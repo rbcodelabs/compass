@@ -240,7 +240,7 @@ describe("an agent-bound OAuth token engages the agent authorization model", () 
     )
   })
 
-  it.each(["approve_solution_plan", "request_release_authorization"])(
+  it.each(["approve_solution_plan", "reject_solution_plan"])(
     "is refused by the AGENT_TOOL_POLICY DENY entry for %s",
     async (tool) => {
       const actor = actorFromAuth(await validateMcpAuth(bearer()))

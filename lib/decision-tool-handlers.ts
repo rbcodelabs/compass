@@ -266,7 +266,8 @@ export async function requestReleaseAuthorization(scope: ReleaseScope) {
     // A cloud run is the agent acting, not the person who started it: no human requester is recorded for it (both columns
     // are nullable), matching request_decision. Personal agent keys and people keep requestedById as before.
     const cloudAgentRun = actor.purpose === "AGENT_TURN" && !!actor.agentId
-    const result = await prepareReleaseRun({ ...scope, requestedById: cloudAgentRun ? null : actor.userId })
+    const requestedByAgentId = isAgentIdentityActor(actor) ? (actor.agentId ?? null) : null
+    const result = await prepareReleaseRun({ ...scope, requestedById: cloudAgentRun ? null : actor.userId, requestedByAgentId })
     if (result.status === "BLOCKED") return fail(`Release authorization blocked: ${result.code}`)
     const reviewUrl = await reviewUrlByWorkspace(scope.workspaceId, result.requestId)
     return ok(

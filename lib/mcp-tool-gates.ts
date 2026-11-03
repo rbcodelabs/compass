@@ -384,7 +384,13 @@ export const TOOL_GATES: Record<string, Gate> = {
   list_decisions: (a, x) => assertWorkspaceMember(a, x.workspaceId),
   get_decision: (a, x) => assertChildInDeclaredWorkspace(a, "reviewRequest", x.requestId, x.workspaceId),
   close_decision_no_action: (a, x) => assertChildInDeclaredWorkspace(a, "reviewRequest", x.requestId, x.workspaceId),
-  request_release_authorization: async (a, x) => void (await assertWorkspaceAdmin(a, x.workspaceId)),
+  // Raising the request is not the attestation: the human decision (admin-only, enforced on the review revision) is.
+  // Agents therefore need only workspace write access (the WRITE classification below) and are recorded as the
+  // requester via requestedByAgentId; people still need to be a workspace admin.
+  request_release_authorization: async (a, x) => {
+    if (a.purpose === "AGENT" || a.purpose === "AGENT_TURN") await assertWorkspaceMember(a, x.workspaceId)
+    else await assertWorkspaceAdmin(a, x.workspaceId)
+  },
   list_release_runs: (a, x) => assertWorkspaceMember(a, x.workspaceId),
   get_review_request: async (a, x) => void (await assertEntityAccess(a, "reviewRequest", x.requestId)),
   list_review_requests: (a, x) => assertWorkspaceMember(a, x.workspaceId),
@@ -828,7 +834,7 @@ export const AGENT_TOOL_POLICY: Record<string, "READ" | "WRITE" | "DENY"> = Obje
   ].map(name => [name, "READ"]),
   ...[
     "link_artifact_to_decision", "unlink_artifact_from_decision",
-    "add_comment", "delete_comment", "resolve_comment", "reopen_comment", "create_okr_cycle", "create_objective", "update_objective", "delete_objective", "add_key_result", "update_key_result", "delete_key_result", "log_checkin", "set_objective_parent_kr", "create_opportunity", "create_opportunities", "create_solutions", "update_opportunity", "update_opportunity_status", "link_opportunity_to_kr", "link_opportunity_to_objective", "unlink_opportunity_from_objective", "link_solution_to_key_result", "unlink_solution_from_key_result", "link_entities", "unlink_entities", "create_spec", "add_solution", "update_solution_status", "update_solution", "add_assumption", "update_assumption", "delete_assumption", "promote_to_roadmap", "add_solution_plan", "add_solution_comment", "delete_solution_comment", "create_experiment", "log_experiment_result", "conclude_experiment", "update_roadmap_item", "add_to_roadmap", "request_decision", "close_decision_no_action", "apply_recorded_decision", "create_checklist_template", "set_launch_tier", "update_launch_checklist_item", "create_squad", "update_squad", "assign_squad", "TaskCreate", "TaskUpdate", "create_task", "update_task", "move_task_status", "link_task", "unlink_task", "create_feedback", "update_feedback", "update_feedback_status", "link_feedback_to_opportunity", "update_feedback_type", "prepare_artifact_upload", "prepare_doc_image_upload", "prepare_feedback_attachment_upload", "add_feedback_attachment", "promote_feedback_to_roadmap", "add_evidence", "link_evidence", "write_doc", "delete_doc", "move_doc", "restore_doc_version", "add_doc_comment", "resolve_doc_comment", "edit_doc", "edit_canvas", "build_canvas_tree", "create_artifact", "refresh_artifact_from_v0", "update_artifact", "create_feedback_source", "update_feedback_source", "link_artifact_to_solution", "unlink_artifact_from_solution", "archive_artifact", "capture_screenshot", "score_opportunity", "score_solution", "set_custom_field_value",
+    "add_comment", "delete_comment", "resolve_comment", "reopen_comment", "create_okr_cycle", "create_objective", "update_objective", "delete_objective", "add_key_result", "update_key_result", "delete_key_result", "log_checkin", "set_objective_parent_kr", "create_opportunity", "create_opportunities", "create_solutions", "update_opportunity", "update_opportunity_status", "link_opportunity_to_kr", "link_opportunity_to_objective", "unlink_opportunity_from_objective", "link_solution_to_key_result", "unlink_solution_from_key_result", "link_entities", "unlink_entities", "create_spec", "add_solution", "update_solution_status", "update_solution", "add_assumption", "update_assumption", "delete_assumption", "promote_to_roadmap", "add_solution_plan", "add_solution_comment", "delete_solution_comment", "create_experiment", "log_experiment_result", "conclude_experiment", "update_roadmap_item", "add_to_roadmap", "request_decision", "request_release_authorization", "close_decision_no_action", "apply_recorded_decision", "create_checklist_template", "set_launch_tier", "update_launch_checklist_item", "create_squad", "update_squad", "assign_squad", "TaskCreate", "TaskUpdate", "create_task", "update_task", "move_task_status", "link_task", "unlink_task", "create_feedback", "update_feedback", "update_feedback_status", "link_feedback_to_opportunity", "update_feedback_type", "prepare_artifact_upload", "prepare_doc_image_upload", "prepare_feedback_attachment_upload", "add_feedback_attachment", "promote_feedback_to_roadmap", "add_evidence", "link_evidence", "write_doc", "delete_doc", "move_doc", "restore_doc_version", "add_doc_comment", "resolve_doc_comment", "edit_doc", "edit_canvas", "build_canvas_tree", "create_artifact", "refresh_artifact_from_v0", "update_artifact", "create_feedback_source", "update_feedback_source", "link_artifact_to_solution", "unlink_artifact_from_solution", "archive_artifact", "capture_screenshot", "score_opportunity", "score_solution", "set_custom_field_value",
   ].map(name => [name, "WRITE"]),
   // ADR 0020: no longer unconditionally human-only. Each of these four now
   // carries its own agentCapability check inside its TOOL_GATES entry above
@@ -852,10 +858,10 @@ export const AGENT_TOOL_POLICY: Record<string, "READ" | "WRITE" | "DENY"> = Obje
   ...["create_card_sort_round", "set_card_sort_round_state", "propose_card_sort_move", "withdraw_card_sort_proposal"].map(name => [name, "DENY"]),
   // Legacy comments lack a durable agent author ID; body edits could retain a human label or approval badge.
   // (update_doc_comment was removed by ADR 0019.)
-  // approve_solution_plan, reject_solution_plan, and request_release_authorization
-  // remain unconditionally human-only per ADR 0020: they are approval /
-  // attestation acts that would be recorded as the delegating human's own.
-  ...["update_comment", "update_solution_comment", "approve_solution_plan", "reject_solution_plan", "request_release_authorization"].map(name => [name, "DENY"]),
+  // approve_solution_plan and reject_solution_plan remain unconditionally human-only per ADR 0020: they are approval /
+  // attestation acts that would be recorded as the delegating human's own. request_release_authorization was moved
+  // to WRITE (see ADR 0021): it only prepares the review; the approval stays human-only.
+  ...["update_comment", "update_solution_comment", "approve_solution_plan", "reject_solution_plan"].map(name => [name, "DENY"]),
   // create_workspace was DENY under ADR 0020. It is now a WRITE: an agent
   // inherits its owner's live org admin rights (see hasOwnerOrgAdminRights),
   // enforced inside its TOOL_GATES entry. Creating a workspace is pure

@@ -18,7 +18,7 @@ export type ReleaseScope = {
   taskIds: string[]
 }
 
-type PrepareReleaseInput = ReleaseScope & { requestedById?: string | null }
+type PrepareReleaseInput = ReleaseScope & { requestedById?: string | null; requestedByAgentId?: string | null }
 
 export type PrepareReleaseResult =
   | {
@@ -238,6 +238,7 @@ export async function prepareReleaseRun(input: PrepareReleaseInput): Promise<Pre
         subjectId: releaseRun.id,
         state: "DRAFT",
         requestedById: input.requestedById ?? null,
+        requestedByAgentId: input.requestedByAgentId ?? null,
         ...(await allocateOneSeq(tx, input.workspaceId, "reviewRequest")),
       },
     })
