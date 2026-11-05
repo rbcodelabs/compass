@@ -3,10 +3,11 @@ import path from "node:path"
 import { bootSandboxFromSnapshot } from "@/lib/agent-sandbox"
 import { getGoldenSnapshotId } from "@/lib/agent-runtime-config"
 import { Sandbox } from "@vercel/sandbox"
+import type { SandboxHandle } from "@/lib/sandbox-provider"
 import { analysisStep, assertAnalysisDeadline } from "@/lib/research-analysis-deadline"
 import { researchFailureDiagnostic } from "@/lib/research-failure-diagnostics"
 
-async function stopBoundedSandbox(sandbox: Sandbox) {
+async function stopBoundedSandbox(sandbox: SandboxHandle) {
   const controller = new AbortController()
   try { await analysisStep(() => sandbox.stop({ signal: controller.signal }), Date.now() + 5_000, controller) }
   catch (error) { console.error("Research guide sandbox cleanup failed", researchFailureDiagnostic(error)) }

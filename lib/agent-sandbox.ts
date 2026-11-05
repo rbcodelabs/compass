@@ -42,7 +42,12 @@
  */
 
 import { createHash } from "node:crypto"
-import { APIError, Sandbox, Snapshot, type NetworkPolicy } from "@vercel/sandbox"
+import { Sandbox, type NetworkPolicy } from "@vercel/sandbox"
+import type { SandboxHandle } from "@/lib/sandbox-provider"
+import { vercelSandboxProvider } from "@/lib/sandbox-provider-vercel"
+
+/** The active substrate. Swapping this is the single switch the AWS migration flips (per the Sandbox substrate ADR). */
+const provider = vercelSandboxProvider
 import { OPENCODE_PINNED_VERSION } from "@/lib/agent-harness"
 import {
   AGENT_SANDBOX_RETENTION_MS,
@@ -259,7 +264,7 @@ export type BuildSnapshotResult = {
  * the package manager's own diagnostics rather than just an exit code.
  */
 export async function runStep(
-  sandbox: Sandbox,
+  sandbox: SandboxHandle,
   label: string,
   params: { cmd: string; args: string[]; sudo?: boolean },
   emit: (line: string) => void
@@ -386,7 +391,7 @@ export async function buildGoldenSnapshot(opts?: {
 
 /** Write the smoke script into a sandbox, run it, and return its output. */
 async function runBrowserSmokeCheck(
-  sandbox: Sandbox,
+  sandbox: SandboxHandle,
   label: string,
   emit: (line: string) => void
 ): Promise<string> {
@@ -395,7 +400,7 @@ async function runBrowserSmokeCheck(
 }
 
 async function runOpencodeSmokeCheck(
-  sandbox: Sandbox,
+  sandbox: SandboxHandle,
   label: string,
   emit: (line: string) => void
 ): Promise<string> {
@@ -454,17 +459,15 @@ function parseBrowserVersion(smokeOutput: string): string {
 export async function bootSandboxFromSnapshot(
   snapshotId: string,
   opts?: { timeoutMs?: number; name?: string; tags?: Record<string, string>; networkPolicy?: NetworkPolicy; persistent?: boolean; snapshotExpirationMs?: number }
-): Promise<Sandbox> {
-  return Sandbox.create({
-    source: { type: "snapshot", snapshotId },
-    timeout: opts?.timeoutMs ?? SANDBOX_TIMEOUT_MS,
-    // Omitted = the platform default (full egress). Set only for shell-enabled turns (lib/agent-github-access.ts).
+): Promise<SandboxHandle> {
+  return provider.boot({
+    snapshotId,
+    timeoutMs: opts?.timeoutMs ?? SANDBOX_TIMEOUT_MS,
     ...(opts?.networkPolicy ? { networkPolicy: opts.networkPolicy } : {}),
     ...(opts?.name ? { name: opts.name } : {}),
     ...(opts?.tags ? { tags: opts.tags } : {}),
     ...(opts?.persistent !== undefined ? { persistent: opts.persistent } : {}),
-    // Persistent sandboxes snapshot on every stop; keep only the latest, and let it expire after the retention window.
-    ...(opts?.snapshotExpirationMs ? { snapshotExpiration: opts.snapshotExpirationMs, keepLastSnapshots: { count: 1 } } : {}),
+    ...(opts?.snapshotExpirationMs ? { snapshotExpirationMs: opts.snapshotExpirationMs } : {}),
   })
 }
 
@@ -478,14 +481,12 @@ export async function bootSandboxFromSnapshot(
  * correctness.
  */
 export async function stopSandboxByName(name: string): Promise<void> {
-  // resume:false — stopping must never boot a stopped sandbox just to stop it again. Stopping a persistent
-  // sandbox is a pause: the platform snapshots its disk and the next turn resumes it.
-  const sandbox = await Sandbox.get({ name, resume: false })
-  await sandbox.stop()
+  // Stopping a persistent sandbox is a pause: the platform snapshots its disk and the next turn resumes it.
+  await provider.stopByName(name)
 }
 
 /** The platform-reported state the reuse decision reads. A handle with no session reads as not running. */
-function describeSandbox(sandbox: Sandbox): ExistingSandboxState {
+function describeSandbox(sandbox: SandboxHandle): ExistingSandboxState {
   try {
     return { status: sandbox.status, tags: sandbox.tags }
   } catch {
@@ -494,7 +495,7 @@ function describeSandbox(sandbox: Sandbox): ExistingSandboxState {
 }
 
 function isNotFound(error: unknown): boolean {
-  return error instanceof APIError && error.response.status === 404
+  return provider.isNotFound(error)
 }
 
 /**
@@ -502,10 +503,10 @@ function isNotFound(error: unknown): boolean {
  * snapshot (expired, or the sandbox stopped without one). The disk is already gone, so there is nothing to protect.
  */
 export function isSnapshotGone(error: unknown): boolean {
-  return error instanceof APIError && error.response.status === 410
+  return provider.isSnapshotGone(error)
 }
 
-export type ConversationSandboxResult = { sandbox: Sandbox; reused: boolean; reason: SandboxReuseReason }
+export type ConversationSandboxResult = { sandbox: SandboxHandle; reused: boolean; reason: SandboxReuseReason }
 
 /**
  * Get this conversation's sandbox. Conversation sandboxes are PERSISTENT and are never deleted by the turn
@@ -532,10 +533,10 @@ export async function acquireConversationSandbox(opts: {
   requiredMs: number
   boot: { timeoutMs: number; tags: Record<string, string>; networkPolicy?: NetworkPolicy }
 }): Promise<ConversationSandboxResult> {
-  let existing: Sandbox | null = null
+  let existing: SandboxHandle | null = null
   let lookupFailed = false
   try {
-    existing = await Sandbox.get({ name: opts.name, resume: false })
+    existing = await provider.getByName(opts.name, { resume: false })
   } catch (error) {
     if (!isNotFound(error)) {
       lookupFailed = true
@@ -554,7 +555,7 @@ export async function acquireConversationSandbox(opts: {
     previous: opts.previous,
   })
 
-  let resumed: Sandbox | null = null
+  let resumed: SandboxHandle | null = null
   if (existing && decision.action !== "boot") {
     let sandbox = existing
     let snapshotGone = false
@@ -562,7 +563,7 @@ export async function acquireConversationSandbox(opts: {
       // Pause a running-but-untrusted sandbox first: that ends its processes and snapshots its disk.
       if (existing.status === "running") await existing.stop().catch(() => {})
       try {
-        sandbox = await Sandbox.get({ name: opts.name }) // resume
+        sandbox = await provider.getByName(opts.name) // resume
         await sandbox.updateNetworkPolicy(opts.boot.networkPolicy ?? "allow-all")
       } catch (error) {
         if (!isSnapshotGone(error)) throw error
@@ -602,7 +603,7 @@ export async function acquireConversationSandbox(opts: {
  * turn cannot linger). The agent's own work, notably the repo clones, is outside this set.
  * Runs with sudo because the jail user may have created files the entry user cannot remove.
  */
-async function resetReusedSandbox(sandbox: Sandbox): Promise<void> {
+async function resetReusedSandbox(sandbox: SandboxHandle): Promise<void> {
   const result = await sandbox.runCommand({ cmd: "bash", args: ["-c", reusedSandboxCleanupScript("/vercel/sandbox")], sudo: true })
   if (result.exitCode !== 0) throw new Error(`reused sandbox cleanup exited ${result.exitCode}`)
 }
@@ -622,6 +623,5 @@ async function resetReusedSandbox(sandbox: Sandbox): Promise<void> {
  * rebuild route does) should catch and log rather than fail the request.
  */
 export async function deleteGoldenSnapshot(snapshotId: string): Promise<void> {
-  const snapshot = await Snapshot.get({ snapshotId })
-  await snapshot.delete()
+  await provider.deleteImage(snapshotId)
 }

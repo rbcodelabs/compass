@@ -16,7 +16,7 @@
  */
 
 import { createHash } from "node:crypto"
-import { Sandbox } from "@vercel/sandbox"
+import type { SandboxHandle } from "@/lib/sandbox-provider"
 import { bootSandboxFromSnapshot, computeDepsFingerprint, runStep } from "@/lib/agent-sandbox"
 
 const BUILD_TIMEOUT_MS = 15 * 60_000
@@ -134,7 +134,7 @@ export async function buildDeveloperSnapshot(opts: {
 }): Promise<BuildDeveloperSnapshotResult> {
   const emit = opts.onProgress ?? (() => {})
   const startedAt = Date.now()
-  let sandbox: Sandbox | undefined
+  let sandbox: SandboxHandle | undefined
   let snapshotted = false
   try {
     const createStart = Date.now()
