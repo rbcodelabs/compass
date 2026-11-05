@@ -157,18 +157,18 @@ export async function buildDeveloperSnapshot(opts: {
     emit(`developer layer works: PostgreSQL ${postgresVersion} (${smokeMs}ms)`)
 
     const snapStart = Date.now()
-    const snap = await sandbox.currentSession().snapshot()
+    const snap = await sandbox.snapshot()
     const snapshotMs = Date.now() - snapStart
     snapshotted = true // snapshot() stops the session; do not stop() again
-    emit(`snapshot created: ${snap.snapshotId} (${snapshotMs}ms, ${snap.sizeBytes} bytes)`)
+    emit(`snapshot created: ${snap.imageId} (${snapshotMs}ms, ${snap.sizeBytes} bytes)`)
 
     const verifyStart = Date.now()
-    await verifyDeveloperSnapshot(snap.snapshotId, emit)
+    await verifyDeveloperSnapshot(snap.imageId, emit)
     const verifyMs = Date.now() - verifyStart
     emit(`snapshot verified after warm boot (${verifyMs}ms)`)
 
     return {
-      snapshotId: snap.snapshotId,
+      snapshotId: snap.imageId,
       depsFingerprint: computeDeveloperFingerprint(),
       baseSnapshotId: opts.baseSnapshotId,
       sizeBytes: snap.sizeBytes,

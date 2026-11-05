@@ -42,9 +42,9 @@
  */
 
 import { createHash } from "node:crypto"
-import { Sandbox, type NetworkPolicy } from "@vercel/sandbox"
-import type { SandboxHandle } from "@/lib/sandbox-provider"
-import { vercelSandboxProvider } from "@/lib/sandbox-provider-vercel"
+import { Sandbox } from "@vercel/sandbox"
+import type { NetworkPolicy, SandboxHandle } from "@/lib/sandbox-provider"
+import { vercelSandboxProvider, wrapVercelSandbox } from "@/lib/sandbox-provider-vercel"
 
 /** The active substrate. Swapping this is the single switch the AWS migration flips (per the Sandbox substrate ADR). */
 const provider = vercelSandboxProvider
@@ -301,14 +301,14 @@ export async function buildGoldenSnapshot(opts?: {
 }): Promise<BuildSnapshotResult> {
   const emit = opts?.onProgress ?? (() => {})
   const startedAt = Date.now()
-  let sandbox: Sandbox | undefined
+  let sandbox: SandboxHandle | undefined
   let snapshotted = false
   try {
     const createStart = Date.now()
-    sandbox = await Sandbox.create({
+    sandbox = wrapVercelSandbox(await Sandbox.create({
       runtime: SANDBOX_RUNTIME,
       timeout: SNAPSHOT_BUILD_TIMEOUT_MS,
-    })
+    }))
     const createMs = Date.now() - createStart
     emit(`sandbox created: ${sandbox.name} (${createMs}ms)`)
 
@@ -353,18 +353,18 @@ export async function buildGoldenSnapshot(opts?: {
     await runStep(sandbox, "rm", { cmd: "rm", args: ["-f", BROWSER_SMOKE_PATH, OPENCODE_SMOKE_PATH] }, emit)
 
     const snapStart = Date.now()
-    const snap = await sandbox.currentSession().snapshot()
+    const snap = await sandbox.snapshot()
     const snapshotMs = Date.now() - snapStart
     snapshotted = true // snapshot() stops the session; do not stop() again
-    emit(`snapshot created: ${snap.snapshotId} (${snapshotMs}ms, ${snap.sizeBytes} bytes)`)
+    emit(`snapshot created: ${snap.imageId} (${snapshotMs}ms, ${snap.sizeBytes} bytes)`)
 
     const verifyStart = Date.now()
-    await verifySnapshotBrowser(snap.snapshotId, emit)
+    await verifySnapshotBrowser(snap.imageId, emit)
     const verifyMs = Date.now() - verifyStart
     emit(`snapshot verified: Chromium launches after warm boot (${verifyMs}ms)`)
 
     return {
-      snapshotId: snap.snapshotId,
+      snapshotId: snap.imageId,
       depsFingerprint: computeDepsFingerprint(),
       sizeBytes: snap.sizeBytes,
       browserVersion,
@@ -458,7 +458,7 @@ function parseBrowserVersion(smokeOutput: string): string {
  */
 export async function bootSandboxFromSnapshot(
   snapshotId: string,
-  opts?: { timeoutMs?: number; name?: string; tags?: Record<string, string>; networkPolicy?: NetworkPolicy; persistent?: boolean; snapshotExpirationMs?: number }
+  opts?: { timeoutMs?: number; name?: string; tags?: Record<string, string>; networkPolicy?: NetworkPolicy; persistent?: boolean; snapshotExpirationMs?: number; signal?: AbortSignal }
 ): Promise<SandboxHandle> {
   return provider.boot({
     snapshotId,
@@ -468,6 +468,7 @@ export async function bootSandboxFromSnapshot(
     ...(opts?.tags ? { tags: opts.tags } : {}),
     ...(opts?.persistent !== undefined ? { persistent: opts.persistent } : {}),
     ...(opts?.snapshotExpirationMs ? { snapshotExpirationMs: opts.snapshotExpirationMs } : {}),
+    ...(opts?.signal ? { signal: opts.signal } : {}),
   })
 }
 

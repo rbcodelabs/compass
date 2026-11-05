@@ -1,42 +1,85 @@
 /**
  * The seam between Compass's agent code and whichever microVM platform runs it.
  *
- * Today the only implementation is Vercel Sandbox (lib/sandbox-provider-vercel.ts). The AWS
- * migration adds a second one behind this same interface; see the "Sandbox substrate: AWS
- * microVMs" ADR under Architecture Decisions in the bankrate/compass-internal workspace.
- *
- * Scope of this first step: the *provider operations* (boot, look up, stop, delete a snapshot,
- * classify errors) go through the interface. `SandboxHandle` is a structural subset of the
- * Vercel SDK's `Sandbox`, i.e. exactly the methods callers use today, so existing call sites
- * keep working unchanged. Decoupling the handle's parameter and result types from the SDK
- * (RunCommandParams, NetworkPolicy, CommandFinished) is the next step and is needed before a
- * second provider can be written; it is deliberately not done here to keep this change free of
- * behavior risk.
+ * Implementations: Vercel Sandbox (lib/sandbox-provider-vercel.ts) today, AWS Lambda MicroVMs next
+ * (ADR-0036: Compass Docs -> Architecture Decisions). Nothing in this file may import a platform SDK:
+ * these types are the contract a second provider must implement, so they describe what Compass
+ * needs from a sandbox, not what one vendor's SDK happens to expose.
  */
 
-import type { NetworkPolicy, Sandbox } from "@vercel/sandbox"
+/**
+ * Egress restriction. A host allowlist is the only policy Compass builds (agentEgressPolicy); the
+ * two strings are the endpoints. Providers that cannot express a policy natively enforce it
+ * another way (the MicroVM provider confines the agent to a network namespace behind an allowlist
+ * proxy), or refuse to boot when asked for one they cannot enforce.
+ */
+export type NetworkPolicy = "allow-all" | "deny-all" | { allow: string[] }
 
-export type { NetworkPolicy }
+/** One line of a command's output. */
+export type LogLine = { stream: "stdout" | "stderr"; data: string }
 
-/** The sandbox methods callers rely on. Keep this list minimal: every entry is something a second provider must implement. */
-export type SandboxHandle = Pick<
-  Sandbox,
-  | "name"
-  | "status"
-  | "tags"
-  | "expiresAt"
-  | "runCommand"
-  | "writeFiles"
-  | "readFileToBuffer"
-  | "extendTimeout"
-  | "updateNetworkPolicy"
-  | "currentSession"
-  | "stop"
-  | "delete"
->
+export type RunCommandParams = {
+  cmd: string
+  args?: string[]
+  cwd?: string
+  env?: Record<string, string>
+  /** Run as root. Otherwise as the sandbox's default (unprivileged) user. */
+  sudo?: boolean
+  /** Return as soon as the command starts; the sandbox keeps running it (bounded by `timeoutMs`). */
+  detached?: boolean
+  signal?: AbortSignal
+  /** Enforced by the sandbox, so it holds whether or not anyone awaits the command (including detached). */
+  timeoutMs?: number
+}
+
+export type CommandResult = { exitCode: number }
+
+/** A started command. `exitCode` is null until it finishes. */
+export interface CommandHandle {
+  readonly cmdId: string
+  readonly exitCode: number | null
+  logs(opts?: { signal?: AbortSignal }): AsyncIterable<LogLine>
+  wait(opts?: { signal?: AbortSignal }): Promise<CommandResult>
+}
+
+/** What the platform reports. Compared as plain strings by the reuse decision (lib/agent-sandbox-reuse.ts). */
+export type SandboxStatus = string
+
+export interface SandboxHandle {
+  readonly name: string
+  readonly status: SandboxStatus
+  readonly tags: Record<string, string> | undefined
+  /** When the platform will stop it, if it says. */
+  readonly expiresAt: Date | undefined
+
+  runCommand(params: RunCommandParams & { detached: true }): Promise<CommandHandle>
+  runCommand(params: RunCommandParams): Promise<CommandResult>
+  /** Look up a command started earlier, for a caller holding only its id. Null if unknown. */
+  getCommand(cmdId: string): Promise<CommandHandle | null>
+
+  writeFiles(files: Array<{ path: string; content: string | Uint8Array }>, opts?: { signal?: AbortSignal }): Promise<void>
+  /** Null when the file does not exist. */
+  readFileToBuffer(file: { path: string }): Promise<Buffer | null>
+
+  /** Add to the platform lifetime. */
+  extendTimeout(durationMs: number): Promise<void>
+  updateNetworkPolicy(policy: NetworkPolicy): Promise<void>
+
+  /**
+   * Stop it and save its state as a new image, returning the image id. Ends the session, so do not
+   * stop() afterwards. Only providers whose images are made by snapshotting a built sandbox support
+   * this (Vercel). Providers that build images from a recipe (MicroVMs) throw.
+   */
+  snapshot(): Promise<{ imageId: string; sizeBytes: number }>
+
+  /** Stop it (for a persistent sandbox: pause, keeping the disk). */
+  stop(opts?: { signal?: AbortSignal }): Promise<void>
+  /** Remove it and its saved state. */
+  delete(): Promise<void>
+}
 
 export type BootSandboxOptions = {
-  /** Source image: for Vercel, a golden snapshot id. */
+  /** Source image: a golden image id. */
   snapshotId: string
   timeoutMs: number
   /** Makes the sandbox addressable later (`getByName`), which is how the sweeper reaches a run nobody is watching. */
@@ -48,17 +91,18 @@ export type BootSandboxOptions = {
   /** Persistent sandboxes keep their disk across stop/resume. */
   persistent?: boolean
   snapshotExpirationMs?: number
+  signal?: AbortSignal
 }
 
 export interface SandboxProvider {
-  /** Stable identifier recorded in logs and ADR notes, e.g. "vercel" or "aws-agentcore". */
+  /** Stable identifier recorded in logs, e.g. "vercel" or "microvm". */
   readonly id: string
 
   boot(options: BootSandboxOptions): Promise<SandboxHandle>
 
   /**
-   * Look a sandbox up by name. `resume: false` must never start a stopped sandbox. Throws a
-   * not-found error (see `isNotFound`) when no sandbox has that name.
+   * Look a sandbox up by name. `resume: false` must never start a stopped sandbox. Throws an error
+   * for which `isNotFound` is true when no sandbox has that name.
    */
   getByName(name: string, opts?: { resume?: boolean }): Promise<SandboxHandle>
 

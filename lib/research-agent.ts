@@ -2,7 +2,6 @@ import { readFileSync } from "node:fs"
 import path from "node:path"
 import { bootSandboxFromSnapshot } from "@/lib/agent-sandbox"
 import { getGoldenSnapshotId } from "@/lib/agent-runtime-config"
-import { Sandbox } from "@vercel/sandbox"
 import type { SandboxHandle } from "@/lib/sandbox-provider"
 import { analysisStep, assertAnalysisDeadline } from "@/lib/research-analysis-deadline"
 import { researchFailureDiagnostic } from "@/lib/research-failure-diagnostics"
@@ -56,7 +55,7 @@ export async function runResearchInterviewAgent({
     }
 
     stage = "sandbox_create"
-    sandbox = deadline === undefined ? await bootSandboxFromSnapshot(snapshotId) : await analysisStep(() => Sandbox.create({ source: { type: "snapshot", snapshotId }, timeout: Math.max(1, deadline - Date.now()), signal: controller.signal }), deadline, controller, stopBoundedSandbox)
+    sandbox = deadline === undefined ? await bootSandboxFromSnapshot(snapshotId) : await analysisStep(() => bootSandboxFromSnapshot(snapshotId, { timeoutMs: Math.max(1, deadline - Date.now()), signal: controller.signal }), deadline, controller, stopBoundedSandbox)
     const active = sandbox
     if (attachments.length > 3 || attachments.reduce((sum, item) => sum + item.bytes.byteLength, 0) > 15 * 1024 * 1024) {
       throw new Error("Research multimodal input exceeded its bounded attachment limit")
