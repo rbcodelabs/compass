@@ -120,7 +120,7 @@ describe.skipIf(!databaseUrl)("workspace export/import round trip", () => {
       data: { workspaceId: wsId, title: "Faster onboarding", squadId: squad.id, createdById: aliceId, seqPrefix: "OPP", seqNumber: 42 },
     })
     oppId = opp.id
-    const sol = await prisma.solution.create({ data: { workspaceId: wsId, opportunityId: opp.id, title: "Wizard", createdById: bobId } })
+    const sol = await prisma.solution.create({ data: { workspaceId: ws.id, opportunityId: opp.id, title: "Wizard", createdById: bobId } })
     await prisma.opportunityScore.create({ data: { opportunityId: opp.id, scoringModelId, scoredByUserId: bobId, modelVersion: 1, formulaSnapshot: {}, rawValues: {}, rawScore: 1, normalizedScore: 1 } })
     const task = await prisma.task.create({ data: { workspaceId: wsId, title: "Build wizard", createdById: aliceId, seqPrefix: "TASK", seqNumber: 7 } })
     await prisma.taskLink.create({ data: { taskId: task.id, linkedType: "SOLUTION", linkedId: sol.id } })
@@ -200,56 +200,56 @@ describe.skipIf(!databaseUrl)("workspace export/import round trip", () => {
     expect(report.slug).toBe("alpha-imported")
     expect(report.usersMatched).toBe(2)
 
-    const ws = await prisma.workspace.findUnique({ where: { id: report.workspaceId } })
+    const ws = await prisma.workspace.findUniqueOrThrow({ where: { id: report.workspaceId } })
     expect(ws.ssoEnabled).toBe(false)
     expect(ws.ssoSecretEncrypted).toBeNull()
     expect(ws.anthropicApiKeyEncrypted).toBeNull()
 
-    const opp = await prisma.opportunity.findFirst({ where: { workspaceId: report.workspaceId } })
+    const opp = await prisma.opportunity.findFirstOrThrow({ where: { workspaceId: report.workspaceId } })
     expect(opp.id).not.toBe(oppId)
     expect(opp.seqNumber).toBe(42)
     expect(opp.createdById).toBe(aliceId) // matched by email
-    const squad = await prisma.squad.findFirst({ where: { workspaceId: report.workspaceId } })
+    const squad = await prisma.squad.findFirstOrThrow({ where: { workspaceId: report.workspaceId } })
     expect(opp.squadId).toBe(squad.id)
 
     // Polymorphic + text-embedded ids follow the new rows.
-    const link = await prisma.entityLink.findFirst({ where: { workspaceId: report.workspaceId } })
+    const link = await prisma.entityLink.findFirstOrThrow({ where: { workspaceId: report.workspaceId } })
     expect(link.toId).toBe(opp.id)
-    const comment = await prisma.comment.findFirst({ where: { workspaceId: report.workspaceId } })
+    const comment = await prisma.comment.findFirstOrThrow({ where: { workspaceId: report.workspaceId } })
     expect(comment.targetId).toBe(opp.id)
     expect(comment.body).toBe(`See ${opp.id} and OPP-42`)
-    const cfv = await prisma.customFieldValue.findFirst({ where: { fieldId: { in: (await prisma.customFieldDefinition.findMany({ where: { workspaceId: report.workspaceId } })).map((f: { id: string }) => f.id) } } })
+    const cfv = await prisma.customFieldValue.findFirstOrThrow({ where: { fieldId: { in: (await prisma.customFieldDefinition.findMany({ where: { workspaceId: report.workspaceId } })).map((f: { id: string }) => f.id) } } })
     expect(cfv.objectId).toBe(opp.id)
 
     // Same-org scoring model is kept; counters never behind imported numbers.
-    const score = await prisma.opportunityScore.findFirst({ where: { opportunityId: opp.id } })
+    const score = await prisma.opportunityScore.findFirstOrThrow({ where: { opportunityId: opp.id } })
     expect(score.scoringModelId).toBe(scoringModelId)
-    const seq = await prisma.workspaceSequence.findUnique({ where: { workspaceId_entityType: { workspaceId: report.workspaceId, entityType: "opportunity" } } })
+    const seq = await prisma.workspaceSequence.findUniqueOrThrow({ where: { workspaceId_entityType: { workspaceId: report.workspaceId, entityType: "opportunity" } } })
     expect(seq.nextValue).toBeGreaterThanOrEqual(50)
-    const taskSeq = await prisma.workspaceSequence.findUnique({ where: { workspaceId_entityType: { workspaceId: report.workspaceId, entityType: "task" } } })
+    const taskSeq = await prisma.workspaceSequence.findUniqueOrThrow({ where: { workspaceId_entityType: { workspaceId: report.workspaceId, entityType: "task" } } })
     expect(taskSeq.nextValue).toBeGreaterThanOrEqual(8)
 
     // Docs: embedded compass:// ref and image path rewritten, image blob copied.
-    const doc = await prisma.doc.findFirst({ where: { workspaceId: report.workspaceId } })
+    const doc = await prisma.doc.findFirstOrThrow({ where: { workspaceId: report.workspaceId } })
     expect(doc.id).not.toBe(docId)
     expect(doc.content).toContain(`compass://opportunity/${opp.id}`)
     expect(doc.content).toContain(`/api/docs/images/${report.workspaceId}/`)
     expect(doc.content).not.toContain(wsId)
-    const imageName = /images\/[^/]+\/([^ )]+)/.exec(doc.content)![1]
+    const imageName = /images\/[^/]+\/([^ )]+)/.exec(doc.content ?? "")![1]
     expect(artifact.files.has(`docs/${report.workspaceId}/images/${imageName}`)).toBe(true)
 
     // Artifact HTML blob copied to the rewritten path.
-    const rev = await prisma.artifactRevision.findFirst({ where: { artifactId: { not: artifactId }, blobPathname: { not: null } } })
+    const rev = await prisma.artifactRevision.findFirstOrThrow({ where: { artifactId: { not: artifactId }, blobPathname: { not: null } } })
     expect(rev.blobPathname).toContain(report.workspaceId)
-    expect(artifact.files.has(rev.blobPathname)).toBe(true)
+    expect(artifact.files.has(rev.blobPathname!)).toBe(true)
 
     // Feedback attachment re-uploaded and URL rewritten.
-    const att = await prisma.feedbackAttachment.findFirst({ where: { url: { contains: report.workspaceId } } })
+    const att = await prisma.feedbackAttachment.findFirstOrThrow({ where: { url: { contains: report.workspaceId } } })
     expect(att).toBeTruthy()
     expect(publicBlobs.has(att.url)).toBe(true)
 
     // Analytics connection arrives disabled with no secret.
-    const conn = await prisma.analyticsConnection.findFirst({ where: { workspaceId: report.workspaceId } })
+    const conn = await prisma.analyticsConnection.findFirstOrThrow({ where: { workspaceId: report.workspaceId } })
     expect(conn.enabled).toBe(false)
     expect(conn.secretEncrypted).toBeNull()
 
@@ -257,7 +257,7 @@ describe.skipIf(!databaseUrl)("workspace export/import round trip", () => {
     expect(await prisma.opportunity.count({ where: { workspaceId: wsId } })).toBe(1)
     expect(await prisma.notification.count({ where: { workspaceId: report.workspaceId } })).toBe(0)
     // Members: org members + importer as admin.
-    const importerMember = await prisma.workspaceMember.findFirst({ where: { workspaceId: report.workspaceId, userId: importerId } })
+    const importerMember = await prisma.workspaceMember.findFirstOrThrow({ where: { workspaceId: report.workspaceId, userId: importerId } })
     expect(importerMember.role).toBe("ADMIN")
   }, 120_000)
 
@@ -275,7 +275,7 @@ describe.skipIf(!databaseUrl)("workspace export/import round trip", () => {
     await prisma.organizationMember.create({ data: { organizationId: otherOrgId, userId: importerId, role: "ADMIN" } })
     const report = await importWorkspaceBundle(prisma, bundle, { organizationId: otherOrgId, importerUserId: importerId, blobs, nonce: "n3" })
     expect(report.usersFallbackToImporter).toBe(2)
-    const opp = await prisma.opportunity.findFirst({ where: { workspaceId: report.workspaceId } })
+    const opp = await prisma.opportunity.findFirstOrThrow({ where: { workspaceId: report.workspaceId } })
     expect(opp.createdById).toBe(importerId)
         expect(report.warnings.join(" ")).toMatch(/Skipped 1 OpportunityScore/)
     expect(await prisma.opportunityScore.count({ where: { opportunityId: opp.id } })).toBe(0)
@@ -298,6 +298,26 @@ describe.skipIf(!databaseUrl)("workspace export/import round trip", () => {
     expect(await prisma.opportunity.count()).toBe(beforeRows)
     expect(await prisma.workspace.count({ where: { slug: "will-fail" } })).toBe(0)
     expect(artifact.files.size).toBe(beforeBlobs)
+  }, 120_000)
+
+  it("drops a link whose endpoint is not part of the import instead of pointing into another workspace", async () => {
+    const reader = new BundleReader(bundle)
+    const files: Record<string, Uint8Array> = {}
+    for (const n of reader.list("")) files[n] = reader.read(n)!
+    const name = reader.list("data/EntityLink.")[0]
+    const foreign = JSON.parse(reader.readText(name)!.split("\n")[0])
+    foreign.id = randomUUID()
+    foreign.toId = randomUUID() // an entity from some other workspace
+    foreign.linkType = "BLOCKS"
+    files[name] = new TextEncoder().encode(reader.readText(name)! + JSON.stringify(foreign) + "\n")
+    const manifest = reader.manifest()
+    manifest.counts.EntityLink += 1
+    files["manifest.json"] = new TextEncoder().encode(JSON.stringify(manifest))
+    const report = await importWorkspaceBundle(prisma, zipSync(files), { organizationId: orgId, importerUserId: importerId, blobs, nonce: "n-foreign", slug: "foreign-link" })
+    expect(report.warnings.join(" ")).toMatch(/Skipped 1 EntityLink/)
+    const links = await prisma.entityLink.findMany({ where: { workspaceId: report.workspaceId } })
+    expect(links.length).toBe(1)
+    expect(links.every((l: { toId: string }) => l.toId !== foreign.toId)).toBe(true)
   }, 120_000)
 
   it("rejects bundles that try to write outside the content models", async () => {

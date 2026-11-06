@@ -1,4 +1,4 @@
-import { Button } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button";
 
 interface Props {
   orgSlug: string;
@@ -17,11 +17,14 @@ export function ExportWorkspacePanel({ orgSlug, workspaceSlug }: Props) {
         Anthropic keys, share links, sessions and agent run history are never included. Import it from Organization Settings to make a copy or move it to another organization.
       </p>
       <div>
-        <Button asChild variant="outline">
-          <a href={`/api/workspace-export/${encodeURIComponent(orgSlug)}/${encodeURIComponent(workspaceSlug)}`} download data-testid="export-workspace">
-            Download workspace bundle
-          </a>
-        </Button>
+        <a
+          className={buttonVariants({ variant: "outline" })}
+          href={`/api/workspace-export/${encodeURIComponent(orgSlug)}/${encodeURIComponent(workspaceSlug)}`}
+          download
+          data-testid="export-workspace"
+        >
+          Download workspace bundle
+        </a>
       </div>
     </div>
   );

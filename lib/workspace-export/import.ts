@@ -29,7 +29,26 @@ const KEEP_COLUMNS = new Set(["authorityRecordId", "v0VersionId", "applicationRe
  * Required columns that reference an org-level row outside the export. If it cannot be resolved in the target
  * organization the row is skipped rather than left pointing at another organization's data.
  */
-const DROP_ON_UNRESOLVED = new Set(["OpportunityScore.scoringModelId", "SolutionScore.scoringModelId"])
+const DROP_ON_UNRESOLVED = new Set([
+  "OpportunityScore.scoringModelId",
+  "SolutionScore.scoringModelId",
+  // Link and polymorphic endpoints: a row whose target is not part of the import would point into another workspace.
+  "EntityLink.fromId",
+  "EntityLink.toId",
+  "TaskLink.linkedId",
+  "ArtifactLink.linkedId",
+  "OpportunityObjectiveLink.opportunityId",
+  "OpportunityObjectiveLink.objectiveId",
+  "SolutionKeyResultLink.solutionId",
+  "SolutionKeyResultLink.keyResultId",
+  "Comment.targetId",
+  "CanvasNodePosition.entityId",
+  "CustomFieldValue.objectId",
+  "CardSortProposal.objectId",
+  "DecisionApplication.targetId",
+  "MetricBinding.targetId",
+  "Follow.subjectId",
+])
 /**
  * Content columns that are unique across the WHOLE database (not per workspace) and so would collide with the
  * source rows. They are rewritten to a per-import hash; the value is only ever compared for equality.

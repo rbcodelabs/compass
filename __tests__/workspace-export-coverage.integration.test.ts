@@ -63,14 +63,14 @@ describe.skipIf(!databaseUrl)("workspace export: wide model coverage", () => {
     wsId = ws.id
 
     const opp = await db().opportunity.create({ data: { workspaceId: wsId, title: "O", createdById: adminId } })
-    const sol = await db().solution.create({ data: { workspaceId: wsId, opportunityId: opp.id, title: "S" } })
+    const sol = await db().solution.create({ data: { workspaceId: ws.id, opportunityId: opp.id, title: "S" } })
     const task = await db().task.create({ data: { workspaceId: wsId, title: "T" } })
     await db().task.create({ data: { workspaceId: wsId, title: "child", parentTaskId: task.id } })
     await db().assumption.create({ data: { solutionId: sol.id, workspaceId: wsId, title: "A" } })
     await db().experiment.create({ data: { workspaceId: wsId, title: "E", hypothesis: "h", method: "m", killCondition: "k" } })
 
     const cycle = await db().oKRCycle.create({ data: { workspaceId: wsId, title: "Q", startDate: new Date(), endDate: new Date() } })
-    const obj = await db().objective.create({ data: { workspaceId: wsId, cycleId: cycle.id, title: "Obj" } })
+    const obj = await db().objective.create({ data: { workspaceId: ws.id, cycleId: cycle.id, title: "Obj" } })
     const kr = await db().keyResult.create({ data: { workspaceId: wsId, objectiveId: obj.id, title: "KR", target: 10 } })
     await db().checkIn.create({ data: { keyResultId: kr.id, value: 3 } })
 

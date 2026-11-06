@@ -13,7 +13,6 @@ import { SECRET_COLUMNS } from "@/lib/workspace-export/model-registry"
 import {
   PARENT,
   delegateFor,
-  dmmfModels,
   exportOrder,
   modelHasId,
   modelHasWorkspaceId,

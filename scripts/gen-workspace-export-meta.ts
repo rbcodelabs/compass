@@ -1,7 +1,7 @@
 /**
  * Generates lib/workspace-export/schema-meta.generated.ts from prisma/schema.prisma.
  *
- * The Prisma runtime datamodel (`Prisma.dmmf`) does not carry nullability, and the importer
+ * The Prisma runtime datamodel does not carry nullability, and the importer
  * needs to know which String columns may be set to NULL when they point at something that is
  * not part of the export. A test fails when this file is stale: run
  *   node scripts/gen-workspace-export-meta.ts

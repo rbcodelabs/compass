@@ -33,7 +33,6 @@ describe.skipIf(!databaseUrl)("workspace export/import routes", () => {
   let adminId: string
   let memberId: string
   let outsiderId: string
-  let wsId: string
 
   const orgParams = (orgSlug: string) => ({ params: Promise.resolve({ orgSlug }) })
   const wsParams = (orgSlug: string, workspaceSlug: string) => ({ params: Promise.resolve({ orgSlug, workspaceSlug }) })
@@ -58,7 +57,6 @@ describe.skipIf(!databaseUrl)("workspace export/import routes", () => {
     await prisma.organizationMember.create({ data: { organizationId: org.id, userId: adminId, role: "ADMIN" } })
     await prisma.organizationMember.create({ data: { organizationId: org.id, userId: memberId, role: "MEMBER" } })
     const ws = await prisma.workspace.create({ data: { organizationId: org.id, slug: "src", name: "Src" } })
-    wsId = ws.id
     await prisma.workspaceMember.create({ data: { workspaceId: ws.id, userId: adminId, role: "ADMIN" } })
     await prisma.workspaceMember.create({ data: { workspaceId: ws.id, userId: memberId, role: "MEMBER" } })
     await prisma.opportunity.create({ data: { workspaceId: ws.id, title: "Route opp", createdById: adminId } })
