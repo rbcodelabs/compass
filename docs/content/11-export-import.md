@@ -2,7 +2,7 @@
 title: "Export and import"
 description: "Back up a workspace, or copy or move it to another organization"
 icon: "Download"
-order: 30
+order: 11
 section: "Configuration"
 ---
 
