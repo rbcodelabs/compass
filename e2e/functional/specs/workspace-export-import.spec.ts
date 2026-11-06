@@ -58,9 +58,10 @@ test.describe("Workspace export / import", () => {
     // ── 3. The imported workspace exists and is usable ─────────────────────
     await result.getByRole("link", { name: "Open the workspace" }).click();
     await expect(page).toHaveURL(new RegExp(`/${orgSlug}/${importedSlug}`));
-    await expect(page.getByText(`Imported ${importedSlug}`).first()).toBeVisible();
     await page.goto(`/${orgSlug}/${importedSlug}/settings`);
+    await expect(page.locator("main").getByText(`Imported ${importedSlug}`).first()).toBeVisible();
     await expect(page.getByTestId("export-workspace")).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath("imported-workspace-settings.png") });
 
     // ── 4. A bad file is rejected with a readable message ──────────────────
     await page.goto(`/${orgSlug}/settings`);
