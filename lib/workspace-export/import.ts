@@ -30,6 +30,11 @@ const KEEP_COLUMNS = new Set(["authorityRecordId", "v0VersionId", "applicationRe
  * organization the row is skipped rather than left pointing at another organization's data.
  */
 const DROP_ON_UNRESOLVED = new Set(["OpportunityScore.scoringModelId", "SolutionScore.scoringModelId"])
+/**
+ * Content columns that are unique across the WHOLE database (not per workspace) and so would collide with the
+ * source rows. They are rewritten to a per-import hash; the value is only ever compared for equality.
+ */
+const REKEY_COLUMNS = new Set(["DecisionRecord.idempotencyKey", "DecisionApplication.receiptKey", "MetricObservation.refreshKey"])
 const MAX_ROWS_PER_MODEL = 2_000_000
 
 export class WorkspaceImportError extends Error {}
@@ -223,6 +228,8 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
           }
         } else if (name === "id" && UUID_EXACT.test(value)) {
           row[name] = mapUuid(value) ?? value
+        } else if (REKEY_COLUMNS.has(`${model}.${name}`)) {
+          row[name] = createHash("sha256").update(`${importKey}:${model}.${name}:${value}`).digest("hex")
         } else {
           row[name] = rewriteText(value)
         }
@@ -234,6 +241,8 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
     }
     for (const col of SECRET_COLUMNS[model] ?? []) if (col in row) row[col] = null
     Object.assign(row, IMPORT_OVERRIDES[model] ?? {})
+    // Org-scoped columns (Workspace, SavedView) always belong to the target organization, never the source.
+    if ("organizationId" in row) row.organizationId = opts.organizationId
     return row
   }
 
@@ -261,6 +270,7 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
     for (const model of exportOrder()) {
       const delegate = delegateFor(client, model)
       let buffer: Row[] = []
+      const insertedIds: string[] = []
       let total = 0
       const flush = async () => {
         if (!buffer.length) return
@@ -284,10 +294,18 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
           }
         }
         buffer.push(row)
+        if (typeof row.id === "string") insertedIds.push(row.id)
         total++
         if (buffer.length >= CHUNK) await flush()
       }
       await flush()
+      // createMany(skipDuplicates) swallows unique-constraint conflicts. Prove every row actually landed.
+      for (const group of chunks(insertedIds, 500)) {
+        const present = await delegate.count({ where: { id: { in: group } } })
+        if (present !== group.length) {
+          throw new WorkspaceImportError(`Import of ${model} was incomplete: ${group.length - present} row(s) were rejected by a uniqueness constraint`)
+        }
+      }
       counts[model] = total
     }
 
@@ -371,7 +389,7 @@ async function rollbackImport(
   uploaded: { store: "artifact" | "research" | "feedback"; key: string }[],
   blobs: BlobAdapters,
 ) {
-  for (const model of [...exportOrder()].reverse()) {
+  const deleteModel = async (model: string) => {
     const delegate = delegateFor(client, model)
     if (modelHasId(model)) {
       const ids: string[] = []
@@ -382,11 +400,29 @@ async function rollbackImport(
     } else {
       // Keyed by its parent (e.g. SolutionPlanProposal.commentId): delete by the derived parent ids.
       const parent = PARENT[model]
-      if (!parent) continue
+      if (!parent) return
       const parentIds: string[] = []
       for (const row of reader.rows(parent.model)) if (typeof row.id === "string") parentIds.push(deriveId(importKey, row.id))
       for (const group of chunks(parentIds, 500)) await withRetry(() => delegate.deleteMany({ where: { [parent.fk]: { in: group } } }))
     }
+  }
+  // Prisma emulates required relations (relationMode "prisma"), so a delete can be refused while another model
+  // still points at the row (P2014). Repeat passes until everything is gone or no pass makes progress.
+  let pending = [...exportOrder()].reverse()
+  let lastError: unknown
+  while (pending.length) {
+    const next: string[] = []
+    for (const model of pending) {
+      try {
+        await deleteModel(model)
+      } catch (error) {
+        if ((error as { code?: string }).code !== "P2014") throw error
+        lastError = error
+        next.push(model)
+      }
+    }
+    if (next.length === pending.length) throw lastError
+    pending = next
   }
   for (const u of uploaded) {
     if (u.store === "feedback") await blobs.delPublic(u.key)
