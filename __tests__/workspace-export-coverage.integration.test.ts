@@ -10,11 +10,13 @@ import { execFileSync } from "node:child_process"
 import { PrismaClient } from "@prisma/client"
 import { PrismaPg } from "@prisma/adapter-pg"
 import { Pool } from "pg"
+import { zipSync } from "fflate"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import type { AppPrismaClient } from "@/lib/db"
 import { injectUpdatedAtExtension } from "@/lib/prisma-updated-at"
 import type { ArtifactStorage } from "@/lib/artifact-storage"
 import type { BlobAdapters } from "@/lib/workspace-export/blobs"
+import { BundleReader } from "@/lib/workspace-export/bundle"
 import { exportWorkspaceToBuffer } from "@/lib/workspace-export/export"
 import { importWorkspaceBundle } from "@/lib/workspace-export/import"
 import { encodeRow } from "@/lib/workspace-export/codec"
@@ -238,4 +240,21 @@ describe.skipIf(!databaseUrl)("workspace export: wide model coverage", () => {
     const tasks = imported.rows.get("Task")!
     expect(tasks.filter((t) => t.parentTaskId).every((t) => imported.ids.get("Task")!.includes(t.parentTaskId as string))).toBe(true)
   }, 180_000)
+
+  it("imports legacy rows that hold NULL in columns the schema now declares required (the column default applies)", async () => {
+    const bundle = await exportWorkspaceToBuffer(prisma, wsId, blobs)
+    const reader = new BundleReader(bundle)
+    const files: Record<string, Uint8Array> = {}
+    for (const n of reader.list("")) files[n] = reader.read(n)!
+    // Assumption.source is `String @default("UI")`; real databases contain NULLs there from before the column existed.
+    const name = reader.list("data/Assumption.")[0]
+    const rows = reader.readText(name)!.split("\n").filter(Boolean).map((l) => JSON.parse(l))
+    expect(rows.length).toBeGreaterThan(0)
+    for (const r of rows) r.source = null
+    files[name] = new TextEncoder().encode(rows.map((r) => JSON.stringify(r)).join("\n") + "\n")
+    const report = await importWorkspaceBundle(prisma, zipSync(files), { organizationId: orgId, importerUserId: adminId, blobs, nonce: "legacy-null", slug: "legacy-null" })
+    const imported = await db().assumption.findMany({ where: { workspaceId: report.workspaceId } })
+    expect(imported.length).toBe(rows.length)
+    expect(imported.every((a: { source: string }) => a.source === "UI")).toBe(true)
+  }, 120_000)
 })

@@ -6,7 +6,7 @@ import { WORK_ITEM_REGISTRY, WORK_ITEM_TYPES } from "@/lib/work-item-ids"
 import { BundleReader, blobEntry, type BundleManifest } from "@/lib/workspace-export/bundle"
 import { type BlobAdapters } from "@/lib/workspace-export/blobs"
 import { decodeRow, fieldInfo } from "@/lib/workspace-export/codec"
-import { OPTIONAL_STRING_FIELDS } from "@/lib/workspace-export/schema-meta.generated"
+import { OPTIONAL_FIELDS, OPTIONAL_STRING_FIELDS } from "@/lib/workspace-export/schema-meta.generated"
 import { IMPORT_OVERRIDES, SECRET_COLUMNS } from "@/lib/workspace-export/model-registry"
 import {
   PARENT,
@@ -239,6 +239,12 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
     for (const [name, value] of Object.entries(row)) {
       const info = fieldInfo(model, name)
       if (!info) continue
+      // Real databases hold legacy NULLs in columns the schema now declares required (they have a default).
+      // Prisma rejects an explicit null there, so leave the key out and let the column default apply.
+      if (value === null && !OPTIONAL_FIELDS[model]?.includes(name)) {
+        delete row[name]
+        continue
+      }
       if (info.type === "Json") {
         row[name] = value === null ? undefined : rewriteDeep(value)
       } else if (info.type === "String" && typeof value === "string") {

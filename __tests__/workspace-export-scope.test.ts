@@ -2,8 +2,8 @@ import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
 import { MODEL_BUCKETS } from "@/lib/workspace-export/model-registry"
 import { PARENT, dmmfModels, exportOrder, modelHasWorkspaceId } from "@/lib/workspace-export/scope"
-import { OPTIONAL_STRING_FIELDS } from "@/lib/workspace-export/schema-meta.generated"
-import { OUTPUT_PATH, SCHEMA_PATH, parseOptionalStringFields, render } from "../scripts/gen-workspace-export-meta.ts"
+import { OPTIONAL_FIELDS, OPTIONAL_STRING_FIELDS } from "@/lib/workspace-export/schema-meta.generated"
+import { OUTPUT_PATH, SCHEMA_PATH, render } from "../scripts/gen-workspace-export-meta.ts"
 
 describe("workspace export scope", () => {
   it("every exported model is reachable: it has workspaceId, a declared parent, or is a special case", () => {
@@ -29,8 +29,12 @@ describe("workspace export scope", () => {
   })
 
   it("generated schema metadata is current (run: node scripts/gen-workspace-export-meta.ts)", () => {
-    const expected = render(parseOptionalStringFields(readFileSync(SCHEMA_PATH, "utf8")))
+    const expected = render(readFileSync(SCHEMA_PATH, "utf8"))
     expect(readFileSync(OUTPUT_PATH, "utf8")).toBe(expected)
     expect(Object.keys(OPTIONAL_STRING_FIELDS).length).toBeGreaterThan(20)
+    // Non-String optional columns are covered too, and required columns are not.
+    expect(OPTIONAL_FIELDS.Assumption).toContain("createdById")
+    expect(OPTIONAL_FIELDS.Assumption).not.toContain("source")
+    expect(OPTIONAL_FIELDS.Workspace).toContain("ssoSecretUpdatedAt")
   })
 })
