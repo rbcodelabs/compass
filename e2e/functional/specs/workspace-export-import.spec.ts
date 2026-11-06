@@ -71,4 +71,28 @@ test.describe("Workspace export / import", () => {
     await expect(form2.getByRole("alert")).toContainText(/not a valid workspace bundle/i);
     await page.screenshot({ path: testInfo.outputPath("import-error.png") });
   });
+
+  test.describe("mobile viewport (390x844)", () => {
+    test.use({ viewport: { width: 390, height: 844 } });
+
+    test("export and import controls are reachable without horizontal overflow", async ({ page, orgSlug, workspaceSlug }, testInfo) => {
+      const noHorizontalOverflow = () => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1);
+
+      await page.goto(`/${orgSlug}/${workspaceSlug}/settings`);
+      const exportLink = page.getByTestId("export-workspace");
+      await exportLink.scrollIntoViewIfNeeded();
+      await expect(exportLink).toBeVisible();
+      await expect(exportLink).toBeInViewport();
+      expect(await noHorizontalOverflow()).toBe(true);
+      await page.screenshot({ path: testInfo.outputPath("mobile-export.png") });
+
+      await page.goto(`/${orgSlug}/settings`);
+      const form = page.getByTestId("import-workspace-form");
+      await form.scrollIntoViewIfNeeded();
+      await expect(form.getByRole("button", { name: "Import workspace" })).toBeVisible();
+      await expect(form.getByLabel("Bundle file")).toBeVisible();
+      expect(await noHorizontalOverflow()).toBe(true);
+      await page.screenshot({ path: testInfo.outputPath("mobile-import.png") });
+    });
+  });
 });
