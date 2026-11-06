@@ -130,6 +130,11 @@ describe.skipIf(!databaseUrl)("workspace export/import round trip", () => {
     await prisma.comment.create({
       data: { workspaceId: wsId, targetType: "OPPORTUNITY", targetId: opp.id, body: `See ${opp.id} and OPP-42`, authorId: aliceId, authorName: "Alice" },
     })
+    const parentComment = await prisma.comment.findFirstOrThrow({ where: { workspaceId: wsId } })
+    await prisma.comment.create({
+      data: { workspaceId: wsId, targetType: "OPPORTUNITY", targetId: opp.id, body: "a reply", authorName: "Bob", parentId: parentComment.id },
+    })
+    await prisma.task.create({ data: { workspaceId: wsId, title: "Subtask", parentTaskId: task.id } })
     await prisma.workspaceSequence.create({ data: { workspaceId: wsId, entityType: "opportunity", nextValue: 50 } })
 
     const imageName = `${randomUUID()}.png`
@@ -215,7 +220,7 @@ describe.skipIf(!databaseUrl)("workspace export/import round trip", () => {
     // Polymorphic + text-embedded ids follow the new rows.
     const link = await prisma.entityLink.findFirstOrThrow({ where: { workspaceId: report.workspaceId } })
     expect(link.toId).toBe(opp.id)
-    const comment = await prisma.comment.findFirstOrThrow({ where: { workspaceId: report.workspaceId } })
+    const comment = await prisma.comment.findFirstOrThrow({ where: { workspaceId: report.workspaceId, parentId: null } })
     expect(comment.targetId).toBe(opp.id)
     expect(comment.body).toBe(`See ${opp.id} and OPP-42`)
     const cfv = await prisma.customFieldValue.findFirstOrThrow({ where: { fieldId: { in: (await prisma.customFieldDefinition.findMany({ where: { workspaceId: report.workspaceId } })).map((f: { id: string }) => f.id) } } })
@@ -271,6 +276,30 @@ describe.skipIf(!databaseUrl)("workspace export/import round trip", () => {
     expect(await prisma.opportunity.count()).toBe(before + 1)
   }, 120_000)
 
+  it("two concurrent imports with the same nonce yield one complete workspace and never delete each other's rows", async () => {
+    const run = () => importWorkspaceBundle(prisma, bundle, { organizationId: orgId, importerUserId: importerId, blobs, nonce: "race", slug: "race-copy" })
+    const [a, b] = await Promise.all([run(), run()])
+    expect(a.workspaceId).toBe(b.workspaceId)
+    expect(await prisma.workspace.count({ where: { slug: "race-copy" } })).toBe(1)
+    // The workspace is complete, not empty.
+    expect(await prisma.opportunity.count({ where: { workspaceId: a.workspaceId } })).toBe(1)
+    expect(await prisma.comment.count({ where: { workspaceId: a.workspaceId } })).toBe(2)
+    expect(await prisma.task.count({ where: { workspaceId: a.workspaceId } })).toBe(2)
+    // A later retry still reports the same, complete import.
+    const again = await run()
+    expect(again.alreadyImported).toBe(true)
+    expect(await prisma.opportunity.count({ where: { workspaceId: a.workspaceId } })).toBe(1)
+  }, 120_000)
+
+  it("tells the user when a reserved slug was changed, and rejects an over-long slug", async () => {
+    const report = await importWorkspaceBundle(prisma, bundle, { organizationId: orgId, importerUserId: importerId, blobs, nonce: "reserved", slug: "settings" })
+    expect(report.slug).toBe("settings-workspace")
+    expect(report.warnings.join(" ")).toMatch(/"settings" is reserved.*"settings-workspace"/)
+    await expect(
+      importWorkspaceBundle(prisma, bundle, { organizationId: orgId, importerUserId: importerId, blobs, nonce: "long", slug: "a".repeat(101) }),
+    ).rejects.toThrow(/100 characters/)
+  }, 120_000)
+
   it("imports into a different org: unmatched users fall back to the importer, foreign scoring models are cleared", async () => {
     await prisma.organizationMember.create({ data: { organizationId: otherOrgId, userId: importerId, role: "ADMIN" } })
     const report = await importWorkspaceBundle(prisma, bundle, { organizationId: otherOrgId, importerUserId: importerId, blobs, nonce: "n3" })
@@ -291,11 +320,16 @@ describe.skipIf(!databaseUrl)("workspace export/import round trip", () => {
     files["manifest.json"] = new TextEncoder().encode(JSON.stringify(manifest))
     const tampered = zipSync(files)
     const beforeRows = await prisma.opportunity.count()
+    const beforeComments = await prisma.comment.count()
+    const beforeTasks = await prisma.task.count()
     const beforeBlobs = artifact.files.size
     await expect(
       importWorkspaceBundle(prisma, tampered, { organizationId: orgId, importerUserId: importerId, blobs, nonce: "n4", slug: "will-fail" }),
     ).rejects.toThrow(/Validation failed for Opportunity/)
     expect(await prisma.opportunity.count()).toBe(beforeRows)
+    // Self-referencing rows (comment replies, subtasks) are removed too, children before parents.
+    expect(await prisma.comment.count()).toBe(beforeComments)
+    expect(await prisma.task.count()).toBe(beforeTasks)
     expect(await prisma.workspace.count({ where: { slug: "will-fail" } })).toBe(0)
     expect(artifact.files.size).toBe(beforeBlobs)
   }, 120_000)

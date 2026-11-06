@@ -81,6 +81,21 @@ export type ImportReport = {
   warnings: string[]
 }
 
+function alreadyImportedReport(workspace: Row, manifest: BundleManifest): ImportReport {
+  return {
+    workspaceId: workspace.id as string,
+    slug: workspace.slug as string,
+    name: workspace.name as string,
+    alreadyImported: true,
+    counts: manifest.counts,
+    usersMatched: 0,
+    usersFallbackToImporter: 0,
+    referencesCleared: 0,
+    blobsCopied: 0,
+    warnings: [],
+  }
+}
+
 function deriveId(importKey: string, oldId: string): string {
   const h = createHash("sha256").update(`${importKey}:${oldId.toLowerCase()}`).digest("hex")
   const variant = ((parseInt(h.slice(16, 18), 16) & 0x3f) | 0x80).toString(16).padStart(2, "0")
@@ -152,20 +167,7 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
   const newWorkspaceId = deriveId(importKey, manifest.source.workspaceId)
 
   const existing = await delegateFor(client, "Workspace").findMany({ where: { id: newWorkspaceId }, take: 1 })
-  if (existing[0]) {
-    return {
-      workspaceId: newWorkspaceId,
-      slug: existing[0].slug as string,
-      name: existing[0].name as string,
-      alreadyImported: true,
-      counts: manifest.counts,
-      usersMatched: 0,
-      usersFallbackToImporter: 0,
-      referencesCleared: 0,
-      blobsCopied: 0,
-      warnings: [],
-    }
-  }
+  if (existing[0]) return alreadyImportedReport(existing[0], manifest)
 
   // ---- users: match by email, fall back to the importer ---------------------------------------------------------------
   const members = (await delegateFor(client, "OrganizationMember").findMany({
@@ -208,9 +210,11 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
   const wsDelegate = delegateFor(client, "Workspace")
   const baseName = (opts.name ?? `${manifest.source.name} (imported)`).trim()
   if (!baseName) throw new WorkspaceImportError("Workspace name is required")
-  let slug = (opts.slug ?? `${manifest.source.slug}-imported`).trim().toLowerCase()
+  let slug = (opts.slug ?? `${manifest.source.slug.slice(0, 80)}-imported`).trim().toLowerCase()
   if (!SLUG_PATTERN.test(slug)) throw new WorkspaceImportError("Slug may only contain lowercase letters, numbers and hyphens")
-  if (isReservedWorkspaceSlug(slug)) slug = `${slug}-workspace`
+  if (slug.length > 100) throw new WorkspaceImportError("Slug must be 100 characters or fewer")
+  const requestedReserved = isReservedWorkspaceSlug(slug) ? slug : null
+  if (requestedReserved) slug = `${slug}-workspace`
   if (!opts.slug) {
     const base = slug
     for (let i = 2; (await wsDelegate.count({ where: { organizationId: opts.organizationId, slug } })) > 0; i++) slug = `${base}-${i}`
@@ -218,9 +222,13 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
     throw new WorkspaceImportError(`A workspace with the slug "${slug}" already exists in this organization`)
   }
 
+  const slugWarnings = requestedReserved
+    ? [`The URL slug "${requestedReserved}" is reserved by Compass, so the workspace uses "${slug}" instead.`]
+    : []
+
   // ---- row transform -----------------------------------------------------------------------------------------------------
   let referencesCleared = 0
-  const warnings = [...manifest.warnings]
+  const warnings = [...manifest.warnings, ...slugWarnings]
   const uploaded: { store: "artifact" | "research" | "feedback"; key: string }[] = []
 
   const dropped: Record<string, number> = {}
@@ -392,10 +400,46 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
       warnings,
     }
   } catch (error) {
+    // The Workspace row is the commit point. If it exists, a request with the same nonce finished first (two concurrent
+    // submissions derive identical ids, and the loser fails at the Workspace insert). Rolling back would delete the
+    // winner's rows, so treat it as "already imported" and leave everything alone.
+    const committed = await delegateFor(client, "Workspace").findMany({ where: { id: newWorkspaceId }, take: 1 }).catch(() => [])
+    if (committed[0]) {
+      if ((error as { code?: string }).code === "P2002") return alreadyImportedReport(committed[0], manifest)
+      throw error
+    }
     await rollbackImport(client, reader, importKey, newWorkspaceId, uploaded, opts.blobs).catch((rollbackError) => {
       console.error("[workspace-import] rollback failed; partial rows may remain for workspace", newWorkspaceId, rollbackError)
     })
     throw error
+  }
+}
+
+/**
+ * Deletes rows by id. Self-referencing models (comment replies, doc trees, subtasks) trip Prisma's emulated Restrict when a
+ * parent and its children go in one statement, so on P2014 fall back to repeated passes, one row at a time, until every row
+ * whose children are gone has been removed.
+ */
+async function deleteIdsLeafFirst(delegate: ReturnType<typeof delegateFor>, ids: string[]) {
+  try {
+    await withRetry(() => delegate.deleteMany({ where: { id: { in: ids } } }))
+    return
+  } catch (error) {
+    if ((error as { code?: string }).code !== "P2014") throw error
+  }
+  let pending = ids
+  while (pending.length) {
+    const next: string[] = []
+    for (const id of pending) {
+      try {
+        await withRetry(() => delegate.deleteMany({ where: { id } }))
+      } catch (error) {
+        if ((error as { code?: string }).code !== "P2014") throw error
+        next.push(id)
+      }
+    }
+    if (next.length === pending.length) throw new WorkspaceImportError("Could not remove partially imported rows")
+    pending = next
   }
 }
 
@@ -413,7 +457,7 @@ async function rollbackImport(
     if (modelHasId(model)) {
       const ids: string[] = []
       for (const row of reader.rows(model)) if (typeof row.id === "string") ids.push(deriveId(importKey, row.id))
-      for (const group of chunks(ids, 500)) await withRetry(() => delegate.deleteMany({ where: { id: { in: group } } }))
+      for (const group of chunks(ids, 500)) await deleteIdsLeafFirst(delegate, group)
     } else if (modelHasWorkspaceId(model)) {
       await withRetry(() => delegate.deleteMany({ where: { workspaceId: newWorkspaceId } }))
     } else {

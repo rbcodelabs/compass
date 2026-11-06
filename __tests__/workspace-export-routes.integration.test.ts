@@ -127,6 +127,10 @@ describe.skipIf(!databaseUrl)("workspace export/import routes", () => {
     expect((await call(memberId)).status).toBe(403)
     const res = await call(adminId)
     expect(await res.json()).toEqual({ mode: "multipart" })
+    connection.userId = adminId
+    const empty = await prepareRoute(new Request("http://x", { method: "POST", body: JSON.stringify({ fileSize: 0 }), headers: { "Content-Type": "application/json" } }), orgParams("route-org"))
+    expect(empty.status).toBe(400)
+    expect((await empty.json()).error).toBe("The file is empty.")
   })
 
   it("upload receipts are signed, scoped to org and user, and expire", async () => {

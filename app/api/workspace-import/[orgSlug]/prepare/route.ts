@@ -11,7 +11,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ orgSlug
     const session = await auth()
     const body = (await req.json().catch(() => ({}))) as { fileSize?: number }
     const fileSize = Number(body.fileSize)
-    if (!Number.isInteger(fileSize) || fileSize < 1) return NextResponse.json({ error: "fileSize is required" }, { status: 400 })
+    if (!Number.isInteger(fileSize) || fileSize < 0) return NextResponse.json({ error: "fileSize is required" }, { status: 400 })
+    if (fileSize === 0) return NextResponse.json({ error: "The file is empty." }, { status: 400 })
     if (fileSize > MAX_BUNDLE_BYTES) return NextResponse.json({ error: "The bundle exceeds the 512 MB limit" }, { status: 413 })
     if (!directUploadAvailable()) {
       if (fileSize > MAX_MULTIPART_BYTES && process.env.VERCEL) {

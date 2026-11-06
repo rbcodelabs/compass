@@ -27,6 +27,8 @@ type Result = {
 export function ImportWorkspacePanel({ orgSlug }: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
   const nonceRef = useRef<string>(crypto.randomUUID());
+  // State updates are async; a ref blocks a second submit in the same tick (double tap, Enter + click).
+  const submittingRef = useRef(false);
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
   const [busy, setBusy] = useState(false);
@@ -38,11 +40,17 @@ export function ImportWorkspacePanel({ orgSlug }: Props) {
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
+    if (submittingRef.current) return;
     const file = fileRef.current?.files?.[0];
     if (!file) {
       setError("Choose a bundle file first.");
       return;
     }
+    if (file.size === 0) {
+      setError("The file is empty.");
+      return;
+    }
+    submittingRef.current = true;
     setBusy(true);
     setError(null);
     setResult(null);
@@ -83,6 +91,7 @@ export function ImportWorkspacePanel({ orgSlug }: Props) {
     } catch (e) {
       setError(e instanceof Error ? e.message : "The import failed");
     } finally {
+      submittingRef.current = false;
       setBusy(false);
       setStage(null);
     }
