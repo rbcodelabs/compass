@@ -53,6 +53,7 @@ test.describe("Workspace export / import", () => {
 
     const result = page.getByTestId("import-result");
     await expect(result).toContainText(`Imported Imported ${importedSlug}`, { timeout: 120_000 });
+    await result.scrollIntoViewIfNeeded();
     await page.screenshot({ path: testInfo.outputPath("import-result.png") });
 
     // ── 3. The imported workspace exists and is usable ─────────────────────
