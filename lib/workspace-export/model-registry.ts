@@ -86,7 +86,7 @@ export const SECRET_COLUMNS: Readonly<Record<string, readonly string[]>> = {
   ],
   AnalyticsConnection: ["secretEncrypted"],
   ResearchStudy: ["shareTokenHash"],
-  ResearchSession: ["resumeTokenHash", "participantTokenId"],
+  ResearchSession: ["resumeTokenHash", "participantTokenId", "activeRequestId", "voiceLeaseId"],
   CommentExternalAuthor: ["embedTokenId"],
 };
 
