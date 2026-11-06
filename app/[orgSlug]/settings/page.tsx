@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import getPrisma from "@/lib/db";
 import { ManageScoringModelsPanel } from "@/components/scoring-models/manage-scoring-models-panel";
+import { ImportWorkspacePanel } from "@/components/settings/import-workspace-panel";
 import { DeleteOrganizationPanel } from "@/components/settings/delete-organization-panel";
 import { CreateWorkspacePanel } from "@/components/settings/create-workspace-panel";
 import { OrganizationSlugPanel } from "@/components/settings/organization-slug-panel";
@@ -109,6 +110,13 @@ export default async function OrgSettingsPage({ params }: Props) {
           orgMemberCount={orgMemberCount}
           orgAdminCount={orgAdminCount}
         />
+      </SettingsSection>
+
+      <SettingsSection
+        title="Import workspace"
+        description="Create a new workspace from a bundle exported from another workspace or organization."
+      >
+        <ImportWorkspacePanel orgSlug={orgSlug} />
       </SettingsSection>
 
       <SettingsSection
