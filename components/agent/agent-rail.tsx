@@ -367,11 +367,13 @@ export function AgentRail({ workspaceId, basePath, userInitials, userId }: Agent
     selectConversation(null)
   }, [selectConversation])
 
+  const expandBlocked = streaming && !conversationId
+
   const expandToPage = useCallback(() => {
-    // The button is disabled mid-turn; this is the belt to that brace. Closing
-    // would abort the turn, and for a new chat the id does not exist until the
-    // turn completes, so the page would open empty.
-    if (streaming) return
+    // Mid-turn the run is detached (it lives on the server), so the full page
+    // reattaches to it via ?c=. That needs the conversation id: a brand-new chat
+    // has none until the server answers, so wait for it.
+    if (streaming && !conversationId) return
     // The rail is deliberately NOT closed here. Two things make that safe and
     // better: the provider hides the rail on the agent route, so there are never
     // two live AgentChats; and closing would change rail state while this push
@@ -556,18 +558,18 @@ export function AgentRail({ workspaceId, basePath, userInitials, userId }: Agent
           variant="ghost"
           size="icon-sm"
           onClick={expandToPage}
-          disabled={streaming}
+          disabled={expandBlocked}
           aria-label="Open in full page"
           // Disabled buttons get no pointer events, so this native title is the
           // explanation sighted users get; aria-describedby carries it to AT.
-          title={streaming ? "Available when the response finishes" : "Open in full page"}
-          aria-describedby={streaming ? expandHintId : undefined}
+          title={expandBlocked ? "Available once the agent has started the conversation" : "Open in full page"}
+          aria-describedby={expandBlocked ? expandHintId : undefined}
         >
           <Maximize2 aria-hidden="true" />
         </Button>
-        {streaming && (
+        {expandBlocked && (
           <span id={expandHintId} className="sr-only">
-            Open in full page is available when the response finishes.
+            Open in full page is available once the agent has started the conversation.
           </span>
         )}
         </>)}

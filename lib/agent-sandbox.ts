@@ -497,6 +497,14 @@ function isNotFound(error: unknown): boolean {
   return error instanceof APIError && error.response.status === 404
 }
 
+/**
+ * Resuming a stopped persistent sandbox answers 410 "snapshot_not_found" when the platform no longer holds its
+ * snapshot (expired, or the sandbox stopped without one). The disk is already gone, so there is nothing to protect.
+ */
+export function isSnapshotGone(error: unknown): boolean {
+  return error instanceof APIError && error.response.status === 410
+}
+
 export type ConversationSandboxResult = { sandbox: Sandbox; reused: boolean; reason: SandboxReuseReason }
 
 /**
@@ -546,14 +554,31 @@ export async function acquireConversationSandbox(opts: {
     previous: opts.previous,
   })
 
+  let resumed: Sandbox | null = null
   if (existing && decision.action !== "boot") {
     let sandbox = existing
+    let snapshotGone = false
     if (decision.action === "resume") {
       // Pause a running-but-untrusted sandbox first: that ends its processes and snapshots its disk.
       if (existing.status === "running") await existing.stop().catch(() => {})
-      sandbox = await Sandbox.get({ name: opts.name }) // resume
-      await sandbox.updateNetworkPolicy(opts.boot.networkPolicy ?? "allow-all")
+      try {
+        sandbox = await Sandbox.get({ name: opts.name }) // resume
+        await sandbox.updateNetworkPolicy(opts.boot.networkPolicy ?? "allow-all")
+      } catch (error) {
+        if (!isSnapshotGone(error)) throw error
+        snapshotGone = true
+      }
     }
+    if (snapshotGone) {
+      // Unrecoverable: free the name and fall through to a fresh boot rather than failing every future turn of this chat.
+      console.warn("[agent-sandbox] conversation sandbox has no snapshot to resume; booting a fresh one", { name: opts.name })
+      await existing.delete().catch(() => {})
+    } else {
+      resumed = sandbox
+    }
+  }
+  if (resumed) {
+    const sandbox = resumed
     await resetReusedSandbox(sandbox)
     const remaining = sandbox.expiresAt ? sandbox.expiresAt.getTime() - Date.now() : 0
     if (remaining < opts.requiredMs) await sandbox.extendTimeout(opts.requiredMs - Math.max(remaining, 0))
