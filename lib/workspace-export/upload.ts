@@ -8,6 +8,7 @@ import { shouldUseLocalStorage, type ArtifactStorage } from "@/lib/artifact-stor
  * the import route reads it from there (and deletes it). Locally (no Blob) the multipart path is used.
  */
 
+/** Upper bound for a bundle, enforced on prepare (declared size), on the signed client token (maximumSizeInBytes) and on the multipart route. */
 export const MAX_BUNDLE_BYTES = 512 * 1024 * 1024
 /** Largest bundle accepted through the multipart route (a serverless request body is capped near 4.5 MB). */
 export const MAX_MULTIPART_BYTES = 4 * 1024 * 1024
