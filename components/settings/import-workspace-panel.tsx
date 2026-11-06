@@ -128,7 +128,7 @@ export function ImportWorkspacePanel({ orgSlug }: Props) {
             </Link>
           </p>
           <p className="text-muted-foreground">
-            {result.usersMatched} people matched by email, {result.usersFallbackToImporter} attributed to you, {result.blobsCopied} files copied.
+            {result.usersMatched} {result.usersMatched === 1 ? "person" : "people"} matched by email, {result.usersFallbackToImporter} attributed to you, {result.blobsCopied} {result.blobsCopied === 1 ? "file" : "files"} copied.
           </p>
           {result.warnings.length > 0 && (
             <ul className="mt-2 list-disc pl-5 text-muted-foreground">
