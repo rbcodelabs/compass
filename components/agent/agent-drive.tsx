@@ -53,28 +53,67 @@ function visibleHeadings(): string[] {
   return out
 }
 
+/**
+ * Turn whatever a failed capture threw into a message the agent can act on.
+ * html-to-image rejects with a DOM Event (no message) when an image or other
+ * resource fails to load, so checking for an Error instance alone loses the
+ * reason and the agent only ever saw a generic failure.
+ */
+export function describeCaptureError(error: unknown): string {
+  if (error instanceof Error) return error.message || error.name
+  if (typeof Event !== "undefined" && error instanceof Event) {
+    const target = error.target
+    const src =
+      target instanceof HTMLImageElement ? target.currentSrc || target.src
+      : target instanceof HTMLElement ? target.tagName.toLowerCase()
+      : ""
+    return "A resource failed to load while capturing the screen (" + error.type + (src ? ": " + src.slice(0, 200) : "") + ")."
+  }
+  if (typeof error === "string" && error) return error.slice(0, 500)
+  return "Screenshot capture failed with a non-Error value."
+}
+
+// A 1x1 transparent PNG, drawn in place of any image that cannot be inlined.
+const IMAGE_PLACEHOLDER =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+
 async function captureScreenshot() {
   const { toPng } = await import("html-to-image")
-  // Smaller pixel ratios until the PNG fits the server's ceiling.
-  for (const pixelRatio of [1, 0.6, 0.4, 0.25]) {
-    const dataUrl = await toPng(document.body, {
-      pixelRatio,
-      cacheBust: true,
-      width: window.innerWidth,
-      height: window.innerHeight,
-      filter: (node) => !(node instanceof HTMLElement && node.hasAttribute("data-agent-drive-ui")),
-    })
-    const pngBase64 = dataUrl.slice(dataUrl.indexOf(",") + 1)
-    if (pngBase64.length <= UI_SCREENSHOT_MAX_BASE64) {
-      return {
-        pngBase64,
-        path: window.location.pathname + window.location.search,
-        width: Math.round(window.innerWidth * pixelRatio),
-        height: Math.round(window.innerHeight * pixelRatio),
+  const base = {
+    cacheBust: true,
+    width: window.innerWidth,
+    height: window.innerHeight,
+    imagePlaceholder: IMAGE_PLACEHOLDER,
+    filter: (node: Node) => !(node instanceof HTMLElement && node.hasAttribute("data-agent-drive-ui")),
+  }
+  // First try with fonts embedded; if the capture throws, retry once without
+  // them, since an unreachable font file is a common reason a capture fails.
+  const attempts: { skipFonts?: boolean }[] = [{}, { skipFonts: true }]
+  let lastError: unknown = null
+  for (const extra of attempts) {
+    // Smaller pixel ratios until the PNG fits the server ceiling.
+    for (const pixelRatio of [1, 0.6, 0.4, 0.25]) {
+      let dataUrl: string
+      try {
+        dataUrl = await toPng(document.body, { ...base, ...extra, pixelRatio })
+      } catch (error) {
+        lastError = error
+        console.error("[agent-drive] screenshot capture failed", { skipFonts: Boolean(extra.skipFonts), error })
+        break
       }
+      const pngBase64 = dataUrl.slice(dataUrl.indexOf(",") + 1)
+      if (pngBase64.length <= UI_SCREENSHOT_MAX_BASE64) {
+        return {
+          pngBase64,
+          path: window.location.pathname + window.location.search,
+          width: Math.round(window.innerWidth * pixelRatio),
+          height: Math.round(window.innerHeight * pixelRatio),
+        }
+      }
+      lastError = new Error("Screenshot is too large to send even when downscaled.")
     }
   }
-  throw new Error("Screenshot is too large to send even when downscaled.")
+  throw lastError instanceof Error ? lastError : new Error(describeCaptureError(lastError))
 }
 
 export function AgentDrive({ workspaceId, basePath }: { workspaceId: string; basePath: string }) {
@@ -128,7 +167,8 @@ export function AgentDrive({ workspaceId, basePath }: { workspaceId: string; bas
           await postResult(command.id, { ok: false, error: `Unsupported command: ${String(command.kind)}` })
         }
       } catch (e) {
-        await postResult(command.id, { ok: false, error: e instanceof Error ? e.message : "Command failed." })
+        console.error("[agent-drive] command failed", { kind: command.kind, error: e })
+        await postResult(command.id, { ok: false, error: describeCaptureError(e) })
       }
     },
     [basePath, postResult],
