@@ -11,6 +11,7 @@ import { assertDocumentPilotCleanupReviewed } from "@/lib/document-cleanup";
 import { deleteWorkspaceAnalytics } from "@/lib/analytics/service";
 import { drainLinksFor, deleteWorkspaceLinks } from "@/lib/typed-links";
 import { deleteLinksForEntity, deleteWorkspaceLinks as deleteWorkspaceEntityLinks } from "@/lib/links/service";
+import { sweepWorkspaceOwnedRows } from "@/lib/workspace-export/sweep";
 
 /**
  * Aurora DSQL fails a transaction that modifies more than ~3,000 rows, and the workspace_id indexes on Solution and
@@ -51,6 +52,12 @@ export async function deleteWorkspaceCascade(prisma: AppPrismaClient, workspaceI
   const ids = async (
     rows: Promise<{ id: string }[]>
   ): Promise<string[]> => (await rows).map((r) => r.id);
+
+  // 0b. Comment threads and card sorts point at many other records (artifacts, custom fields, any commentable entity), so they are
+  //     cleared before the steps that delete those, or an emulated Restrict from a leftover comment anchor or card sort round blocks them.
+  await sweepWorkspaceOwnedRows(prisma, workspaceId, {
+    only: ["CommentElementAnchor", "DocCommentAnchor", "SolutionPlanProposal", "CommentExternalAuthor", "Comment", "CardSortNewEntry", "CardSortProposal", "CardSortRound"],
+  });
 
   // 1. Break the KeyResult↔Objective Restrict cycle.
   //
@@ -94,8 +101,8 @@ export async function deleteWorkspaceCascade(prisma: AppPrismaClient, workspaceI
   // DSQL has no FK cascades, so clear the full child graph first.
   await deleteWorkspaceDecisionData(prisma, workspaceId);
 
-  // 3. Tasks + TaskLinks (TaskLink.task is Restrict; parentTask self-ref is
-  //    safe when all rows go in a single deleteMany).
+  // 3. Tasks + TaskLinks (TaskLink.task is Restrict). A parent and its subtasks cannot go in one statement either: the emulated
+  //    Restrict on Task.parentTaskId refuses it (P2014) even though every row is being deleted, so the tree is detached first.
   const taskIds = await ids(
     prisma.task.findMany({ where: { workspaceId }, select: { id: true } })
   );
@@ -104,6 +111,7 @@ export async function deleteWorkspaceCascade(prisma: AppPrismaClient, workspaceI
     await deleteLinksForEntity(prisma, "TASK", taskIds);
     await prisma.taskLink.deleteMany({ where: { taskId: { in: taskIds } } });
   }
+  await prisma.task.updateMany({ where: { workspaceId }, data: { parentTaskId: null } });
   await prisma.task.deleteMany({ where: { workspaceId } });
 
   // 4. Launch checklists + checklist templates (all Restrict chains).
@@ -292,13 +300,28 @@ export async function deleteWorkspaceCascade(prisma: AppPrismaClient, workspaceI
   // Work item ID counters (migration 092): no FK reaches this table, so it is deleted explicitly.
   await prisma.workspaceSequence.deleteMany({ where: { workspaceId } });
 
-  // 14. Members + squads + docs, then the workspace itself.
-  await prisma.workspaceMember.deleteMany({ where: { workspaceId } });
+  // 14. Squads + docs, a final sweep, then members and the workspace itself.
   await prisma.squad.deleteMany({ where: { workspaceId } });
   const docIds = await ids(prisma.doc.findMany({ where: { workspaceId }, select: { id: true } }));
   if (docIds.length > 0) await deleteLinksForEntity(prisma, "DOC", docIds);
+  // Version snapshots and doc comments hold a required relation to Doc, so the docs cannot go while any exist (P2014). Replies go
+  // before their parent comments, and the doc tree is detached, for the same reason.
+  for (const chunk of chunked(docIds)) {
+    await prisma.docVersion.deleteMany({ where: { docId: { in: chunk } } });
+    await prisma.docComment.deleteMany({ where: { docId: { in: chunk }, parentId: { not: null } } });
+    await prisma.docComment.deleteMany({ where: { docId: { in: chunk } } });
+  }
+  await prisma.doc.updateMany({ where: { workspaceId }, data: { parentId: null } });
   await prisma.doc.deleteMany({ where: { workspaceId } });
+
+  // Backstop for anything the steps above do not know about (workspace-wide Comment rows, card sorts, modules, and whatever is added
+  // next): every model in the export registry that still holds rows for this workspace is removed, children first.
+  await sweepWorkspaceOwnedRows(prisma, workspaceId);
+
+  // Members go LAST, in the same transaction as the workspace row. Deleting them earlier meant a failure further down left a
+  // workspace nobody could open, delete or retry; now a failed delete leaves it fully accessible and this function can simply be re-run.
   await prisma.$transaction(async tx => {
+    await tx.workspaceMember.deleteMany({ where: { workspaceId } });
     await tx.workspace.delete({ where: { id: workspaceId } });
     await deleteWorkspaceAnalytics(tx, workspaceId);
   });

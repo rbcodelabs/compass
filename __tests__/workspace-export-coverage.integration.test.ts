@@ -19,6 +19,7 @@ import type { BlobAdapters } from "@/lib/workspace-export/blobs"
 import { BundleReader } from "@/lib/workspace-export/bundle"
 import { exportWorkspaceToBuffer } from "@/lib/workspace-export/export"
 import { importWorkspaceBundle } from "@/lib/workspace-export/import"
+import { deleteWorkspaceCascade } from "@/lib/delete-workspace-cascade"
 import { encodeRow } from "@/lib/workspace-export/codec"
 import { PARENT, delegateFor, exportOrder, modelHasId, modelHasWorkspaceId } from "@/lib/workspace-export/scope"
 
@@ -149,6 +150,17 @@ describe.skipIf(!databaseUrl)("workspace export: wide model coverage", () => {
     await db().feedbackElementAnchor.create({ data: { feedbackItemId: fb.id, feedbackSourceId: (await db().feedbackSource.findFirst({ where: { workspaceId: wsId } })).id, pageUrl: "u", pagePath: "/" } })
     await db().researchSynthesis.create({ data: { studyId: study.id, content: "c" } })
     const sm = await db().scoringModel.create({ data: { organizationId: orgId, name: "M" } })
+    // Rows for the models only the narrower round-trip suite used to cover, so this fixture touches every exported model.
+    await db().squad.create({ data: { workspaceId: wsId, name: "Core", createdById: adminId } })
+    await db().opportunityScore.create({ data: { opportunityId: opp.id, scoringModelId: sm.id, scoredByUserId: adminId, modelVersion: 1, formulaSnapshot: {}, rawValues: {}, rawScore: 1, normalizedScore: 1 } })
+    await db().taskLink.create({ data: { taskId: task.id, linkedType: "SOLUTION", linkedId: sol.id } })
+    await db().entityLink.create({ data: { workspaceId: wsId, linkType: "RELATES_TO", fromType: "TASK", fromId: task.id, toType: "OPPORTUNITY", toId: opp.id } })
+    await db().docVersion.create({ data: { docId: docX.id, title: "Dx", content: "v1", createdById: adminId } })
+    await db().artifactRevision.create({ data: { artifactId: art.id, revisionNumber: 1, blobPathname: `artifacts/${wsId}/${art.id}/r1-page.html`, createdById: adminId } })
+    await db().feedbackAttachment.create({ data: { feedbackItemId: fb.id, url: "https://public.example/feedback/old/shot.png", filename: "shot.png", fileType: "image/png", fileSize: 2 } })
+    await db().customFieldValue.create({ data: { fieldId: field.id, objectId: opp.id, value: "now" } })
+    await db().analyticsConnection.create({ data: { workspaceId: wsId, provider: "POSTHOG", projectId: "p1", secretEncrypted: "x", enabled: true } })
+    await db().workspaceSequence.create({ data: { workspaceId: wsId, entityType: "opportunity", nextValue: 5 } })
     await db().solutionScore.create({ data: { solutionId: sol.id, scoringModelId: sm.id, modelVersion: 1, formulaSnapshot: {}, rawValues: {}, rawScore: 1, normalizedScore: 1 } })
     await db().decisionEvidenceRef.create({
       data: { reviewRevisionId: rev.id, evidenceType: "E", authorityProvider: "compass_decisions", authorityRecordId: randomUUID(), authorityLocator: "l", authorityChecksum: "c", subjectType: "TASK", subjectId: task.id, decisionOutcome: "APPROVE", decisionSourceVersion: "1", applicationStatus: "APPLIED", appliedAt: new Date(), applicationReceiptId: randomUUID(), verifiedAt: new Date(), verifierVersion: "1" },
@@ -196,8 +208,7 @@ describe.skipIf(!databaseUrl)("workspace export: wide model coverage", () => {
     const imported = await collect(newWs)
 
     const seeded = [...source.rows].filter(([, r]) => r.length > 0).map(([m]) => m)
-    console.info("UNSEEDED:", exportOrder().filter((m) => !seeded.includes(m)).join(" "))
-    expect(seeded.length).toBeGreaterThanOrEqual(62)
+    expect(exportOrder().filter((m) => !seeded.includes(m)), "every exported model must have a row in this fixture").toEqual([])
     for (const model of seeded) expect(imported.rows.get(model)?.length, `row count for ${model}`).toBe(source.rows.get(model)!.length)
 
     // No source id (row ids or the source workspace id) survives anywhere in imported data.
@@ -257,4 +268,63 @@ describe.skipIf(!databaseUrl)("workspace export: wide model coverage", () => {
     expect(imported.length).toBe(rows.length)
     expect(imported.every((a: { source: string }) => a.source === "UI")).toBe(true)
   }, 120_000)
+
+  /** Every row the fixture-owned workspace still holds, per exported model ("Model:count"), found with the same scoping the exporter uses. */
+  async function leftovers(workspaceId: string): Promise<string[]> {
+    const out: string[] = []
+    const ids = new Map<string, string[]>()
+    for (const model of exportOrder()) {
+      const d = delegateFor(prisma, model)
+      let rows: Record<string, unknown>[]
+      if (model === "Agent") rows = await d.findMany({ where: { ownerType: "WORKSPACE", ownerWorkspaceId: workspaceId } })
+      else if (modelHasWorkspaceId(model)) rows = await d.findMany({ where: { workspaceId } })
+      else {
+        const p = PARENT[model]
+        rows = await d.findMany({ where: { [p.fk]: { in: ids.get(p.model) ?? [] } } })
+      }
+      if (rows.length) out.push(`${model}:${rows.length}`)
+      if (modelHasId(model)) ids.set(model, rows.map((r) => r.id as string))
+    }
+    return out
+  }
+
+  async function importCopy(nonce: string) {
+    const bundle = await exportWorkspaceToBuffer(prisma, wsId, blobs)
+    return importWorkspaceBundle(prisma, bundle, { organizationId: orgId, importerUserId: adminId, blobs, nonce, slug: nonce })
+  }
+
+  it("deleteWorkspaceCascade removes the workspace and every row of every exported model, and leaves other workspaces alone", async () => {
+    const sourceBefore = await leftovers(wsId)
+    const copy = await importCopy("cascade-copy")
+    expect(await db().workspaceMember.count({ where: { workspaceId: copy.workspaceId } })).toBeGreaterThan(0)
+
+    await deleteWorkspaceCascade(prisma, copy.workspaceId, { skipBlobCleanup: true })
+
+    expect(await leftovers(copy.workspaceId)).toEqual([])
+    expect(await db().workspace.count({ where: { id: copy.workspaceId } })).toBe(0)
+    expect(await db().workspaceMember.count({ where: { workspaceId: copy.workspaceId } })).toBe(0)
+    expect(await leftovers(wsId)).toEqual(sourceBefore)
+  }, 180_000)
+
+  it("a delete that fails midway keeps the workspace members, so the owner can retry; the retry then completes", async () => {
+    const copy = await importCopy("cascade-retry")
+    const members = await db().workspaceMember.count({ where: { workspaceId: copy.workspaceId } })
+    expect(members).toBeGreaterThan(0)
+
+    // Fail the final workspace transaction, the way a real mid-delete error would.
+    const failing = new Proxy(prisma, {
+      get(target, key, receiver) {
+        if (key === "$transaction") return async () => { throw new Error("simulated failure at the final step") }
+        return Reflect.get(target, key, receiver)
+      },
+    }) as typeof prisma
+    await expect(deleteWorkspaceCascade(failing, copy.workspaceId, { skipBlobCleanup: true })).rejects.toThrow(/simulated failure/)
+
+    expect(await db().workspace.count({ where: { id: copy.workspaceId } })).toBe(1)
+    expect(await db().workspaceMember.count({ where: { workspaceId: copy.workspaceId } })).toBe(members)
+
+    await deleteWorkspaceCascade(prisma, copy.workspaceId, { skipBlobCleanup: true })
+    expect(await db().workspace.count({ where: { id: copy.workspaceId } })).toBe(0)
+    expect(await leftovers(copy.workspaceId)).toEqual([])
+  }, 180_000)
 })
