@@ -144,6 +144,71 @@ describe("saved view service on the board surfaces", () => {
   })
 })
 
+describe("TASKS_BOARD surface", () => {
+  it("is personal-only: SHARED is rejected on create and update", async () => {
+    const { db } = makeStore([row({ id: "t", surface: "TASKS_BOARD" })])
+    await expect(createSavedView(actor(), "TASKS_BOARD", WS_A, input({ visibility: "SHARED" }), db)).rejects.toMatchObject({ code: "FORBIDDEN" })
+    await expect(updateSavedView(actor(), "TASKS_BOARD", WS_A, "t", input({ visibility: "SHARED" }), undefined, db)).rejects.toMatchObject({ code: "FORBIDDEN" })
+  })
+
+  it("stamps the surface and workspace on create, validating against the Tasks schemas", async () => {
+    const { db, rows } = makeStore()
+    const created = await createSavedView(actor(), "TASKS_BOARD", WS_A, input({ filters: { priority: "HIGH" }, display: { view: "list" } }), db)
+    expect(rows[0]).toMatchObject({ surface: "TASKS_BOARD", workspaceId: WS_A, ownerId: ME })
+    expect(created).toMatchObject({ surface: "TASKS_BOARD", filters: { priority: "HIGH", includeAgentTasks: false }, display: { view: "list" } })
+    await expect(createSavedView(actor(), "TASKS_BOARD", WS_A, input({ name: "Bad", filters: { priority: "SOON" } }), db)).rejects.toMatchObject({ code: "INVALID" })
+    await expect(createSavedView(actor(), "TASKS_BOARD", null, input({ name: "No ws" }), db)).rejects.toMatchObject({ code: "INVALID" })
+  })
+
+  it("isolates by surface, workspace, owner and org (a tasks view is never visible to another surface, workspace or user)", async () => {
+    const { db } = makeStore([
+      row({ id: "task", surface: "TASKS_BOARD" }),
+      row({ id: "opp", surface: "OPPORTUNITIES_BOARD" }),
+      row({ id: "task-ws-b", surface: "TASKS_BOARD", workspaceId: WS_B }),
+      row({ id: "task-other-user", surface: "TASKS_BOARD", ownerId: OTHER }),
+      row({ id: "task-other-org", surface: "TASKS_BOARD", organizationId: "zzz" }),
+    ])
+    const both = actor({ workspaces: [{ id: WS_A, isReadOnly: false, isAdmin: false }, { id: WS_B, isReadOnly: false, isAdmin: false }] })
+    expect((await listSavedViews(both, "TASKS_BOARD", WS_A, db)).map((v) => v.id)).toEqual(["task"])
+    expect((await listSavedViews(both, "TASKS_BOARD", WS_B, db)).map((v) => v.id)).toEqual(["task-ws-b"])
+    expect((await listSavedViews(both, "OPPORTUNITIES_BOARD", WS_A, db)).map((v) => v.id)).toEqual(["opp"])
+    expect(await getSavedView(actor(), "TASKS_BOARD", WS_A, "opp", db)).toBeNull()
+    expect(await getSavedView(actor(), "OPPORTUNITIES_BOARD", WS_A, "task", db)).toBeNull()
+    expect(await getSavedView(actor(), "TASKS_BOARD", WS_A, "task-ws-b", db)).toBeNull()
+    expect(await getSavedView(actor(), "TASKS_BOARD", WS_A, "task-other-user", db)).toBeNull()
+    expect(await getSavedView(actor(), "TASKS_BOARD", WS_A, "task-other-org", db)).toBeNull()
+  })
+
+  it("cannot update or delete another surface's, workspace's or owner's view through the Tasks surface", async () => {
+    const { db, rows } = makeStore([
+      row({ id: "opp", surface: "OPPORTUNITIES_BOARD" }),
+      row({ id: "mine-ws-b", surface: "TASKS_BOARD", workspaceId: WS_B }),
+      row({ id: "theirs", surface: "TASKS_BOARD", ownerId: OTHER }),
+    ])
+    const both = actor({ workspaces: [{ id: WS_A, isReadOnly: false, isAdmin: false }, { id: WS_B, isReadOnly: false, isAdmin: false }] })
+    await expect(deleteSavedView(both, "TASKS_BOARD", WS_A, "opp", db)).rejects.toMatchObject({ code: "NOT_FOUND" })
+    await expect(deleteSavedView(both, "TASKS_BOARD", WS_A, "mine-ws-b", db)).rejects.toMatchObject({ code: "NOT_FOUND" })
+    await expect(deleteSavedView(both, "TASKS_BOARD", WS_A, "theirs", db)).rejects.toMatchObject({ code: "NOT_FOUND" })
+    await expect(updateSavedView(both, "TASKS_BOARD", WS_A, "theirs", input(), undefined, db)).rejects.toMatchObject({ code: "NOT_FOUND" })
+    expect(rows).toHaveLength(3)
+  })
+
+  it("allows the same name on Tasks as on another surface, but not twice on Tasks, and enforces the cap per surface", async () => {
+    const { db } = makeStore([row({ id: "a", surface: "OPPORTUNITIES_BOARD", name: "Mine" })])
+    await expect(createSavedView(actor(), "TASKS_BOARD", WS_A, input({ name: "Mine" }), db)).resolves.toBeDefined()
+    await expect(createSavedView(actor(), "TASKS_BOARD", WS_A, input({ name: "Mine" }), db)).rejects.toMatchObject({ code: "INVALID" })
+    const full = makeStore(Array.from({ length: 50 }, (_, i) => row({ id: `v${i}`, name: `View ${i}`, surface: "TASKS_BOARD" })))
+    await expect(createSavedView(actor(), "TASKS_BOARD", WS_A, input(), full.db)).rejects.toMatchObject({ code: "LIMIT" })
+    await expect(createSavedView(actor(), "OPPORTUNITIES_BOARD", WS_A, input(), full.db)).resolves.toBeDefined()
+  })
+
+  it("lets a read-only workspace member keep personal views (they are data about how someone looks, not workspace data)", async () => {
+    const { db } = makeStore()
+    const readOnly = actor({ workspaces: [{ id: WS_A, isReadOnly: true, isAdmin: false }] })
+    await expect(createSavedView(readOnly, "TASKS_BOARD", WS_A, input(), db)).resolves.toBeDefined()
+  })
+})
+
 describe("legacy NULL-surface rows", () => {
   it("are read as the roadmap surface derived from their workspace, and nowhere else", async () => {
     const { db } = makeStore([
@@ -247,6 +312,18 @@ describe("generalized server actions", () => {
     expect(fresh).toMatchObject({ ok: true, view: { name: "X" } })
 
     expect(await deleteSavedViewAction("acme", "OPPORTUNITIES_BOARD", WS_A, created.view.id)).toEqual({ ok: true })
+  })
+
+  it("creates, updates and deletes a Tasks view, revalidating the Tasks page, and rejects it with a null workspace", async () => {
+    expect(await createSavedViewAction("acme", "TASKS_BOARD", null, input())).toEqual({ ok: false, error: "Invalid view location" })
+    const created = await createSavedViewAction("acme", "TASKS_BOARD", WS_A, input({ filters: { priority: "HIGH" } }))
+    if (!created.ok) throw new Error("create failed")
+    expect(mocks.revalidatePath).toHaveBeenCalledWith("/acme/[workspaceSlug]/tasks", "page")
+    // The same id is not reachable through another surface.
+    expect(await updateSavedViewAction("acme", "OPPORTUNITIES_BOARD", WS_A, created.view.id, input({ name: "X" }))).toMatchObject({ ok: false })
+    expect(await deleteSavedViewAction("acme", "SOLUTIONS_BOARD", WS_A, created.view.id)).toMatchObject({ ok: false })
+    expect(await updateSavedViewAction("acme", "TASKS_BOARD", WS_A, created.view.id, input({ name: "X" }), created.view.updatedAt)).toMatchObject({ ok: true, view: { name: "X" } })
+    expect(await deleteSavedViewAction("acme", "TASKS_BOARD", WS_A, created.view.id)).toEqual({ ok: true })
   })
 
   it("the Roadmap update action passes expectedUpdatedAt through", async () => {

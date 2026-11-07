@@ -10,8 +10,8 @@ import {
 import { SAVED_VIEW_SURFACES, SURFACES, isConsistentScope, type SavedViewSurface } from "@/lib/saved-views/surfaces"
 
 /**
- * Saved-view mutations for EVERY surface (Opportunities board, Solutions board and
- * both roadmaps). They are plain data about how someone looks at a page, not the
+ * Saved-view mutations for EVERY surface (Opportunities board, Solutions board, Tasks board
+ * and both roadmaps). They are plain data about how someone looks at a page, not the
  * page's data, so a read-only workspace member may keep personal views; sharing is
  * gated separately (lib/saved-views/access.ts, and per surface in surfaces.ts).
  * Expected failures come back as `{ ok: false }` so the UI can show them; genuine
@@ -32,6 +32,7 @@ function pathsToRevalidate(orgSlug: string, surface: SavedViewSurface): Array<[s
     case "ROADMAP_WORKSPACE": return [[`/${orgSlug}/roadmap`], [`/${orgSlug}/[workspaceSlug]/roadmap`, "page"]]
     case "OPPORTUNITIES_BOARD": return [[`/${orgSlug}/[workspaceSlug]/discovery`, "page"]]
     case "SOLUTIONS_BOARD": return [[`/${orgSlug}/[workspaceSlug]/solutions`, "page"]]
+    case "TASKS_BOARD": return [[`/${orgSlug}/[workspaceSlug]/tasks`, "page"]]
   }
 }
 

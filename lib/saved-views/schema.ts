@@ -13,6 +13,7 @@ import {
   roadmapViewDisplaySchema, roadmapViewFiltersSchema,
 } from "@/lib/roadmap-views/schema"
 import { columnsByGroupSchema } from "@/lib/saved-views/columns"
+import { TASK_PRIORITIES } from "@/lib/task-meta"
 import type { SavedViewSurface } from "@/lib/saved-views/surfaces"
 
 const uuid = z.string().uuid()
@@ -62,6 +63,36 @@ function boardDisplaySchema(statuses: readonly string[], extraGroupings: readonl
 const opportunitiesDisplaySchema = boardDisplaySchema(OPPORTUNITY_BOARD_STATUSES)
 const solutionsDisplaySchema = boardDisplaySchema(SOLUTION_BOARD_STATUSES, ["squad", "opportunity"])
 
+/**
+ * The Tasks board (`TASKS_BOARD`). `filters` is exactly what the Tasks page keeps in the URL (tasks-filters.tsx): one squad,
+ * one assignee (`user:<id>`, `agent:<id>` or the `__unassigned__` sentinel), one priority, whether agent-created tasks are
+ * shown, and the custom-field tag filter. Ids are NOT checked against the workspace here: a stale id just matches nothing,
+ * and the page's queries re-scope to the workspace, so a view can never widen access.
+ */
+export const tasksFiltersSchema = z.object({
+  squadId: uuid.optional(),
+  assignee: z.string().min(1).max(200).optional(),
+  priority: z.enum(TASK_PRIORITIES).optional(),
+  /** `?agentTasks=include`: tasks the in-app agent created for its own plan, hidden by default. */
+  includeAgentTasks: z.boolean().default(false),
+  customField: z.object({ fieldId: uuid, value: z.string().min(1).max(200) }).optional(),
+})
+
+/**
+ * `view` is the page's Board/List toggle (`?view=list`). `columnLayout` is the board's pinned/docked columns and column
+ * order (lib/board-layout.ts), client state like the other boards' (components/tasks/tasks-column-layout.tsx): absent =
+ * the default layout, and one that fails validation degrades to absent via `.catch`, so it can never take the rest of the
+ * display document down. "Show cancelled" is deliberately not stored: it is a transient toggle on the board, not part of
+ * how a view looks.
+ */
+export const tasksDisplaySchema = z.object({
+  view: z.enum(["board", "list"]).default("board"),
+  columnLayout: boardLayoutSchema.optional().catch(undefined),
+})
+
+export type TasksViewFilters = z.infer<typeof tasksFiltersSchema>
+export type TasksViewDisplay = z.infer<typeof tasksDisplaySchema>
+
 export type BoardViewFilters = z.infer<typeof boardFiltersSchema>
 export type BoardViewDisplay = z.infer<typeof opportunitiesDisplaySchema>
 
@@ -80,6 +111,10 @@ export const SURFACE_SCHEMAS: Readonly<Record<SavedViewSurface, SurfaceSchemas>>
   SOLUTIONS_BOARD: {
     filters: boardFiltersSchema, display: solutionsDisplaySchema,
     defaultFilters: boardFiltersSchema.parse({}), defaultDisplay: solutionsDisplaySchema.parse({}),
+  },
+  TASKS_BOARD: {
+    filters: tasksFiltersSchema, display: tasksDisplaySchema,
+    defaultFilters: tasksFiltersSchema.parse({}), defaultDisplay: tasksDisplaySchema.parse({}),
   },
   ROADMAP_WORKSPACE: {
     filters: roadmapViewFiltersSchema, display: roadmapViewDisplaySchema,

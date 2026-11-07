@@ -1,13 +1,12 @@
 "use client";
 
-import { useState, useTransition, useCallback, useEffect, useId } from "react";
+import { useState, useTransition, useCallback, useEffect, useId, useRef } from "react";
 import {
   DndContext,
   DragOverlay,
   DragStartEvent,
   DragEndEvent,
   DragOverEvent,
-  closestCenter,
   PointerSensor,
   KeyboardSensor,
   useSensor,
@@ -22,7 +21,20 @@ import { moveTaskStatus, updateSortOrder } from "@/app/[orgSlug]/[workspaceSlug]
 import { TaskColumn } from "./task-column";
 import { TaskCard, type TaskCardData } from "./task-card";
 import type { TaskStatus, MemberData } from "@/lib/types";
-import { Board } from "@/components/patterns/board";
+import {
+  Board,
+  BOARD_FADE_END_TRACK_CLASS,
+  BoardDock,
+  type BoardColumnLayoutControls,
+  type BoardDockTab,
+} from "@/components/patterns/board";
+import { DroppableDockTab, dockAwareCollisionDetection } from "@/components/patterns/board-dock-dnd";
+import { useTasksColumnLayout } from "@/components/tasks/tasks-column-layout";
+import { useMediaQuery } from "@/hooks/use-media-query";
+import { cn } from "@/lib/utils";
+import { canMoveColumn, collapseDock, moveColumn, setActiveColumn, togglePinColumn, type BoardLayout, type MoveDirection } from "@/lib/board-layout";
+import { TASK_BOARD_COLUMN_IDS, TASK_BOARD_STATUSES } from "@/lib/tasks/board-layout";
+import { TASK_STATUS_LABELS } from "@/lib/task-meta";
 import { usePanelContext } from "@/components/panels/panel-context";
 import { TASK_CREATED_EVENT } from "@/lib/task-created-event";
 import { useLiveRefresh } from "@/hooks/use-live-refresh";
@@ -31,8 +43,8 @@ import { useFlipAnimation } from "@/hooks/use-flip-animation";
 
 type ColumnMap = Record<TaskStatus, TaskCardData[]>;
 
-const BOARD_STATUSES: TaskStatus[] = ["BACKLOG", "TODO", "IN_PROGRESS", "BLOCKED", "IN_REVIEW", "DONE"];
-const ALL_STATUSES: TaskStatus[] = [...BOARD_STATUSES, "CANCELLED"];
+const BOARD_STATUSES: readonly TaskStatus[] = TASK_BOARD_STATUSES;
+const ALL_STATUSES = TASK_BOARD_COLUMN_IDS as readonly TaskStatus[];
 
 type Props = {
   initialTasks: TaskCardData[];
@@ -96,7 +108,56 @@ export function TaskBoard({ initialTasks, workspaceId, orgSlug, workspaceSlug, m
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   );
 
+  // Column layout (lib/board-layout.ts): the column order, which columns are pinned (docked in ONE dock on the right,
+  // outside the scroller), which pinned column the dock shows and whether it is collapsed to its tab rail. Docking applies
+  // from md up only; below md every column is an ordinary scroller column, in the same order. "Show cancelled" changes the
+  // column set: a hidden CANCELLED is filtered out of what renders (the layout keeps it, pinned or not).
+  const isDesktop = useMediaQuery("(min-width: 768px)", false);
+  const { layout, update: updateLayout } = useTasksColumnLayout(workspaceId);
   const visibleStatuses = showCancelled ? ALL_STATUSES : BOARD_STATUSES;
+  const rendered = new Set<string>(visibleStatuses);
+  const orderedStatuses = layout.columnOrder.filter((id) => rendered.has(id)) as TaskStatus[];
+  const isDocked = (id: string) => isDesktop && layout.pinnedColumnIds.includes(id);
+  const dockedStatuses = orderedStatuses.filter(isDocked);
+  const scrollerStatuses = orderedStatuses.filter((id) => !isDocked(id));
+  // The stored active column may be one that isn't rendered (a hidden CANCELLED): show the first rendered one then.
+  const activeDockId = layout.activePinnedId && dockedStatuses.includes(layout.activePinnedId as TaskStatus) ? (layout.activePinnedId as TaskStatus) : (dockedStatuses[0] ?? null);
+  const dockOpen = activeDockId !== null && !layout.dockCollapsed;
+
+  // Keyboard users keep their place: after a layout change the control that now represents the column gets focus.
+  const pendingFocus = useRef<string | null>(null);
+  useEffect(() => {
+    const target = pendingFocus.current;
+    if (!target) return;
+    pendingFocus.current = null;
+    containerRef.current?.querySelector<HTMLElement>(`[data-column-control="${target}"]`)?.focus();
+  }, [layout, containerRef]);
+  const changeLayout = (transition: (current: BoardLayout) => BoardLayout, focus?: string) => {
+    if (focus) pendingFocus.current = focus;
+    updateLayout(transition);
+  };
+
+  // The active tab of an open dock closes it; any other tab shows its column and opens the dock.
+  function selectDockTab(id: string) {
+    changeLayout((current) => (dockOpen && id === activeDockId ? collapseDock(current) : setActiveColumn(current, id)), `${id}:tab`);
+  }
+
+  function layoutControlsFor(status: TaskStatus): BoardColumnLayoutControls {
+    // A column moves among the columns rendered in its own region (the dock's tabs, or the scroller; everything on narrow screens).
+    const scope = { among: (other: string) => rendered.has(other) && (!isDesktop || isDocked(other) === isDocked(status)) };
+    const docked = isDocked(status);
+    return {
+      columnId: status,
+      label: TASK_STATUS_LABELS[status],
+      pinned: docked,
+      pinnable: isDesktop,
+      onTogglePin: () => changeLayout((l) => togglePinColumn(l, status), `${status}:pin`),
+      canMoveLeft: canMoveColumn(layout, status, "left", scope),
+      canMoveRight: canMoveColumn(layout, status, "right", scope),
+      onMove: (direction: MoveDirection) => changeLayout((l) => moveColumn(l, status, direction, scope), `${status}:menu`),
+      onCollapse: docked ? () => changeLayout(collapseDock, `${status}:tab`) : undefined,
+    };
+  }
 
   function handleDragStart(event: DragStartEvent) {
     const id = event.active.id as string;
@@ -253,6 +314,31 @@ export function TaskBoard({ initialTasks, workspaceId, orgSlug, workspaceSlug, m
 
   const cancelledCount = columns.CANCELLED.length;
 
+  function renderColumn(status: TaskStatus, placement: "scroller" | "pinned") {
+    return (
+      <TaskColumn
+        key={status}
+        status={status}
+        tasks={columns[status]}
+        workspaceId={workspaceId}
+        orgSlug={orgSlug}
+        workspaceSlug={workspaceSlug}
+        revalidatePathStr={revalidatePathStr}
+        members={members}
+        onTaskAdded={handleTaskAdded}
+        onCancel={handleCancel}
+        placement={placement}
+        layoutControls={layoutControlsFor(status)}
+      />
+    );
+  }
+
+  const dockTabs: BoardDockTab[] = dockedStatuses.map((status) => ({
+    id: status,
+    title: TASK_STATUS_LABELS[status],
+    count: columns[status].length,
+  }));
+
   return (
     <div ref={containerRef} className="flex min-h-0 flex-1 flex-col overflow-y-auto md:overflow-hidden">
       {cancelledCount > 0 && (
@@ -268,35 +354,44 @@ export function TaskBoard({ initialTasks, workspaceId, orgSlug, workspaceSlug, m
       <DndContext
         id={dndId}
         sensors={sensors}
-        collisionDetection={closestCenter}
+        collisionDetection={dockAwareCollisionDetection}
         onDragStart={handleDragStart}
         onDragOver={handleDragOver}
         onDragEnd={handleDragEnd}
       >
-        <Board
-          label="Task board"
-          className="block min-h-[24rem] flex-1 scroll-px-3 overflow-x-auto p-0 sm:scroll-px-4 md:overflow-y-hidden"
-        >
-          <div
-            data-slot="task-board-track"
-            className="flex h-full w-max min-w-full items-stretch gap-3 px-3 pt-3 pb-3 sm:px-4 sm:pt-4 md:px-4 md:pt-3"
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col md:flex-row">
+          <Board
+            label="Task board"
+            fadeEnd={dockedStatuses.length > 0}
+            className="block min-h-[24rem] flex-1 scroll-px-3 overflow-x-auto p-0 sm:scroll-px-4 md:overflow-y-hidden"
           >
-            {visibleStatuses.map((status) => (
-              <TaskColumn
-                key={status}
-                status={status}
-                tasks={columns[status]}
-                workspaceId={workspaceId}
-                orgSlug={orgSlug}
-                workspaceSlug={workspaceSlug}
-                revalidatePathStr={revalidatePathStr}
-                members={members}
-                onTaskAdded={handleTaskAdded}
-                onCancel={handleCancel}
-              />
-            ))}
-          </div>
-        </Board>
+            <div
+              data-slot="task-board-track"
+              className={cn(
+                "flex h-full w-max min-w-full items-stretch gap-3 px-3 pt-3 pb-3 sm:px-4 sm:pt-4 md:px-4 md:pt-3",
+                // Room for the scroller's tapered edge, so the last column at full scroll-end is not faded.
+                dockedStatuses.length > 0 && BOARD_FADE_END_TRACK_CLASS,
+              )}
+            >
+              {scrollerStatuses.map((status) => renderColumn(status, "scroller"))}
+            </div>
+          </Board>
+          {/* The dock sits OUTSIDE the horizontal scroller, so it stays put while the rest scroll and a drag from it never needs a mid-drag scroll. */}
+          {dockTabs.length > 0 ? (
+            <BoardDock
+              tabs={dockTabs}
+              activeId={activeDockId}
+              collapsed={!dockOpen}
+              onSelectTab={selectDockTab}
+              panel={dockOpen && activeDockId ? renderColumn(activeDockId, "pinned") : null}
+              wrapTab={(tab, node, { panelOpen }) => (
+                <DroppableDockTab columnId={tab.id} columnDroppableId={`column-${tab.id}`} panelOpen={panelOpen} slot="task-dock-tab-drop">
+                  {node}
+                </DroppableDockTab>
+              )}
+            />
+          ) : null}
+        </div>
 
         <DragOverlay>
           {activeTask ? (

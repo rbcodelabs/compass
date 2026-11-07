@@ -1,6 +1,6 @@
 /**
  * Saved view persistence for every surface (Opportunities board, Solutions board,
- * both roadmaps): resolving who the caller is, and CRUD with the rules from
+ * Tasks board, both roadmaps): resolving who the caller is, and CRUD with the rules from
  * access.ts enforced on every call. Server-only (no session access here: callers
  * pass the user id, so this stays testable and the session lookup lives in exactly
  * one place, the server actions/pages).

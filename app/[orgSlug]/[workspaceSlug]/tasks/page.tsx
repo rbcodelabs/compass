@@ -9,6 +9,16 @@ import { TaskBoard } from "@/components/tasks/task-board";
 import { TaskListView } from "@/components/tasks/task-list-view";
 import { TasksViewToggle } from "@/components/tasks/tasks-view-toggle";
 import { TasksFilters } from "@/components/tasks/tasks-filters";
+import { TasksSavedViewsMenu } from "@/components/tasks/tasks-saved-views";
+import { TasksColumnLayoutProvider } from "@/components/tasks/tasks-column-layout";
+import { listSavedViews, resolveSavedViewActor } from "@/lib/saved-views/service";
+import {
+  needsTasksViewExpansion,
+  resolveTasksState,
+  tasksHref,
+  tasksPageParams,
+  type TasksState,
+} from "@/lib/saved-views/tasks-state";
 import { CreateTaskDialog } from "@/components/tasks/create-task-dialog";
 import type { TaskCardData } from "@/components/tasks/task-card";
 import type { SquadData, MemberData } from "@/lib/types";
@@ -42,6 +52,9 @@ interface TasksPageProps {
     fieldValue?: string;
     /** "include" shows tasks the in-app agent created for its own plan (source AGENT), hidden by default. */
     agentTasks?: string;
+    /** A saved view id; `edited=1` marks the URL as a snapshot that overrides the view. */
+    saved?: string;
+    edited?: string;
   }>;
 }
 
@@ -50,21 +63,36 @@ export default async function TasksPage({ params, searchParams }: TasksPageProps
   if (!session?.user?.id) redirect("/login");
 
   const { orgSlug, workspaceSlug } = await params;
-  const {
-    squad: squadFilter,
-    assignee: assigneeFilter,
-    priority: priorityFilter,
-    view: viewParam,
-    field: fieldParam,
-    fieldValue: fieldValueParam,
-    agentTasks: agentTasksParam,
-  } = await searchParams;
-  const includeAgentTasks = agentTasksParam === "include";
-  const view = viewParam === "list" ? "list" : "board";
+  const search = await searchParams;
   const prisma = getPrisma();
 
   const workspace = await getWorkspace(orgSlug, workspaceSlug, session.user.id);
   if (!workspace) notFound();
+
+  // Saved views (personal). A stale, foreign or invisible ?saved= id falls through to the defaults. The filters and the
+  // Board/List choice are resolved from the URL over the selected view, with the same pure function the header uses.
+  const savedActor = await resolveSavedViewActor(session.user.id, orgSlug);
+  const savedViews = savedActor ? await listSavedViews(savedActor, "TASKS_BOARD", workspace.id) : [];
+  const savedParam = Array.isArray(search.saved) ? search.saved[0] : search.saved;
+  const selectedView = savedParam ? (savedViews.find((v) => v.id === savedParam) ?? null) : null;
+  const selectedState: TasksState | null = selectedView
+    ? { filters: selectedView.filters as TasksState["filters"], display: selectedView.display as TasksState["display"] }
+    : null;
+  const pageState = resolveTasksState(search, selectedState);
+  // A bare ?saved=id becomes the full (edited=1) form, so every control keeps editing single params.
+  if (selectedView && needsTasksViewExpansion(search)) {
+    redirect(tasksHref(`/${orgSlug}/${workspaceSlug}/tasks`, pageState, selectedView.id));
+  }
+  const {
+    squad: squadFilter,
+    assignee: assigneeFilter,
+    priority: priorityFilter,
+    view,
+    field: fieldParam,
+    fieldValue: fieldValueParam,
+    includeAgentTasks,
+  } = tasksPageParams(pageState);
+
 
   // Custom-field tag filter. `null` means "no filter applied" (including a
   // filter carried over from another page with no counterpart here); an empty
@@ -174,12 +202,28 @@ export default async function TasksPage({ params, searchParams }: TasksPageProps
   });
 
   return (
+    // The header (saved-views menu) and the board are siblings; they share the column layout through this provider.
+    <TasksColumnLayoutProvider
+      workspaceId={workspace.id}
+      savedView={selectedView && selectedState
+        ? { id: selectedView.id, version: selectedView.updatedAt, columnLayout: selectedState.display.columnLayout }
+        : null}
+    >
     <WorkspacePage
       title="Tasks"
       contentClassName={view === "board" ? "p-0 sm:p-0 md:p-0" : undefined}
       actions={(
         <>
           <Suspense>
+            <TasksSavedViewsMenu
+              savedViews={{
+                orgSlug,
+                workspaceId: workspace.id,
+                views: savedViews,
+                savedViewId: selectedView?.id ?? null,
+                canSave: !workspace.isReadOnly,
+              }}
+            />
             <TasksViewToggle view={view} />
             <TasksFilters
               squads={squads}
@@ -230,5 +274,6 @@ export default async function TasksPage({ params, searchParams }: TasksPageProps
         </div>
       )}
     </WorkspacePage>
+    </TasksColumnLayoutProvider>
   );
 }
