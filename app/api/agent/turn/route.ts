@@ -86,6 +86,7 @@ import { labelUserTurn } from "@/lib/agent-author-label"
 import * as docFs from "@/lib/doc-fs"
 import { coerceFinalState, reconcileAgentDocs, type DocBaselineEntry, type DocFinalState } from "@/lib/agent-doc-reconciliation"
 import { selectMaterializable } from "@/lib/agent-doc-materialize"
+import { parseContextItems, parseUploadRefs, resolveTurnAttachments } from "@/lib/agent-turn-attachments"
 import { signDocManifest, DOC_MANIFEST_FILE } from "@/lib/agent-doc-manifest"
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -380,6 +381,16 @@ export async function POST(request: NextRequest) {
   // attributed to. Both degrade to the pre-sharing behaviour until migration 080 lands.
   const attribution = await loadConversationAttribution(prisma, { conversationId: conversationIdResolved, workspaceId })
   const authorData = await authorColumn(prisma, userId)
+  // Files and workspace items the user attached to this message. Machine-driven (claimed) turns ignore them.
+  const attached = interviewClaim?.claimed
+    ? null
+    : await resolveTurnAttachments({
+        workspace,
+        userId,
+        contextItems: parseContextItems(body.contextItems),
+        uploadRefs: parseUploadRefs(body.uploads),
+      })
+  if (attached?.labels.length) turnMessage = `${turnMessage}\n\n[Attached: ${attached.labels.join("; ")}]`
   const savedMessage = await prisma.agentMessage.create({
     data: { conversationId: conversationIdResolved, role: "user", content: turnMessage, ...authorData },
     // Not the default RETURNING-everything: naming no columns would ask for author_user_id.
@@ -409,6 +420,7 @@ export async function POST(request: NextRequest) {
           thinkingModelLabels: workspace.thinkingModelLabels,
         },
       }))?.promptBlock
+  const turnContextBlock = [pageContextBlock, attached?.promptBlock].filter(Boolean).join("\n\n") || undefined
   const prompt = assemblePrompt(
     {
       id: workspace.id,
@@ -421,7 +433,7 @@ export async function POST(request: NextRequest) {
     seedContextBlock,
     attribution,
     userId,
-    pageContextBlock
+    turnContextBlock
   )
 
   // Session resume. Handoff/interview turns never use
@@ -432,12 +444,12 @@ export async function POST(request: NextRequest) {
   const sessionPlan = interviewClaim?.claimed
     ? ({ enabled: false } as const)
     : await planAgentSession({ prisma, conversationId: conversationIdResolved, workspaceId, currentMessageId: savedMessage.id, attribution, harness })
-  const sessionFiles: { path: string; content: Buffer }[] = []
+  const sessionFiles: { path: string; content: Buffer }[] = [...(attached?.files ?? [])]
   let turnPrompt = prompt
   let sessionEnv: { sessionId: string; mode: "new" | "resume" } | undefined
   if (sessionPlan.enabled) {
     if (sessionPlan.resume) {
-      turnPrompt = buildResumePrompt(sessionPlan.resume.gap, turnMessage, attribution.shared ? attribution.labelFor(userId) : undefined, pageContextBlock)
+      turnPrompt = buildResumePrompt(sessionPlan.resume.gap, turnMessage, attribution.shared ? attribution.labelFor(userId) : undefined, turnContextBlock)
       sessionFiles.push(
         { path: "session-in.jsonl.gz", content: Buffer.from(sessionPlan.resume.bytes) },
         { path: "fallback-prompt.txt", content: Buffer.from(prompt, "utf8") },
@@ -938,6 +950,7 @@ export async function POST(request: NextRequest) {
     },
   })
   } catch (error) {
+    console.error("[agent-turn] request failed before the run could start", error)
     if (interviewClaim?.claimed) {
       reportPmAgentFailure(conversationIdResolved, interviewClaim.state.claimId!, "prepare", error)
       await finishInterviewProcessing(conversationIdResolved, interviewClaim.state.claimId!).catch(() => {})
