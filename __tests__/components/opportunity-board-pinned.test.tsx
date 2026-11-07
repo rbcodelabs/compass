@@ -14,7 +14,7 @@ vi.mock("@/app/[orgSlug]/[workspaceSlug]/discovery/actions", () => ({
   updateOpportunityStatus: vi.fn(),
   archiveOpportunity: vi.fn(),
   moveOpportunity: vi.fn(),
-  reorderOpportunity: vi.fn(),
+  reorderOpportunity: vi.fn(), reorderOpportunitiesInColumn: vi.fn(),
   createOpportunity: vi.fn(),
 }));
 

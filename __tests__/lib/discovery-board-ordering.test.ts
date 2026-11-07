@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
+  applySubsetOrder,
+  dockTabDropStatus,
   orderCards,
   planDragEnd,
   sortByScoreDesc,
@@ -139,5 +141,44 @@ describe("planDragEnd", () => {
 
   it("persists nothing when an index cannot be resolved", () => {
     expect(planDragEnd({ ...base, newIndex: -1 })).toEqual({ kind: "none" });
+  });
+});
+
+describe("dockTabDropStatus (a drag over a dock tab must not move the card optimistically)", () => {
+  it("names the tab's status for a dock tab, which the board resolves at drag end", () => {
+    expect(dockTabDropStatus({ status: "ACTIVE", dockTab: true })).toBe("ACTIVE");
+  });
+
+  it("is null for an ordinary column or card, which keep the optimistic cross-column move", () => {
+    expect(dockTabDropStatus({ status: "ACTIVE" })).toBeNull();
+    expect(dockTabDropStatus({})).toBeNull();
+    expect(dockTabDropStatus(undefined)).toBeNull();
+    expect(dockTabDropStatus(null)).toBeNull();
+  });
+
+  it("a tab drop plans a move to the tab's status exactly as a drop on the open column would", () => {
+    const status = dockTabDropStatus({ status: "ACTIVE", dockTab: true });
+    expect(planDragEnd({ activeId: "c", overId: "column-ACTIVE", currentStatus: status, dragSourceStatus: "EXPLORING", oldIndex: -1, newIndex: -1, scoreSortActive: false })).toEqual({ kind: "move", status: "ACTIVE" });
+    // dropped back on its own column's tab: nothing to write
+    expect(planDragEnd({ activeId: "c", overId: "column-EXPLORING", currentStatus: "EXPLORING", dragSourceStatus: "EXPLORING", oldIndex: -1, newIndex: -1, scoreSortActive: false })).toEqual({ kind: "none" });
+  });
+});
+
+describe("applySubsetOrder", () => {
+  it("replaces the whole column order when the subset is the whole column", () => {
+    expect(applySubsetOrder(["a", "b", "c"], ["c", "a", "b"])).toEqual(["c", "a", "b"]);
+  });
+
+  it("keeps a filtered subset in the positions it held and leaves the other cards where they were", () => {
+    expect(applySubsetOrder(["a", "x", "b", "y"], ["b", "a"])).toEqual(["b", "x", "a", "y"]);
+  });
+
+  it("is the identity for an unchanged order", () => {
+    expect(applySubsetOrder(["a", "b"], ["a", "b"])).toEqual(["a", "b"]);
+  });
+
+  it("rejects ids that are not in the column, and duplicates", () => {
+    expect(applySubsetOrder(["a", "b"], ["a", "z"])).toBeNull();
+    expect(applySubsetOrder(["a", "b"], ["a", "a"])).toBeNull();
   });
 });

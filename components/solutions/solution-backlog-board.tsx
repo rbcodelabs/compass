@@ -8,6 +8,7 @@ import {
   DndContext,
   DragOverlay,
   type DragEndEvent,
+  type DragCancelEvent,
   type DragOverEvent,
   type DragStartEvent,
   KeyboardSensor,
@@ -379,6 +380,9 @@ function StatusBacklogBoard({
     if (scoreSortActive) return;
     const { active, over } = event;
     if (!over) return;
+    // A dock tab is resolved at drag end: its column may not be rendered, and moving the dragged card into an unrendered
+    // column mid-drag unmounts it while dnd-kit is still tracking it.
+    if (over.data.current?.dockTab) return;
     const activeId = active.id as string;
     const overId = over.id as string;
     const source = findStatus(columns, activeId);
@@ -402,28 +406,57 @@ function StatusBacklogBoard({
 
   function handleDragEnd(event: DragEndEvent) {
     const activeId = event.active.id as string;
-    const current = findStatus(columns, activeId);
+    const found = findStatus(columns, activeId);
+    // Dropped on a dock tab: that tab's status is the destination (the card has not been moved there during the drag).
+    const tabStatus = event.over?.data.current?.dockTab ? ((event.over.data.current.status as SolutionStatus | undefined) ?? null) : null;
+    const current = tabStatus ?? found;
     const plan = scoreSortActive || !event.over ? { kind: "none" as const } : planSolutionDrop(dragSourceStatus, current);
-    const moved = current ? columns[current].find((item) => item.id === activeId) : null;
+    const moved = found ? columns[found].find((item) => item.id === activeId) : null;
+    if (tabStatus && found && tabStatus !== found && !scoreSortActive) {
+      setColumns((prev) => {
+        const item = prev[found].find((i) => i.id === activeId);
+        if (!item) return prev;
+        return { ...prev, [found]: prev[found].filter((i) => i.id !== activeId), [tabStatus]: [...prev[tabStatus], { ...item, status: tabStatus }] };
+      });
+    }
 
     if (plan.kind === "move" && moved) {
       startTransition(async () => {
         const result = await moveSolutionStatus(activeId, plan.status, moved.opportunity.id, workspaceId, revalidatePathStr);
         announceRoadmapSync(result.roadmapSync);
       });
-    } else if (dragSourceStatus && current && dragSourceStatus !== current) {
+    } else if (dragSourceStatus && found && !tabStatus && dragSourceStatus !== found) {
       // Dropped outside any column: snap back to where the drag began.
       setColumns((prev) => {
-        const item = prev[current].find((i) => i.id === activeId);
+        const item = prev[found].find((i) => i.id === activeId);
         if (!item) return prev;
         return {
           ...prev,
-          [current]: prev[current].filter((i) => i.id !== activeId),
+          [found]: prev[found].filter((i) => i.id !== activeId),
           [dragSourceStatus]: [...prev[dragSourceStatus], { ...item, status: dragSourceStatus }],
         };
       });
     }
 
+    setActiveItem(null);
+    setDragSourceStatus(null);
+  }
+
+  /** Escape (or anything else that cancels the drag) puts the card back where the drag began. */
+  function handleDragCancel(event: DragCancelEvent) {
+    const activeId = event.active.id as string;
+    const found = findStatus(columns, activeId);
+    if (dragSourceStatus && found && found !== dragSourceStatus) {
+      setColumns((prev) => {
+        const item = prev[found].find((i) => i.id === activeId);
+        if (!item) return prev;
+        return {
+          ...prev,
+          [found]: prev[found].filter((i) => i.id !== activeId),
+          [dragSourceStatus]: [...prev[dragSourceStatus], { ...item, status: dragSourceStatus }],
+        };
+      });
+    }
     setActiveItem(null);
     setDragSourceStatus(null);
   }
@@ -465,6 +498,7 @@ function StatusBacklogBoard({
         onDragStart={handleDragStart}
         onDragOver={handleDragOver}
         onDragEnd={handleDragEnd}
+        onDragCancel={handleDragCancel}
       >
         <div className="flex min-h-0 min-w-0 flex-1 flex-col md:flex-row">
           <Board

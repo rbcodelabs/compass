@@ -6,7 +6,7 @@ import "@testing-library/jest-dom/vitest"
 const mocks = vi.hoisted(() => ({ replace: vi.fn(), params: new URLSearchParams() }))
 
 vi.mock("@/app/[orgSlug]/[workspaceSlug]/discovery/actions", () => ({
-  moveOpportunity: vi.fn(), reorderOpportunity: vi.fn(),
+  moveOpportunity: vi.fn(), reorderOpportunity: vi.fn(), reorderOpportunitiesInColumn: vi.fn(),
   createOpportunity: vi.fn(),
 }))
 vi.mock("@/app/[orgSlug]/saved-views-actions", () => ({

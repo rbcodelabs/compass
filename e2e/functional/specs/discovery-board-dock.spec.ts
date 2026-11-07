@@ -6,7 +6,9 @@
  *   2. Pin VALIDATING, then ACTIVE: one dock, two tabs (column order), constant width; switch tabs.
  *   3. Drag and drop with the dock: drop an Exploring card on a dock TAB (it registers under the column's own
  *      `column-<status>` droppable id), drag a card out of the docked panel into a scroller column, and the IN-COLUMN
- *      ORDERING that opportunity cards also have still works, both in a scroller column and inside the docked panel.
+ *      ORDERING that opportunity cards also have still works, both in a scroller column and inside the docked panel, and the
+ *      new order survives a reload (the column is renumbered, so gapped and tied stored orders cannot undo it). Hovering a
+ *      card over a tab whose column is not open must not move the card until it is dropped.
  *   4. The Columns popover keeps hide/show but reorders the SAME layout the column menu moves.
  *   5. Save a view: the layout is stored as `display.columnLayout` and restores after a reload with this browser's own copy
  *      cleared; changing the layout marks the view Modified; Reset restores the saved layout.
@@ -77,6 +79,22 @@ const orderIn = async (root: Locator, titles: string[]) => {
   return titles.sort((a, b) => all.findIndex((t) => t.includes(a)) - all.findIndex((t) => t.includes(b)));
 };
 
+/**
+ * Collects uncaught page errors and prints each one's full stack to the test output (an error such as React's
+ * "Maximum update depth exceeded" is otherwise only a line in the browser console). The journey asserts none occurred.
+ */
+function capturePageErrors(page: Page): string[] {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => {
+    errors.push(error.message);
+    console.log(`[pageerror] ${error.message}\n${error.stack ?? "(no stack)"}`);
+  });
+  page.on("console", (message) => {
+    if (message.type() === "error" && /Maximum update depth/.test(message.text())) console.log(`[console.error] ${message.text()}`);
+  });
+  return errors;
+}
+
 async function shot(page: Page, name: string, { resize = true } = {}) {
   const dir = process.env.QA_SHOTS_DIR;
   if (!dir) return;
@@ -91,6 +109,7 @@ async function shot(page: Page, name: string, { resize = true } = {}) {
 test.describe("Opportunity board dock", () => {
   test("pin, tabs, drag and drop and in-column ordering, Columns popover, saved view, legacy view, field board and narrow screens", async ({ page, base }) => {
     test.setTimeout(480_000);
+    const pageErrors = capturePageErrors(page);
     const pool = requireLocalE2eDatabase();
     const tag = randomUUID().slice(0, 8);
     const titles = {
@@ -100,6 +119,10 @@ test.describe("Opportunity board dock", () => {
       validating: `E2E Dock Validating ${tag}`,
       activeOne: `E2E Dock Active One ${tag}`,
       activeTwo: `E2E Dock Active Two ${tag}`,
+      prioritizedOne: `E2E Dock Prioritized One ${tag}`,
+      prioritizedTwo: `E2E Dock Prioritized Two ${tag}`,
+      validatingOne: `E2E Dock Validating One ${tag}`,
+      validatingTwo: `E2E Dock Validating Two ${tag}`,
     };
     const viewName = `E2E Opportunities Dock ${tag}`;
     const legacyName = `E2E Legacy Opp Order ${tag}`;
@@ -110,6 +133,26 @@ test.describe("Opportunity board dock", () => {
     const rowOf = async (title: string) =>
       (await pool.query<{ status: string; sort_order: number }>(`SELECT status, sort_order FROM "${S}".opportunities WHERE title = $1`, [title])).rows[0];
     const statusOf = async (title: string) => (await rowOf(title))?.status;
+    /**
+     * Drags `second` (listed second) onto `first` inside `root`, then checks the order three ways: on screen at once, in the
+     * database (the column is renumbered, so the two are distinct and in the new order), and after a reload. `dockTab` re-opens
+     * the docked panel (a reload restores the dock but the active tab is whatever was last open).
+     */
+    const reorderAndReload = async (root: Locator, first: string, second: string, dockTab?: string) => {
+      expect(await orderIn(root, [first, second]), "starts in seeded order").toEqual([first, second]);
+      const secondCard = cardOf(root, second);
+      await dragTo(page, secondCard.getByLabel("Drag to reorder"), cardOf(root, first), { alignCard: secondCard });
+      await expect.poll(async () => (await rowOf(second)).sort_order < (await rowOf(first)).sort_order, { timeout: 15_000 }).toBe(true);
+      expect((await rowOf(second)).status, "a reorder never changes the status").toBe((await rowOf(first)).status);
+      await page.reload();
+      await page.waitForLoadState("networkidle");
+      if (dockTab) {
+        await expect(tab(page, dockTab)).toBeVisible({ timeout: 30_000 });
+        if ((await tab(page, dockTab).getAttribute("aria-selected")) !== "true") await tab(page, dockTab).click();
+      }
+      await expect(cardOf(root, second)).toBeVisible({ timeout: 30_000 });
+      expect(await orderIn(root, [first, second]), "the new order is what the server persisted").toEqual([second, first]);
+    };
 
     try {
       const { rows } = await pool.query<{ id: string; organization_id: string }>(
@@ -118,13 +161,20 @@ test.describe("Opportunity board dock", () => {
       );
       workspaceId = rows[0].id;
       organizationId = rows[0].organization_id;
+      // Two stored-order shapes, so a reorder is proven against both: DENSE non-negative (0, 1) in the Exploring scroller
+      // column and the Validating docked panel, and GAPPED negative (-5000, -4999) in the Prioritized scroller column and
+      // the Active docked panel (the old single-index write could not hold that shape).
       const seed: [string, string, number][] = [
-        [titles.exploringOne, "EXPLORING", -5000],
-        [titles.exploringTwo, "EXPLORING", -4999],
-        [titles.toTab, "EXPLORING", -4998],
-        [titles.validating, "VALIDATING", -5000],
+        [titles.exploringOne, "EXPLORING", 0],
+        [titles.exploringTwo, "EXPLORING", 1],
+        [titles.toTab, "EXPLORING", 2],
+        [titles.validating, "VALIDATING", -6000],
+        [titles.validatingOne, "VALIDATING", 0],
+        [titles.validatingTwo, "VALIDATING", 1],
         [titles.activeOne, "ACTIVE", -5000],
         [titles.activeTwo, "ACTIVE", -4999],
+        [titles.prioritizedOne, "PRIORITIZED", -3000],
+        [titles.prioritizedTwo, "PRIORITIZED", -2999],
       ];
       for (const [title, status, sortOrder] of seed) {
         await pool.query(
@@ -178,6 +228,31 @@ test.describe("Opportunity board dock", () => {
       await shot(page, "desktop-3-two-pinned-tab-switch");
 
       // ── 3. Drag and drop with the dock ───────────────────────────────────────
+      // 3-pre. Hovering a card over a tab whose column is NOT the open panel must not move it into that (unrendered) column:
+      // the destination is resolved when the card is dropped. (Moving it mid-drag unmounts the dragged card; that is what
+      // threw "Maximum update depth".) On the way to the tab the pointer crosses the open panel, so the card may be shown in
+      // THAT column meanwhile; what matters is that the card is still mounted (the drag overlay's copy plus the card itself: 2, where an
+      // unmounted dragged card would leave 1), the Active count is unchanged, and
+      // cancelling the drag with Escape puts it back where it started and writes nothing.
+      {
+        const activeCount = await tabCount(page, "Active");
+        const handle = cardOf(column(page, "EXPLORING"), titles.exploringOne).getByLabel("Drag to reorder");
+        const box = (await handle.boundingBox())!;
+        await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+        await page.mouse.down();
+        await page.mouse.move(box.x + 15, box.y + 15, { steps: 10 });
+        const tabBox = (await tab(page, "Active").boundingBox())!;
+        await page.mouse.move(tabBox.x + tabBox.width / 2, tabBox.y + tabBox.height / 2, { steps: 30 });
+        await page.waitForTimeout(600);
+        await expect(page.locator("[data-flip-id]", { hasText: titles.exploringOne }), "the dragged card stays mounted (card + drag overlay)").toHaveCount(2);
+        expect(await tabCount(page, "Active"), "hovering a tab moves nothing into its column").toBe(activeCount);
+        await page.keyboard.press("Escape");
+        await page.mouse.up();
+        await expect(cardOf(column(page, "EXPLORING"), titles.exploringOne), "a cancelled drag puts the card back").toHaveCount(1);
+        expect(await tabCount(page, "Active")).toBe(activeCount);
+        expect(await statusOf(titles.exploringOne), "a cancelled drag writes nothing").toBe("EXPLORING");
+      }
+
       // 3a. Active panel is Validating; drop an Exploring card on the ACTIVE tab (a drop target registered as column-ACTIVE).
       const activeBefore = await tabCount(page, "Active");
       await dragTo(page, cardOf(column(page, "EXPLORING"), titles.toTab).getByLabel("Drag to reorder"), tab(page, "Active"));
@@ -200,28 +275,21 @@ test.describe("Opportunity board dock", () => {
       await page.waitForLoadState("networkidle");
       await expect(tab(page, "Validating")).toBeVisible({ timeout: 30_000 });
 
-      // 3c. In-column ORDERING still works in a scroller column: Exploring Two onto Exploring One.
-      const exploring = column(page, "EXPLORING");
-      expect(await orderIn(exploring, [titles.exploringOne, titles.exploringTwo])).toEqual([titles.exploringOne, titles.exploringTwo]);
-      const twoCard = cardOf(exploring, titles.exploringTwo);
-      await dragTo(page, twoCard.getByLabel("Drag to reorder"), cardOf(exploring, titles.exploringOne), { alignCard: twoCard });
-      await expect.poll(async () => (await rowOf(titles.exploringTwo)).sort_order, { timeout: 15_000 }).not.toBe(-4999);
-      expect((await rowOf(titles.exploringTwo)).status, "a reorder never changes the status").toBe("EXPLORING");
-      await page.reload();
-      await page.waitForLoadState("networkidle");
-      await expect(tab(page, "Active")).toBeVisible({ timeout: 30_000 });
+      // 3c. In-column ORDERING still works in a scroller column, and the new order survives a reload.
+      // Dense stored order (0, 1): Exploring Two onto Exploring One.
+      await reorderAndReload(column(page, "EXPLORING"), titles.exploringOne, titles.exploringTwo);
+      // Gapped stored order (-3000, -2999): Prioritized Two onto Prioritized One.
+      await reorderAndReload(column(page, "PRIORITIZED"), titles.prioritizedOne, titles.prioritizedTwo);
 
-      // 3d. ...and inside the docked panel: the open panel is a sortable drop target too (Active Two onto Active One).
+      // 3d. ...and inside the docked panel (the open panel is a sortable drop target too), for both stored-order shapes.
       await tab(page, "Active").click();
       await expect(panel(page).getByText(titles.activeOne)).toBeVisible();
-      expect(await orderIn(panel(page), [titles.activeOne, titles.activeTwo])).toEqual([titles.activeOne, titles.activeTwo]);
-      const activeTwoCard = cardOf(panel(page), titles.activeTwo);
-      await dragTo(page, activeTwoCard.getByLabel("Drag to reorder"), cardOf(panel(page), titles.activeOne), { alignCard: activeTwoCard });
-      await expect.poll(async () => (await rowOf(titles.activeTwo)).sort_order, { timeout: 15_000 }).not.toBe(-4999);
-      expect((await rowOf(titles.activeTwo)).status).toBe("ACTIVE");
-      await page.reload();
-      await page.waitForLoadState("networkidle");
-      await expect(tab(page, "Active")).toHaveAttribute("aria-selected", "true", { timeout: 30_000 });
+      await reorderAndReload(panel(page), titles.activeOne, titles.activeTwo, "Active");
+      await tab(page, "Validating").click();
+      await expect(panel(page).getByText(titles.validatingOne)).toBeVisible();
+      await reorderAndReload(panel(page), titles.validatingOne, titles.validatingTwo, "Validating");
+      await tab(page, "Active").click();
+      await expect(tab(page, "Active")).toHaveAttribute("aria-selected", "true");
 
       // ── 4. Collapse, and the Columns popover shares the layout's order ───────
       await panel(page).getByRole("button", { name: "Collapse Active" }).click();
@@ -367,6 +435,7 @@ test.describe("Opportunity board dock", () => {
       await expect(scroller(page).locator("[data-status=EXPLORING]")).toBeAttached();
       await expect(page.getByRole("button", { name: /^Pin .* to the right$/ })).toHaveCount(0);
       await shot(page, "narrow-390x844-no-dock-fallback");
+      expect(pageErrors, "no uncaught page errors during the journey").toEqual([]);
     } finally {
       await pool.query(`DELETE FROM "${S}".roadmap_views WHERE name = ANY($1)`, [[viewName, legacyName]]);
       await pool.query(`DELETE FROM "${S}".opportunities WHERE title = ANY($1)`, [Object.values(titles)]);
