@@ -41,6 +41,17 @@ authorization. This is deliberate: a shared token would let one person's agent
 act as another person inside the third-party product, which has no way to tell
 Compass users apart.
 
+### Which agents can use your connections
+
+Your connected accounts follow the person, so they go only where that person is the one acting:
+
+- **Compass Agent** (the built-in assistant) uses them.
+- **A personal agent you run in chat** uses them. Only you can run it, so it is you acting through your own agent.
+- **A shared agent never does**, whoever runs it, because it belongs to the workspace and not to one person.
+- **Runs started by a task assignment or an @mention never do**, even for a personal agent, because they can start without you at the keyboard.
+
+Compass re-checks this against the live chat run on every connector request, not only when the turn starts: the run must still be live, the agent still active with access to the workspace, and you still a member of it. The Tools menu under the message box shows whether the selected agent will carry your connections.
+
 ## What the agent can see
 
 Compass holds the provider's token server-side and never passes it to the agent.

@@ -35,7 +35,9 @@ import { ToolsMenu, connectorsEnabledFor } from "@/components/agent/tools-menu"
 import { ModelPicker, modelLabelFor, useModelPick } from "@/components/agent/model-picker"
 import { AgentChip } from "@/components/agent/composer/agent-chip"
 import { ComposerCard } from "@/components/agent/composer/composer-card"
+import { AGENT_MAX_GOOGLE_RESOURCES_PER_TURN, GOOGLE_DRIVE_CONNECTOR_SLUG, googleResourcesFromPaste, type GoogleResourceRef } from "@/lib/agent-google-resources"
 import { Markdown } from "@/components/agent/markdown"
+import { RecentMentions } from "@/components/agent/recent-mentions"
 import { AttachMenu, uploadAgentFiles, type AttachedItem, type AttachedUpload } from "@/components/agent/composer/attach-menu"
 import { SeedContextChip } from "@/components/agent/seed-context-chip"
 import { AgentParticipantsPanel, type Roster } from "@/components/agent/agent-participants"
@@ -187,6 +189,7 @@ export function AgentChat({
   const [attachedItems, setAttachedItems] = useState<AttachedItem[]>([])
   const [attachedUploads, setAttachedUploads] = useState<AttachedUpload[]>([])
   const [attachError, setAttachError] = useState<string | null>(null)
+  const [googleResources, setGoogleResources] = useState<GoogleResourceRef[]>([])
   const [dragging, setDragging] = useState(false)
   const dragDepth = useRef(0)
   const [orgSlug, workspaceSlug] = basePath.split("/").filter(Boolean)
@@ -214,6 +217,17 @@ export function AgentChat({
   const agentChoices = useAgentChoices({ workspaceId })
   const [agentPick, setAgentPick] = useState(initialAgentId ?? "")
   const agentSelection = agentPick === "builtin" || agentChoices.agents.some((agent) => agent.id === agentPick) ? agentPick : ""
+  const driveConnected = agentChoices.connectors.some((c) => c.slug === GOOGLE_DRIVE_CONNECTOR_SLUG)
+  // A paste that is nothing but Drive links becomes chips instead of text; anything else pastes as usual.
+  const pasteGoogleLinks = useCallback((text: string): boolean => {
+    const refs = googleResourcesFromPaste(text)
+    if (!refs.length) return false
+    setGoogleResources((list) => {
+      const known = new Set(list.map((r) => r.fileId))
+      return [...list, ...refs.filter((r) => !known.has(r.fileId))].slice(0, AGENT_MAX_GOOGLE_RESOURCES_PER_TURN)
+    })
+    return true
+  }, [])
   const defaultAgentName = agentChoices.agents.find((agent) => agent.id === agentChoices.defaultAgentId)?.name ?? "Compass Agent"
   const modelPick = useModelPick({ userId, workspaceId, choices: agentChoices, agentSelection })
   const turn = useAgentTurn({
@@ -358,6 +372,8 @@ export function AgentChat({
     setDocChip(null)
     const contextItemsForThisTurn = attachedItems.map(({ type, id }) => ({ type, id }))
     const uploadsForThisTurn = attachedUploads.map((u) => u.ref)
+    const googleLinksForThisTurn = googleResources.map((r) => r.url)
+    setGoogleResources([])
     setAttachedItems([])
     setAttachedUploads([])
     setAttachError(null)
@@ -366,6 +382,7 @@ export function AgentChat({
       message: text,
       contextItems: contextItemsForThisTurn,
       uploads: uploadsForThisTurn,
+      googleLinks: googleLinksForThisTurn,
       conversationId: activeConversationId,
       seedContext: seedContextForThisTurn,
       agentId: agentSelection || undefined,
@@ -377,7 +394,7 @@ export function AgentChat({
       retry,
       continueTurn: !handoff && Boolean(processing?.canContinue),
     })
-  }, [input, activeConversationId, isRail, processing?.canContinue, pendingSeedEntity, attachedItems, attachedUploads, sending, startTurn, agentSelection, modelPick.model])
+  }, [input, activeConversationId, isRail, processing?.canContinue, pendingSeedEntity, attachedItems, attachedUploads, googleResources, sending, startTurn, agentSelection, modelPick.model])
 
   // The agent's plan is its Compass tasks for this conversation (TaskCreate/TaskUpdate), read from the server so it
   // survives a reload and reaches participants. Refetched when a task tool call finishes (planVersion) and when a turn ends.
@@ -810,6 +827,13 @@ export function AgentChat({
               </button>
             </div>
           )}
+          <RecentMentions
+            messages={messages}
+            onInsert={(text) => {
+              setInput((prev) => (prev.trim() ? prev.trimEnd() + " " + text : text))
+              composerRef.current?.focus()
+            }}
+          />
           <ComposerCard
             textareaRef={composerRef}
             value={input}
@@ -825,6 +849,7 @@ export function AgentChat({
             stopDisabled={!canCancelRun}
             stopTitle={canCancelRun ? "Stop this run (Esc)" : "Only the person who asked, or the owner, can stop this run"}
             readOnly={Boolean(accessLost)}
+            onPasteText={accessLost ? undefined : pasteGoogleLinks}
             runStartedByMe={!runStartedByOther}
             status={(runStatusLine || queued) ? (
               <>
@@ -840,7 +865,7 @@ export function AgentChat({
               </>
             ) : null}
             contextChips={
-              pendingSeedEntity || docChip || attachedItems.length || attachedUploads.length || attachError ? (
+              pendingSeedEntity || docChip || attachedItems.length || attachedUploads.length || googleResources.length || attachError ? (
                 <>
                   {attachedItems.map((i) => (
                     <AttachedChip key={`${i.type}:${i.id}`} label={i.title} hint={i.typeLabel} onRemove={() => setAttachedItems((l) => l.filter((x) => x !== i))} />
@@ -848,6 +873,12 @@ export function AgentChat({
                   {attachedUploads.map((u) => (
                     <AttachedChip key={u.ref} label={u.name} hint="File" file onRemove={() => setAttachedUploads((l) => l.filter((x) => x !== u))} />
                   ))}
+                  {googleResources.map((r) => (
+                    <AttachedChip key={r.fileId} label={r.label} hint={driveConnected ? "Google Drive" : "Google Drive (not connected)"} file onRemove={() => setGoogleResources((l) => l.filter((x) => x !== r))} />
+                  ))}
+                  {googleResources.length > 0 && !driveConnected && agentChoices.loaded && (
+                    <span className="text-xs text-muted-foreground">Connect Google Drive in <Link href="/settings/agents" className="underline underline-offset-2">Settings → Agents</Link> so the agent can read this.</span>
+                  )}
                   {attachError && <span role="alert" className="text-xs text-status-danger">{attachError}</span>}
                   {pendingSeedEntity && (
                     <SeedContextChip label={pendingSeedEntity.label} summary={pendingSeedEntity.summary} sourceUrl={pendingSeedEntity.sourceUrl} onDismiss={() => setPendingSeedEntity(undefined)} />
@@ -874,7 +905,7 @@ export function AgentChat({
                 {agentChoices.agents.length > 0 && (
                   <AgentChip choices={agentChoices} value={agentSelection} defaultAgentName={defaultAgentName} disabled={composerDisabled} onChange={setAgentPick} />
                 )}
-                <ToolsMenu connectors={agentChoices.connectors} enabled={connectorsEnabledFor(agentSelection, agentChoices.defaultAgentId)} loaded={agentChoices.loaded} />
+                <ToolsMenu connectors={agentChoices.connectors} enabled={connectorsEnabledFor(agentSelection, agentChoices.defaultAgentId, agentChoices.agents)} loaded={agentChoices.loaded} />
                 {modelPick.visible && (
                   <ModelPicker choices={agentChoices} value={modelPick.model} defaultLabel={modelPick.defaultLabel} disabled={composerDisabled} onChange={modelPick.select} />
                 )}
