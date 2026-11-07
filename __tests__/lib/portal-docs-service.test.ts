@@ -17,6 +17,7 @@ interface DocRow {
   title: string
   content: string | null
   storageProvider: string | null
+  docType?: string
   publishedAt: Date | null
   publishedById: string | null
   updatedAt: Date
@@ -190,5 +191,15 @@ describe("before migration 113 is applied", () => {
     expect(await getPublishedDoc(broken(missing), WS, id(1))).toBeNull()
     await expect(listPublishedDocs(broken(new Error("connection lost")), WS)).rejects.toThrow("connection lost")
     await expect(getPublishedDoc(broken(new Error("connection lost")), WS, id(1))).rejects.toThrow("connection lost")
+  })
+
+  it("never publishes or serves a canvas doc (its content is canvas JSON, not markdown)", async () => {
+    const rows = [row(1, { docType: "CANVAS" }), row(2, { docType: "CANVAS", publishedAt: d(5) })]
+    const prisma = fake(rows, [{ workspaceId: WS, userId: "user-1" }])
+    await expect(setDocPublished(prisma, { userId: "user-1", docId: id(1), published: true })).rejects.toMatchObject({ code: "unsupported" })
+    expect(rows[0].publishedAt).toBeNull()
+    // Even a row that somehow carries publishedAt is excluded from every public read.
+    expect(await getPublishedDoc(prisma, WS, id(2))).toBeNull()
+    expect(await listPublishedDocs(prisma, WS)).toEqual([])
   })
 })

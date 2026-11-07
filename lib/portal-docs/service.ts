@@ -15,9 +15,15 @@ export type { PublicDoc, PublicDocSummary } from "./types"
  * public-path concern in v1.
  */
 export function publishedDocWhere(workspaceId: string) {
+  return { ...publishableDocWhere(workspaceId), publishedAt: { not: null } }
+}
+
+/** Docs that CAN be published (published or not): the admin picker lists only these. Not a public read. */
+export function publishableDocWhere(workspaceId: string) {
   return {
     workspaceId,
-    publishedAt: { not: null },
+    // A canvas doc's content is canvas JSON, not markdown: never publishable.
+    docType: { not: "CANVAS" },
     OR: [{ storageProvider: null }, { storageProvider: { not: "GEODE" } }],
   }
 }
@@ -105,6 +111,26 @@ export async function getPublishedDoc(prisma: AppPrismaClient, workspaceId: stri
   return { ...toSummary(row), body: row.content ?? "" }
 }
 
+/**
+ * Team-side read for the editor's Publish control: is this doc published, and can it be? Returns published
+ * state only to callers that already passed workspace access (the docs page). Tolerates an unapplied migration
+ * 113 (nothing is published then). `publishable` mirrors the rules setDocPublished and the public predicate enforce.
+ */
+export async function getDocPublishState(
+  prisma: AppPrismaClient,
+  workspaceId: string,
+  docId: string,
+): Promise<{ publishedAt: string | null; publishable: boolean }> {
+  try {
+    const row = await prisma.doc.findFirst({ where: { id: docId, workspaceId }, select: { publishedAt: true, storageProvider: true, docType: true } })
+    if (!row) return { publishedAt: null, publishable: false }
+    return { publishedAt: row.publishedAt?.toISOString() ?? null, publishable: row.storageProvider !== "GEODE" && row.docType !== "CANVAS" }
+  } catch (error) {
+    if (isMissingColumnError(error)) return { publishedAt: null, publishable: false }
+    throw error
+  }
+}
+
 export interface SetDocPublishedResult {
   docId: string
   workspaceId: string
@@ -129,7 +155,7 @@ export async function setDocPublished(
   if (!uuidLike.safeParse(input.docId).success) throw notFound
   const doc = await prisma.doc.findUnique({
     where: { id: input.docId },
-    select: { id: true, workspaceId: true, storageProvider: true, publishedAt: true },
+    select: { id: true, workspaceId: true, storageProvider: true, docType: true, publishedAt: true },
   })
   if (!doc) throw notFound
   const member = await prisma.workspace.findFirst({
@@ -148,6 +174,7 @@ export async function setDocPublished(
     return { docId: doc.id, workspaceId: doc.workspaceId, published: false, publishedAt: null }
   }
 
+  if (doc.docType === "CANVAS") throw new DocPublishError("Canvas docs cannot be published to the portal.", "unsupported")
   if (doc.storageProvider === "GEODE") throw new DocPublishError("This doc's content is stored externally and cannot be published yet.", "unsupported")
   if (doc.publishedAt !== null) {
     return { docId: doc.id, workspaceId: doc.workspaceId, published: true, publishedAt: doc.publishedAt.toISOString() }

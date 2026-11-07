@@ -93,6 +93,8 @@ interface DocEditorProps {
   decisionAction?: React.ReactNode;
   /** Follow toggle, rendered beside the decision action. */
   followAction?: React.ReactNode;
+  /** Publish-to-portal control, rendered under the title row. */
+  publishAction?: React.ReactNode;
   /** What this doc is (Spec / Discovery Plan / unscoped), for SPEC docs. Rendered above the properties; read-only. */
   specHeader?: React.ReactNode;
   /**
@@ -171,7 +173,7 @@ function captureAnchor(editor: Editor): PendingAnchor | null {
   };
 }
 
-export function DocEditor({ doc, versions, comments: initialComments, revalidatePathStr, orgSlug, workspaceSlug, workspaceId, linkedTasks, decisionAction, followAction, specHeader, specScopes, readOnly = false, recordCreators, patchRecordField, initialCommentsPin, initialHistoryPin, mentionOptions = NO_MENTION_OPTIONS, confirmedAgentIds: initialConfirmedAgentIds = [], taskCards: initialTaskCards = {}, lastWriter }: DocEditorProps) {
+export function DocEditor({ doc, versions, comments: initialComments, revalidatePathStr, orgSlug, workspaceSlug, workspaceId, linkedTasks, decisionAction, followAction, publishAction, specHeader, specScopes, readOnly = false, recordCreators, patchRecordField, initialCommentsPin, initialHistoryPin, mentionOptions = NO_MENTION_OPTIONS, confirmedAgentIds: initialConfirmedAgentIds = [], taskCards: initialTaskCards = {}, lastWriter }: DocEditorProps) {
   const [title, setTitle] = useState(doc.title);
   const [icon, setIcon] = useState(doc.icon ?? "");
   const [showIconInput, setShowIconInput] = useState(false);
@@ -742,6 +744,8 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
           className="flex-1 min-w-0 text-2xl font-bold text-text-primary bg-transparent border-none outline-none placeholder:text-text-disabled"
         />
       </div>
+
+      {publishAction}
 
       {/* Toolbar */}
       <div className="sticky top-0 z-10 border-b border-border-default bg-surface-panel/90 backdrop-blur-sm">
