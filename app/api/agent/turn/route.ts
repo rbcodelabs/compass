@@ -391,7 +391,7 @@ export async function POST(request: NextRequest) {
         contextItems: parseContextItems(body.contextItems),
         uploadRefs: parseUploadRefs(body.uploads),
       })
-  // Google Drive links the user pasted as chips (ADR-0027 phase 1b). Nothing is fetched here: the agent reads them through the
+  // Google Drive links the user pasted as chips. Nothing is fetched here: the agent reads them through the
   // user's own Drive connection, and is told plainly when there is none. A shared agent never borrows its invoker's connectors; a personal agent run by its owner does.
   const googleRefs = interviewClaim?.claimed ? [] : parseGoogleResourceUrls(body.googleLinks)
   const driveConnected = googleRefs.length > 0 && (!runAgent || agentMayUseOwnerConnectors(runAgent, userId))

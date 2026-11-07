@@ -1,5 +1,5 @@
 /**
- * Google Drive / Docs links attached to an agent chat message (ADR-0027, phase 1b).
+ * Google Drive / Docs links attached to an agent chat message.
  *
  * A pasted Drive URL becomes a chip in the composer. Nothing is copied into Compass: the message carries the file
  * ID and kind, and the agent reads the file with the Drive MCP tools (ADR-0018) as the user, so the user's own

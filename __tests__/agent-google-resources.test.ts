@@ -6,7 +6,7 @@ import {
 const DOC = "https://docs.google.com/document/d/1AbCdEfGhIjKlMnOp/edit?usp=sharing"
 const SHEET = "https://docs.google.com/spreadsheets/d/1SheetIdSheetId123/edit#gid=0"
 
-describe("agent google resources (ADR-0027 phase 1b)", () => {
+describe("agent google resources", () => {
   it("turns a pasted Drive link into a canonical, ID-only ref", () => {
     const [ref] = googleResourcesFromPaste(DOC)
     expect(ref).toMatchObject({ fileId: "1AbCdEfGhIjKlMnOp", kind: "document", label: "Google Doc" })
