@@ -5,7 +5,7 @@ import { EmptyHome, PortalHomeBoard } from "@/components/portal-home/board"
 import { PortalHomeEditor } from "@/components/portal-home/editor"
 import { buildDefaultWidgets } from "@/lib/portal-home/defaults"
 import { resolveCustomerAvailability, resolveHomeForMember, resolveHomeForTeam } from "@/lib/portal-home/resolve"
-import { loadHomeLayout, loadPublishedWidgets } from "@/lib/portal-home/service"
+import { loadHomeLayout, loadPublishedHome } from "@/lib/portal-home/service"
 
 export const metadata = {
   title: "Home",
@@ -50,7 +50,7 @@ export default async function TeamHomePage({ params }: TeamHomePageProps) {
   }
   const defaults = buildDefaultWidgets({ workspaceName: workspace.name, orgSlug, workspaceSlug, roadmapPublic, feedbackEnabled })
 
-  const published = await loadPublishedWidgets(prisma, workspace.id)
+  const { widgets: published, template } = await loadPublishedHome(prisma, workspace.id)
   const baseline = published ?? defaults
   const home = await resolveHomeForTeam(resolveContext, baseline)
   const board =
@@ -78,6 +78,8 @@ export default async function TeamHomePage({ params }: TeamHomePageProps) {
         workspaceSlug={workspaceSlug}
         initialDraft={draft}
         initialBaseline={baseline}
+        initialTemplate={layout.hasRow ? layout.draftTemplate : template}
+        initialBaselineTemplate={template}
         publishedAt={layout.publishedAt?.toISOString() ?? null}
         initialResolved={initialResolved}
         initialCustomerAvailability={initialCustomerAvailability}

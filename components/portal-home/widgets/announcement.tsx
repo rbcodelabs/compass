@@ -16,12 +16,12 @@ export function AnnouncementRenderer({ config }: RendererProps<AnnouncementConfi
       {config.primaryCta || config.secondaryCta ? (
         <div className="mt-1 flex flex-wrap gap-2">
           {config.primaryCta ? (
-            <PortalLink href={config.primaryCta.url} external={external(config.primaryCta.url)} className="inline-flex h-9 items-center rounded-lg bg-primary-foreground px-4 text-sm font-medium text-primary hover:opacity-90">
+            <PortalLink href={config.primaryCta.url} external={external(config.primaryCta.url)} className="inline-flex h-9 items-center rounded-lg bg-primary-foreground px-4 text-sm font-medium text-primary hover:opacity-90 group-data-[hero=light]/home:bg-primary group-data-[hero=light]/home:text-primary-foreground">
               {config.primaryCta.label}
             </PortalLink>
           ) : null}
           {config.secondaryCta ? (
-            <PortalLink href={config.secondaryCta.url} external={external(config.secondaryCta.url)} className="inline-flex h-9 items-center rounded-lg border border-primary-foreground/50 px-4 text-sm font-medium hover:bg-primary-foreground/10">
+            <PortalLink href={config.secondaryCta.url} external={external(config.secondaryCta.url)} className="inline-flex h-9 items-center rounded-lg border border-primary-foreground/50 px-4 text-sm font-medium hover:bg-primary-foreground/10 group-data-[hero=light]/home:border-border-strong group-data-[hero=light]/home:hover:bg-surface-inset">
               {config.secondaryCta.label}
             </PortalLink>
           ) : null}
