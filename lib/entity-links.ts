@@ -37,7 +37,7 @@ import { classifyWorkItemRef } from "@/lib/work-item-ids"
  * not `EntityType`s (neither has a detail panel) but each has its own page, and
  * the search results and the `create_doc` / artifact MCP tools link to them.
  */
-export type EntityLinkType = EntityType | "doc" | "artifact"
+export type EntityLinkType = EntityType | "doc" | "artifact" | "review"
 
 // Compile-time proof that EntityLinkType covers every panel entity type, so
 // adding a type to lib/entity-detail.ts's ENTITY_TYPES fails the build here
@@ -54,6 +54,7 @@ const _COVERS_EVERY_ENTITY_TYPE = {
   task: true,
   doc: true,
   artifact: true,
+  review: true,
 } satisfies Record<EntityLinkType, true>
 void _COVERS_EVERY_ENTITY_TYPE
 
@@ -118,6 +119,8 @@ export function entityPath(input: EntityLinkInput): string {
       return `${base}/docs/${id}`
     case "artifact":
       return `${base}/docs/artifacts/${id}`
+    case "review":
+      return `${base}/reviews/${id}`
 
     // ── Entities addressed by the ?detail= panel ───────────────────────────
     case "solution":
@@ -160,6 +163,7 @@ const PANEL_LINK_TYPES: ReadonlySet<string> = new Set<EntityLinkType>([
   "roadmapItem",
   "feedback",
   "task",
+  "review",
 ])
 
 /** `id` is the link's reference as written: a UUID or a display ID. Resolve it server-side before using it as a key. */
@@ -220,7 +224,7 @@ export function parseEntityLink(href: string, currentOrigin?: string | null): Pa
   if (detail && sep > 0) {
     const type = detail.slice(0, sep)
     const id = detail.slice(sep + 1)
-    if (PANEL_LINK_TYPES.has(type) && isEntityRef(id)) return { ...slugs, type: type as EntityLinkType, id }
+    if (PANEL_LINK_TYPES.has(type) && (type === "review" ? isEntityId(id) : isEntityRef(id))) return { ...slugs, type: type as EntityLinkType, id }
   }
 
   if (section === "docs" && first === "artifacts") return own("artifact", second)
@@ -230,6 +234,8 @@ export function parseEntityLink(href: string, currentOrigin?: string | null): Pa
     case "experiments": return own("experiment", first)
     case "tasks": return own("task", first)
     case "docs": return own("doc", first)
+    // Decision requests are addressed by UUID only.
+    case "reviews": return first && isEntityId(first) ? own("review", first) : null
     case "roadmap": return own("roadmapItem", first)
     default: return null
   }

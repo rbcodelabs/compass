@@ -48,6 +48,12 @@ export type StartTurnParams = {
   message: string
   conversationId?: string | null
   seedContext?: { entityType: string; entityId: string }
+  /** Workspace items pinned into this message (re-resolved server-side). */
+  contextItems?: { type: string; id: string }[]
+  /** Refs returned by /api/agent/attachments. */
+  uploads?: string[]
+  /** Google Drive links pasted as chips; the server re-parses each one and the agent reads them through the user's Drive connection. */
+  googleLinks?: string[]
   /** A cloud agent id, or "builtin". Omitted = the server's default (personal, then workspace, then built-in). */
   agentId?: string
   /** An explicit model pick (an id from /api/agent/choices `models`). Omitted = the agent's own model, else the deployment default. */
@@ -368,6 +374,9 @@ export function useAgentTurn({ workspaceId, onConversationCreated, onSettled }: 
           message: text,
           conversationId: params.conversationId ?? undefined,
           ...(params.seedContext ? { seedContext: params.seedContext } : {}),
+          ...(params.contextItems?.length ? { contextItems: params.contextItems } : {}),
+          ...(params.uploads?.length ? { uploads: params.uploads } : {}),
+          ...(params.googleLinks?.length ? { googleLinks: params.googleLinks } : {}),
           ...(params.agentId ? { agentId: params.agentId } : {}),
           ...(params.model ? { model: params.model } : {}),
           ...(params.pageUrl ? { pageUrl: params.pageUrl } : {}),

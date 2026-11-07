@@ -120,7 +120,7 @@ const subscribeNever = () => () => {}
 // lib/entity-links.ts). The panel mounts in the workspace layout, so it opens on whatever page the
 // reader is already on; navigating to the link instead drags them off that page (a solution link
 // points at its opportunity's discovery page) just to show the same panel.
-const PANEL_ADDRESSED: ReadonlySet<string> = new Set(["solution", "assumption", "feedback", "objective", "keyResult", "roadmapItem"])
+const PANEL_ADDRESSED: ReadonlySet<string> = new Set(["solution", "assumption", "feedback", "objective", "keyResult", "roadmapItem", "review"])
 
 export function AgentLink({ href, children }: { href?: string; children?: ReactNode }) {
   // A GitHub PR link is its own chip (opens the PR sidebar); it never reaches the entity-link path below.

@@ -43,6 +43,7 @@ const LABELS: Record<EntityLinkType, string> = {
   task: "Task",
   doc: "Doc",
   artifact: "Artifact",
+  review: "Decision",
 }
 
 /** Workspaces can rename Opportunity and Solution; everything else is canonical. */
