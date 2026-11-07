@@ -6,6 +6,7 @@ import { resolveKeyLinks } from "./resolvers/key-links"
 import { resolveRoadmapSpotlight } from "./resolvers/roadmap-spotlight"
 import { resolveRecentUpdates } from "./resolvers/recent-updates"
 import { resolveFeedbackCta } from "./resolvers/feedback-cta"
+import { resolveDocs } from "./resolvers/docs"
 
 async function resolveWidget(ctx: ResolveContext, widget: PortalHomeWidget): Promise<WidgetResolution> {
   switch (widget.type) {
@@ -23,6 +24,8 @@ async function resolveWidget(ctx: ResolveContext, widget: PortalHomeWidget): Pro
       return resolveRecentUpdates(ctx, widget.config)
     case "feedback_cta":
       return resolveFeedbackCta(ctx, widget.config)
+    case "docs":
+      return resolveDocs(ctx, widget.config)
   }
 }
 
@@ -64,9 +67,22 @@ export async function resolveHomeForCustomer(
  * team view), so only ids that actually resolved publicly are kept.
  */
 function redactForCustomer(widget: PortalHomeWidget, resolution: WidgetResolution): PortalHomeWidget {
-  if (widget.type !== "roadmap_spotlight") return widget
-  const publicIds = new Set(resolution.available && resolution.data.type === "roadmap_spotlight" ? resolution.data.items.map((item) => item.id) : [])
-  return { ...widget, config: { ...widget.config, itemIds: widget.config.itemIds.filter((id) => publicIds.has(id)) } }
+  if (widget.type === "roadmap_spotlight") {
+    const publicIds = new Set(resolution.available && resolution.data.type === "roadmap_spotlight" ? resolution.data.items.map((item) => item.id) : [])
+    return { ...widget, config: { ...widget.config, itemIds: widget.config.itemIds.filter((id) => publicIds.has(id)) } }
+  }
+  // Doc ids that did not resolve are unpublished (or foreign) docs: keep their ids out of the browser payload.
+  if (widget.type === "docs") {
+    const publishedIds = new Set(resolution.available && resolution.data.type === "docs" ? resolution.data.docs.map((doc) => doc.id) : [])
+    return { ...widget, config: { ...widget.config, docIds: widget.config.docIds.filter((id) => publishedIds.has(id)) } }
+  }
+  if (widget.type === "key_links") {
+    const publishedIds = new Set(
+      resolution.available && resolution.data.type === "key_links" ? resolution.data.links.flatMap((link) => (link.docId ? [link.docId] : [])) : [],
+    )
+    return { ...widget, config: { ...widget.config, links: widget.config.links.filter((link) => link.kind === "url" || publishedIds.has(link.docId)) } }
+  }
+  return widget
 }
 
 /**

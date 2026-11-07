@@ -46,6 +46,7 @@ const ITEMS: Item[] = [
 
 function matches(row: Item, where: Record<string, unknown>): boolean {
   return Object.entries(where).every(([key, cond]) => {
+    if (key === "OR") return (cond as Record<string, unknown>[]).some((alternative) => matches(row, alternative))
     const value = (row as unknown as Record<string, unknown>)[key]
     if (cond && typeof cond === "object" && !(cond instanceof Date)) {
       const c = cond as { in?: unknown[]; not?: unknown }
@@ -87,8 +88,10 @@ function fakePrisma(opts: { queries?: string[] } = {}) {
       findMany: async (args: { where: { workspaceId: string; id: { in: string[] } }; select?: Record<string, boolean> }) => {
         log("doc")
         const rows = [
-          { id: id(201), workspaceId: WS, title: "Internal runbook" },
-          { id: id(202), workspaceId: OTHER_WS, title: "SECRET other workspace doc" },
+          // 201: a member-only doc (never published). 202: published, but in ANOTHER workspace.
+          { id: id(201), workspaceId: WS, title: "Internal runbook", content: "x", storageProvider: null, publishedAt: null, updatedAt: d(1) },
+          { id: id(202), workspaceId: OTHER_WS, title: "SECRET other workspace doc", content: "x", storageProvider: null, publishedAt: d(2), updatedAt: d(2) },
+          { id: id(203), workspaceId: WS, title: "Public handbook", content: "Welcome", storageProvider: null, publishedAt: d(3), updatedAt: d(3) },
         ].filter((r) => matches(r as never, args.where as never))
         return project(rows, args.select)
       },
@@ -175,7 +178,7 @@ describe("feedback widget leakage boundary", () => {
   })
 })
 
-describe("key links: Docs are member-only", () => {
+describe("key links: Docs resolve for customers only when published", () => {
   const links = w(createWidget("key_links", 0), {
     config: {
       title: "Links",
@@ -183,17 +186,24 @@ describe("key links: Docs are member-only", () => {
         { kind: "url", label: "Security", url: "https://example.com/security" },
         { kind: "doc", docId: id(201), label: "" },
         { kind: "doc", docId: id(202), label: "" },
+        { kind: "doc", docId: id(203), label: "" },
       ],
     },
   })
 
-  it("returns only external links to customers and never queries docs", async () => {
-    const queries: string[] = []
-    const out = await resolveHomeForCustomer(ctx({}, queries), [links], { signedIn: true })
-    expect(queries).toEqual([])
-    expect(JSON.stringify(out)).not.toContain("Internal runbook")
+  it("gives customers external links plus ONLY published same-workspace Docs, linked to the portal", async () => {
+    const out = await resolveHomeForCustomer(ctx(), [links], { signedIn: true })
+    const wire = JSON.stringify(out)
+    expect(wire).not.toContain("Internal runbook")
+    expect(wire).not.toContain("SECRET")
     const data = out.resolved[links.id]
-    expect(data.available && data.data.type === "key_links" && data.data.links.map((l) => l.label)).toEqual(["Security"])
+    expect(data.available && data.data.type === "key_links" && data.data.links.map((l) => [l.label, l.href])).toEqual([
+      ["Security", "https://example.com/security"],
+      ["Public handbook", `/portal/acme/main/docs/${id(203)}`],
+    ])
+    // The unpublished / foreign doc ids are also redacted from the serialized widget config.
+    expect(wire).not.toContain(id(201))
+    expect(wire).not.toContain(id(202))
   })
 
   it("gives workspace members their own Docs only, never another workspace's", async () => {
@@ -201,6 +211,49 @@ describe("key links: Docs are member-only", () => {
     const json = JSON.stringify(resolved)
     expect(json).toContain("Internal runbook")
     expect(json).not.toContain("SECRET")
+  })
+})
+
+describe("docs widget", () => {
+  const docs = (config: Partial<{ heading: string; maxItems: number; mode: "all" | "selected"; docIds: string[] }> = {}) =>
+    w(createWidget("docs", 0), { config: { heading: "Docs", maxItems: 6, mode: "all", docIds: [], ...config } })
+
+  it("returns published docs of this workspace only to customers, with safe fields and portal links", async () => {
+    const widget = docs()
+    const out = await resolveHomeForCustomer(ctx(), [widget], { signedIn: false })
+    const data = out.resolved[widget.id]
+    expect(data.available && data.data.type === "docs" && data.data.docs).toEqual([
+      { id: id(203), title: "Public handbook", excerpt: "Welcome", updatedAt: d(3).toISOString(), publishedAt: d(3).toISOString(), href: `/portal/acme/main/docs/${id(203)}` },
+    ])
+    expect(JSON.stringify(out)).not.toContain("SECRET")
+    expect(JSON.stringify(out)).not.toContain("Internal runbook")
+  })
+
+  it("selected mode never surfaces unpublished or foreign ids, and drops them from the serialized config", async () => {
+    const widget = docs({ mode: "selected", docIds: [id(201), id(202), id(203)] })
+    const out = await resolveHomeForCustomer(ctx(), [widget], { signedIn: false })
+    const wire = JSON.stringify(out)
+    expect(wire).toContain("Public handbook")
+    expect(wire).not.toContain(id(201))
+    expect(wire).not.toContain(id(202))
+    expect(out.widgets[0].type === "docs" && out.widgets[0].config.docIds).toEqual([id(203)])
+  })
+
+  it("is omitted for customers when nothing is selected or nothing selected is published, and says why to members", async () => {
+    const none = docs({ mode: "selected", docIds: [] })
+    const unpublished = docs({ mode: "selected", docIds: [id(201)] })
+    unpublished.id = "w_unpub"
+    const out = await resolveHomeForCustomer(ctx(), [none, unpublished], { signedIn: true })
+    expect(out.widgets).toEqual([])
+    const member = await resolveHomeForMember(ctx(), [unpublished])
+    expect(member[unpublished.id]).toEqual({ available: false, reason: "None of the selected docs are published." })
+  })
+
+  it("members see the same published-only list (a member's unpublished doc is not a portal doc)", async () => {
+    const widget = docs()
+    const member = await resolveHomeForMember(ctx(), [widget])
+    const resolution = member[widget.id]
+    expect(resolution.available && resolution.data.type === "docs" && resolution.data.docs.map((x) => x.title)).toEqual(["Public handbook"])
   })
 })
 

@@ -5,6 +5,8 @@ import { roadmapSpotlightConfig, roadmapSpotlightDefinition } from "./widgets/ro
 import { feedbackCtaConfig, feedbackCtaDefinition } from "./widgets/feedback-cta"
 import { recentUpdatesConfig, recentUpdatesDefinition } from "./widgets/recent-updates"
 import { richTextConfig, richTextDefinition } from "./widgets/rich-text"
+import { docsConfig, docsDefinition } from "./widgets/docs"
+import { DEFAULT_PORTAL_TEMPLATE, type PortalTemplate } from "./templates"
 
 /**
  * Portal Home widget model. Client-safe: Zod and plain data only, so the admin
@@ -43,6 +45,7 @@ export const widgetSchema = z.discriminatedUnion("type", [
   z.object({ ...base, type: z.literal("feedback_cta"), config: feedbackCtaConfig }),
   z.object({ ...base, type: z.literal("recent_updates"), config: recentUpdatesConfig }),
   z.object({ ...base, type: z.literal("rich_text"), config: richTextConfig }),
+  z.object({ ...base, type: z.literal("docs"), config: docsConfig }),
 ])
 export type PortalHomeWidget = z.infer<typeof widgetSchema>
 export type WidgetType = PortalHomeWidget["type"]
@@ -60,6 +63,7 @@ export const WIDGET_DEFINITIONS = {
   feedback_cta: feedbackCtaDefinition,
   recent_updates: recentUpdatesDefinition,
   rich_text: richTextDefinition,
+  docs: docsDefinition,
 } as const
 
 export const WIDGET_TYPES = Object.keys(WIDGET_DEFINITIONS) as WidgetType[]
@@ -122,8 +126,17 @@ function canonicalJson(value: unknown): string {
   return JSON.stringify(value)
 }
 
-/** True when the draft differs from what customers currently see. */
-export function hasUnpublishedChanges(draft: readonly PortalHomeWidget[], published: readonly PortalHomeWidget[] | null): boolean {
-  if (published === null) return draft.length > 0
+/**
+ * True when the draft differs from what customers currently see. `templates` is optional so callers that only
+ * know widgets keep working; when given, a template change alone counts as an unpublished change (with no
+ * published layout, customers see the default home in the editorial template).
+ */
+export function hasUnpublishedChanges(
+  draft: readonly PortalHomeWidget[],
+  published: readonly PortalHomeWidget[] | null,
+  templates?: { draft: PortalTemplate; published: PortalTemplate },
+): boolean {
+  if (published === null) return draft.length > 0 || (templates !== undefined && templates.draft !== DEFAULT_PORTAL_TEMPLATE)
+  if (templates && templates.draft !== templates.published) return true
   return canonicalJson(normalizeOrder(draft)) !== canonicalJson(normalizeOrder(published))
 }

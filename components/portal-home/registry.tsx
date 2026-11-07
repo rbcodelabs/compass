@@ -8,6 +8,7 @@ import { RoadmapSpotlightForm, RoadmapSpotlightRenderer } from "./widgets/roadma
 import { FeedbackCtaForm, FeedbackCtaRenderer } from "./widgets/feedback-cta"
 import { RecentUpdatesForm, RecentUpdatesRenderer } from "./widgets/recent-updates"
 import { RichTextForm, RichTextRenderer } from "./widgets/rich-text"
+import { DocsForm, DocsRenderer } from "./widgets/docs"
 
 /**
  * The UI half of the widget registry (the data half is lib/portal-home/schema.ts
@@ -31,6 +32,8 @@ export function renderWidgetBody(widget: PortalHomeWidget, resolution: Extract<W
       return data.type === "recent_updates" ? <RecentUpdatesRenderer config={widget.config} data={data} /> : null
     case "feedback_cta":
       return data.type === "feedback_cta" ? <FeedbackCtaRenderer config={widget.config} data={data} /> : null
+    case "docs":
+      return data.type === "docs" ? <DocsRenderer config={widget.config} data={data} /> : null
   }
 }
 
@@ -49,5 +52,7 @@ export function renderWidgetForm(widget: PortalHomeWidget, onChange: (widget: Po
       return <RecentUpdatesForm config={widget.config} options={options} onChange={(config) => onChange({ ...widget, config })} />
     case "rich_text":
       return <RichTextForm config={widget.config} options={options} onChange={(config) => onChange({ ...widget, config })} />
+    case "docs":
+      return <DocsForm config={widget.config} options={options} onChange={(config) => onChange({ ...widget, config })} />
   }
 }

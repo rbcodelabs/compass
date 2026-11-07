@@ -20,9 +20,13 @@ export async function GET(_req: Request, route: HomeRouteParams) {
         where: { workspaceId },
         orderBy: [{ updatedAt: "desc" }],
         take: 200,
-        select: { id: true, title: true },
+        select: { id: true, title: true, publishedAt: true },
       }),
     ])
-    return NextResponse.json({ roadmapItems, docs })
+    // isPublished lets the Docs widget picker flag docs customers cannot see yet. The timestamp itself stays server-side.
+    return NextResponse.json({
+      roadmapItems,
+      docs: docs.map((doc) => ({ id: doc.id, title: doc.title, isPublished: doc.publishedAt !== null })),
+    })
   })
 }

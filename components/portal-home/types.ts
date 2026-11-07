@@ -1,6 +1,6 @@
 export interface HomeOptions {
   roadmapItems: { id: string; title: string; horizon: string; isPrivate: boolean }[]
-  docs: { id: string; title: string }[]
+  docs: { id: string; title: string; isPublished?: boolean }[]
 }
 
 export interface RendererProps<C, D = unknown> {
