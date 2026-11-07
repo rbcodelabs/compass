@@ -15,8 +15,8 @@ export const ROADMAP_HORIZONS = ["NOW", "NEXT", "LATER", "LAUNCHING", "LAUNCHED"
 export const ROADMAP_DELIVERY_STATUSES = ["NOT_STARTED", "IN_DEVELOPMENT", "IN_REVIEW", "BLOCKED", "COMPLETE"] as const satisfies readonly RoadmapDeliveryStatus[]
 export const ROADMAP_LINK_FILTERS = ["linked", "unlinked"] as const
 export const ROADMAP_VIEW_VISIBILITIES = ["PERSONAL", "SHARED"] as const
-export const ROADMAP_VIEW_MODES = ["board", "timeline"] as const
-export const ROADMAP_VIEW_GROUPINGS = ["horizon", "workspace", "squad", "none"] as const
+export const ROADMAP_VIEW_MODES = ["board", "timeline", "gallery"] as const
+export const ROADMAP_VIEW_GROUPINGS = ["horizon", "workspace", "squad", "none", "status"] as const
 export const ROADMAP_VIEW_SORTS = ["manual", "startDate", "endDate", "title", "updated"] as const
 
 export const MAX_VIEW_NAME_LENGTH = 120

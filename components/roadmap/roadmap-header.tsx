@@ -76,9 +76,11 @@ function RailToggleButton({ rail }: { rail: RailToggle }) {
  * timeline scale and reload, timeline only).
  * The row below the title under `md` carries everything after the view toggle.
  */
-export function RoadmapHeader({ squads, timeline, customFieldGroups = [], activeCustomFieldId = null, groupByValue, groupByOptions = [], cardSortHref, savedViews }: {
+export function RoadmapHeader({ squads, timeline, gallery = false, customFieldGroups = [], activeCustomFieldId = null, groupByValue, groupByOptions = [], cardSortHref, savedViews }: {
   squads: SquadData[];
   timeline?: TimelineControls;
+  /** The Gallery view: swaps the view toggle state and the group-by choices. */
+  gallery?: boolean;
   /** Picklist fields on Roadmap Item that have options to filter by. */
   customFieldGroups?: CustomFieldFilterGroup[];
   /** The field the active filter resolved to on this page, if any. */
@@ -95,7 +97,7 @@ export function RoadmapHeader({ squads, timeline, customFieldGroups = [], active
   return (
     <WorkspaceHeader
       title="Roadmap"
-      actions={<RoadmapViewToggle view={timeline ? "timeline" : "board"} />}
+      actions={<RoadmapViewToggle view={timeline ? "timeline" : gallery ? "gallery" : "board"} />}
       controls={
         <>
           {savedViews && <WorkspaceSavedViewsMenu savedViews={savedViews} />}
@@ -107,7 +109,7 @@ export function RoadmapHeader({ squads, timeline, customFieldGroups = [], active
             </div>
           )}
           {timeline?.schedule?.rail && <RailToggleButton rail={timeline.schedule.rail} />}
-          {(timeline || groupByValue !== undefined) && <RoadmapGroupByToggle variant={timeline ? "timeline" : "board"} value={groupByValue ?? "phase"} customFieldOptions={groupByOptions} />}
+          {(timeline || groupByValue !== undefined) && <RoadmapGroupByToggle variant={timeline ? "timeline" : gallery ? "gallery" : "board"} value={groupByValue ?? "phase"} customFieldOptions={groupByOptions} />}
           <div className={timeline ? undefined : "ml-auto md:ml-0"}>
             <RoadmapFilters squads={squads} customFieldGroups={customFieldGroups} activeCustomFieldId={activeCustomFieldId} />
           </div>

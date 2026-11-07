@@ -8,9 +8,9 @@
  *
  *   squad                 <-> filters.squadIds (zero or one id; the page filters one squad)
  *   field + fieldValue    <-> filters.customField
- *   groupBy phase|squad|none  <-> display.groupBy horizon|squad|none
+ *   groupBy phase|squad|none|status  <-> display.groupBy horizon|squad|none|status (status = gallery only)
  *   groupBy <field id>    <-> display.groupField
- *   view timeline|board   <-> display.view
+ *   view timeline|gallery|board   <-> display.view
  *
  * Pure (no database, no React), like schema.ts, so the server page, the client
  * header and the tests share one definition.
@@ -77,7 +77,7 @@ export function resolveWorkspaceRoadmapState(params: RawSearchParams, saved: Sta
   if (groupBy !== undefined) {
     display.groupField = undefined
     if (groupBy === "phase") display.groupBy = "horizon"
-    else if (groupBy === "squad" || groupBy === "none") display.groupBy = groupBy
+    else if (groupBy === "squad" || groupBy === "none" || groupBy === "status") display.groupBy = groupBy
     else if (uuid.safeParse(groupBy).success) {
       display.groupBy = "horizon"
       display.groupField = groupBy
@@ -85,7 +85,7 @@ export function resolveWorkspaceRoadmapState(params: RawSearchParams, saved: Sta
   }
 
   const view = first(params[p.view])
-  if (view !== undefined) display.view = view === "timeline" ? "timeline" : "board"
+  if (view !== undefined) display.view = view === "timeline" || view === "gallery" ? view : "board"
 
   return { filters, display }
 }
@@ -101,8 +101,8 @@ export function workspaceStateToParams(state: State): URLSearchParams {
     out.set(p.fieldValue, filters.customField.value)
   }
   if (display.groupField) out.set(p.groupBy, display.groupField)
-  else if (display.groupBy === "squad" || display.groupBy === "none") out.set(p.groupBy, display.groupBy)
-  if (display.view === "timeline") out.set(p.view, "timeline")
+  else if (display.groupBy === "squad" || display.groupBy === "none" || display.groupBy === "status") out.set(p.groupBy, display.groupBy)
+  if (display.view === "timeline" || display.view === "gallery") out.set(p.view, display.view)
   return out
 }
 
@@ -126,7 +126,7 @@ export function workspacePageParams(state: State): {
   field: string | undefined
   fieldValue: string | undefined
   groupBy: string | undefined
-  view: "board" | "timeline"
+  view: "board" | "timeline" | "gallery"
 } {
   const params = workspaceStateToParams(state)
   return {

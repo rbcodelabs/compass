@@ -17,6 +17,8 @@ import getPrisma from "@/lib/db";
 import { isModuleEnabled } from "@/lib/modules/server"
 import { getTasksLinkedTo } from "@/lib/task-links-read";
 import { RoadmapBoard } from "@/components/roadmap/roadmap-board";
+import { RoadmapGallery } from "@/components/roadmap/roadmap-gallery";
+import { loadRoadmapGalleryExtras, type GalleryGroupMode } from "@/lib/roadmap/gallery";
 import { NativeTimeline } from "@/components/roadmap/native-timeline/native-timeline";
 import { RoadmapHeader } from "@/components/roadmap/roadmap-header";
 import type { Horizon, SquadData, TaskStatus } from "@/lib/types";
@@ -120,7 +122,11 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
   // Only SELECT-type fields are groupable — MULTI_SELECT is out of scope
   // (an item could belong to more than one group, which breaks
   // one-row-per-item lane packing on the timeline).
-  const resolvedGroupBy = resolveRoadmapGroupBy(parseGroupByParam(groupByParam), roadmapFieldDefs);
+  const requestedGroupBy = resolveRoadmapGroupBy(parseGroupByParam(groupByParam), roadmapFieldDefs);
+  // "status" grouping only exists in the Gallery; the board and timeline read it as Phase.
+  const resolvedGroupBy = requestedGroupBy.mode === "status" ? ({ mode: "phase" } as const) : requestedGroupBy;
+  const galleryGroupMode: GalleryGroupMode =
+    requestedGroupBy.mode === "status" ? "status" : requestedGroupBy.mode === "squad" ? "squad" : requestedGroupBy.mode === "none" ? "none" : "horizon";
   const groupByOptions = roadmapFieldDefs
     .filter((field) => field.fieldType === "SELECT")
     .map((field) => ({ id: field.id, label: field.name }));
@@ -275,6 +281,8 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
         : null;
 
   const cardItems: RoadmapCardData[] = items.map((item) => toRoadmapCardData(item, taskStatusesByRoadmapItem.get(item.id) ?? []));
+  // Only the Gallery pays for artifact + screenshot lookups.
+  const galleryExtras = view === "gallery" ? await loadRoadmapGalleryExtras(prisma, workspace.id, items) : null;
 
   // A filter change is a new dataset; ordinary refreshes must preserve
   // in-flight mutation fences and optimistic edits. Both views seed their own
@@ -328,7 +336,34 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
 
   return (
     <>
-      {view === "timeline" ? (
+      {view === "gallery" && galleryExtras ? (
+        <div className="flex min-h-full min-w-0 flex-1 flex-col md:h-full md:min-h-0">
+          <Suspense>
+            <RoadmapHeader
+              squads={squads}
+              gallery
+              customFieldGroups={customFieldGroups}
+              activeCustomFieldId={customFieldFilter?.fieldId ?? null}
+              cardSortHref={cardSortHref}
+              savedViews={savedViewsProps}
+              groupByValue={requestedGroupBy.mode === "customField" ? "phase" : requestedGroupBy.mode}
+              groupByOptions={groupByOptions}
+            />
+          </Suspense>
+          <div data-slot="workspace-content" className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
+            <RoadmapGallery
+              key={filterKey}
+              items={cardItems}
+              extras={galleryExtras}
+              squads={squads}
+              groupMode={galleryGroupMode}
+              workspaceId={workspace.id}
+              orgSlug={orgSlug}
+              workspaceSlug={workspaceSlug}
+            />
+          </div>
+        </div>
+      ) : view === "timeline" ? (
         <Suspense>
           <NativeTimeline
             key={filterKey}
