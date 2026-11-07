@@ -1,8 +1,7 @@
 /**
  * The seam between Compass's agent code and whichever microVM platform runs it.
  *
- * Implementations: Vercel Sandbox (lib/sandbox-provider-vercel.ts) today, AWS Lambda MicroVMs next
- * (ADR-0036: Compass Docs -> Architecture Decisions). Nothing in this file may import a platform SDK:
+ * Implementations: Vercel Sandbox (lib/sandbox-provider-vercel.ts). Nothing in this file may import a platform SDK:
  * these types are the contract a second provider must implement, so they describe what Compass
  * needs from a sandbox, not what one vendor's SDK happens to expose.
  */
@@ -10,8 +9,7 @@
 /**
  * Egress restriction. A host allowlist is the only policy Compass builds (agentEgressPolicy); the
  * two strings are the endpoints. Providers that cannot express a policy natively enforce it
- * another way (the MicroVM provider confines the agent to a network namespace behind an allowlist
- * proxy), or refuse to boot when asked for one they cannot enforce.
+ * another way (for example a network namespace behind an allowlist proxy), or refuse to boot when asked for one they cannot enforce.
  */
 export type NetworkPolicy = "allow-all" | "deny-all" | { allow: string[] }
 
@@ -68,7 +66,7 @@ export interface SandboxHandle {
   /**
    * Stop it and save its state as a new image, returning the image id. Ends the session, so do not
    * stop() afterwards. Only providers whose images are made by snapshotting a built sandbox support
-   * this (Vercel). Providers that build images from a recipe (MicroVMs) throw.
+   * this (Vercel). Providers that build images from a recipe throw.
    */
   snapshot(): Promise<{ imageId: string; sizeBytes: number }>
 
@@ -95,7 +93,7 @@ export type BootSandboxOptions = {
 }
 
 export interface SandboxProvider {
-  /** Stable identifier recorded in logs, e.g. "vercel" or "microvm". */
+  /** Stable identifier recorded in logs, e.g. "vercel". */
   readonly id: string
 
   boot(options: BootSandboxOptions): Promise<SandboxHandle>
