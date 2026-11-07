@@ -29,7 +29,18 @@ function writeStored(key: string, value: string) {
 
 /** The label for a model id: an option's own label, else the label the server sent for it, else the bare id. */
 export function modelLabelFor(choices: Pick<AgentChoices, "models" | "modelLabels">, modelId: string): string {
-  return choices.models.find((model) => model.value === modelId)?.label ?? choices.modelLabels[modelId] ?? modelId
+  return choices.models.find((model) => model.value === modelId)?.label ?? choices.modelLabels[modelId] ?? prettifyModelId(modelId)
+}
+
+/**
+ * Turns a raw provider id into something readable when no label is known, e.g. Bedrock's
+ * "us.anthropic.claude-sonnet-4-5-20250929-v1:0" becomes "Claude Sonnet 4.5". Unrecognised ids are returned unchanged.
+ */
+export function prettifyModelId(modelId: string): string {
+  const match = /(?:^|[./])(claude)-([a-z]+)-(\d+(?:-\d+)?)(?:-\d{8})?(?:-v\d+(?::\d+)?)?$/i.exec(modelId)
+  if (!match) return modelId
+  const family = match[2].charAt(0).toUpperCase() + match[2].slice(1)
+  return `Claude ${family} ${match[3].replace("-", ".")}`
 }
 
 /**
