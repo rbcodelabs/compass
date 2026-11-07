@@ -100,7 +100,8 @@ export async function searchUserDrive(userId: string, term: string): Promise<Dri
       result = await call("title")
     } catch (error) {
       // A rejected query term is a tool error, not a connection problem: try the REST spelling once.
-      if (isNotConnected(error)) throw error
+      // A timeout is not a rejected term: retrying would double the wait past the route's maxDuration.
+      if (isNotConnected(error) || (error instanceof McpConnectorError && error.code === "GATEWAY_TIMEOUT")) throw error
       result = await call("name")
     }
     return { status: "ok", hits: parseDriveSearchResult(result.structured, result.text) }
@@ -109,4 +110,26 @@ export async function searchUserDrive(userId: string, term: string): Promise<Dri
     console.warn("[agent-drive-search] search failed", error instanceof Error ? error.message : error)
     return { status: "unavailable" }
   }
+}
+
+/**
+ * Per-user, per-instance request ceiling. Honest scope: in-memory, so each warm serverless instance counts on its
+ * own and a cold start resets it. It stops a runaway client loop from fanning out to Google, not a determined abuser.
+ */
+export const DRIVE_SEARCH_MAX_PER_WINDOW = 30
+export const DRIVE_SEARCH_WINDOW_MS = 60_000
+const MAX_TRACKED_USERS = 5_000
+const recent = new Map<string, number[]>()
+
+export function allowDriveSearch(userId: string, now: number = Date.now()): boolean {
+  const fresh = (recent.get(userId) ?? []).filter((at) => now - at < DRIVE_SEARCH_WINDOW_MS)
+  if (fresh.length >= DRIVE_SEARCH_MAX_PER_WINDOW) {
+    recent.set(userId, fresh)
+    return false
+  }
+  fresh.push(now)
+  recent.delete(userId)
+  recent.set(userId, fresh)
+  if (recent.size > MAX_TRACKED_USERS) recent.delete(recent.keys().next().value as string)
+  return true
 }

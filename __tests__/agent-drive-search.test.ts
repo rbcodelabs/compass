@@ -4,7 +4,7 @@ const callConnectorTool = vi.fn()
 vi.mock("@/lib/mcp-connectors/call", () => ({ callConnectorTool: (...args: unknown[]) => callConnectorTool(...args) }))
 
 import { McpConnectorError } from "@/lib/mcp-connectors/config"
-import { driveTitleQuery, escapeDriveQueryValue, parseDriveSearchResult, searchUserDrive } from "@/lib/agent-drive-search"
+import { allowDriveSearch, DRIVE_SEARCH_MAX_PER_WINDOW, DRIVE_SEARCH_WINDOW_MS, driveTitleQuery, escapeDriveQueryValue, parseDriveSearchResult, searchUserDrive } from "@/lib/agent-drive-search"
 
 const DOC_ID = "1AbCdEfGhIjKlMnOp"
 
@@ -64,6 +64,13 @@ describe("searchUserDrive", () => {
     expect(callConnectorTool.mock.calls[1][0].args.query).toBe("name contains 'plan'")
   })
 
+  it("does not retry a timeout (it would outlast the route's maxDuration)", async () => {
+    callConnectorTool.mockImplementation(async () => { throw new McpConnectorError("GATEWAY_TIMEOUT") })
+    vi.spyOn(console, "warn").mockImplementation(() => {})
+    expect(await searchUserDrive("u1", "plan")).toEqual({ status: "unavailable" })
+    expect(callConnectorTool).toHaveBeenCalledTimes(1)
+  })
+
   it("reports not connected without retrying", async () => {
     callConnectorTool.mockImplementation(async () => { throw new McpConnectorError("NOT_CONNECTED") })
     expect(await searchUserDrive("u1", "plan")).toEqual({ status: "not_connected" })
@@ -74,5 +81,15 @@ describe("searchUserDrive", () => {
     callConnectorTool.mockImplementation(async () => { throw new Error("boom") })
     vi.spyOn(console, "warn").mockImplementation(() => {})
     expect(await searchUserDrive("u1", "plan")).toEqual({ status: "unavailable" })
+  })
+})
+
+describe("allowDriveSearch", () => {
+  it("allows a bounded number per user per window, then recovers", () => {
+    const t0 = 1_000_000
+    for (let i = 0; i < DRIVE_SEARCH_MAX_PER_WINDOW; i++) expect(allowDriveSearch("rate-u", t0 + i)).toBe(true)
+    expect(allowDriveSearch("rate-u", t0 + 100)).toBe(false)
+    expect(allowDriveSearch("other-user", t0 + 100)).toBe(true)
+    expect(allowDriveSearch("rate-u", t0 + DRIVE_SEARCH_WINDOW_MS + DRIVE_SEARCH_MAX_PER_WINDOW)).toBe(true)
   })
 })
