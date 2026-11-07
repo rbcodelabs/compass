@@ -122,7 +122,7 @@ export function opportunityStatusTooltip(status: OpportunityStatus): string {
   return `${d.definition} ${d.entryCriterion}`
 }
 
-/** The order an opportunity moves through (not display order). */
+/** The order an opportunity moves through (not display order; the board shows Unreviewed last). */
 export const OPPORTUNITY_LIFECYCLE_STATUSES = ["UNREVIEWED", "EXPLORING", "VALIDATING", "PRIORITIZED", "ACTIVE", "ARCHIVED"] as const satisfies readonly OpportunityStatus[]
 
 /** "UNREVIEWED → EXPLORING → ..." for MCP tool descriptions and docs. */
