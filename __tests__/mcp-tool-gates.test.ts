@@ -295,11 +295,10 @@ describe("ADR 0020: AgentOrgAdminGrant for delegated scoring-model admin", () =>
     await expect(applyToolGate(tool, AGENT, argsFor(tool))).rejects.toThrow("Human administrator required.")
   })
 
-  // Proves the grant doesn't leak scope: release authorization stays
-  // unconditionally human-only per ADR 0020, even for an agent holding a live
-  // grant. (create_workspace left this list when agents began inheriting their
-  // owner's org admin rights; see the next describe block.)
-  it("request_release_authorization is an agent WRITE gated by workspace membership, not org admin (ADR 0021)", async () => {
+  // Raising a release-authorization request is an agent WRITE gated by workspace membership; the approval
+  // itself stays human-only (admin on the review revision). (create_workspace left the human-only list when
+  // agents began inheriting their owner's org admin rights; see the next describe block.)
+  it("request_release_authorization is an agent WRITE gated by workspace membership, not org admin", async () => {
     expect(AGENT_TOOL_POLICY.request_release_authorization).toBe("WRITE")
     mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
     await expect(applyToolGate("request_release_authorization", AGENT, { workspaceId: "ws-1" })).resolves.toBeUndefined()

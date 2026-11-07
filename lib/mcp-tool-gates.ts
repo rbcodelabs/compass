@@ -860,7 +860,7 @@ export const AGENT_TOOL_POLICY: Record<string, "READ" | "WRITE" | "DENY"> = Obje
   // (update_doc_comment was removed by ADR 0019.)
   // approve_solution_plan and reject_solution_plan remain unconditionally human-only per ADR 0020: they are approval /
   // attestation acts that would be recorded as the delegating human's own. request_release_authorization was moved
-  // to WRITE (see ADR 0021): it only prepares the review; the approval stays human-only.
+  // to WRITE (decision record pending in Compass Docs → Architecture Decisions, not yet approved): it only prepares the review; the approval stays human-only.
   ...["update_comment", "update_solution_comment", "approve_solution_plan", "reject_solution_plan"].map(name => [name, "DENY"]),
   // create_workspace was DENY under ADR 0020. It is now a WRITE: an agent
   // inherits its owner's live org admin rights (see hasOwnerOrgAdminRights),
