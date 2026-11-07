@@ -84,7 +84,9 @@ describe("agent entry capability-pack policy", () => {
   it("ADR 0019: confines the file tools with a PreToolUse path guard and keeps run credentials out of the CLI's environment", () => {
     // Without the hook, `Read /proc/self/environ` returns every secret in this process.
     expect(source).toContain('from "./docs-path-guard.ts"')
-    expect(source).toContain("{ matcher: DOCS_GUARDED_TOOLS_MATCHER, hooks: [createDocsPreToolUseHook(docsRoot, { readOnlyRoots: githubShell ? [REPOS_DIR] : [] })] }")
+    // Same guard and matcher; the only grant beyond the docs root is READ-ONLY roots (repo workdir for a shell turn,
+    // plus the sibling uploads dir the host drops attached files into). Never a writable root.
+    expect(source).toContain("{ matcher: DOCS_GUARDED_TOOLS_MATCHER, hooks: [createDocsPreToolUseHook(docsRoot, { readOnlyRoots: [...(githubShell ? [REPOS_DIR] : []), resolvePath(docsRoot, \"..\", \"uploads\")] })] }")
     expect(source).toContain("env: scrubbedAgentEnv(process.env, { github: githubShell, npm: githubShell && process.env.AGENT_SANDBOX_CLASS === \"DEVELOPER\" }),")
     // The guard must be registered exactly when the file tools are.
     expect(source).toMatch(/docsSession && docsRoot\s*\?\s*\{\s*hooks:/)

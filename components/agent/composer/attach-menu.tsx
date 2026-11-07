@@ -6,6 +6,7 @@
 import { useEffect, useRef, useState } from "react"
 import { AtSign, Loader2, Paperclip, Search } from "lucide-react"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { useLabels } from "@/components/thinking-model/thinking-model-provider"
 import type { WorkspaceSearchItem, WorkspaceSearchResponse } from "@/lib/workspace-search"
 
 export const UPLOAD_MAX_BYTES = 4 * 1024 * 1024
@@ -60,6 +61,7 @@ type Props = {
 }
 
 export function AttachMenu({ workspaceId, orgSlug, workspaceSlug, disabled, uploadCount, items, onUploaded, onPickItem, onError }: Props) {
+  const labels = useLabels()
   const fileRef = useRef<HTMLInputElement>(null)
   const [uploading, setUploading] = useState(false)
   const [open, setOpen] = useState(false)
@@ -112,7 +114,7 @@ export function AttachMenu({ workspaceId, orgSlug, workspaceSlug, disabled, uplo
         <PopoverContent align="start" side="top" className="w-80 p-0">
           <div className="flex items-center gap-2 border-b border-border px-3 py-2">
             <Search className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-            <input autoFocus value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search opportunities, solutions, docs, tasks…" aria-label="Search the workspace" className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground" />
+            <input autoFocus value={query} onChange={(e) => setQuery(e.target.value)} placeholder={`Search ${labels.opportunity.plural.toLowerCase()}, ${labels.solution.plural.toLowerCase()}, docs, tasks…`} aria-label="Search the workspace" className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground" />
             {searching && <Loader2 className="size-3.5 animate-spin text-muted-foreground" aria-hidden="true" />}
           </div>
           <ul className="max-h-64 overflow-y-auto py-1">

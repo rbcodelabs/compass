@@ -29,7 +29,8 @@ const SANDBOX_ROOT = "/vercel/sandbox"
 
 const CONTEXT_TYPES = new Set<string>(["opportunity", "solution", "experiment", "roadmapItem", "task", "feedback", "doc", "objective", "keyResult", "decision"])
 const TEXT_EXTENSIONS = /\.(txt|md|markdown|csv|tsv|json|ya?ml|xml|html?|log|ts|tsx|js|jsx|py|sql|css)$/i
-const REF_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/[A-Za-z0-9._-]{1,100}$/i
+// The file-name part may not start with "." so a forged ref can never name "." or ".." in the storage key.
+const REF_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/[A-Za-z0-9_-][A-Za-z0-9._-]{0,99}$/i
 
 export type ContextItemRef = { type: string; id: string }
 export type UploadedFileMeta = { ref: string; name: string; size: number; contentType: string }
@@ -47,8 +48,9 @@ function uploadKey(workspaceId: string, userId: string, ref: string): string {
 export async function storeAgentUpload(input: { workspaceId: string; userId: string; name: string; bytes: Uint8Array; contentType: string }): Promise<UploadedFileMeta> {
   const safe = safeUploadName(input.name)
   const ref = `${randomUUID()}/${safe}`
-  await getArtifactStorage().put(uploadKey(input.workspaceId, input.userId, ref), input.bytes, input.contentType || "application/octet-stream")
-  return { ref, name: safe, size: input.bytes.byteLength, contentType: input.contentType }
+  const contentType = /^[\w.+-]+\/[\w.+-]+$/.test(input.contentType) && input.contentType.length <= 100 ? input.contentType : "application/octet-stream"
+  await getArtifactStorage().put(uploadKey(input.workspaceId, input.userId, ref), input.bytes, contentType)
+  return { ref, name: safe, size: input.bytes.byteLength, contentType }
 }
 
 function looksLikeText(name: string, bytes: Uint8Array): boolean {
@@ -139,7 +141,10 @@ export async function resolveTurnAttachments(input: {
       if (looksLikeText(name, bytes)) {
         const text = new TextDecoder("utf-8", { fatal: false }).decode(bytes)
         const clipped = text.length > INLINE_TEXT_MAX_CHARS ? `${text.slice(0, INLINE_TEXT_MAX_CHARS)}\n…[truncated]` : text
-        sections.push(`#### Uploaded file: ${name} (also at ${SANDBOX_ROOT}/${sandboxPath})\n\`\`\`\n${clipped}\n\`\`\``)
+        // A fence longer than any backtick run in the file, so the content cannot close it and pose as prompt text.
+        const longestRun = Math.max(0, ...(clipped.match(/`+/g) ?? []).map((run) => run.length))
+        const fence = "`".repeat(Math.max(3, longestRun + 1))
+        sections.push(`#### Uploaded file: ${name} (also at ${SANDBOX_ROOT}/${sandboxPath})\n${fence}\n${clipped}\n${fence}`)
       } else {
         sections.push(`#### Uploaded file: ${name} (${bytes.byteLength} bytes, binary) — available in the sandbox at ${SANDBOX_ROOT}/${sandboxPath} (absolute path; your working directory is the docs folder, not this one)`)
       }

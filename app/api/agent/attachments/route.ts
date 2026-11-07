@@ -14,6 +14,12 @@ export async function POST(request: NextRequest) {
   if (!session?.user?.id) return new Response("Unauthorized", { status: 401 })
   const userId = session.user.id
 
+  // Reject an oversized body before buffering it (multipart overhead gets 64 KB of slack); the exact per-file check below still runs.
+  const declared = Number(request.headers.get("content-length") ?? 0)
+  if (declared > AGENT_UPLOAD_MAX_BYTES + 64 * 1024) {
+    return Response.json({ error: `Files must be ${AGENT_UPLOAD_MAX_BYTES / 1024 / 1024} MB or smaller.` }, { status: 413 })
+  }
+
   const form = await request.formData().catch(() => null)
   const workspaceId = form?.get("workspaceId")
   const file = form?.get("file")
