@@ -1,10 +1,14 @@
+import { isMissingTable } from "@/lib/batched-delete"
 import { MODEL_BUCKETS } from "@/lib/workspace-export/model-registry"
 import { StuckDeleteError, deleteIdsLeafFirst, isRestrictViolation, withRetry } from "@/lib/workspace-export/leaf-first"
 import { PARENT, delegateFor, exportOrder, modelHasId, modelHasWorkspaceId } from "@/lib/workspace-export/scope"
 
 type Client = unknown
 type Row = Record<string, unknown>
+/** Rows per paging query. */
 const PAGE = 500
+/** Ids per delete statement: kept below the page size because every row also modifies its secondary indexes (DSQL counts them toward its per-transaction limit). */
+const DELETE_GROUP = 250
 
 function chunks<T>(list: T[], size: number): T[][] {
   const out: T[][] = []
@@ -50,14 +54,22 @@ export async function sweepWorkspaceOwnedRows(
     selectors.set(model, wheres)
     if (!modelHasId(model)) continue
     const ids: string[] = []
-    for (const where of wheres) {
-      let cursor: string | undefined
-      for (;;) {
-        const rows = (await delegate.findMany({ where, select: { id: true }, orderBy: { id: "asc" }, take: PAGE, ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}) })) as { id: string }[]
-        ids.push(...rows.map((r) => r.id))
-        if (rows.length < PAGE) break
-        cursor = rows[rows.length - 1].id
+    try {
+      for (const where of wheres) {
+        let cursor: string | undefined
+        for (;;) {
+          const rows = (await delegate.findMany({ where, select: { id: true }, orderBy: { id: "asc" }, take: PAGE, ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}) })) as { id: string }[]
+          ids.push(...rows.map((r) => r.id))
+          if (rows.length < PAGE) break
+          cursor = rows[rows.length - 1].id
+        }
       }
+    } catch (error) {
+      // A table whose migration has not run yet cannot hold rows. Deleting a workspace must not depend on it existing
+      // (the code can ship ahead of its migration), so such a model is simply skipped.
+      if (!isMissingTable(error)) throw error
+      selectors.delete(model)
+      continue
     }
     idsByModel.set(model, ids)
   }
@@ -72,7 +84,7 @@ export async function sweepWorkspaceOwnedRows(
       try {
         if (modelHasId(model)) {
           const ids = idsByModel.get(model) ?? []
-          for (const group of chunks(ids, PAGE)) await deleteIdsLeafFirst(delegate, group)
+          for (const group of chunks(ids, DELETE_GROUP)) await deleteIdsLeafFirst(delegate, group)
           removed[model] = (removed[model] ?? 0) + ids.length
           idsByModel.set(model, [])
         } else {
@@ -83,6 +95,7 @@ export async function sweepWorkspaceOwnedRows(
           }
         }
       } catch (error) {
+        if (isMissingTable(error)) continue
         if (!isRestrictViolation(error) && !(error instanceof StuckDeleteError)) throw error
         lastError = error
         next.push(model)

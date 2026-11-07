@@ -11,6 +11,7 @@ import { assertDocumentPilotCleanupReviewed } from "@/lib/document-cleanup";
 import { deleteWorkspaceAnalytics } from "@/lib/analytics/service";
 import { drainLinksFor, deleteWorkspaceLinks } from "@/lib/typed-links";
 import { deleteLinksForEntity, deleteWorkspaceLinks as deleteWorkspaceEntityLinks } from "@/lib/links/service";
+import { updateInBatches } from "@/lib/batched-delete";
 import { sweepWorkspaceOwnedRows } from "@/lib/workspace-export/sweep";
 
 /**
@@ -111,7 +112,7 @@ export async function deleteWorkspaceCascade(prisma: AppPrismaClient, workspaceI
     await deleteLinksForEntity(prisma, "TASK", taskIds);
     await prisma.taskLink.deleteMany({ where: { taskId: { in: taskIds } } });
   }
-  await prisma.task.updateMany({ where: { workspaceId }, data: { parentTaskId: null } });
+  await updateInBatches(prisma.task, { workspaceId, parentTaskId: { not: null } }, { parentTaskId: null });
   await prisma.task.deleteMany({ where: { workspaceId } });
 
   // 4. Launch checklists + checklist templates (all Restrict chains).
@@ -304,14 +305,9 @@ export async function deleteWorkspaceCascade(prisma: AppPrismaClient, workspaceI
   await prisma.squad.deleteMany({ where: { workspaceId } });
   const docIds = await ids(prisma.doc.findMany({ where: { workspaceId }, select: { id: true } }));
   if (docIds.length > 0) await deleteLinksForEntity(prisma, "DOC", docIds);
-  // Version snapshots and doc comments hold a required relation to Doc, so the docs cannot go while any exist (P2014). Replies go
-  // before their parent comments, and the doc tree is detached, for the same reason.
-  for (const chunk of chunked(docIds)) {
-    await prisma.docVersion.deleteMany({ where: { docId: { in: chunk } } });
-    await prisma.docComment.deleteMany({ where: { docId: { in: chunk }, parentId: { not: null } } });
-    await prisma.docComment.deleteMany({ where: { docId: { in: chunk } } });
-  }
-  await prisma.doc.updateMany({ where: { workspaceId }, data: { parentId: null } });
+  // Version snapshots and doc comments hold a required relation to Doc, so the docs cannot go while any exist (P2014); comment replies
+  // and doc trees are self-referencing for the same reason. The sweep removes the whole family children-first, in bounded batches.
+  await sweepWorkspaceOwnedRows(prisma, workspaceId, { only: ["DocVersion", "DocComment", "Doc"] });
   await prisma.doc.deleteMany({ where: { workspaceId } });
 
   // Backstop for anything the steps above do not know about (workspace-wide Comment rows, card sorts, modules, and whatever is added

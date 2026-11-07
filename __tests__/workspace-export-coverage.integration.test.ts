@@ -327,4 +327,48 @@ describe.skipIf(!databaseUrl)("workspace export: wide model coverage", () => {
     expect(await db().workspace.count({ where: { id: copy.workspaceId } })).toBe(0)
     expect(await leftovers(copy.workspaceId)).toEqual([])
   }, 180_000)
+
+  it("deletes a large workspace (1,100 tasks in deep chains, 700 doc versions, a deep comment thread) in bounded batches; workspace agents and their keys go, personal agents and other workspaces stay", async () => {
+    const before = await leftovers(wsId)
+    const big = await db().workspace.create({ data: { organizationId: orgId, slug: "big", name: "Big" } })
+
+    // Subtask chains of 10, so every statement that touches the tree has to cope with parents and children together.
+    const tasks = Array.from({ length: 1100 }, (_, i) => ({ id: randomUUID(), workspaceId: big.id, title: `T${i}`, parentTaskId: null as string | null }))
+    tasks.forEach((t, i) => { if (i % 10 !== 0) t.parentTaskId = tasks[i - 1].id })
+    await db().task.createMany({ data: tasks })
+
+    const doc = await db().doc.create({ data: { workspaceId: big.id, title: "Big doc", content: "" } })
+    await db().docVersion.createMany({ data: Array.from({ length: 700 }, (_, i) => ({ docId: doc.id, title: `v${i}`, content: "x" })) })
+    let parentId: string | null = null
+    for (let i = 0; i < 4; i++) {
+      const c: { id: string } = await db().docComment.create({ data: { docId: doc.id, body: `c${i}`, authorName: "A", parentId } })
+      parentId = c.id
+    }
+
+    const wsAgent = await db().agent.create({ data: { name: "WsBot", ownerType: "WORKSPACE", ownerWorkspaceId: big.id } })
+    const personal = await db().agent.create({ data: { name: "Mine", ownerType: "USER", ownerUserId: adminId } })
+    const hash = () => `${randomUUID()}${randomUUID()}`.replaceAll("-", "")
+    await db().apiKey.createMany({
+      data: [
+        { userId: adminId, name: "ws-agent-key", keyHash: hash(), keyPrefix: "cmp_aaaa", agentId: wsAgent.id },
+        { userId: adminId, name: "personal-agent-key", keyHash: hash(), keyPrefix: "cmp_bbbb", agentId: personal.id },
+      ],
+    })
+
+    await deleteWorkspaceCascade(prisma, big.id, { skipBlobCleanup: true })
+
+    expect(await db().workspace.count({ where: { id: big.id } })).toBe(0)
+    expect(await db().workspaceMember.count({ where: { workspaceId: big.id } })).toBe(0)
+    expect(await db().task.count({ where: { workspaceId: big.id } })).toBe(0)
+    expect(await db().docVersion.count({ where: { docId: doc.id } })).toBe(0)
+    expect(await db().docComment.count({ where: { docId: doc.id } })).toBe(0)
+    expect(await db().doc.count({ where: { workspaceId: big.id } })).toBe(0)
+    // The workspace's own agent and its credential are gone; the personal agent and its key are not.
+    expect(await db().agent.count({ where: { id: wsAgent.id } })).toBe(0)
+    expect(await db().apiKey.count({ where: { agentId: wsAgent.id } })).toBe(0)
+    expect(await db().agent.count({ where: { id: personal.id } })).toBe(1)
+    expect(await db().apiKey.count({ where: { agentId: personal.id } })).toBe(1)
+    // Other workspaces are untouched.
+    expect(await leftovers(wsId)).toEqual(before)
+  }, 240_000)
 })

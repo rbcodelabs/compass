@@ -13,6 +13,14 @@ const runDelegates = () => ({
   agentRunEvent: { findFirst: vi.fn(async () => null), deleteMany: vi.fn() },
   // Same reasoning for stored agent sessions (079): the probe reads the table.
   agentSession: { findFirst: vi.fn(async () => null), findMany: vi.fn(async (): Promise<{ blobKey: string }[]> => []), deleteMany: vi.fn() },
+  // Default-agent picks and the agents a workspace owns itself (deleted with it) are also read and deleted.
+  userDefaultAgent: { deleteMany: vi.fn() },
+  workspaceDefaultAgent: { deleteMany: vi.fn() },
+  agent: { findMany: vi.fn(async (): Promise<{ id: string }[]> => []), deleteMany: vi.fn() },
+  oAuthToken: { deleteMany: vi.fn() },
+  oAuthAuthorizationCode: { deleteMany: vi.fn() },
+  oAuthConsent: { deleteMany: vi.fn() },
+  agentOrgAdminGrant: { deleteMany: vi.fn() },
 });
 
 beforeEach(() => {
@@ -69,6 +77,34 @@ describe("agent lifecycle", () => {
     expect(db.agentToolCall.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "workspace" } });
     expect(db.agentRun.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "workspace" } });
     expect(db.agentSession.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "workspace" } });
+  });
+
+  it("deletes the agents the workspace owns, with their credentials, and never a personal agent", async () => {
+    type AgentRow = { id: string; ownerType: string; ownerWorkspaceId: string | null; ownerUserId: string | null };
+    const rows: AgentRow[] = [
+      { id: "shared-bot", ownerType: "WORKSPACE", ownerWorkspaceId: "workspace", ownerUserId: null },
+      { id: "other-workspace-bot", ownerType: "WORKSPACE", ownerWorkspaceId: "elsewhere", ownerUserId: null },
+      { id: "personal", ownerType: "USER", ownerWorkspaceId: null, ownerUserId: "owner" },
+    ];
+    const db = { apiKey: { deleteMany: vi.fn() }, pMInterview: { updateMany: vi.fn() }, agentMessage: { deleteMany: vi.fn() }, agentAuditLog: { deleteMany: vi.fn() }, agentConversation: { deleteMany: vi.fn() }, agentConversationReview: { deleteMany: vi.fn() }, agentWorkspaceGrant: { deleteMany: vi.fn() }, agentToolCall: { deleteMany: vi.fn() }, ...runDelegates() };
+    db.agent.findMany = vi.fn(async ({ where }: { where: { ownerType: string; ownerWorkspaceId: string } }) =>
+      rows.filter((row) => row.ownerType === where.ownerType && row.ownerWorkspaceId === where.ownerWorkspaceId).map(({ id }) => ({ id }))) as unknown as typeof db.agent.findMany;
+
+    await deleteWorkspaceAgentData(db as unknown as AppPrismaClient, "workspace");
+
+    expect(db.agent.deleteMany).toHaveBeenCalledWith({ where: { id: { in: ["shared-bot"] } } });
+    expect(db.apiKey.deleteMany).toHaveBeenCalledWith({ where: { agentId: { in: ["shared-bot"] } } });
+    expect(db.oAuthToken.deleteMany).toHaveBeenCalledWith({ where: { agentId: { in: ["shared-bot"] } } });
+    expect(db.userDefaultAgent.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "workspace" } });
+    expect(db.workspaceDefaultAgent.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "workspace" } });
+    // Credentials go before the identity they authenticate.
+    expect(db.apiKey.deleteMany.mock.invocationCallOrder.at(-1)!).toBeLessThan(db.agent.deleteMany.mock.invocationCallOrder[0]);
+  });
+
+  it("deletes no agent when the workspace owns none", async () => {
+    const db = { apiKey: { deleteMany: vi.fn() }, pMInterview: { updateMany: vi.fn() }, agentMessage: { deleteMany: vi.fn() }, agentAuditLog: { deleteMany: vi.fn() }, agentConversation: { deleteMany: vi.fn() }, agentConversationReview: { deleteMany: vi.fn() }, agentWorkspaceGrant: { deleteMany: vi.fn() }, agentToolCall: { deleteMany: vi.fn() }, ...runDelegates() };
+    await deleteWorkspaceAgentData(db as unknown as AppPrismaClient, "workspace");
+    expect(db.agent.deleteMany).not.toHaveBeenCalled();
   });
 
   it("still deletes a workspace when migration 079 has not been applied", async () => {
