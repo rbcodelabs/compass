@@ -1,7 +1,7 @@
 import getPrisma from "@/lib/db"
 import { agentWorkspaceWhere } from "@/lib/agent-access"
 import { findAgentById, isUserOwnedBy, isWorkspaceOwned } from "@/lib/agent-ownership"
-import { assertOrgAdminBySlug, assertOrgMemberBySlug, assertScoringModelAccess, assertWorkspaceAdmin, assertWorkspaceMember, getMcpActor, isServiceActor } from "@/lib/mcp-authz"
+import { assertOrgAdminBySlug, assertOrgMemberBySlug, assertScoringModelAccess, assertScoringModelActivation, assertWorkspaceAdmin, assertWorkspaceMember, getMcpActor, isServiceActor } from "@/lib/mcp-authz"
 import { decodeCursor, decodeOrderedCursor, encodeCursor, encodeOrderedCursor, type OrderedCursorPayload } from "@/lib/rest/cursor"
 import type { RestAuthorizationPolicy, RestRoute } from "@/lib/rest/registry"
 import { BatchRequestError, createOpportunityBatch, createSolutionBatch } from "@/lib/opportunity-batch-create"
@@ -215,7 +215,7 @@ export async function executeRestRoute(route: RestRoute, input: Input): Promise<
           prisma.scoringModel.findFirst({ where: { id: String(body.scoringModelId) }, select: { organizationId: true } }),
         ])
         if (!workspace || !model || workspace.organizationId !== model.organizationId) throw new RestNotFoundError()
-        await assertScoringModelAccess(actor, String(body.scoringModelId))
+        await assertScoringModelActivation(actor, workspaceId, String(body.scoringModelId))
       }
       ensureTool(await setWorkspaceScoringModel({ workspaceId, entityType: input.params.entityType as "OPPORTUNITY" | "SOLUTION", scoringModelId: nullable(body.scoringModelId) ?? null }))
       return { workspaceId, entityType: input.params.entityType, scoringModelId: nullable(body.scoringModelId) }

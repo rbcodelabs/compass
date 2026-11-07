@@ -521,3 +521,32 @@ export async function assertScoringModelAccess(
   }
   return { organizationId: model.organizationId }
 }
+
+/**
+ * Narrow check for ACTIVATING a scoring model on a workspace (set_workspace_scoring_model,
+ * REST updateWorkspaceScoringModel). Callers must run assertWorkspaceAdmin for the
+ * workspace first. A brand-new model is referenced by no WorkspaceScoringConfig, so the
+ * non-admin agent branch of assertScoringModelAccess can never see it; for an AGENT or
+ * AGENT_TURN actor this instead requires the model to belong to the workspace's own
+ * organization and a live SCORING_MODEL_ADMIN grant in it (defence in depth). Every
+ * other actor goes through assertScoringModelAccess exactly as before.
+ */
+export async function assertScoringModelActivation(
+  actor: McpActor,
+  workspaceId: string,
+  scoringModelId: string,
+): Promise<{ organizationId: string }> {
+  if (actor.purpose !== "AGENT" && actor.purpose !== "AGENT_TURN") return assertScoringModelAccess(actor, scoringModelId)
+  const prisma = getPrisma()
+  const [workspace, model] = await Promise.all([
+    prisma.workspace.findUnique({ where: { id: workspaceId }, select: { organizationId: true } }),
+    prisma.scoringModel.findUnique({ where: { id: scoringModelId }, select: { organizationId: true } }),
+  ])
+  if (!workspace || !model || workspace.organizationId !== model.organizationId) {
+    throw new McpAuthzError("Scoring model not found or access denied.")
+  }
+  if (!(await hasValidAgentOrgAdminGrant(actor, workspace.organizationId, "SCORING_MODEL_ADMIN"))) {
+    throw new McpAuthzError("Human administrator required.")
+  }
+  return { organizationId: workspace.organizationId }
+}
