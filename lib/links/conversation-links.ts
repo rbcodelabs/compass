@@ -9,6 +9,7 @@
  *  - A CREATED link is never downgraded: a later read or update leaves it alone, and a create replaces an earlier MENTIONS link.
  *  - Idempotent (the pair is unique); source AGENT marks it automatic, origin DIRECT.
  *  - It can never fail a tool call: `linkAgentToolCall` swallows and logs every error. No chat text is parsed.
+ *  - A user may remove an automatic link; the agent re-adds it only if a later tool call touches the same object again.
  *
  * READS apply the conversation access rules (lib/agent-conversation-access.ts): a viewer sees a conversation on an object only when
  * they may open that conversation, and a conversation's linked objects only when they may open the conversation. Titles are never
