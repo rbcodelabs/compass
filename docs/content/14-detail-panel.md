@@ -22,7 +22,7 @@ Each panel shows the essentials for that item — its status, key fields, and th
 
 | Item | Shows |
 |---|---|
-| **Objective** | Status, cycle, and its Key Results. An Objective with no cycle shows **No cycle / Persistent** as its cycle (on Torres workspaces a cycle is shown only when there is one) |
+| **Objective** | Status, cycle, its Key Results, and a read-only **Linked Opportunities** list (see below). An Objective with no cycle shows **No cycle / Persistent** as its cycle (on Torres workspaces a cycle is shown only when there is one) |
 | **Key Result** | Progress, its Objective (with a **Move to another objective…** picker, see [OKRs](/help/01-okrs#moving-a-key-result-to-another-objective)), any supporting Objectives, and any linked Opportunities and Roadmap items. On Opportunity-first and Torres workspaces it also has a read-only **Linked Solutions** list (each row opens that solution) |
 | **Opportunity** | The shared full-page detail: editable header, Key Result, Solutions, Evidence, OST Tree, configured scoring/custom fields, feedback, delivery tasks and Discussion. On Opportunity-first and Torres workspaces the header also has an **Objectives** (**Outcomes**) box listing the Objectives it is linked to, with a **Change** control to add or remove them |
 | **Solution** | Status, its Opportunity, assumptions, and roadmap links. On Opportunity-first and Torres workspaces it also has a **Linked Key Results** box (**Linked Success metrics** under Torres) where you tick or untick the Key Results the solution is meant to move; each tick saves immediately |
@@ -31,6 +31,15 @@ Each panel shows the essentials for that item — its status, key fields, and th
 | **Roadmap item** | The shared full-page detail: editable title, horizon, squad and dates in one summary row, votes and a Private chip, delivery tasks, launch checklist (when enabled), linked records, measurements, configured custom fields and Discussion |
 | **Task** | Status, priority, assignee, owner, squad, subtasks, and everything it's linked to |
 | **Feedback** | Type, status, votes, linked Opportunity, and attachments |
+
+### Linked opportunities on an Objective
+
+An Objective's panel lists the Opportunities that serve it: those linked directly to the Objective and those linked through one of its Key Results (an opportunity that is both appears once). Each row shows the opportunity's title (it opens the opportunity's page), its status, and a small **Direct** and/or **via Key Result: …** note.
+
+- When the workspace has an active Opportunity [scoring model](/help/11-scoring-models), a **Score** column shows each opportunity's **raw score** and the list is ordered by it, highest first, with unscored opportunities last. The raw score is shown rather than the 0-100 value because multiplicative models reach into the thousands; hover the score to see the normalized value. A score saved under an older version of the model is marked **stale**.
+- With no active scoring model there is no Score column, and the list is ordered by status, then title.
+- A long list scrolls inside the section, and the table scrolls sideways in a narrow panel instead of squeezing its columns.
+- The names follow your [thinking model](/help/27-thinking-models) (for example **Linked Bets** if you renamed Opportunities to Bets). The section is read-only: make or remove links from the opportunity's page.
 
 See [Tasks](/help/13-tasks) for what's specific to Task's fields — Epics/Subtasks, Owner, and Iteration.
 

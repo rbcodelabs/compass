@@ -19,6 +19,8 @@ import { LinkedTasksSection, type LinkedTaskData } from "@/components/tasks/link
 import type { MemberData, CustomFieldDefinitionData, CustomFieldValue } from "@/lib/types";
 import { CustomFieldsPanel } from "@/components/custom-fields/custom-fields-panel";
 import { useLabels, useThinkingModel } from "@/components/thinking-model/thinking-model-provider";
+import { LinkedOpportunitiesSection } from "./linked-opportunities-section";
+import type { LinkedOpportunities } from "@/lib/objective-linked-opportunities";
 import { cycleRouteSegment, noCycleLabel } from "@/lib/okr-cycle-scope";
 
 type ObjectiveData = {
@@ -45,6 +47,7 @@ type ObjectiveData = {
       cycle: { id: string; title: string; status: string } | null;
     };
   } | null;
+  linkedOpportunities?: LinkedOpportunities;
   deliveryTasks: LinkedTaskData[];
   linkableTasks: Array<{ id: string; title: string }>;
   members: MemberData[];
@@ -152,6 +155,10 @@ export function ObjectivePanel({
       <Section label={labels.keyResult.plural} count={data.keyResults.length}>
         <RelationList items={krItems} empty={`No ${labels.keyResult.lowerPlural} yet.`} />
       </Section>
+
+      {data.linkedOpportunities && (
+        <LinkedOpportunitiesSection data={data.linkedOpportunities} orgSlug={orgSlug} workspaceSlug={workspaceSlug} />
+      )}
 
       <Section label="Supports">
         <RelationList items={parentItems} empty={`No higher-level ${labels.keyResult.singular}.`} />
