@@ -712,6 +712,7 @@ export function RoadmapBoard({
         <div className="flex min-h-0 min-w-0 flex-1 flex-col md:flex-row">
         <Board
           label="Roadmap board"
+          fadeEnd={dockedColumnIds.length > 0}
           className={cn(
             "block min-h-[24rem] flex-1 scroll-px-3 overflow-x-auto p-0 sm:scroll-px-4",
             // Lanes stack vertically, so the board scrolls both ways in lane mode. Snapping is off there:

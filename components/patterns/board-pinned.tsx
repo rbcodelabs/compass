@@ -119,7 +119,7 @@ export function BoardPinnedRegion({ children, label = "Pinned columns", classNam
       data-testid="board-pinned-region"
       data-slot="board-pinned-region"
       aria-label={label}
-      className={cn("flex min-h-0 shrink-0 gap-3 py-3 pr-3 lg:pr-4", className)}
+      className={cn("flex min-h-0 shrink-0 gap-3 border-l border-border-default py-3 pl-3 pr-3 lg:pl-4 lg:pr-4", className)}
     >
       {children}
     </aside>

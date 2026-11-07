@@ -236,6 +236,24 @@ test.describe("Roadmap board pinned columns", () => {
       await shot(page, "05-swimlane-mode-not-scheduled-docked");
       await page.evaluate(() => window.localStorage.clear());
 
+      // ── 7b. Separation: docked rail has a left divider and the scroller tapers instead of being sliced ──
+      await page.setViewportSize({ width: 1280, height: 800 });
+      await page.goto(`${base}/roadmap`);
+      await page.waitForLoadState("networkidle");
+      await expect(pinnedRegion(page)).toBeVisible({ timeout: 30_000 });
+      expect(await pinnedRegion(page).evaluate((el) => getComputedStyle(el).borderLeftWidth)).toBe("1px");
+      expect(await scroller(page).evaluate((el) => getComputedStyle(el).maskImage)).toContain("linear-gradient");
+      const midScroll = () => scroller(page).evaluate((el) => { el.scrollLeft = (el.scrollWidth - el.clientWidth) / 2; });
+      await midScroll();
+      await shot(page, "desktop-spacing-1-not-scheduled-collapsed-mid-scroll");
+      await pinnedRegion(page).getByRole("button", { name: /^Expand Not scheduled/ }).click();
+      await midScroll();
+      await shot(page, "desktop-spacing-2-not-scheduled-expanded-mid-scroll");
+      await page.getByRole("button", { name: "Pin Later to the right" }).click();
+      await midScroll();
+      await shot(page, "desktop-spacing-3-two-pinned-mid-scroll");
+      await page.evaluate(() => window.localStorage.clear());
+
       // ── 8. Narrow viewport: pinned columns fall back to scroller columns ──────
       await page.goto(`${base}/roadmap`);
       await page.waitForLoadState("networkidle");
