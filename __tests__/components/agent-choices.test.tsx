@@ -96,12 +96,16 @@ describe("AgentChat agent selector", () => {
 })
 
 describe("AgentChat composer layout", () => {
-  it("has no context strip until there is a status or a chip to show, and no footer without choices", async () => {
+  it("has no context strip until there is a status or a chip to show, and no choice chips in the footer without choices", async () => {
     stubFetch({ agents: [], defaultAgentId: null })
     const { container } = render(<AgentChat {...chatProps()} />)
     await act(async () => {})
     expect(container.querySelector('[data-slot="composer-strip"]')).toBeNull()
-    expect(container.querySelector('[data-slot="composer-footer"]')).toBeNull()
+    // The footer now always carries the attach control, so it exists; what must be absent is any Agent choice chip.
+    const footer = container.querySelector('[data-slot="composer-footer"]')
+    expect(footer).not.toBeNull()
+    expect(footer).toContainElement(screen.getByRole("button", { name: "Attach a file" }))
+    expect(queryChipButton("Agent")).toBeNull()
   })
 
   it("shows the Agent chip in the footer once there are agents to pick", async () => {

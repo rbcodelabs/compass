@@ -22,7 +22,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { Archive, ArchiveRestore, Loader2, Sparkles, X as XIcon } from "lucide-react"
+import { Archive, ArchiveRestore, FileText, Loader2, Sparkles, X as XIcon } from "lucide-react"
 import { fetchArchivedConversations, setConversationArchived, type ArchivedConversation } from "@/lib/agent-archive-client"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -36,6 +36,7 @@ import { ModelPicker, modelLabelFor, useModelPick } from "@/components/agent/mod
 import { AgentChip } from "@/components/agent/composer/agent-chip"
 import { ComposerCard } from "@/components/agent/composer/composer-card"
 import { Markdown } from "@/components/agent/markdown"
+import { AttachMenu, uploadAgentFiles, type AttachedItem, type AttachedUpload } from "@/components/agent/composer/attach-menu"
 import { SeedContextChip } from "@/components/agent/seed-context-chip"
 import { AgentParticipantsPanel, type Roster } from "@/components/agent/agent-participants"
 import { initialsOf } from "@/lib/user-initials"
@@ -183,6 +184,12 @@ export function AgentChat({
   // never resent — belt-and-suspenders alongside the server's own
   // conversationId-presence guard (app/api/agent/turn/route.ts).
   const [pendingSeedEntity, setPendingSeedEntity] = useState<SeedEntity | undefined>(seedEntity)
+  const [attachedItems, setAttachedItems] = useState<AttachedItem[]>([])
+  const [attachedUploads, setAttachedUploads] = useState<AttachedUpload[]>([])
+  const [attachError, setAttachError] = useState<string | null>(null)
+  const [dragging, setDragging] = useState(false)
+  const dragDepth = useRef(0)
+  const [orgSlug, workspaceSlug] = basePath.split("/").filter(Boolean)
   const [docChip, setDocChip] = useState<{ label: string; summary: string; sourceUrl: string } | null>(null)
   const appliedSeedId = useRef<number | null>(null)
   const composerRef = useRef<HTMLTextAreaElement>(null)
@@ -349,9 +356,16 @@ export function AgentChat({
         : undefined
     if (seedContextForThisTurn) setPendingSeedEntity(undefined)
     setDocChip(null)
+    const contextItemsForThisTurn = attachedItems.map(({ type, id }) => ({ type, id }))
+    const uploadsForThisTurn = attachedUploads.map((u) => u.ref)
+    setAttachedItems([])
+    setAttachedUploads([])
+    setAttachError(null)
 
     await startTurn({
       message: text,
+      contextItems: contextItemsForThisTurn,
+      uploads: uploadsForThisTurn,
       conversationId: activeConversationId,
       seedContext: seedContextForThisTurn,
       agentId: agentSelection || undefined,
@@ -363,7 +377,7 @@ export function AgentChat({
       retry,
       continueTurn: !handoff && Boolean(processing?.canContinue),
     })
-  }, [input, activeConversationId, isRail, processing?.canContinue, pendingSeedEntity, sending, startTurn, agentSelection, modelPick.model])
+  }, [input, activeConversationId, isRail, processing?.canContinue, pendingSeedEntity, attachedItems, attachedUploads, sending, startTurn, agentSelection, modelPick.model])
 
   // The agent's plan is its Compass tasks for this conversation (TaskCreate/TaskUpdate), read from the server so it
   // survives a reload and reaches participants. Refetched when a task tool call finishes (planVersion) and when a turn ends.
@@ -588,13 +602,36 @@ export function AgentChat({
           : null
       : null
 
+  const hasFiles = (e: React.DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes("Files")
+  const canDrop = !composerDisabled && !accessLost
+  const dropHandlers = {
+    onDragEnter: (e: React.DragEvent) => { if (!canDrop || !hasFiles(e)) return; e.preventDefault(); dragDepth.current++; setDragging(true) },
+    onDragOver: (e: React.DragEvent) => { if (!canDrop || !hasFiles(e)) return; e.preventDefault(); e.dataTransfer.dropEffect = "copy" },
+    onDragLeave: (e: React.DragEvent) => { if (!hasFiles(e)) return; dragDepth.current = Math.max(0, dragDepth.current - 1); if (dragDepth.current === 0) setDragging(false) },
+    onDrop: (e: React.DragEvent) => {
+      if (!hasFiles(e)) return
+      e.preventDefault()
+      dragDepth.current = 0
+      setDragging(false)
+      if (!canDrop) return
+      setAttachError(null)
+      void uploadAgentFiles({ files: Array.from(e.dataTransfer.files), workspaceId, uploadCount: attachedUploads.length, onUploaded: (u) => setAttachedUploads((l) => [...l, u]), onError: setAttachError })
+    },
+  }
+
   return (
     <div
+      {...dropHandlers}
       // No card chrome in either variant: the page sits under WorkspacePage's
       // header and fills the pane edge to edge, and the rail draws its own
       // border and header.
-      className="flex min-h-0 flex-1 overflow-hidden bg-surface-panel"
+      className="relative flex min-h-0 flex-1 overflow-hidden bg-surface-panel"
     >
+      {dragging && (
+        <div data-testid="agent-drop-overlay" className="pointer-events-none absolute inset-2 z-50 grid place-items-center rounded-lg border-2 border-dashed border-primary bg-popover/90 text-sm font-medium text-foreground">
+          Drop files to attach them to your message
+        </div>
+      )}
       {/* Conversation list — page only; in the rail these controls live in the
           rail header instead, because 256px of list plus a readable thread does
           not fit in a 320–560px column. Shown or removed entirely by the page
@@ -803,8 +840,15 @@ export function AgentChat({
               </>
             ) : null}
             contextChips={
-              pendingSeedEntity || docChip ? (
+              pendingSeedEntity || docChip || attachedItems.length || attachedUploads.length || attachError ? (
                 <>
+                  {attachedItems.map((i) => (
+                    <AttachedChip key={`${i.type}:${i.id}`} label={i.title} hint={i.typeLabel} onRemove={() => setAttachedItems((l) => l.filter((x) => x !== i))} />
+                  ))}
+                  {attachedUploads.map((u) => (
+                    <AttachedChip key={u.ref} label={u.name} hint="File" file onRemove={() => setAttachedUploads((l) => l.filter((x) => x !== u))} />
+                  ))}
+                  {attachError && <span role="alert" className="text-xs text-status-danger">{attachError}</span>}
                   {pendingSeedEntity && (
                     <SeedContextChip label={pendingSeedEntity.label} summary={pendingSeedEntity.summary} sourceUrl={pendingSeedEntity.sourceUrl} onDismiss={() => setPendingSeedEntity(undefined)} />
                   )}
@@ -813,17 +857,28 @@ export function AgentChat({
               ) : null
             }
             chips={
-              (agentChoices.agents.length > 0 || modelPick.visible || agentChoices.connectors.length > 0) && (
-                <>
-                  {agentChoices.agents.length > 0 && (
-                    <AgentChip choices={agentChoices} value={agentSelection} defaultAgentName={defaultAgentName} disabled={composerDisabled} onChange={setAgentPick} />
-                  )}
-                  <ToolsMenu connectors={agentChoices.connectors} enabled={connectorsEnabledFor(agentSelection, agentChoices.defaultAgentId)} loaded={agentChoices.loaded} />
-                  {modelPick.visible && (
-                    <ModelPicker choices={agentChoices} value={modelPick.model} defaultLabel={modelPick.defaultLabel} disabled={composerDisabled} onChange={modelPick.select} />
-                  )}
-                </>
-              )
+              <>
+                {!accessLost && (
+                  <AttachMenu
+                    workspaceId={workspaceId}
+                    orgSlug={orgSlug}
+                    workspaceSlug={workspaceSlug}
+                    disabled={composerDisabled}
+                    uploadCount={attachedUploads.length}
+                    items={attachedItems}
+                    onUploaded={(u) => { setAttachError(null); setAttachedUploads((l) => [...l, u]) }}
+                    onPickItem={(i) => { setAttachError(null); setAttachedItems((l) => [...l, i]) }}
+                    onError={setAttachError}
+                  />
+                )}
+                {agentChoices.agents.length > 0 && (
+                  <AgentChip choices={agentChoices} value={agentSelection} defaultAgentName={defaultAgentName} disabled={composerDisabled} onChange={setAgentPick} />
+                )}
+                <ToolsMenu connectors={agentChoices.connectors} enabled={connectorsEnabledFor(agentSelection, agentChoices.defaultAgentId)} loaded={agentChoices.loaded} />
+                {modelPick.visible && (
+                  <ModelPicker choices={agentChoices} value={modelPick.model} defaultLabel={modelPick.defaultLabel} disabled={composerDisabled} onChange={modelPick.select} />
+                )}
+              </>
             }
           />
         </div>
@@ -832,9 +887,10 @@ export function AgentChat({
   )
 }
 
-function AttachedChip({ label, hint, onRemove }: { label: string; hint: string; onRemove: () => void }) {
+function AttachedChip({ label, hint, file, onRemove }: { label: string; hint: string; file?: boolean; onRemove: () => void }) {
   return (
     <div title={`${hint}: ${label}`} className="inline-flex h-6 min-w-0 max-w-full items-center gap-1 rounded-md border border-border bg-muted pr-0.5 pl-2 text-xs">
+      {file && <FileText className="size-3 shrink-0 text-muted-foreground" aria-hidden="true" />}
       <span className="min-w-0 truncate font-medium text-foreground">{label}</span>
       <button type="button" aria-label={`Remove ${label}`} onClick={onRemove} className="relative grid size-[18px] shrink-0 place-items-center rounded text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
         <XIcon className="size-3" aria-hidden="true" />
