@@ -2317,6 +2317,11 @@ model Doc {
   // Human-readable ID (ADR "Human-readable work item IDs"). Nullable until migration 093 numbers old rows.
   seqPrefix String? @map("seq_prefix") @db.VarChar(8)
   seqNumber Int? @map("seq_number")
+
+  /// Portal publishing (migration 113). NULL = private to workspace members. Set = readable on the public
+  /// portal, scoped by workspaceId AND publishedAt (lib/portal-docs). publishedById is a bare UUID (no FK).
+  publishedAt   DateTime? @map("published_at")
+  publishedById String?   @map("published_by_id") @db.Uuid
   @@unique([workspaceId, seqPrefix, seqNumber], map: "idx_docs_seq")
   @@map("docs")
 }
@@ -3783,6 +3788,9 @@ model PortalHomeLayout {
   publishedWidgets Json?     @map("published_widgets")
   publishedAt      DateTime? @map("published_at")
   publishedById    String?   @map("published_by_id") @db.Uuid
+  /// Template ids (lib/portal-home/templates.ts), migration 114. NULL = "editorial" (DSQL: no DEFAULT on ADD COLUMN).
+  draftTemplate     String?  @map("draft_template") @db.VarChar(20)
+  publishedTemplate String?  @map("published_template") @db.VarChar(20)
   createdAt        DateTime  @default(now()) @map("created_at")
   updatedAt        DateTime  @default(now()) @map("updated_at")
 
