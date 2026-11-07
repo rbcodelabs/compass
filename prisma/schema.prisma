@@ -2930,6 +2930,9 @@ model AgentConversation {
   userId      String   @map("user_id") @db.Uuid
   title       String?  @db.VarChar(255)
   interviewProcessingJson String? @map("interview_processing_json") @db.Text
+  /// Set when the OWNER archives the chat; null = active. Archived chats are hidden from the
+  /// conversation list (everyone it is shared with) but stay readable by id and restorable.
+  archivedAt  DateTime? @map("archived_at")
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @default(now()) @map("updated_at")
 

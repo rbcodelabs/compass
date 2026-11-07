@@ -24,7 +24,7 @@ describe("listAgentConversations", () => {
     const res = await listAgentConversations("ws-1", "user-1")
     expect(res).toHaveLength(1)
     expect(mockPrisma.agentConversation.findMany).toHaveBeenCalledWith({
-      where: accessibleConversationsWhere("ws-1", "user-1"),
+      where: { ...accessibleConversationsWhere("ws-1", "user-1"), archivedAt: null },
       orderBy: { updatedAt: "desc" },
       select: { id: true, title: true, updatedAt: true },
       take: 50,

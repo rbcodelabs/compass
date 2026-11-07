@@ -195,6 +195,8 @@ test.describe("Roadmap — not yet on the roadmap", () => {
       await page.goto(`${base}/roadmap`);
       await page.waitForLoadState("networkidle");
 
+      // The pane starts collapsed; expand it before interacting.
+      await page.getByRole("button", { name: /^Expand Not scheduled/ }).click();
       await expect(page.getByRole("heading", { name: "Not scheduled" })).toBeVisible({ timeout: 10_000 });
       // From md up the pane is docked beside the board (outside the scrolling track) so a drag never needs
       // a mid-drag scroll; below md it stays the last column in the track (kanban-mobile-scroll covers that).
@@ -273,6 +275,8 @@ test.describe("Roadmap — not yet on the roadmap", () => {
       // pinned selects) legitimately leave their own validated solutions
       // unscheduled. The empty state itself is covered by
       // __tests__/components/unscheduled-items-column.test.tsx.
+      // The reload above reset the pane to its collapsed default, so expand it before reading the column.
+      await page.getByRole("button", { name: /^Expand Not scheduled/ }).click();
       const boardUnscheduled = page.getByTestId("roadmap-unscheduled-column");
       await expect(boardUnscheduled).toBeVisible();
       for (const title of [solTitle, sol2Title, bugTitle]) {

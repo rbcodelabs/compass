@@ -59,8 +59,8 @@ export function DeleteOrganizationPanel({ orgSlug, organizationName, workspaces 
         )}
         {workspaces.length > 0 && (
           <ul className="ml-4 list-disc space-y-0.5 text-sm text-status-danger">
-            {workspaces.map((ws) => (
-              <li key={ws.name} className="break-words font-medium">
+            {workspaces.map((ws, index) => (
+              <li key={`${index}:${ws.name}`} className="break-words font-medium">
                 {ws.name}
               </li>
             ))}

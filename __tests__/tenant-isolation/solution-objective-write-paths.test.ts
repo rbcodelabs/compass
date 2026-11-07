@@ -417,6 +417,8 @@ const files = walk(ROOT)
  */
 const KNOWN_PRISMA_CREATE_SITES: Record<string, number> = {
   "__tests__/preview-automation-qa/postgres-integration.test.ts": 1,
+  "__tests__/workspace-export-coverage.integration.test.ts": 2, // solution + objective fixtures for the round trip, each created with the fixture workspace's id
+  "__tests__/workspace-export.integration.test.ts": 1, // one solution fixture for the round trip, created with the fixture workspace's id
   "__tests__/typed-link-tables-migration.integration.test.ts": 2, // objective + solution in the old-client CRUD check; both set a workspaceId derived from the created rows
   "app/[orgSlug]/[workspaceSlug]/discovery/actions.ts": 1,
   "app/[orgSlug]/[workspaceSlug]/okrs/actions.ts": 1,

@@ -44,6 +44,9 @@ const mayName = (file: string) =>
   posix(file).startsWith("lib/links/") ||
   posix(file).startsWith("lib/migrations/") ||
   posix(file).startsWith("prisma/migrations/") ||
+  // Workspace export/import copies link rows between workspaces generically; it re-points both endpoints through its id map and drops a
+  // link whose endpoint is not part of the import (see lib/workspace-export/import.ts DROP_ON_UNRESOLVED and the guard note in typed-link-access.test.ts).
+  posix(file).startsWith("lib/workspace-export/") ||
   ["prisma/schema.prisma", "lib/typed-links.ts"].includes(posix(file));
 
 describe("findReferences (canary: the guard catches known-bad text)", () => {

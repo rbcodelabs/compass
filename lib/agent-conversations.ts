@@ -8,7 +8,7 @@
 import getPrisma from "@/lib/db"
 import { agentParticipantsAvailable } from "@/lib/agent-conversation-participants"
 import { sanitizeAuthorLabel } from "@/lib/agent-author-label"
-import { accessibleConversationsWhere, resolveConversationAccess } from "@/lib/agent-conversation-access"
+import { accessibleConversationsWhere, ownedConversationsWhere, resolveConversationAccess } from "@/lib/agent-conversation-access"
 
 export type ConversationSummary = {
   id: string
@@ -30,14 +30,19 @@ export type ChatMessage = {
   authorName: string | null
 }
 
-/** The conversations a user can access in a workspace, most-recently-updated first. */
+/**
+ * The conversations a user can access in a workspace, most-recently-updated first.
+ * Archived chats are excluded unless `archived` is true, in which case ONLY archived
+ * chats are returned.
+ */
 export async function listAgentConversations(
   workspaceId: string,
-  userId: string
+  userId: string,
+  { archived = false }: { archived?: boolean } = {}
 ): Promise<ConversationSummary[]> {
   const prisma = getPrisma()
   return prisma.agentConversation.findMany({
-    where: accessibleConversationsWhere(workspaceId, userId),
+    where: { ...accessibleConversationsWhere(workspaceId, userId), archivedAt: archived ? { not: null } : null },
     orderBy: { updatedAt: "desc" },
     select: { id: true, title: true, updatedAt: true },
     take: 50,
@@ -92,4 +97,23 @@ export async function getAgentConversationMessages(
     authorUserId,
     authorName: authorUserId ? (names.get(authorUserId) ?? null) : null,
   }))
+}
+
+/**
+ * Archive or restore a conversation. Owner-only: a participant who wants a shared chat
+ * out of their way leaves it instead. Returns false when the caller is not the owner (or
+ * has no access), which routes report as 404.
+ */
+export async function setAgentConversationArchived(
+  conversationId: string,
+  workspaceId: string,
+  userId: string,
+  archived: boolean
+): Promise<boolean> {
+  const prisma = getPrisma()
+  const { count } = await prisma.agentConversation.updateMany({
+    where: { id: conversationId, ...ownedConversationsWhere(workspaceId, userId) },
+    data: { archivedAt: archived ? new Date() : null },
+  })
+  return count > 0
 }

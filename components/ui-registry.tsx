@@ -37,6 +37,8 @@ import { FacetedFilterMenu } from "@/components/patterns/faceted-filter-menu";
 import { WorkspaceCreateButton, WorkspaceHeader, WorkspaceIconButton, WorkspaceMoreMenu, WorkspaceViewSwitcher } from "@/components/patterns";
 import { AppShell, Board, BoardColumn, ConfirmDialog, DetailPanel, DetailPanelSection, EmptyState, EntityCard, FilterBar, FormField, LoadingState, MetricBadge, PageHeader, PageSection, SettingsSection, StatusBadge, Toolbar } from "@/components/patterns";
 import { DataGrid, type GridColumnDef, type GridSort } from "@/components/data-grid";
+import { EntityPill, PILL, type EntityPillData } from "@/components/patterns/entity-pill";
+import { cn } from "@/lib/utils";
 
 function WorkspaceHeaderExamples() {
   const [status, setStatus] = useState<string | null>(null);
@@ -304,6 +306,32 @@ function DataGridExamples() {
   );
 }
 
+const pillSamples: EntityPillData[] = [
+  { kind: "solution", typeLabel: "Solution", title: "Inline entity pills for agent chat", status: "IN_DELIVERY", description: "Replace block cards in the transcript with compact pills. Hovering shows the live title, state and key facts.", facts: [{ label: "Score", value: "72" }, { label: "Opportunity", value: "Skim agent replies faster" }], href: "#" },
+  { kind: "assumption", typeLabel: "Assumption", title: "Readers scan faster with inline links", status: "UNTESTED", description: "We have no usage data yet on how people read agent replies.", facts: [{ label: "Risk", value: "High" }], href: "#" },
+  { kind: "experiment", typeLabel: "Experiment", title: "A/B transcript skim test", status: "RUNNING", description: null, facts: [{ label: "Ends", value: "Nov 14" }], href: "#" },
+  { kind: "task", typeLabel: "Task", title: "Ship shared pill component", status: "DONE", description: null, facts: [], href: "#" },
+  { kind: "keyResult", typeLabel: "Key result", title: "Weekly active discovery teams", status: null, description: null, facts: [{ label: "Progress", value: "62%" }], href: "#" },
+];
+
+function EntityPillExamples() {
+  const stay = (event: React.MouseEvent) => event.preventDefault();
+  return (
+    <div className="space-y-4 text-sm leading-7 text-text-secondary">
+      <p>
+        Inline in a sentence: the riskiest bet is <EntityPill data={pillSamples[0]} onClick={stay} /> and it rests on{" "}
+        <EntityPill data={pillSamples[1]} onClick={stay} />. Hover or focus a pill to see its card.
+      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        {pillSamples.slice(2).map((data) => <EntityPill key={data.title} data={data} onClick={stay} />)}
+        <a href="#" onClick={stay} className={cn(PILL, "w-28 animate-pulse bg-surface-interactive")} aria-busy="true" aria-label="Loading" />
+        <a href="#" onClick={stay} className={cn(PILL, "border-dashed text-text-secondary")}>Unavailable record</a>
+      </div>
+      <p className="text-xs text-text-subtle">Shared by agent chat and docs. Pass resolved record data; the pill is a real link, so the caller decides what a click does.</p>
+    </div>
+  );
+}
+
 function Section({ id, title, description, children }: { id: string; title: string; description: string; children: React.ReactNode }) {
   return (
     <section id={id} className="scroll-mt-8 border-t border-border-default pt-10">
@@ -381,6 +409,7 @@ export function UIRegistry() {
                 <Example title="Application shell"><div className="h-64 overflow-hidden rounded-xl border border-border-default"><AppShell className="min-h-0 [&>div]:min-h-0" navigation={<div className="p-4 text-sm font-semibold">Compass<br /><span className="mt-6 block rounded-lg bg-surface-navigation-active p-2 font-normal">Discovery</span></div>}><PageHeader title="Workspace" description="Shared shell spacing and main-content semantics." /></AppShell></div></Example>
                 <Example title="Board and columns"><Board label="Example opportunity board"><BoardColumn title="Exploring" count={1} accent="info"><EntityCard title="Clarify first-run guidance" description="Synthesize onboarding signals." status={<StatusBadge status="info">Open</StatusBadge>} /></BoardColumn><BoardColumn title="Validating" count={1} accent="warning"><EntityCard title="Test guided setup" description="Prototype a first-session checklist." status={<StatusBadge status="warning">Running</StatusBadge>} /></BoardColumn><BoardColumn title="Learned" count={0} accent="success" emptyState={<EmptyState compact title="Nothing learned yet" description="Concluded experiments appear here." />} /></Board></Example>
                 <div className="grid gap-4 lg:grid-cols-2"><Example title="Form field and settings section"><SettingsSection title="Workspace defaults" description="Applied to new opportunities."><FormField id="registry-pattern-name" label="Default owner" description="The teammate responsible for new work."><Input id="registry-pattern-name" placeholder="Choose an owner" /></FormField></SettingsSection></Example><Example title="Detail panel and loading"><div className="h-80 overflow-hidden rounded-xl border border-border-default"><DetailPanel eyebrow="Opportunity" title="Reduce setup uncertainty" description="Customer onboarding"><DetailPanelSection title="Summary"><p className="text-sm text-text-secondary">Help teams reach their first useful plan with less ambiguity.</p></DetailPanelSection><DetailPanelSection title="Activity"><LoadingState rows={2} label="Loading activity" /></DetailPanelSection></DetailPanel></div></Example></div>
+                <Example title="Entity pill and hover card"><EntityPillExamples /></Example>
                 <Example title="Confirmation pattern"><ConfirmDialog trigger={<Button variant="destructive"><Trash2 />Delete opportunity</Button>} title="Delete opportunity?" description="This permanently removes the opportunity and its links." confirmLabel="Delete" destructive onConfirm={() => undefined} /></Example>
               </div>
             </Section>

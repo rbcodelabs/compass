@@ -10,7 +10,7 @@ import {
 } from "react"
 import type { CSSProperties, KeyboardEvent } from "react"
 import { useRouter } from "next/navigation"
-import { BookOpen, Check, ChevronDown, Library, Maximize2, MessagesSquare, Plus, Sparkles, X } from "lucide-react"
+import { Archive, ArchiveRestore, BookOpen, Check, ChevronDown, Library, Maximize2, MessagesSquare, Plus, Sparkles, X } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -18,8 +18,10 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { fetchArchivedConversations, setConversationArchived } from "@/lib/agent-archive-client"
 import { cn } from "@/lib/utils"
 import { PANEL_MIN_MAIN, PANEL_WIDTH_MAX, PANEL_WIDTH_MIN } from "@/lib/panel-pin"
 import {
@@ -306,6 +308,29 @@ export function AgentRail({ workspaceId, basePath, userInitials, userId }: Agent
     if (open) void loadThreads()
   }, [open, loadThreads])
 
+  // Archive: the switcher shows active chats; "Archived chats" swaps in the archived ones,
+  // where picking one restores it and opens it.
+  const [showArchived, setShowArchived] = useState(false)
+  const [archivedThreads, setArchivedThreads] = useState<RailThread[]>([])
+  const toggleArchived = useCallback(async () => {
+    if (!showArchived) setArchivedThreads(await fetchArchivedConversations(workspaceId))
+    setShowArchived((v) => !v)
+  }, [showArchived, workspaceId])
+  const archiveCurrent = useCallback(async () => {
+    if (!conversationId || !(await setConversationArchived(workspaceId, conversationId, true))) return
+    selectConversation(null)
+    void loadThreads()
+  }, [conversationId, workspaceId, selectConversation, loadThreads])
+  const restoreThread = useCallback(
+    async (id: string) => {
+      if (!(await setConversationArchived(workspaceId, id, false))) return
+      setShowArchived(false)
+      void loadThreads()
+      selectConversation(id)
+    },
+    [workspaceId, loadThreads, selectConversation],
+  )
+
   // Transcript for the selected thread. Reruns on selection, not on every
   // render, and never for a thread whose messages are already on screen.
   useEffect(() => {
@@ -367,11 +392,13 @@ export function AgentRail({ workspaceId, basePath, userInitials, userId }: Agent
     selectConversation(null)
   }, [selectConversation])
 
+  const expandBlocked = streaming && !conversationId
+
   const expandToPage = useCallback(() => {
-    // The button is disabled mid-turn; this is the belt to that brace. Closing
-    // would abort the turn, and for a new chat the id does not exist until the
-    // turn completes, so the page would open empty.
-    if (streaming) return
+    // Mid-turn the run is detached (it lives on the server), so the full page
+    // reattaches to it via ?c=. That needs the conversation id: a brand-new chat
+    // has none until the server answers, so wait for it.
+    if (streaming && !conversationId) return
     // The rail is deliberately NOT closed here. Two things make that safe and
     // better: the provider hides the rail on the agent route, so there are never
     // two live AgentChats; and closing would change rail state while this push
@@ -519,6 +546,18 @@ export function AgentRail({ workspaceId, basePath, userInitials, userId }: Agent
         >
           <Plus aria-hidden="true" />
         </Button>
+        {conversationId && threads.some((t) => t.id === conversationId) && (
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={() => void archiveCurrent()}
+            disabled={streaming}
+            aria-label="Archive this chat"
+            title="Archive this chat"
+          >
+            <Archive aria-hidden="true" />
+          </Button>
+        )}
 
         {/* The conversation list lives here rather than inside AgentChat: the
             page shows it as a 256px column, which a 320px rail has no room for
@@ -536,19 +575,36 @@ export function AgentRail({ workspaceId, basePath, userInitials, userId }: Agent
           >
             <MessagesSquare aria-hidden="true" />
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="max-h-80 w-64 overflow-y-auto">
-            {threads.length === 0 && (
-              <DropdownMenuItem disabled>No conversations yet</DropdownMenuItem>
+          <DropdownMenuContent align="end" className="w-64 p-0">
+            <div className="max-h-64 overflow-y-auto p-1">
+            {(showArchived ? archivedThreads : threads).length === 0 && (
+              <DropdownMenuItem disabled>
+                {showArchived ? "No archived chats" : "No conversations yet"}
+              </DropdownMenuItem>
             )}
-            {threads.map((thread) => (
+            {(showArchived ? archivedThreads : threads).map((thread) => (
               <DropdownMenuItem
                 key={thread.id}
-                onClick={() => selectConversation(thread.id)}
+                onClick={() => (showArchived ? void restoreThread(thread.id) : selectConversation(thread.id))}
                 className={cn(thread.id === conversationId && "font-semibold")}
               >
+                {showArchived && <ArchiveRestore className="size-4 shrink-0 text-text-subtle" aria-hidden="true" />}
                 <span className="truncate">{thread.title || "Untitled chat"}</span>
               </DropdownMenuItem>
             ))}
+            </div>
+            <DropdownMenuSeparator className="my-0" />
+            <div className="p-1">
+            {!showArchived && conversationId && threads.some((t) => t.id === conversationId) && (
+              <DropdownMenuItem onClick={() => void archiveCurrent()}>
+                <Archive className="size-4 shrink-0 text-text-subtle" aria-hidden="true" />
+                Archive this chat
+              </DropdownMenuItem>
+            )}
+            <DropdownMenuItem closeOnClick={false} onClick={() => void toggleArchived()}>
+              {showArchived ? "Back to chats" : "Archived chats"}
+            </DropdownMenuItem>
+            </div>
           </DropdownMenuContent>
         </DropdownMenu>
 
@@ -556,18 +612,18 @@ export function AgentRail({ workspaceId, basePath, userInitials, userId }: Agent
           variant="ghost"
           size="icon-sm"
           onClick={expandToPage}
-          disabled={streaming}
+          disabled={expandBlocked}
           aria-label="Open in full page"
           // Disabled buttons get no pointer events, so this native title is the
           // explanation sighted users get; aria-describedby carries it to AT.
-          title={streaming ? "Available when the response finishes" : "Open in full page"}
-          aria-describedby={streaming ? expandHintId : undefined}
+          title={expandBlocked ? "Available once the agent has started the conversation" : "Open in full page"}
+          aria-describedby={expandBlocked ? expandHintId : undefined}
         >
           <Maximize2 aria-hidden="true" />
         </Button>
-        {streaming && (
+        {expandBlocked && (
           <span id={expandHintId} className="sr-only">
-            Open in full page is available when the response finishes.
+            Open in full page is available once the agent has started the conversation.
           </span>
         )}
         </>)}
