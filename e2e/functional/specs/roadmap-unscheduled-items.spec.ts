@@ -195,8 +195,8 @@ test.describe("Roadmap — not yet on the roadmap", () => {
       await page.goto(`${base}/roadmap`);
       await page.waitForLoadState("networkidle");
 
-      // The pane starts collapsed (its default pinned layout); expand it before interacting.
-      await page.getByRole("button", { name: /^Expand Not scheduled/ }).click();
+      // The dock starts collapsed to its tab rail (the default layout); open the Not scheduled tab before interacting.
+      await page.getByRole("tab", { name: /^Not scheduled/ }).click();
       await expect(page.getByRole("heading", { name: "Not scheduled" })).toBeVisible({ timeout: 10_000 });
       // From md up "Not scheduled" is an ordinary column pinned to the right of the board (outside the scrolling
       // track) so a drag never needs a mid-drag scroll; below md it is the last column in the track
@@ -276,11 +276,11 @@ test.describe("Roadmap — not yet on the roadmap", () => {
       // pinned selects) legitimately leave their own validated solutions
       // unscheduled. The empty state itself is covered by
       // __tests__/components/unscheduled-items-column.test.tsx.
-      // The pane's open/closed choice is part of the board's column layout and is remembered by this browser, so
+      // The dock's open/closed choice is part of the board's column layout and is remembered by this browser, so
       // it is still open after the reload above. Open it only if it is not.
-      const expandTab = page.getByRole("button", { name: /^Expand Not scheduled/ });
-      await expect(expandTab.or(page.getByTestId("roadmap-unscheduled-column"))).toBeVisible({ timeout: 10_000 });
-      if (await expandTab.count()) await expandTab.click();
+      const notScheduledTab = page.getByRole("tab", { name: /^Not scheduled/ });
+      await expect(notScheduledTab).toBeVisible({ timeout: 10_000 });
+      if ((await notScheduledTab.getAttribute("aria-selected")) !== "true") await notScheduledTab.click();
       const boardUnscheduled = page.getByTestId("roadmap-unscheduled-column");
       await expect(boardUnscheduled).toBeVisible();
       for (const title of [solTitle, sol2Title, bugTitle]) {

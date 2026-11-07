@@ -22,15 +22,19 @@ export const UNSCHEDULED_COLUMN_ID = "unscheduled"
 export const ROADMAP_BOARD_COLUMN_IDS: readonly string[] = [...INTERNAL_BOARD_HORIZONS, UNSCHEDULED_COLUMN_ID]
 
 /**
- * Pinned and collapsed to a slim tab, which is how the "Not scheduled" pane has always started, so a
+ * Pinned, with the dock collapsed to its slim tab rail, which is how the "Not scheduled" pane has always started, so a
  * workspace that never touches the layout sees no change on desktop.
  */
 export const ROADMAP_BOARD_LAYOUT_DEFAULTS: BoardLayoutDefaults = {
   pinned: [UNSCHEDULED_COLUMN_ID],
-  collapsed: [UNSCHEDULED_COLUMN_ID],
+  active: UNSCHEDULED_COLUMN_ID,
+  dockCollapsed: true,
 }
 
-export function resolveRoadmapBoardLayout(layout: Partial<BoardLayout> | null | undefined): BoardLayout {
+/** A stored layout as it may arrive: possibly partial, absent, or in an older shape. */
+type StoredLayout = Parameters<typeof resolveBoardLayout>[0]
+
+export function resolveRoadmapBoardLayout(layout: StoredLayout): BoardLayout {
   return resolveBoardLayout(layout, ROADMAP_BOARD_COLUMN_IDS, ROADMAP_BOARD_LAYOUT_DEFAULTS)
 }
 
@@ -47,6 +51,6 @@ export function serializeRoadmapBoardLayout(layout: BoardLayout): BoardLayout | 
  * Comparable identity of a stored (possibly absent or stale) layout, for "is this view modified?".
  * An absent layout and an explicit default layout have the same key.
  */
-export function roadmapBoardLayoutKey(stored: Partial<BoardLayout> | null | undefined): string {
+export function roadmapBoardLayoutKey(stored: StoredLayout): string {
   return boardLayoutKey(resolveRoadmapBoardLayout(stored))
 }

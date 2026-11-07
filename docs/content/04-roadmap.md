@@ -20,16 +20,20 @@ On mobile, each column fills the available board width with small side gutters. 
 
 ### Pin, collapse and reorder columns
 
-On a wide screen (the medium breakpoint and up) any Board column can be **pinned**: it docks on the right, outside the scrolling area, so it stays put while the other columns scroll. That makes a pinned column a fixed drop target, for example when you drag a card to Now from far down the board.
+On a wide screen (the medium breakpoint and up) any Board column can be **pinned**: it moves into the **dock** on the right, outside the scrolling area, so it stays put while the other columns scroll. That makes a pinned column a fixed drop target, for example when you drag a card to Now from far down the board.
 
-- **Pin or unpin.** Use the pin button in a column's header (it appears when you hover the header) or **Pin to the right** / **Unpin** in the column's **⋯** menu. Pinned columns sit side by side at the right edge, in the order they appear on the board.
-- **Collapse.** A pinned column has a **Collapse** button that folds it to a slim tab showing its name and item count. Click the tab to expand it again.
-- **Move left / Move right.** The **⋯** menu on any column reorders it without dragging, so it works from the keyboard too. Move actions are disabled at the ends.
-- **Not scheduled** is an ordinary column. By default it is pinned on the right and collapsed. Expand it, unpin it, collapse it again or move it like any other column, and Compass remembers what you chose.
+The dock is **one slot**, however many columns you pin. It is a panel that shows one pinned column, with a narrow rail of **tabs** at its right edge, one tab per pinned column (the column's name and item count). Pinning more columns adds tabs; it never makes the dock wider.
+
+- **Pin or unpin.** Use the pin button in a column's header (it appears when you hover the header) or **Pin to the right** / **Unpin** in the column's **⋯** menu. A column you pin becomes the active tab and the dock opens on it. Unpinning the active tab shows its neighbour; unpinning the last pinned column removes the dock.
+- **Switch columns.** Click a tab to show that column in the panel. With the keyboard, move between tabs with the arrow keys (Home and End jump to the first and last) and press Enter or Space to show one.
+- **Collapse.** Click the active tab, or the **Collapse** button in the panel's header, to close the panel and leave only the tab rail. Click any tab to open it again. With a single pinned column the closed dock is just that column's slim tab.
+- **Drop onto a tab.** While the dock is closed, a tab for a horizon is still a drop target: drag a card onto it and the card moves to that horizon.
+- **Reorder.** Use **Move left** / **Move right** in the column's **⋯** menu. For a pinned column this changes the order of the tabs; for the others it changes their order on the board.
+- **Not scheduled** is an ordinary column. By default it is the one pinned column, with the dock closed. Open it, unpin it, add other tabs next to it or move it like any other column, and Compass remembers what you chose.
 - **Swimlanes.** With **Group board by** on, only **Not scheduled** docks (the lanes need the horizon columns inside the grid), and it can't be unpinned while lanes are shown.
 - **Narrow screens.** Below the medium breakpoint nothing is docked: pinned columns appear in the scrolling board in their saved order, so **Not scheduled** is still the last swipe column on a phone, and the pin button is hidden. Your layout comes back when the screen is wide again.
 
-Pinned columns, their collapsed state and the column order are part of a [saved view](#saved-views). With no saved view selected, Compass remembers the layout in this browser for each workspace. If a saved layout can't be read, the board falls back to the default layout and the rest of the view still applies.
+Which columns are pinned, which tab is active, whether the dock is open and the column order are part of a [saved view](#saved-views). With no saved view selected, Compass remembers the layout in this browser for each workspace. If a saved layout can't be read, the board falls back to the default layout and the rest of the view still applies.
 
 ### Board swimlanes
 
@@ -136,7 +140,7 @@ Use **Reload timeline** to fetch a fresh snapshot after changes made elsewhere. 
 
 Compass surfaces validated or in-delivery Solutions from Discovery, and Bug-type Feedback items, that don't have a roadmap item yet. These are the same items that already have a "Promote to roadmap" action on the Discovery solution card or the Feedback board; this is a second entry point that lets you schedule them without leaving the roadmap.
 
-- **On the Board** — these candidates live in the **Not scheduled** column, which by default is pinned to the right of the board and collapsed to a thin tab (expand it to see the cards; it remembers whether you left it open, and you can unpin or move it like any other column, see [Pin, collapse and reorder columns](#pin-collapse-and-reorder-columns)). On phones it is the last swipe column. Drag a card from it onto any roadmap horizon to schedule it there, or use its **⋯** menu to add it directly to Now/Next/Later without dragging. The column remains visible when empty so the board layout stays consistent.
+- **On the Board** — these candidates live in the **Not scheduled** column, which by default is the board's one pinned column, shown as a thin tab on the right (click the tab to see the cards; it remembers whether you left it open, and you can unpin or move it like any other column, see [Pin, collapse and reorder columns](#pin-collapse-and-reorder-columns)). On phones it is the last swipe column. Drag a card from it onto any roadmap horizon to schedule it there, or use its **⋯** menu to add it directly to Now/Next/Later without dragging. The column remains visible when empty so the board layout stays consistent.
 - **On the Timeline** — the collapsible **Not scheduled** sidebar, docked on the right of the chart (or, on narrower screens, above it), which looks like the Board's **Not scheduled** column but is a separate sidebar with its own open/closed setting. See [Build the roadmap from Discovery](#build-the-roadmap-from-discovery) below.
 
 Ideas (as opposed to Bugs) aren't included in the list — they're expected to go through Opportunity → Solution discovery first, same as everywhere else in Compass.

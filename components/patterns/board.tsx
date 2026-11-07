@@ -10,10 +10,11 @@ import { BoardColumnLayoutActions, type BoardColumnLayoutControls } from "./boar
  *      `pinColumn` / `unpinColumn` / `moveColumn` / `setColumnCollapsed` transitions) and persists it however
  *      it likes (the roadmap board stores it in the saved view, see components/roadmap/column-layout-context.tsx);
  *   2. renders the unpinned columns, in `columnOrder`, inside `<Board>` (the horizontal scroller);
- *   3. renders the pinned columns in a `<BoardPinnedRegion>` that is a SIBLING of `<Board>` (outside the
- *      scroller), each as a `<BoardColumn className={PINNED_COLUMN_CLASS} bodyClassName={PINNED_COLUMN_BODY_CLASS}>`
- *      or, when collapsed, a `<CollapsedColumnTab>`;
- *   4. passes each `BoardColumn` a `layoutControls` object (pin toggle, collapse, move left/right).
+ *   3. renders the pinned columns in a `<BoardDock>` that is a SIBLING of `<Board>` (outside the scroller): one fixed-width
+ *      panel showing the active pinned column (a `<BoardColumn className={PINNED_COLUMN_CLASS}
+ *      bodyClassName={PINNED_COLUMN_BODY_CLASS}>`) and a tab rail with one tab per pinned column, so the dock never
+ *      grows as more are pinned;
+ *   4. passes each `BoardColumn` a `layoutControls` object (pin toggle, collapse dock, move left/right).
  * Below md a board should ignore pinning and render every column in the scroller.
  * Components live in ./board-pinned.tsx; all are re-exported from this module.
  */

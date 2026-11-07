@@ -118,7 +118,7 @@ describe("roadmap view URL round-trip", () => {
 })
 
 describe("display.columnLayout (pinned columns)", () => {
-  const layout = { columnOrder: ["NEXT", "NOW", "unscheduled"], pinnedColumnIds: ["NEXT"], collapsedColumnIds: [] as string[] }
+  const layout = { columnOrder: ["NEXT", "NOW", "unscheduled"], pinnedColumnIds: ["NEXT"], activePinnedId: "NEXT", dockCollapsed: false }
 
   it("is absent by default, so an untouched board adds nothing to a saved view", () => {
     expect(DEFAULT_ROADMAP_DISPLAY.columnLayout).toBeUndefined()
@@ -129,6 +129,12 @@ describe("display.columnLayout (pinned columns)", () => {
     expect(parseStoredDisplay({ sort: "title", columnLayout: layout })).toMatchObject({ sort: "title", columnLayout: layout })
     const input = roadmapViewInputSchema.parse({ name: "v", filters: {}, display: { columnLayout: layout } })
     expect(input.display.columnLayout).toEqual(layout)
+  })
+
+  it("an older-shape layout (per-column collapsedColumnIds) still parses; the stale field is dropped", () => {
+    const old = { columnOrder: ["NOW"], pinnedColumnIds: ["NOW"], collapsedColumnIds: ["NOW"] }
+    expect(parseStoredDisplay({ sort: "title", columnLayout: old })).toMatchObject({ sort: "title", columnLayout: { columnOrder: ["NOW"], pinnedColumnIds: ["NOW"] } })
+    expect(parseStoredDisplay({ columnLayout: old }).columnLayout).not.toHaveProperty("collapsedColumnIds")
   })
 
   it("a layout that does not validate degrades to absent WITHOUT discarding the rest of the display document", () => {

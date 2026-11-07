@@ -100,7 +100,7 @@ describe("workspace URL round-trip", () => {
 })
 
 describe("column layout in a workspace view", () => {
-  const layout = { columnOrder: ["NOW", "NEXT", "LATER", "LAUNCHING", "LAUNCHED", "SHIPPED", "unscheduled"], pinnedColumnIds: ["LATER", "unscheduled"], collapsedColumnIds: [] as string[] }
+  const layout = { columnOrder: ["NOW", "NEXT", "LATER", "LAUNCHING", "LAUNCHED", "SHIPPED", "unscheduled"], pinnedColumnIds: ["LATER", "unscheduled"], activePinnedId: "LATER", dockCollapsed: false }
   const withLayout = { ...saved, display: roadmapViewDisplaySchema.parse({ ...saved.display, columnLayout: layout }) }
 
   it("comes from the saved view whether or not the URL is an edited=1 snapshot (it is not a URL param)", () => {

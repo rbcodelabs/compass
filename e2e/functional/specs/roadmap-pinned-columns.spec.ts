@@ -1,19 +1,21 @@
 /**
- * Roadmap board pinned columns (ADR "Pinned columns for board views", OPP-25).
+ * Roadmap board dock (ADR "Pinned columns for board views", OPP-25, reworked to ONE dock with tabs).
  *
  * Journey, on the workspace roadmap at a desktop width:
- *   1. By default "Not scheduled" is an ordinary column pinned to the right, collapsed to a slim tab, in a
- *      region OUTSIDE the horizontal scroller.
- *   2. Expand it and drag a card onto NOW; scroll the board right and drag another onto SHIPPED. The pinned
- *      column does not move with the scroller, so the drop target is reachable without a mid-drag scroll.
- *   3. Pin LATER: it docks right next to Not scheduled, outside the scroller. Collapse it to a tab, expand it,
- *      unpin it. Pin and collapse are keyboard operable and keep focus on the control that replaces them.
- *   4. Reorder from the column menu (no drag needed).
- *   5. Save a view with a layout, clear the browser's own copy, reload: the view restores the layout. Change the
- *      layout: the view shows as modified; "Save changes" stores it.
- *   6. A corrupt saved layout degrades to the default layout; the view itself still loads.
+ *   1. By default "Not scheduled" is the only pinned column: a dock OUTSIDE the horizontal scroller, collapsed to a
+ *      slim tab rail (one tab).
+ *   2. Open it and drag a card onto NOW; scroll the board right and drag another onto SHIPPED. The dock does not move
+ *      with the scroller, so the drop target is reachable without a mid-drag scroll.
+ *   3. Pin LATER: it joins the SAME dock as a second tab, becomes active and the dock stays the same width. Switch
+ *      tabs, use the keyboard (arrows move focus, Enter activates), close the dock from the active tab and from the
+ *      panel's collapse button, reorder tabs from the column menu, and drop a card onto a tab of the closed dock.
+ *   4. Reorder scroller columns from the column menu (no drag needed).
+ *   5. Save a view with a layout, clear the browser's own copy, reload: the view restores the layout (active tab and
+ *      dock state included). Change the layout: the view shows as modified; "Save changes" stores it.
+ *   6. A corrupt saved layout degrades to the default layout; a stale one keeps what still exists; the OLD per-column
+ *      collapsed shape still loads.
  *   7. In swimlane mode Not scheduled stays docked (it cannot be unpinned there).
- *   8. Below md the pinned region disappears and Not scheduled is the last column in the scroller.
+ *   8. Below md there is no dock and Not scheduled is the last column in the scroller.
  *
  * Fixtures: two unscheduled Bug feedback items and one NOW roadmap item are inserted straight into the local
  * compass_e2e database (like roadmap-saved-views.spec.ts) and removed in `finally`, along with the views made here.
@@ -54,23 +56,29 @@ async function dragTo(page: Page, source: Locator, target: Locator) {
 }
 
 const scroller = (page: Page) => page.getByRole("region", { name: "Roadmap board" });
-const pinnedRegion = (page: Page) => page.getByTestId("board-pinned-region");
+const dock = (page: Page) => page.getByTestId("board-pinned-region");
+const tabs = (page: Page) => dock(page).getByRole("tab");
+const tab = (page: Page, title: string) => dock(page).getByRole("tab", { name: new RegExp(`^${title} \\(`) });
+const panel = (page: Page) => dock(page).getByRole("tabpanel");
+const tabTitles = async (page: Page) => (await tabs(page).evaluateAll((els) => els.map((el) => el.getAttribute("aria-label") ?? ""))).map((l) => l.replace(/ \(\d+\)$/, ""));
 const columnTitles = (root: Locator) => root.locator("section > header h3").allTextContents();
+const dockWidth = async (page: Page) => (await dock(page).boundingBox())!.width;
 
 async function shot(page: Page, name: string) {
   const dir = process.env.QA_SHOTS_DIR;
   if (dir) await page.screenshot({ path: path.join(dir, `${name}.png`) });
 }
 
-test.describe("Roadmap board pinned columns", () => {
-  test("pin, collapse, reorder, drag from a pinned column, and a saved view that restores the layout", async ({ page, base }) => {
-    test.setTimeout(240_000);
+
+test.describe("Roadmap board dock", () => {
+  test("one dock with tabs: pin, switch, collapse, reorder, drag, and a saved view that restores the layout", async ({ page, base }) => {
+    test.setTimeout(300_000);
     const pool = requireLocalE2eDatabase();
     const tag = randomUUID().slice(0, 8);
-    const bugOne = `E2E Pinned Bug One ${tag}`;
-    const bugTwo = `E2E Pinned Bug Two ${tag}`;
-    const nowItem = `E2E Pinned Now Item ${tag}`;
-    const viewName = `E2E Pinned Layout ${tag}`;
+    const bugOne = `E2E Dock Bug One ${tag}`;
+    const bugTwo = `E2E Dock Bug Two ${tag}`;
+    const nowItem = `E2E Dock Now Item ${tag}`;
+    const viewName = `E2E Dock Layout ${tag}`;
     let workspaceId = "";
 
     try {
@@ -94,25 +102,26 @@ test.describe("Roadmap board pinned columns", () => {
 
       await page.setViewportSize({ width: 1440, height: 900 });
 
-      // ── 1. Default layout ────────────────────────────────────────────────────
+      // ── 1. Default layout: one pinned column, the dock collapsed to its tab rail ──
       await page.goto(`${base}/roadmap`);
       await page.waitForLoadState("networkidle");
-      const region = pinnedRegion(page);
-      await expect(region).toBeVisible({ timeout: 30_000 });
-      const expandTab = region.getByRole("button", { name: /^Expand Not scheduled/ });
-      await expect(expandTab).toBeVisible();
-      await expect(expandTab).toHaveAttribute("aria-expanded", "false");
-      await expect(scroller(page).getByRole("button", { name: /^Expand Not scheduled/ })).toHaveCount(0);
+      await expect(dock(page)).toBeVisible({ timeout: 30_000 });
+      await expect(tabs(page)).toHaveCount(1);
+      await expect(tab(page, "Not scheduled")).toHaveAttribute("aria-selected", "false");
+      await expect(panel(page)).toHaveCount(0);
+      await expect(scroller(page).getByRole("tab")).toHaveCount(0);
       const scrollerBox = (await scroller(page).boundingBox())!;
-      const regionBox = (await region.boundingBox())!;
-      expect(regionBox.x, "the pinned region sits to the right of the scroller, not inside it").toBeGreaterThanOrEqual(scrollerBox.x + scrollerBox.width - 1);
-      await shot(page, "01-default-not-scheduled-pinned-collapsed");
+      const dockBox = (await dock(page).boundingBox())!;
+      expect(dockBox.x, "the dock sits to the right of the scroller, not inside it").toBeGreaterThanOrEqual(scrollerBox.x + scrollerBox.width - 1);
+      const collapsedWidth = dockBox.width;
 
-      // ── 2. Drag from the pinned column, with and without the board scrolled ──
-      await expandTab.click();
-      const unscheduled = region.getByTestId("roadmap-unscheduled-column");
+      // ── 2. Open it; drag from it, with and without the board scrolled ────────
+      await tab(page, "Not scheduled").click();
+      await expect(tab(page, "Not scheduled")).toHaveAttribute("aria-selected", "true");
+      const unscheduled = panel(page).getByTestId("roadmap-unscheduled-column");
       await expect(unscheduled).toBeVisible();
-      await shot(page, "02-default-not-scheduled-pinned-expanded");
+      const openWidth = await dockWidth(page);
+      expect(openWidth).toBeGreaterThan(collapsedWidth + 200);
       const cardOne = unscheduled.locator('[data-slot="card"]').filter({ hasText: bugOne });
       const cardTwo = unscheduled.locator('[data-slot="card"]').filter({ hasText: bugTwo });
       await expect(cardOne).toBeVisible();
@@ -126,39 +135,78 @@ test.describe("Roadmap board pinned columns", () => {
       await scroller(page).evaluate((el) => { el.scrollLeft = el.scrollWidth; });
       await expect.poll(() => scroller(page).evaluate((el) => el.scrollLeft)).toBeGreaterThan(0);
       const after = (await unscheduled.boundingBox())!;
-      expect(after.x, "scrolling the board does not move the pinned column").toBe(before.x);
+      expect(after.x, "scrolling the board does not move the dock").toBe(before.x);
       await dragTo(page, cardTwo.getByLabel("Drag to schedule"), page.locator("#roadmap-column-SHIPPED"));
       await expect(cardTwo).toHaveCount(0, { timeout: 15_000 });
       await expect(page.locator("#roadmap-column-SHIPPED").getByText(bugTwo).first()).toBeVisible({ timeout: 15_000 });
       await scroller(page).evaluate((el) => { el.scrollLeft = 0; });
 
-      // ── 3. Pin a second column; collapse / expand / unpin; keyboard ───────────
+      // ── 3. Pin a second column: ONE dock, two tabs, constant width ────────────
       await page.getByRole("button", { name: "Pin Later to the right" }).click();
-      await expect(region.locator("#roadmap-column-LATER")).toBeVisible();
+      await expect(dock(page)).toHaveCount(1);
+      expect(await tabTitles(page)).toEqual(["Later", "Not scheduled"]);
+      await expect(tab(page, "Later")).toHaveAttribute("aria-selected", "true");
+      await expect(panel(page).locator("#roadmap-column-LATER")).toBeVisible();
       await expect(scroller(page).locator("#roadmap-column-LATER")).toHaveCount(0);
-      expect(await columnTitles(region)).toEqual(["Later", "Not scheduled"]);
-      await shot(page, "03-two-pinned-columns");
+      expect(Math.abs((await dockWidth(page)) - openWidth), "two pinned columns take no more room than one").toBeLessThanOrEqual(1);
 
-      await region.getByRole("button", { name: "Collapse Later" }).click();
-      const laterTab = region.getByRole("button", { name: /^Expand Later/ });
-      await expect(laterTab).toBeVisible();
-      await expect(laterTab).toHaveAttribute("aria-expanded", "false");
-      await expect(laterTab, "focus follows the control that replaced the collapse button").toBeFocused();
-      await shot(page, "04-collapsed-pinned-tab");
-      await laterTab.click();
-      await expect(region.locator("#roadmap-column-LATER")).toBeVisible();
+      await tab(page, "Not scheduled").click();
+      await expect(tab(page, "Not scheduled")).toHaveAttribute("aria-selected", "true");
+      await expect(panel(page).getByTestId("roadmap-unscheduled-column")).toBeVisible();
+      await expect(panel(page).locator("#roadmap-column-LATER")).toHaveCount(0);
+      expect(Math.abs((await dockWidth(page)) - openWidth)).toBeLessThanOrEqual(1);
 
-      const unpin = region.getByRole("button", { name: "Unpin Later" });
-      await unpin.focus();
+      // Keyboard: arrows move focus without switching; Enter activates.
+      await tab(page, "Not scheduled").focus();
+      await page.keyboard.press("ArrowUp");
+      await expect(tab(page, "Later")).toBeFocused();
+      await expect(panel(page).getByTestId("roadmap-unscheduled-column"), "moving focus does not switch the panel").toBeVisible();
       await page.keyboard.press("Enter");
-      await expect(scroller(page).locator("#roadmap-column-LATER")).toBeVisible();
-      await expect(page.getByRole("button", { name: "Pin Later to the right" })).toBeFocused();
-      await page.keyboard.press("Space");
-      await expect(region.locator("#roadmap-column-LATER")).toBeVisible();
-      await region.getByRole("button", { name: "Unpin Later" }).click();
-      await expect(scroller(page).locator("#roadmap-column-LATER")).toBeVisible();
+      await expect(panel(page).locator("#roadmap-column-LATER")).toBeVisible();
+      await page.keyboard.press("ArrowDown");
+      await expect(tab(page, "Not scheduled")).toBeFocused();
 
-      // ── 4. Reorder from the column menu ──────────────────────────────────────
+      // Close from the active tab, reopen; close from the panel's collapse button.
+      await tab(page, "Later").click();
+      await expect(panel(page)).toHaveCount(0);
+      expect(await dockWidth(page), "a collapsed dock is just the tab rail").toBeLessThan(openWidth - 200);
+      await tab(page, "Later").click();
+      await expect(panel(page).locator("#roadmap-column-LATER")).toBeVisible();
+      await panel(page).getByRole("button", { name: "Collapse Later" }).click();
+      await expect(panel(page)).toHaveCount(0);
+      await expect(tab(page, "Later"), "focus returns to the tab").toBeFocused();
+
+      // A tab of the closed dock is a drop target: dropping the NOW card on Later moves it there.
+      await expect(tab(page, "Later")).toHaveAccessibleName(/^Later \(1\)/);
+      await dragTo(page, page.locator('[data-slot="card"]').filter({ hasText: nowItem }).first().getByLabel("Drag to reorder"), tab(page, "Later"));
+      await expect(tab(page, "Later")).toHaveAccessibleName(/^Later \(2\)/, { timeout: 15_000 });
+      // The click can land while the drop is still settling, so retry it until the panel shows the dropped card.
+      await expect(async () => {
+        if ((await panel(page).count()) === 0) await tab(page, "Later").click();
+        await expect(panel(page).getByText(nowItem).first()).toBeVisible({ timeout: 2_000 });
+      }).toPass({ timeout: 20_000 });
+
+      // Tabs reorder from the column menu; the active tab stays active.
+      await page.getByRole("button", { name: "Pin Next to the right" }).click();
+      expect(await tabTitles(page)).toEqual(["Next", "Later", "Not scheduled"]);
+      await panel(page).getByRole("button", { name: "Next column options" }).click();
+      await page.getByRole("menuitem", { name: "Move right" }).click();
+      await expect.poll(() => tabTitles(page)).toEqual(["Later", "Next", "Not scheduled"]);
+      await expect(tab(page, "Next")).toHaveAttribute("aria-selected", "true");
+      await panel(page).getByRole("button", { name: "Next column options" }).click();
+      await page.getByRole("menuitem", { name: "Move left" }).click();
+      await expect.poll(() => tabTitles(page)).toEqual(["Next", "Later", "Not scheduled"]);
+
+      // Unpinning the active column returns it to the scroller and hands the panel to its neighbour.
+      await panel(page).getByRole("button", { name: "Unpin Next" }).click();
+      await expect(scroller(page).locator("#roadmap-column-NEXT")).toBeVisible();
+      expect(await tabTitles(page)).toEqual(["Later", "Not scheduled"]);
+      await expect(tab(page, "Later")).toHaveAttribute("aria-selected", "true");
+      await panel(page).getByRole("button", { name: "Unpin Later" }).click();
+      await expect(scroller(page).locator("#roadmap-column-LATER")).toBeVisible();
+      expect(await tabTitles(page)).toEqual(["Not scheduled"]);
+
+      // ── 4. Reorder scroller columns from the column menu ─────────────────────
       expect((await columnTitles(scroller(page))).slice(0, 3)).toEqual(["Now", "Next", "Later"]);
       await page.getByRole("button", { name: "Now column options" }).click();
       await expect(page.getByRole("menuitem", { name: "Move left" })).toHaveAttribute("aria-disabled", "true");
@@ -167,7 +215,7 @@ test.describe("Roadmap board pinned columns", () => {
 
       // ── 5. Save a view with a layout; it restores the layout ─────────────────
       await page.getByRole("button", { name: "Pin Later to the right" }).click();
-      await expect(region.locator("#roadmap-column-LATER")).toBeVisible();
+      await expect(panel(page).locator("#roadmap-column-LATER")).toBeVisible();
       await page.getByTestId("saved-views-trigger").click();
       await page.getByTestId("save-view-new").click();
       const dialog = page.getByRole("dialog");
@@ -176,103 +224,125 @@ test.describe("Roadmap board pinned columns", () => {
       await expect(dialog).toBeHidden({ timeout: 15_000 });
       await expect(page.getByTestId("saved-views-trigger")).toContainText(viewName);
       await expect(page).toHaveURL(/[?&]saved=[0-9a-f-]{36}/);
-      expect(new URL(page.url()).search, "the layout is not a URL param").not.toMatch(/pinned|layout|columnOrder/i);
+      expect(new URL(page.url()).search, "the layout is not a URL param").not.toMatch(/pinned|layout|columnOrder|dock/i);
 
-      const { rows: viewRows } = await pool.query<{ id: string; display: { columnLayout?: { pinnedColumnIds: string[]; columnOrder: string[] } } }>(
+      type StoredLayout = { pinnedColumnIds: string[]; columnOrder: string[]; activePinnedId?: string | null; dockCollapsed?: boolean };
+      const { rows: viewRows } = await pool.query<{ id: string; display: { columnLayout?: StoredLayout } }>(
         `SELECT id, display FROM "${S}".roadmap_views WHERE workspace_id = $1 AND name = $2`,
         [workspaceId, viewName],
       );
       expect(viewRows).toHaveLength(1);
       const viewId = viewRows[0].id;
-      expect(viewRows[0].display.columnLayout?.pinnedColumnIds).toEqual(expect.arrayContaining(["LATER", "unscheduled"]));
-      expect(viewRows[0].display.columnLayout?.columnOrder.slice(0, 3)).toEqual(["NEXT", "NOW", "LATER"]);
+      const saved = viewRows[0].display.columnLayout!;
+      expect(saved.pinnedColumnIds).toEqual(expect.arrayContaining(["LATER", "unscheduled"]));
+      expect(saved.activePinnedId).toBe("LATER");
+      expect(saved.dockCollapsed).toBe(false);
+      expect(saved.columnOrder.slice(0, 3)).toEqual(["NEXT", "NOW", "LATER"]);
 
       // This browser's own copy would also restore the layout, so clear it: the VIEW must carry it.
       await page.evaluate(() => window.localStorage.clear());
       await page.reload();
       await page.waitForLoadState("networkidle");
       await expect(page.getByTestId("saved-views-trigger")).toContainText(viewName, { timeout: 30_000 });
-      await expect(pinnedRegion(page).locator("#roadmap-column-LATER")).toBeVisible({ timeout: 30_000 });
+      await expect(tab(page, "Later")).toHaveAttribute("aria-selected", "true", { timeout: 30_000 });
+      await expect(panel(page).locator("#roadmap-column-LATER")).toBeVisible();
       expect((await columnTitles(scroller(page))).slice(0, 2)).toEqual(["Next", "Now"]);
 
-      // Not modified until the layout changes; then Save changes stores it.
+      // Not modified until the layout changes (switching the tab counts); then Save changes stores it.
       await expect(page.getByTestId("save-view-changes")).toHaveCount(0);
-      await pinnedRegion(page).getByRole("button", { name: "Unpin Later" }).click();
-      await expect(scroller(page).locator("#roadmap-column-LATER")).toBeVisible();
+      await tab(page, "Not scheduled").click();
       await expect(page.getByTestId("save-view-changes")).toBeVisible();
+      await panel(page).getByRole("button", { name: "Collapse Not scheduled" }).click();
+      await tab(page, "Later").click();
+      await panel(page).getByRole("button", { name: "Unpin Later" }).click();
+      await expect(scroller(page).locator("#roadmap-column-LATER")).toBeVisible();
       await page.getByTestId("save-view-changes").click();
       await expect(page.getByTestId("save-view-changes")).toHaveCount(0, { timeout: 15_000 });
       await page.reload();
       await page.waitForLoadState("networkidle");
       await expect(page.getByTestId("saved-views-trigger")).toContainText(viewName, { timeout: 30_000 });
       await expect(scroller(page).locator("#roadmap-column-LATER")).toBeVisible({ timeout: 30_000 });
-      await expect(pinnedRegion(page).locator("#roadmap-column-LATER")).toHaveCount(0);
+      expect(await tabTitles(page)).toEqual(["Not scheduled"]);
 
-      // ── 6. A corrupt saved layout degrades to the default layout ─────────────
+      // ── 6. Corrupt, stale and older-shape stored layouts ─────────────────────
       await pool.query(`UPDATE "${S}".roadmap_views SET display = display || '{"columnLayout": "garbage"}'::jsonb WHERE id = $1`, [viewId]);
       await page.evaluate(() => window.localStorage.clear());
       await page.goto(`${base}/roadmap?saved=${viewId}`);
       await page.waitForLoadState("networkidle");
       await expect(page.getByTestId("saved-views-trigger"), "the view itself still loads").toContainText(viewName, { timeout: 30_000 });
-      await expect(pinnedRegion(page).getByRole("button", { name: /^Expand Not scheduled/ }), "default layout: Not scheduled pinned and collapsed").toBeVisible({ timeout: 30_000 });
+      await expect(tab(page, "Not scheduled"), "default layout: Not scheduled pinned, dock collapsed").toHaveAttribute("aria-selected", "false", { timeout: 30_000 });
+      await expect(panel(page)).toHaveCount(0);
       expect((await columnTitles(scroller(page))).slice(0, 3)).toEqual(["Now", "Next", "Later"]);
-      await pool.query(`UPDATE "${S}".roadmap_views SET display = display || '{"columnLayout": {"columnOrder": ["SHIPPED", "GONE"], "pinnedColumnIds": ["GONE", "NOW"]}}'::jsonb WHERE id = $1`, [viewId]);
+
+      await pool.query(`UPDATE "${S}".roadmap_views SET display = display || '{"columnLayout": {"columnOrder": ["SHIPPED", "GONE"], "pinnedColumnIds": ["GONE", "NOW"], "activePinnedId": "GONE"}}'::jsonb WHERE id = $1`, [viewId]);
       await page.goto(`${base}/roadmap?saved=${viewId}`);
       await page.waitForLoadState("networkidle");
-      await expect(pinnedRegion(page).locator("#roadmap-column-NOW"), "a stale layout keeps what still exists").toBeVisible({ timeout: 30_000 });
+      await expect(tab(page, "Now"), "a stale layout keeps what still exists").toBeVisible({ timeout: 30_000 });
+      expect(await tabTitles(page)).toEqual(["Now", "Not scheduled"]);
       expect((await columnTitles(scroller(page)))[0]).toBe("Shipped");
 
-      // ── 7. Swimlane mode: Not scheduled stays docked (horizons live in the lane grid) ─────
+      await pool.query(
+        `UPDATE "${S}".roadmap_views SET display = display || '{"columnLayout": {"columnOrder": ["NOW","NEXT","LATER","SHIPPED","unscheduled"], "pinnedColumnIds": ["unscheduled","LATER"], "collapsedColumnIds": ["LATER"]}}'::jsonb WHERE id = $1`,
+        [viewId],
+      );
+      await page.goto(`${base}/roadmap?saved=${viewId}`);
+      await page.waitForLoadState("networkidle");
+      await expect(tab(page, "Later"), "an older per-column-collapsed layout still loads").toBeVisible({ timeout: 30_000 });
+      expect(await tabTitles(page)).toEqual(["Later", "Not scheduled"]);
+      await expect(panel(page), "and the dock starts collapsed").toHaveCount(0);
+
+      // ── 7. Swimlane mode: Not scheduled stays docked (horizons live in the lane grid) ─
       await page.goto(`${base}/roadmap?groupBy=squad`);
       await page.waitForLoadState("networkidle");
-      const laneTab = pinnedRegion(page).getByRole("button", { name: /^Expand Not scheduled/ });
-      await expect(laneTab).toBeVisible({ timeout: 30_000 });
-      await laneTab.click();
-      const laneRegion = pinnedRegion(page);
-      await expect(laneRegion.getByTestId("roadmap-unscheduled-column")).toBeVisible();
-      await expect(laneRegion.getByRole("button", { name: "Collapse Not scheduled" })).toBeVisible();
-      await expect(laneRegion.getByRole("button", { name: "Unpin Not scheduled" }), "it cannot be unpinned while lanes are on").toHaveCount(0);
+      await expect(tab(page, "Not scheduled")).toBeVisible({ timeout: 30_000 });
+      await tab(page, "Not scheduled").click();
+      await expect(panel(page).getByTestId("roadmap-unscheduled-column")).toBeVisible();
+      await expect(panel(page).getByRole("button", { name: "Collapse Not scheduled" })).toBeVisible();
+      await expect(panel(page).getByRole("button", { name: "Unpin Not scheduled" }), "it cannot be unpinned while lanes are on").toHaveCount(0);
       await expect(page.getByRole("button", { name: /^Pin .* to the right$/ })).toHaveCount(0);
-      await shot(page, "05-swimlane-mode-not-scheduled-docked");
       await page.evaluate(() => window.localStorage.clear());
 
-      // ── 7b. Separation: docked rail has a left divider and the scroller tapers instead of being sliced ──
+      // ── 7b. Look: divider, 2rem taper, screenshots at 1280x800 ───────────────
       await page.setViewportSize({ width: 1280, height: 800 });
       await page.goto(`${base}/roadmap`);
       await page.waitForLoadState("networkidle");
-      await expect(pinnedRegion(page)).toBeVisible({ timeout: 30_000 });
-      expect(await pinnedRegion(page).evaluate((el) => getComputedStyle(el).borderLeftWidth)).toBe("1px");
+      await expect(dock(page)).toBeVisible({ timeout: 30_000 });
+      expect(await dock(page).evaluate((el) => getComputedStyle(el).borderLeftWidth)).toBe("1px");
       const mask = await scroller(page).evaluate((el) => getComputedStyle(el).maskImage);
       expect(mask).toContain("linear-gradient");
       expect(mask, "the taper is 2rem (32px)").toMatch(/calc\(100% - 32px\)|calc\(-32px \+ 100%\)/);
       expect(await scroller(page).locator('[data-slot="roadmap-board-track"]').evaluate((el) => getComputedStyle(el).paddingRight), "track padding matches the taper").toBe("32px");
       const midScroll = () => scroller(page).evaluate((el) => { el.scrollLeft = (el.scrollWidth - el.clientWidth) / 2; });
       await midScroll();
-      await shot(page, "desktop-spacing-1-not-scheduled-collapsed-mid-scroll");
-      await pinnedRegion(page).getByRole("button", { name: /^Expand Not scheduled/ }).click();
+      await shot(page, "desktop-tabs-1-default-collapsed");
+      await tab(page, "Not scheduled").click();
       await midScroll();
-      await shot(page, "desktop-spacing-2-not-scheduled-expanded-mid-scroll");
+      await shot(page, "desktop-tabs-2-expanded");
       await page.getByRole("button", { name: "Pin Later to the right" }).click();
       await midScroll();
-      await shot(page, "desktop-spacing-3-two-pinned-mid-scroll");
+      await expect(tab(page, "Later")).toHaveAttribute("aria-selected", "true");
+      await shot(page, "desktop-tabs-3-two-pinned-later-active");
+      await tab(page, "Not scheduled").click();
+      await midScroll();
+      await shot(page, "desktop-tabs-4-two-pinned-not-scheduled-active");
       await scroller(page).evaluate((el) => { el.scrollLeft = el.scrollWidth; });
-      await shot(page, "desktop-spacing-4-scrolled-to-end");
-      // At full scroll-end the last column ends 2rem before the scroller's edge, i.e. wholly outside the fade.
+      await shot(page, "desktop-tabs-5-scrolled-to-end");
       const endGap = await scroller(page).evaluate((el) => {
         const cols = el.querySelectorAll("section");
         return el.getBoundingClientRect().right - cols[cols.length - 1].getBoundingClientRect().right;
       });
-      expect(endGap).toBeGreaterThanOrEqual(31);
+      expect(endGap, "the last column ends 2rem before the scroller's edge, outside the taper").toBeGreaterThanOrEqual(31);
       await page.evaluate(() => window.localStorage.clear());
 
-      // ── 8. Narrow viewport: pinned columns fall back to scroller columns ──────
+      // ── 8. Narrow viewport: no dock, pinned columns are scroller columns ─────
       await page.goto(`${base}/roadmap`);
       await page.waitForLoadState("networkidle");
-      await page.setViewportSize({ width: 600, height: 900 });
-      await expect(pinnedRegion(page)).toHaveCount(0);
+      await page.setViewportSize({ width: 390, height: 844 });
+      await expect(dock(page)).toHaveCount(0);
+      await expect(page.getByRole("tablist", { name: "Pinned columns" })).toHaveCount(0);
       await expect(scroller(page).getByTestId("roadmap-unscheduled-column")).toBeAttached();
       await expect(page.getByRole("button", { name: /^Pin .* to the right$/ })).toHaveCount(0);
-      await shot(page, "06-narrow-viewport-fallback");
+      await shot(page, "desktop-tabs-6-narrow-390x844-fallback");
     } finally {
       await pool.query(`DELETE FROM "${S}".roadmap_views WHERE name = $1`, [viewName]);
       await pool.query(`DELETE FROM "${S}".roadmap_items WHERE title IN ($1, $2, $3)`, [nowItem, bugOne, bugTwo]);

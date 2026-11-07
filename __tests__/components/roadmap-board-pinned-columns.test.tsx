@@ -60,6 +60,9 @@ function Board({ launch = true, items = [] as RoadmapCardData[] }: { launch?: bo
 
 const scroller = () => screen.getByRole("region", { name: "Roadmap board" });
 const pinnedRegion = () => screen.queryByTestId("board-pinned-region");
+const tabs = () => within(screen.getByRole("tablist", { name: "Pinned columns" })).getAllByRole("tab");
+const tabNames = () => tabs().map((t) => t.getAttribute("aria-label"));
+const tab = (name: RegExp | string) => within(screen.getByRole("tablist", { name: "Pinned columns" })).getByRole("tab", { name });
 // Column titles only (an empty column's empty state is also an h3).
 const headings = (el: HTMLElement) => Array.from(el.querySelectorAll("section > header h3")).map((h) => h.textContent);
 
@@ -69,57 +72,105 @@ beforeEach(() => {
 });
 afterEach(() => cleanup());
 
-describe("RoadmapBoard pinned columns (md and up)", () => {
-  it("defaults to Not scheduled pinned on the right, collapsed to a tab, outside the scroller", () => {
+describe("RoadmapBoard dock (md and up)", () => {
+  it("defaults to Not scheduled in the dock, collapsed to its tab rail, outside the scroller", () => {
     render(<Board />);
     expect(headings(scroller())).toEqual(["Now", "Next", "Later", "Launching", "Launched", "Shipped"]);
     const region = pinnedRegion()!;
-    expect(region).toBeInTheDocument();
     expect(scroller()).not.toContainElement(region);
-    const tab = within(region).getByRole("button", { name: "Expand Not scheduled (1)" });
-    expect(tab).toHaveAttribute("aria-expanded", "false");
+    expect(tabNames()).toEqual(["Not scheduled (1)"]);
+    expect(tab(/^Not scheduled/)).toHaveAttribute("aria-selected", "false");
+    expect(screen.queryByRole("tabpanel")).not.toBeInTheDocument();
     expect(screen.queryByTestId("roadmap-unscheduled-column")).not.toBeInTheDocument();
   });
 
-  it("expands and collapses the pinned Not scheduled column", () => {
+  it("clicking the tab opens the panel; clicking the active tab, or the panel's collapse button, closes it", () => {
     render(<Board />);
-    fireEvent.click(screen.getByRole("button", { name: "Expand Not scheduled (1)" }));
-    const column = within(pinnedRegion()!).getByTestId("roadmap-unscheduled-column");
-    expect(within(column).getByText("Fix the broken export")).toBeInTheDocument();
-    fireEvent.click(within(column).getByRole("button", { name: "Collapse Not scheduled" }));
-    expect(screen.queryByTestId("roadmap-unscheduled-column")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Expand Not scheduled (1)" })).toBeInTheDocument();
+    fireEvent.click(tab(/^Not scheduled/));
+    const panel = screen.getByRole("tabpanel");
+    expect(within(panel).getByTestId("roadmap-unscheduled-column")).toBeInTheDocument();
+    expect(within(panel).getByText("Fix the broken export")).toBeInTheDocument();
+    expect(tab(/^Not scheduled/)).toHaveAttribute("aria-selected", "true");
+    expect(tab(/^Not scheduled/)).toHaveAttribute("aria-controls", panel.id);
+
+    fireEvent.click(tab(/^Not scheduled/));
+    expect(screen.queryByRole("tabpanel")).not.toBeInTheDocument();
+
+    fireEvent.click(tab(/^Not scheduled/));
+    fireEvent.click(within(screen.getByRole("tabpanel")).getByRole("button", { name: "Collapse Not scheduled" }));
+    expect(screen.queryByRole("tabpanel")).not.toBeInTheDocument();
+    expect(tab(/^Not scheduled/)).toHaveFocus();
   });
 
-  it("pins a second column (Later) into the docked region, outside the scroller, and unpins it back", () => {
+  it("pinning a second column adds a tab to the SAME dock, makes it active and opens the dock; the panel shows only that column", () => {
     render(<Board />);
     fireEvent.click(screen.getByRole("button", { name: "Pin Later to the right" }));
 
-    const region = pinnedRegion()!;
-    expect(within(region).getByTestId("roadmap-column-LATER")).toBeInTheDocument();
+    expect(screen.getAllByTestId("board-pinned-region")).toHaveLength(1);
+    expect(tabNames()).toEqual(["Later (0)", "Not scheduled (1)"]);
+    expect(tab(/^Later/)).toHaveAttribute("aria-selected", "true");
+    const panel = screen.getByRole("tabpanel");
+    expect(within(panel).getByTestId("roadmap-column-LATER")).toBeInTheDocument();
+    expect(within(panel).queryByTestId("roadmap-unscheduled-column")).not.toBeInTheDocument();
     expect(within(scroller()).queryByTestId("roadmap-column-LATER")).not.toBeInTheDocument();
-    // two docked columns: Later (open) and the Not scheduled tab, in column order
-    expect(within(region).getByRole("button", { name: "Expand Not scheduled (1)" })).toBeInTheDocument();
-
-    fireEvent.click(within(region).getByRole("button", { name: "Unpin Later" }));
-    expect(within(scroller()).getByTestId("roadmap-column-LATER")).toBeInTheDocument();
-    expect(headings(scroller())).toContain("Later");
   });
 
-  it("collapses a pinned horizon to a tab with its count and expands it again", () => {
+  it("switching tabs swaps the panel; the dock is one column wide however many are pinned", () => {
     render(<Board />);
     fireEvent.click(screen.getByRole("button", { name: "Pin Later to the right" }));
-    fireEvent.click(within(pinnedRegion()!).getByRole("button", { name: "Collapse Later" }));
+    fireEvent.click(screen.getByRole("button", { name: "Pin Next to the right" }));
+    expect(tabNames()).toEqual(["Next (0)", "Later (0)", "Not scheduled (1)"]);
+    expect(within(screen.getByRole("tabpanel")).getAllByRole("heading", { level: 3 }).length).toBeGreaterThan(0);
+    expect(headings(screen.getByRole("tabpanel"))).toEqual(["Next"]);
 
-    const tab = within(pinnedRegion()!).getByRole("button", { name: "Expand Later (0)" });
-    expect(tab).toHaveAttribute("aria-expanded", "false");
-    expect(screen.queryByTestId("roadmap-column-LATER")).not.toBeInTheDocument();
-
-    fireEvent.click(tab);
-    expect(within(pinnedRegion()!).getByTestId("roadmap-column-LATER")).toBeInTheDocument();
+    fireEvent.click(tab(/^Not scheduled/));
+    expect(headings(screen.getByRole("tabpanel"))).toEqual(["Not scheduled"]);
+    expect(tab(/^Not scheduled/)).toHaveAttribute("aria-selected", "true");
+    expect(tab(/^Next/)).toHaveAttribute("aria-selected", "false");
+    // Only one panel is ever rendered
+    expect(screen.getAllByRole("tabpanel")).toHaveLength(1);
+    expect(headings(scroller())).toEqual(["Now", "Launching", "Launched", "Shipped"]);
   });
 
-  it("reorders from the column menu (keyboard-accessible, no drag needed), and disables moves at the ends", async () => {
+  it("unpinning the active column hands the panel to its neighbour; unpinning the last one removes the dock", () => {
+    render(<Board />);
+    fireEvent.click(screen.getByRole("button", { name: "Pin Later to the right" }));
+    fireEvent.click(within(screen.getByRole("tabpanel")).getByRole("button", { name: "Unpin Later" }));
+    expect(within(scroller()).getByTestId("roadmap-column-LATER")).toBeInTheDocument();
+    expect(tabNames()).toEqual(["Not scheduled (1)"]);
+    expect(tab(/^Not scheduled/)).toHaveAttribute("aria-selected", "true");
+
+    fireEvent.click(within(screen.getByRole("tabpanel")).getByRole("button", { name: "Unpin Not scheduled" }));
+    expect(pinnedRegion()).not.toBeInTheDocument();
+    expect(headings(scroller())).toContain("Later");
+    expect(headings(scroller()).at(-1)).toBe("Not scheduled");
+  });
+
+  it("tabs are keyboard operable: roving tabindex, arrows/Home/End move focus, Enter activates", () => {
+    render(<Board />);
+    fireEvent.click(screen.getByRole("button", { name: "Pin Later to the right" }));
+    fireEvent.click(screen.getByRole("button", { name: "Pin Next to the right" }));
+    const [next, later, unscheduled] = tabs();
+    expect([next, later, unscheduled].map((t) => t.tabIndex)).toEqual([0, -1, -1]);
+
+    next.focus();
+    fireEvent.keyDown(next, { key: "ArrowDown" });
+    expect(later).toHaveFocus();
+    fireEvent.keyDown(later, { key: "End" });
+    expect(unscheduled).toHaveFocus();
+    fireEvent.keyDown(unscheduled, { key: "ArrowDown" });
+    expect(next).toHaveFocus(); // wraps
+    fireEvent.keyDown(next, { key: "ArrowUp" });
+    expect(unscheduled).toHaveFocus();
+    fireEvent.keyDown(unscheduled, { key: "Home" });
+    expect(next).toHaveFocus();
+    // Focus moving does not switch the panel; activating (a click, which Enter/Space produce on a button) does.
+    expect(headings(screen.getByRole("tabpanel"))).toEqual(["Next"]);
+    fireEvent.click(later);
+    expect(headings(screen.getByRole("tabpanel"))).toEqual(["Later"]);
+  });
+
+  it("reorders from the column menu (no drag needed), and disables moves at the ends", async () => {
     render(<Board />);
     fireEvent.click(screen.getByRole("button", { name: "Now column options" }));
     expect(await screen.findByRole("menuitem", { name: "Move left" })).toHaveAttribute("aria-disabled", "true");
@@ -127,16 +178,15 @@ describe("RoadmapBoard pinned columns (md and up)", () => {
     expect(headings(scroller()).slice(0, 3)).toEqual(["Next", "Now", "Later"]);
   });
 
-  it("moves a pinned column among the pinned ones only", async () => {
+  it("Move left / right on a docked column reorders the tabs", async () => {
     render(<Board />);
     fireEvent.click(screen.getByRole("button", { name: "Pin Later to the right" }));
     fireEvent.click(screen.getByRole("button", { name: "Pin Next to the right" }));
-    // Docked, in column order: Next, Later, Not scheduled (tab)
-    expect(headings(pinnedRegion()!)).toEqual(["Next", "Later"]);
-    fireEvent.click(within(pinnedRegion()!).getByRole("button", { name: "Next column options" }));
+    expect(tabNames()).toEqual(["Next (0)", "Later (0)", "Not scheduled (1)"]);
+    fireEvent.click(within(screen.getByRole("tabpanel")).getByRole("button", { name: "Next column options" }));
     fireEvent.click(await screen.findByRole("menuitem", { name: "Move right" }));
-    expect(headings(pinnedRegion()!)).toEqual(["Later", "Next"]);
-    // The scroller is untouched
+    expect(tabNames()).toEqual(["Later (0)", "Next (0)", "Not scheduled (1)"]);
+    expect(tab(/^Next/)).toHaveAttribute("aria-selected", "true"); // still the active tab
     expect(headings(scroller())).toEqual(["Now", "Launching", "Launched", "Shipped"]);
   });
 
@@ -145,53 +195,61 @@ describe("RoadmapBoard pinned columns (md and up)", () => {
     expect(headings(scroller())).toEqual(["Now", "Next", "Later", "Shipped"]);
     fireEvent.click(screen.getByRole("button", { name: "Later column options" }));
     fireEvent.click(await screen.findByRole("menuitem", { name: "Move right" }));
-    // Later swaps with Shipped (the next VISIBLE column), not with the hidden Launching
     expect(headings(scroller())).toEqual(["Now", "Next", "Shipped", "Later"]);
   });
 
   it("mirrors layout changes to this browser's localStorage and restores them on the next visit", () => {
     const first = render(<Board />);
     fireEvent.click(screen.getByRole("button", { name: "Pin Later to the right" }));
-    expect(JSON.parse(window.localStorage.getItem(STORAGE_KEY)!).pinnedColumnIds).toEqual(["unscheduled", "LATER"]);
+    const stored = JSON.parse(window.localStorage.getItem(STORAGE_KEY)!);
+    expect(stored.pinnedColumnIds).toEqual(["unscheduled", "LATER"]);
+    expect(stored.activePinnedId).toBe("LATER");
+    expect(stored.dockCollapsed).toBe(false);
     first.unmount();
 
     render(<Board />);
-    expect(within(pinnedRegion()!).getByTestId("roadmap-column-LATER")).toBeInTheDocument();
+    expect(tabNames()).toEqual(["Later (0)", "Not scheduled (1)"]);
+    expect(within(screen.getByRole("tabpanel")).getByTestId("roadmap-column-LATER")).toBeInTheDocument();
   });
 
   it("falls back to the default layout when the stored one is corrupt", () => {
     window.localStorage.setItem(STORAGE_KEY, "{not json");
     const first = render(<Board />);
-    expect(screen.getByRole("button", { name: "Expand Not scheduled (1)" })).toBeInTheDocument();
-    expect(headings(scroller())).toContain("Later");
+    expect(tabNames()).toEqual(["Not scheduled (1)"]);
+    expect(screen.queryByRole("tabpanel")).not.toBeInTheDocument();
     first.unmount();
 
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ columnOrder: 5, pinnedColumnIds: "x" }));
     render(<Board />);
-    expect(screen.getByRole("button", { name: "Expand Not scheduled (1)" })).toBeInTheDocument();
-    expect(headings(scroller())).toContain("Later");
+    expect(tabNames()).toEqual(["Not scheduled (1)"]);
+  });
+
+  it("tolerates an older stored layout (per-column collapsed ids): same pins, dock starts collapsed", () => {
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ columnOrder: ["NOW", "NEXT", "LATER", "LAUNCHING", "LAUNCHED", "SHIPPED", "unscheduled"], pinnedColumnIds: ["unscheduled", "LATER"], collapsedColumnIds: ["LATER"] }),
+    );
+    render(<Board />);
+    expect(tabNames()).toEqual(["Later (0)", "Not scheduled (1)"]);
+    expect(screen.queryByRole("tabpanel")).not.toBeInTheDocument();
   });
 
   it("drops unknown ids from a stale stored layout and appends the columns it did not know about", () => {
-    window.localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify({ columnOrder: ["SHIPPED", "GONE", "NOW"], pinnedColumnIds: ["GONE", "NOW"], collapsedColumnIds: [] }),
-    );
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ columnOrder: ["SHIPPED", "GONE", "NOW"], pinnedColumnIds: ["GONE", "NOW"] }));
     render(<Board />);
-    expect(headings(pinnedRegion()!)).toEqual(["Now"]);
-    // Saved order first (Shipped, Now), then the columns it never mentioned, in default order.
+    expect(tabNames()).toEqual(["Now (0)", "Not scheduled (1)"]); // Not scheduled is new to that layout: default pinned
     expect(headings(scroller())).toEqual(["Shipped", "Next", "Later", "Launching", "Launched"]);
   });
 });
 
-describe("RoadmapBoard pinned columns below md", () => {
+describe("RoadmapBoard dock below md", () => {
   beforeEach(() => setViewport(false));
 
-  it("falls back to ordinary scroller columns: no pinned region, Not scheduled is the last swipe column, no pin controls", () => {
+  it("falls back to ordinary scroller columns: no dock, Not scheduled is the last swipe column, no pin controls", () => {
     render(<Board />);
     expect(pinnedRegion()).not.toBeInTheDocument();
-    const column = within(scroller()).getByTestId("roadmap-unscheduled-column");
-    expect(column).toBeInTheDocument();
+    expect(screen.queryByRole("tablist")).not.toBeInTheDocument();
+    expect(within(scroller()).getByTestId("roadmap-unscheduled-column")).toBeInTheDocument();
     expect(headings(scroller()).at(-1)).toBe("Not scheduled");
     expect(screen.queryByRole("button", { name: /^Pin .* to the right$/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Collapse Not scheduled" })).not.toBeInTheDocument();
@@ -200,7 +258,7 @@ describe("RoadmapBoard pinned columns below md", () => {
   it("keeps pinned state in the layout but renders it in the scroller, in column order", () => {
     window.localStorage.setItem(
       STORAGE_KEY,
-      JSON.stringify({ columnOrder: ["NOW", "NEXT", "LATER", "LAUNCHING", "LAUNCHED", "SHIPPED", "unscheduled"], pinnedColumnIds: ["unscheduled", "NOW"], collapsedColumnIds: [] }),
+      JSON.stringify({ columnOrder: ["NOW", "NEXT", "LATER", "LAUNCHING", "LAUNCHED", "SHIPPED", "unscheduled"], pinnedColumnIds: ["unscheduled", "NOW"] }),
     );
     render(<Board />);
     expect(pinnedRegion()).not.toBeInTheDocument();
@@ -232,15 +290,15 @@ describe("RoadmapColumnLayoutProvider with a saved view", () => {
   const savedLayout = {
     columnOrder: ["NOW", "NEXT", "LATER", "LAUNCHING", "LAUNCHED", "SHIPPED", "unscheduled"],
     pinnedColumnIds: ["unscheduled", "LATER"],
-    collapsedColumnIds: [],
+    activePinnedId: "LATER",
+    dockCollapsed: false,
   };
 
   it("starts from the saved view's layout, ignoring this browser's localStorage", () => {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...savedLayout, pinnedColumnIds: ["NOW"] }));
     render(<Page columnLayout={savedLayout} />);
-    expect(within(pinnedRegion()!).getByTestId("roadmap-column-LATER")).toBeInTheDocument();
-    expect(within(pinnedRegion()!).getByTestId("roadmap-unscheduled-column")).toBeInTheDocument(); // saved layout says expanded
-    expect(screen.queryByTestId("roadmap-column-NOW")?.closest('[data-testid="board-pinned-region"]')).toBeNull();
+    expect(tabNames()).toEqual(["Later (0)", "Not scheduled (1)"]);
+    expect(within(screen.getByRole("tabpanel")).getByTestId("roadmap-column-LATER")).toBeInTheDocument();
   });
 
   it("exposes the live layout for the save menu: absent while default, the layout once changed, and does not touch localStorage", () => {
@@ -249,12 +307,20 @@ describe("RoadmapColumnLayoutProvider with a saved view", () => {
     fireEvent.click(screen.getByRole("button", { name: "Pin Now to the right" }));
     const stored = JSON.parse(screen.getByTestId("stored").textContent!);
     expect([...stored.pinnedColumnIds].sort()).toEqual(["NOW", "unscheduled"]);
+    expect(stored.activePinnedId).toBe("NOW");
     expect(window.localStorage.getItem(STORAGE_KEY)).toBeNull();
+  });
+
+  it("opening or switching the dock is part of the layout (so Save captures it, and it is 'modified')", () => {
+    render(<Page columnLayout={undefined} />);
+    fireEvent.click(tab(/^Not scheduled/));
+    expect(JSON.parse(screen.getByTestId("stored").textContent!)).toMatchObject({ dockCollapsed: false, activePinnedId: "unscheduled" });
   });
 
   it("a corrupt saved layout degrades to the default layout", () => {
     render(<Page columnLayout={{ columnOrder: "nope" }} />);
-    expect(screen.getByRole("button", { name: "Expand Not scheduled (1)" })).toBeInTheDocument();
+    expect(tabNames()).toEqual(["Not scheduled (1)"]);
+    expect(screen.queryByRole("tabpanel")).not.toBeInTheDocument();
     expect(screen.getByTestId("stored")).toHaveTextContent("null");
   });
 
@@ -262,14 +328,14 @@ describe("RoadmapColumnLayoutProvider with a saved view", () => {
     const { rerender } = render(<Page columnLayout={savedLayout} />);
     fireEvent.click(screen.getByRole("button", { name: "Pin Next to the right" }));
     rerender(<Page columnLayout={savedLayout} />);
-    expect(within(pinnedRegion()!).getByTestId("roadmap-column-NEXT")).toBeInTheDocument();
+    expect(tabNames()).toEqual(["Next (0)", "Later (0)", "Not scheduled (1)"]);
 
-    const next = { ...savedLayout, pinnedColumnIds: ["unscheduled", "LATER", "NEXT"] };
+    const next = { ...savedLayout, pinnedColumnIds: ["unscheduled", "LATER", "NEXT"], activePinnedId: "NEXT" };
     act(() => rerender(<Page columnLayout={next} version="v2" />));
     expect(JSON.parse(screen.getByTestId("stored").textContent!).pinnedColumnIds).toEqual(["unscheduled", "LATER", "NEXT"]);
 
     act(() => rerender(<Page columnLayout={undefined} id="view-2" />));
     expect(screen.getByTestId("stored")).toHaveTextContent("null");
-    expect(screen.getByRole("button", { name: "Expand Not scheduled (1)" })).toBeInTheDocument();
+    expect(tabNames()).toEqual(["Not scheduled (1)"]);
   });
 });

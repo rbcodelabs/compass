@@ -11,7 +11,9 @@ import {
   DragEndEvent,
   DragOverEvent,
   closestCenter,
+  pointerWithin,
   useDroppable,
+  type CollisionDetection,
   PointerSensor,
   KeyboardSensor,
   useSensor,
@@ -39,8 +41,8 @@ import {
 import { usePanelContext } from "@/components/panels/panel-context";
 import { HORIZON_META, INTERNAL_BOARD_HORIZONS, getInternalBoardHorizons, isLaunchHorizon } from "@/lib/roadmap";
 import type { Horizon, SquadData } from "@/lib/types";
-import { Board, BOARD_FADE_END_TRACK_CLASS, BoardPinnedRegion, CollapsedColumnTab, type BoardColumnLayoutControls } from "@/components/patterns/board";
-import { moveColumn, canMoveColumn, pinColumn, setColumnCollapsed, togglePinColumn, type BoardLayout, type MoveDirection } from "@/lib/board-layout";
+import { Board, BOARD_FADE_END_TRACK_CLASS, BoardDock, type BoardColumnLayoutControls, type BoardDockTab } from "@/components/patterns/board";
+import { canMoveColumn, collapseDock, isPinned, moveColumn, pinColumn, setActiveColumn, togglePinColumn, type BoardLayout, type MoveDirection } from "@/lib/board-layout";
 import { UNSCHEDULED_COLUMN_ID } from "@/lib/roadmap/board-layout";
 import { useRoadmapColumnLayout } from "./column-layout-context";
 import { NOT_SCHEDULED_TITLE } from "./schedule/sidebar-chrome";
@@ -227,16 +229,32 @@ export function applyRoadmapItemPatch(
 }
 
 /**
- * A collapsed pinned horizon: a slim tab that is still a drop target, so a card can be dragged onto a column
- * that has been folded away (it lands in that horizon exactly as a drop on the open column would).
+ * closestCenter alone lets a tall column body beat a small dock tab, because it measures the dragged card's centre rather
+ * than the pointer. A tab is only a target when the pointer is actually on it, so check that first.
  */
-function DroppableCollapsedTab({ horizon, title, count, onExpand }: { horizon: Horizon; title: string; count: number; onExpand: () => void }) {
-  const { setNodeRef, isOver } = useDroppable({ id: `column-${horizon}`, data: { horizon } });
-  return (
-    <div ref={setNodeRef} className={cn("h-fit rounded-xl", isOver && "ring-2 ring-ring/40")}>
-      <CollapsedColumnTab title={title} count={count} onClick={onExpand} columnId={horizon} controls={`roadmap-column-${horizon}`} />
-    </div>
-  );
+// A tab needs its own droppable id: the open panel's column registers `column-<horizon>` too, and two droppables sharing
+// an id clobber each other in dnd-kit's registry (unmounting the panel would unregister the tab). Drops on a tab are
+// translated back to the column's id by `droppedOnId`.
+const DOCK_TAB_PREFIX = "dock-tab-";
+const dockTabDroppableId = (horizon: Horizon) => `${DOCK_TAB_PREFIX}${horizon}`;
+const droppedOnId = (over: { id: string | number }): string => {
+  const id = String(over.id);
+  return id.startsWith(DOCK_TAB_PREFIX) ? `column-${id.slice(DOCK_TAB_PREFIX.length)}` : id;
+};
+
+const collisionDetection: CollisionDetection = (args) => {
+  const onTab = pointerWithin(args).find((hit) => args.droppableContainers.find((c) => c.id === hit.id)?.data.current?.dockTab);
+  return onTab ? [onTab] : closestCenter(args);
+};
+
+/**
+ * A dock tab for a horizon column, which is also a drop target: a card dropped on it lands in that horizon exactly as a
+ * drop on the open column would. Disabled while that column is the open panel (the panel itself is the drop target then,
+ * and two droppables must not share an id).
+ */
+function DroppableDockTab({ horizon, disabled, children }: { horizon: Horizon; disabled: boolean; children: React.ReactNode }) {
+  const { setNodeRef, isOver } = useDroppable({ id: dockTabDroppableId(horizon), data: { horizon, dockTab: true }, disabled });
+  return <div ref={setNodeRef} className={cn("h-fit rounded-xl", isOver && "ring-2 ring-ring/40")}>{children}</div>;
 }
 
 export function RoadmapBoard({
@@ -309,14 +327,18 @@ export function RoadmapBoard({
   const dndId = useId();
   const isDesktop = useMediaQuery("(min-width: 768px)", false);
 
-  // Column layout: which columns are pinned (docked on the right, outside the scroller), collapsed, and in what order.
-  // Docking applies from md up only; below md every column is an ordinary scroller column, in the same order. In
-  // swimlane mode the horizons are lane-grid columns, so only the Not scheduled column can dock there.
+  // Column layout: which columns are pinned (docked in ONE dock on the right, outside the scroller), which pinned
+  // column the dock shows, whether the dock is collapsed to its tab rail, and the column order. Docking applies from md
+  // up only; below md every column is an ordinary scroller column, in the same order. In swimlane mode the horizons are
+  // lane-grid columns, so only the Not scheduled column can dock there.
   const { layout, update: updateLayout } = useRoadmapColumnLayout(workspaceId);
   const orderedColumnIds = layout.columnOrder.filter((id) => id === UNSCHEDULED_COLUMN_ID || (visibleHorizons as string[]).includes(id));
   const isDocked = (id: string) => isDesktop && (spec ? id === UNSCHEDULED_COLUMN_ID : layout.pinnedColumnIds.includes(id));
   const dockedColumnIds = orderedColumnIds.filter(isDocked);
   const scrollerColumnIds = orderedColumnIds.filter((id) => !isDocked(id));
+  // The stored active column may be one that isn't rendered (a hidden launch horizon): show the first visible one then.
+  const activeDockId = layout.activePinnedId && dockedColumnIds.includes(layout.activePinnedId) ? layout.activePinnedId : (dockedColumnIds[0] ?? null);
+  const dockOpen = activeDockId !== null && !layout.dockCollapsed;
 
   // Keyboard users keep their place: after a layout change the control that now represents the column gets focus.
   const pendingFocus = useRef<string | null>(null);
@@ -331,8 +353,15 @@ export function RoadmapBoard({
     updateLayout(transition);
   };
 
+  // The active tab of an open dock closes it; any other tab shows its column and opens the dock. (A column the layout
+  // does not list as pinned, i.e. Not scheduled forced into the dock by swimlane mode, is pinned first.)
+  function selectDockTab(id: string) {
+    if (dockOpen && id === activeDockId) changeLayout(collapseDock, `${id}:tab`);
+    else changeLayout((l) => setActiveColumn(isPinned(l, id) ? l : pinColumn(l, id), id), `${id}:tab`);
+  }
+
   function layoutControlsFor(id: string, label: string): BoardColumnLayoutControls {
-    // A column moves among the columns rendered in its own region (docked vs scroller; everything on narrow screens).
+    // A column moves among the columns rendered in its own region (the dock's tabs, or the scroller; everything on narrow screens).
     const scope = { among: (other: string) => orderedColumnIds.includes(other) && (!isDesktop || isDocked(other) === isDocked(id)) };
     const docked = isDocked(id);
     return {
@@ -344,10 +373,9 @@ export function RoadmapBoard({
       canMoveLeft: canMoveColumn(layout, id, "left", scope),
       canMoveRight: canMoveColumn(layout, id, "right", scope),
       onMove: (direction: MoveDirection) => changeLayout((l) => moveColumn(l, id, direction, scope), `${id}:menu`),
-      onCollapse: docked ? () => changeLayout((l) => setColumnCollapsed(pinColumn(l, id), id, true), `${id}:tab`) : undefined,
+      onCollapse: docked ? () => changeLayout(collapseDock, `${id}:tab`) : undefined,
     };
   }
-  const expandColumn = (id: string) => changeLayout((l) => setColumnCollapsed(l, id, false), `${id}:collapse`);
 
   function renderColumn(id: string, placement: "scroller" | "pinned") {
     if (id === UNSCHEDULED_COLUMN_ID) {
@@ -385,14 +413,11 @@ export function RoadmapBoard({
     );
   }
 
-  function renderDockedColumn(id: string) {
-    if (!layout.collapsedColumnIds.includes(id)) return renderColumn(id, "pinned");
-    if (id === UNSCHEDULED_COLUMN_ID) {
-      return <CollapsedColumnTab key={id} title={NOT_SCHEDULED_TITLE} count={unscheduled.length} columnId={id} controls="unscheduled-items-column" onClick={() => expandColumn(id)} />;
-    }
-    const horizon = id as Horizon;
-    return <DroppableCollapsedTab key={id} horizon={horizon} title={HORIZON_META[horizon].label} count={displayColumns[horizon].length} onExpand={() => expandColumn(id)} />;
-  }
+  const dockTabs: BoardDockTab[] = dockedColumnIds.map((id) => ({
+    id,
+    title: id === UNSCHEDULED_COLUMN_ID ? NOT_SCHEDULED_TITLE : HORIZON_META[id as Horizon].label,
+    count: id === UNSCHEDULED_COLUMN_ID ? unscheduled.length : displayColumns[id as Horizon].length,
+  }));
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: { distance: 8 },
@@ -507,7 +532,7 @@ export function RoadmapBoard({
     if (!over) return;
 
     const activeId = active.id as string;
-    const overId = over.id as string;
+    const overId = droppedOnId(over);
 
     const sourceHorizon = findHorizon(columns, activeId);
     if (!sourceHorizon) return;
@@ -569,7 +594,7 @@ export function RoadmapBoard({
       setActiveUnscheduledItem(null);
       if (!over) return;
 
-      const overId = over.id as string;
+      const overId = droppedOnId(over);
       const { horizon: destHorizon, laneKey } = resolveDrop(overId);
       if (!destHorizon) return; // dropped somewhere that isn't a horizon column/card
 
@@ -597,7 +622,7 @@ export function RoadmapBoard({
       return;
     }
 
-    const overId = over.id as string;
+    const overId = droppedOnId(over);
 
     const currentHorizon = findHorizon(columns, activeId);
     if (!currentHorizon) {
@@ -695,7 +720,7 @@ export function RoadmapBoard({
     <DndContext
       id={dndId}
       sensors={sensors}
-      collisionDetection={closestCenter}
+      collisionDetection={collisionDetection}
       onDragStart={handleDragStart}
       onDragOver={handleDragOver}
       onDragEnd={handleDragEnd}
@@ -754,8 +779,19 @@ export function RoadmapBoard({
             {spec && !isDocked(UNSCHEDULED_COLUMN_ID) ? renderColumn(UNSCHEDULED_COLUMN_ID, "scroller") : null}
           </div>
         </Board>
-        {/* Docked columns sit OUTSIDE the horizontal scroller, so they stay put while the rest scroll and a drag from one never needs a mid-drag scroll. */}
-        {dockedColumnIds.length > 0 ? <BoardPinnedRegion>{dockedColumnIds.map(renderDockedColumn)}</BoardPinnedRegion> : null}
+        {/* The dock sits OUTSIDE the horizontal scroller, so it stays put while the rest scroll and a drag from it never needs a mid-drag scroll. */}
+        {dockTabs.length > 0 ? (
+          <BoardDock
+            tabs={dockTabs}
+            activeId={activeDockId}
+            collapsed={!dockOpen}
+            onSelectTab={selectDockTab}
+            panel={dockOpen && activeDockId ? renderColumn(activeDockId, "pinned") : null}
+            wrapTab={(tab, node, { panelOpen }) =>
+              tab.id === UNSCHEDULED_COLUMN_ID ? node : <DroppableDockTab horizon={tab.id as Horizon} disabled={panelOpen}>{node}</DroppableDockTab>
+            }
+          />
+        ) : null}
         </div>
       </div>
 
