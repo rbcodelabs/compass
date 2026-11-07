@@ -39,6 +39,8 @@ import { Markdown } from "@/components/agent/markdown"
 import { SeedContextChip } from "@/components/agent/seed-context-chip"
 import { AgentParticipantsPanel, type Roster } from "@/components/agent/agent-participants"
 import { initialsOf } from "@/lib/user-initials"
+import { formatRelativeTime, groupConversationsByStatus, type AgentListConversation, type BoardColumnId } from "@/lib/agent-board"
+import { cn } from "@/lib/utils"
 
 type Role = "user" | "assistant"
 type Message = {
@@ -54,7 +56,7 @@ type Message = {
   authorUserId?: string | null
   authorName?: string | null
 }
-type ConversationSummary = { id: string; title: string | null }
+type ConversationSummary = AgentListConversation
 type SeedEntity = { entityType: string; entityId: string; label: string; summary: string; sourceUrl: string }
 
 type Props = {
@@ -99,6 +101,8 @@ type Props = {
    * it); ignored by the rail, which has no inline list.
    */
   listOpen?: boolean
+  /** Conversations the shell has marked read this session (after its dwell), overriding the server-rendered status. */
+  reviewedIds?: ReadonlySet<string>
   /**
    * Called when turn 1 of a brand-new chat comes back with the id the server
    * assigned to it.
@@ -152,6 +156,7 @@ export function AgentChat({
   initialAgentId,
   variant = "page",
   listOpen = true,
+  reviewedIds,
   onConversationCreated,
   onStreamingChange,
 }: Props) {
@@ -579,6 +584,14 @@ export function AgentChat({
     void sendRef2.current(false, false, undefined, text)
   }, [queued, isStreaming, composerBlocked, accessLost, sending])
   // Who is answering and on what, shown in the composer card while a detached run is live.
+  // A chat counts as read only after the shell dwell, so the list follows reviewedIds rather than merely being open.
+  const groups = useMemo(
+    () =>
+      groupConversationsByStatus(
+        conversations.map((c) => (reviewedIds?.has(c.id) && c.lastActivityAt ? { ...c, reviewedAt: c.lastActivityAt } : c))
+      ),
+    [conversations, reviewedIds]
+  )
   const runStatusLine =
     activeRun && !activeRun.done
       ? activeRun.agentName
@@ -609,34 +622,39 @@ export function AgentChat({
                 {showArchived ? "No archived chats" : "No conversations yet"}
               </li>
             )}
-            {(showArchived ? archivedChats : conversations).map((c) => {
-              const active = c.id === activeConversationId
-              const label = showArchived ? "Restore chat" : "Archive chat"
-              return (
-                <li key={c.id} className="group relative">
-                  <Link
-                    href={`${basePath}/agent?c=${c.id}`}
-                    className={`block truncate rounded-lg py-2 pl-3 pr-9 text-sm transition-colors ${
-                      active
-                        ? "bg-surface-interactive text-text-primary"
-                        : "text-text-secondary hover:bg-surface-interactive-hover hover:text-text-primary"
-                    }`}
-                  >
-                    {c.title || "Untitled chat"}
-                  </Link>
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
-                    onClick={() => void changeArchived(c.id, !showArchived)}
-                    aria-label={label}
-                    title={label}
-                  >
-                    {showArchived ? <ArchiveRestore aria-hidden="true" /> : <Archive aria-hidden="true" />}
-                  </Button>
-                </li>
-              )
-            })}
+            {groups && !showArchived
+              ? groups.map((group) => (
+                  <li key={group.id} className="flex flex-col gap-1">
+                    <p className="flex items-center justify-between px-3 pt-3 text-[11px] font-semibold uppercase tracking-wide text-text-subtle">
+                      <span>{group.label}</span>
+                      <span>{group.items.length}</span>
+                    </p>
+                    <ul className="flex flex-col gap-1">
+                      {group.items.map((c) => (
+                        <ConversationRow
+                          key={c.id}
+                          c={c}
+                          status={group.id}
+                          active={c.id === activeConversationId}
+                          basePath={basePath}
+                          archived={false}
+                          onToggleArchived={() => void changeArchived(c.id, true)}
+                        />
+                      ))}
+                    </ul>
+                  </li>
+                ))
+              : (showArchived ? archivedChats : conversations).map((c) => (
+                  <ConversationRow
+                    key={c.id}
+                    c={c}
+                    status={null}
+                    active={c.id === activeConversationId}
+                    basePath={basePath}
+                    archived={showArchived}
+                    onToggleArchived={() => void changeArchived(c.id, !showArchived)}
+                  />
+                ))}
           </ul>
         </ScrollArea>
         <div className="border-t border-default p-2">
@@ -894,5 +912,66 @@ function MessageRow({
         </div>
       </div>
     </div>
+  )
+}
+
+const STATUS_STYLE: Record<BoardColumnId, { label: string; dot: string; badge: string }> = {
+  working: { label: "Working", dot: "bg-status-info animate-pulse", badge: "bg-status-info-surface text-status-info" },
+  new: { label: "New", dot: "bg-status-warning", badge: "bg-status-warning-surface text-status-warning" },
+  done: { label: "Done", dot: "bg-status-success", badge: "bg-status-success-surface text-status-success" },
+  failed: { label: "Failed", dot: "bg-status-danger", badge: "bg-status-danger-surface text-status-danger" },
+  ready: { label: "Ready", dot: "bg-status-neutral", badge: "bg-status-neutral-surface text-status-neutral" },
+}
+
+/** One chat-list row. With a status it shows a dot, a labelled badge and the time of last activity. */
+function ConversationRow({
+  c,
+  status,
+  active,
+  basePath,
+  archived,
+  onToggleArchived,
+}: {
+  c: AgentListConversation
+  status: BoardColumnId | null
+  active: boolean
+  basePath: string
+  archived: boolean
+  onToggleArchived: () => void
+}) {
+  const archiveLabel = archived ? "Restore chat" : "Archive chat"
+  const style = status ? STATUS_STYLE[status] : null
+  return (
+    <li className="group relative">
+      <Link
+        href={basePath + "/agent?c=" + c.id}
+        aria-current={active ? "page" : undefined}
+        className={cn(
+          "block rounded-lg py-2 pl-3 pr-9 text-sm transition-colors",
+          active ? "bg-surface-interactive text-text-primary" : "text-text-secondary hover:bg-surface-interactive-hover hover:text-text-primary"
+        )}
+      >
+        <span className="flex items-center gap-2">
+          {style && <span aria-hidden="true" className={cn("size-2 shrink-0 rounded-full", style.dot)} />}
+          <span className={cn("min-w-0 flex-1 truncate", status === "new" && "font-semibold")}>{c.title || "Untitled chat"}</span>
+        </span>
+        {style && c.lastActivityAt && (
+          <span className="mt-1 flex items-center gap-2 pl-4 text-xs">
+            <span className={cn("rounded px-1.5 py-0.5 font-medium", style.badge)}>{style.label}</span>
+            <span className="text-text-subtle">{formatRelativeTime(c.lastActivityAt)}</span>
+          </span>
+        )}
+      </Link>
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        className="absolute right-1 top-1.5 opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
+        onClick={onToggleArchived}
+        aria-label={archiveLabel}
+        title={archiveLabel}
+      >
+        {archived ? <ArchiveRestore aria-hidden="true" /> : <Archive aria-hidden="true" />}
+      </Button>
+    </li>
   )
 }

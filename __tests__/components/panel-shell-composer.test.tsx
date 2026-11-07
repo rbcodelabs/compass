@@ -42,6 +42,7 @@ vi.mock("@/components/feedback/feedback-composer", () => ({
     </div>
   ),
 }));
+vi.mock("@/components/panels/decision-panel", () => ({ DecisionPanel: () => null }));
 vi.mock("@/components/panels/feedback-panel", () => ({
   FeedbackPanel: ({ id }: { id: string }) => <div data-testid="feedback-body">{id}</div>,
 }));
