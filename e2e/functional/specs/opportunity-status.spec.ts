@@ -35,6 +35,8 @@ test.describe("Opportunity statuses", () => {
     await expect(
       page.locator('[data-slot="opportunity-composer"]').getByRole("combobox", { name: "Status" }),
     ).toHaveText(/Active/);
+    await page.locator('[data-slot="opportunity-composer"]').getByLabel("Title").press("Escape");
+    await expect(page.locator('[data-slot="opportunity-composer"]')).toHaveCount(0);
 
     // The Unreviewed column's own "Add opportunity" presets Unreviewed.
     const id = await createOpportunityFromBoard(page, title, { column: "Unreviewed" });
@@ -52,7 +54,7 @@ test.describe("Opportunity statuses", () => {
     }
   });
 
-  test("mobile: the Unreviewed column leads the board and its info hint opens", async ({ page, base }) => {
+  test("mobile: the Unreviewed column is last on the board and its info hint opens", async ({ page, base }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(`${base}/discovery`);
     await page.waitForLoadState("networkidle");
