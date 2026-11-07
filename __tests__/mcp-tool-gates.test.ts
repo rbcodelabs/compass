@@ -307,6 +307,7 @@ describe("ADR 0020: AgentOrgAdminGrant for delegated scoring-model admin", () =>
     it.each(["OPPORTUNITY", "SOLUTION"])("allows a granted agent to activate a same-org unattached model (%s)", async (entityType) => {
       mockPrisma.agentOrgAdminGrant.findFirst.mockResolvedValue({ id: "grant-1", grantedByUserId: "grantor-1" })
       mockPrisma.organizationMember.findFirst.mockResolvedValue({ role: "ADMIN" })
+      mockPrisma.scoringModel.findUnique.mockResolvedValue({ organizationId: "org-1" })
       await expect(applyToolGate("set_workspace_scoring_model", AGENT, { ...ARGS, entityType })).resolves.toBeUndefined()
     })
 
