@@ -97,8 +97,8 @@ export function planDragEnd(params: {
  * while the drag is still in progress would unmount the dragged card (and its menu) mid-drag and make dnd-kit's item
  * set change again and again, so a tab is never an optimistic drag-over target: the destination is resolved at drag end.
  */
-export function dockTabDropStatus(overData: { dockTab?: boolean; status?: string } | undefined | null): OpportunityStatus | null {
-  return overData?.dockTab && overData.status ? (overData.status as OpportunityStatus) : null
+export function dockTabDropStatus<S extends string = OpportunityStatus>(overData: { dockTab?: boolean; status?: string } | undefined | null): S | null {
+  return overData?.dockTab && overData.status ? (overData.status as S) : null
 }
 
 /**

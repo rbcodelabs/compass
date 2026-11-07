@@ -65,6 +65,22 @@ const dockWidth = async (page: Page) => (await dock(page).boundingBox())!.width;
 const column = (page: Page, status: string) => page.locator(`[data-task-column='${status}']`);
 const cardOf = (root: Locator, title: string) => root.locator("[data-slot=card]", { hasText: title });
 
+/**
+ * Collects uncaught page errors and prints each one's full stack to the test output (an error such as React's
+ * "Maximum update depth exceeded" is otherwise only a line in the browser console). The journey asserts none occurred.
+ */
+function capturePageErrors(page: Page): string[] {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => {
+    errors.push(error.message);
+    console.log(`[pageerror] ${error.message}\n${error.stack ?? "(no stack)"}`);
+  });
+  page.on("console", (message) => {
+    if (message.type() === "error" && /Maximum update depth/.test(message.text())) console.log(`[console.error] ${message.text()}`);
+  });
+  return errors;
+}
+
 async function shot(page: Page, name: string, { resize = true } = {}) {
   const dir = process.env.QA_SHOTS_DIR;
   if (!dir) return;
@@ -93,6 +109,7 @@ async function insertTask(pool: pg.Pool, workspaceId: string, title: string, sta
 test.describe("Tasks board dock", () => {
   test("pin, tabs, drag and drop, add from the panel, reorder, show cancelled and narrow screens", async ({ page, base }) => {
     test.setTimeout(420_000);
+    const pageErrors = capturePageErrors(page);
     const pool = requireLocalE2eDatabase();
     const tag = randomUUID().slice(0, 8);
     const t = (name: string) => `E2E Dock ${name} ${tag}`;
@@ -141,6 +158,31 @@ test.describe("Tasks board dock", () => {
       await expect(panel(page).getByText(d1)).toBeVisible();
       await expect(panel(page).getByText(blocked)).toHaveCount(0);
       await shot(page, "desktop-3-two-pinned-tab-switch");
+
+      // ── 3-pre. Hovering a card over a dock tab whose column is NOT rendered must not move or unmount it ─
+      // (It used to move the card into the unrendered column mid-drag, which unmounted it and its menu and could throw
+      // React's "Maximum update depth exceeded".) Done is the open panel, so the Blocked tab has no column behind it.
+      {
+        const blockedTabCount = await tab(page, "Blocked").getAttribute("aria-label");
+        const a1Card = cardOf(column(page, "TODO"), a1);
+        const handleBox = (await a1Card.getByLabel("Drag to reorder").boundingBox())!;
+        const sx = handleBox.x + handleBox.width / 2;
+        const sy = handleBox.y + handleBox.height / 2;
+        await page.mouse.move(sx, sy);
+        await page.mouse.down();
+        await page.mouse.move(sx + 15, sy + 15, { steps: 10 });
+        const tabBox = (await tab(page, "Blocked").boundingBox())!;
+        await page.mouse.move(tabBox.x + tabBox.width / 2, tabBox.y + tabBox.height / 2, { steps: 30 });
+        await page.waitForTimeout(600);
+        await expect(cardOf(column(page, "TODO"), a1), "the dragged card stays mounted in its own column").toHaveCount(1);
+        await expect(tab(page, "Blocked")).toHaveAttribute("aria-label", blockedTabCount!);
+        await page.keyboard.press("Escape");
+        await page.mouse.up();
+        await expect(cardOf(column(page, "TODO"), a1), "Escape restores the card").toBeVisible();
+        expect(await statusOf(a1), "nothing was written").toBe("TODO");
+        await expect(tab(page, "Blocked")).toHaveAttribute("aria-label", blockedTabCount!);
+        expect(pageErrors, "no page errors while hovering a tab").toEqual([]);
+      }
 
       // ── 3a. Drop a To Do card on the BLOCKED tab while the Done panel is open ─
       await dragTo(page, cardOf(column(page, "TODO"), a2).getByLabel("Drag to reorder"), tab(page, "Blocked"));
@@ -221,6 +263,7 @@ test.describe("Tasks board dock", () => {
       const mobileRegion = await scroller(page).boundingBox();
       expect(Math.abs(mobileColumn!.width - (mobileRegion!.width - 24)), "mobile columns keep their one-per-screen snap width").toBeLessThan(2);
       await shot(page, "narrow-390x844-no-dock-fallback");
+      expect(pageErrors, "no uncaught page errors during the journey").toEqual([]);
     } finally {
       await pool.query(`DELETE FROM "${S}".tasks WHERE title LIKE $1`, [`E2E Dock % ${tag}`]);
       await pool.end();
@@ -231,6 +274,7 @@ test.describe("Tasks board dock", () => {
 test.describe("Tasks saved views", () => {
   test("save filters and layout, restore across a cleared browser, Modified/Reset, corrupt layout and delete", async ({ page, base }) => {
     test.setTimeout(300_000);
+    const pageErrors = capturePageErrors(page);
     const pool = requireLocalE2eDatabase();
     const tag = randomUUID().slice(0, 8);
     const high = `E2E Views High ${tag}`;
@@ -336,6 +380,7 @@ test.describe("Tasks saved views", () => {
       await page.waitForLoadState("networkidle");
       await expect(cardOf(column(page, "TODO"), low)).toBeVisible({ timeout: 30_000 });
       await expect(page.getByTestId("saved-views-trigger")).toContainText("Views");
+      expect(pageErrors, "no uncaught page errors during the journey").toEqual([]);
     } finally {
       await pool.query(`DELETE FROM "${S}".roadmap_views WHERE name = ANY($1)`, [[viewName, renamed]]);
       await pool.query(`DELETE FROM "${S}".tasks WHERE title LIKE $1`, [`E2E Views % ${tag}`]);

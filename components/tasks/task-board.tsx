@@ -6,6 +6,7 @@ import {
   DragOverlay,
   DragStartEvent,
   DragEndEvent,
+  DragCancelEvent,
   DragOverEvent,
   PointerSensor,
   KeyboardSensor,
@@ -35,6 +36,7 @@ import { cn } from "@/lib/utils";
 import { canMoveColumn, collapseDock, moveColumn, setActiveColumn, togglePinColumn, type BoardLayout, type MoveDirection } from "@/lib/board-layout";
 import { TASK_BOARD_COLUMN_IDS, TASK_BOARD_STATUSES } from "@/lib/tasks/board-layout";
 import { TASK_STATUS_LABELS } from "@/lib/task-meta";
+import { dockTabDropStatus } from "@/lib/discovery-board-ordering";
 import { usePanelContext } from "@/components/panels/panel-context";
 import { TASK_CREATED_EVENT } from "@/lib/task-created-event";
 import { useLiveRefresh } from "@/hooks/use-live-refresh";
@@ -174,6 +176,9 @@ export function TaskBoard({ initialTasks, workspaceId, orgSlug, workspaceSlug, m
   function handleDragOver(event: DragOverEvent) {
     const { active, over } = event;
     if (!over) return;
+    // A dock tab is resolved at drag end: its column may not be rendered, and moving the dragged card into an unrendered
+    // column mid-drag unmounts it (and its menu) while dnd-kit is still tracking it.
+    if (dockTabDropStatus(over.data.current)) return;
 
     const activeId = active.id as string;
     const overId = over.id as string;
@@ -226,11 +231,29 @@ export function TaskBoard({ initialTasks, workspaceId, orgSlug, workspaceSlug, m
     const activeId = active.id as string;
     const overId = over.id as string;
 
-    const currentStatus = findStatus(columns, activeId);
-    if (!currentStatus) {
+    const found = findStatus(columns, activeId);
+    if (!found) {
       setDragSourceStatus(null);
       return;
     }
+
+    // Dropped on a dock tab: that tab's status is the destination (the card was not moved there during the drag).
+    const tabStatus = dockTabDropStatus<TaskStatus>(over.data.current);
+    if (tabStatus) {
+      if (tabStatus !== found) {
+        setColumns((prev) => {
+          const task = prev[found].find((t) => t.id === activeId);
+          if (!task) return prev;
+          return { ...prev, [found]: prev[found].filter((t) => t.id !== activeId), [tabStatus]: [...prev[tabStatus], { ...task, status: tabStatus }] };
+        });
+        startTransition(async () => {
+          await moveTaskStatus(activeId, tabStatus, workspaceId, revalidatePathStr);
+        });
+      }
+      setDragSourceStatus(null);
+      return;
+    }
+    const currentStatus = found;
 
     if (dragSourceStatus && dragSourceStatus !== currentStatus) {
       startTransition(async () => {
@@ -251,6 +274,25 @@ export function TaskBoard({ initialTasks, workspaceId, orgSlug, workspaceSlug, m
       }
     }
 
+    setDragSourceStatus(null);
+  }
+
+  /** Escape (or anything else that cancels the drag) puts the card back where the drag began. */
+  function handleDragCancel(event: DragCancelEvent) {
+    const activeId = event.active.id as string;
+    const found = findStatus(columns, activeId);
+    if (dragSourceStatus && found && found !== dragSourceStatus) {
+      setColumns((prev) => {
+        const task = prev[found].find((t) => t.id === activeId);
+        if (!task) return prev;
+        return {
+          ...prev,
+          [found]: prev[found].filter((t) => t.id !== activeId),
+          [dragSourceStatus]: [...prev[dragSourceStatus], { ...task, status: dragSourceStatus }],
+        };
+      });
+    }
+    setActiveTask(null);
     setDragSourceStatus(null);
   }
 
@@ -358,6 +400,7 @@ export function TaskBoard({ initialTasks, workspaceId, orgSlug, workspaceSlug, m
         onDragStart={handleDragStart}
         onDragOver={handleDragOver}
         onDragEnd={handleDragEnd}
+        onDragCancel={handleDragCancel}
       >
         <div className="flex min-h-0 min-w-0 flex-1 flex-col md:flex-row">
           <Board
