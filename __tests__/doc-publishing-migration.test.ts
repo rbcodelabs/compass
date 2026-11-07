@@ -17,7 +17,8 @@ const statementsOf = (name: string) =>
 const names = [...runner.matchAll(/name:\s*"(\d{3}_[a-z0-9_]+)"/g)].map((match) => match[1])
 
 describe.each([
-  ["113_doc_publishing", "112_agent_conversation_archive", "assertDocPublishingMigration"],
+  // main's explicit-only 113_entity_links_backfill_conversation landed first; the duplicate leading number is accepted (the runner keys on the exact name).
+  ["113_doc_publishing", "113_entity_links_backfill_conversation", "assertDocPublishingMigration"],
   ["114_portal_home_template", "113_doc_publishing", "assertPortalHomeTemplateMigration"],
 ])("%s", (name, previous, assertion) => {
   it("is registered exactly once, directly after the previous migration", () => {
