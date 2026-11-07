@@ -171,10 +171,10 @@ export function createTenantFakePrisma() {
   const artifactLinks: Graph[] = [];
   // Task links (ADR phase 7): tasks, roadmap items and the legacy task_links rows (the `task` relation resolves through taskId).
   const tasks: Graph[] = [
-    { id: "task-a", workspaceId: WS_A.id, title: "A task", status: "TODO" },
-    { id: "task-a2", workspaceId: WS_A.id, title: "A task 2", status: "DONE" },
-    { id: "task-a3", workspaceId: WS_A.id, title: "A task 3", status: "IN_PROGRESS" },
-    { id: "task-b", workspaceId: WS_B.id, title: "B task", status: "TODO" },
+    { id: "task-a", workspaceId: WS_A.id, title: "A task", parentTaskId: null, status: "TODO" },
+    { id: "task-a2", workspaceId: WS_A.id, title: "A task 2", parentTaskId: null, status: "DONE" },
+    { id: "task-a3", workspaceId: WS_A.id, title: "A task 3", parentTaskId: null, status: "IN_PROGRESS" },
+    { id: "task-b", workspaceId: WS_B.id, title: "B task", parentTaskId: null, status: "TODO" },
   ];
   const roadmapItems: Graph[] = [
     { id: "ri-a", workspaceId: WS_A.id, title: "A roadmap item" },

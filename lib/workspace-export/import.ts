@@ -1,5 +1,4 @@
 import { createHash, randomUUID } from "node:crypto"
-import { isDsqlWriteConflict } from "@/lib/dsql-conflict"
 import { normalizeWorkspaceRole } from "@/lib/roles"
 import { SLUG_PATTERN, isReservedWorkspaceSlug } from "@/lib/slug"
 import { WORK_ITEM_REGISTRY, WORK_ITEM_TYPES } from "@/lib/work-item-ids"
@@ -7,6 +6,7 @@ import { BundleReader, blobEntry, type BundleManifest } from "@/lib/workspace-ex
 import { type BlobAdapters } from "@/lib/workspace-export/blobs"
 import { decodeRow, fieldInfo } from "@/lib/workspace-export/codec"
 import { OPTIONAL_FIELDS, OPTIONAL_STRING_FIELDS } from "@/lib/workspace-export/schema-meta.generated"
+import { deleteIdsLeafFirst, withRetry } from "@/lib/workspace-export/leaf-first"
 import { IMPORT_OVERRIDES, SECRET_COLUMNS } from "@/lib/workspace-export/model-registry"
 import {
   PARENT,
@@ -100,17 +100,6 @@ function deriveId(importKey: string, oldId: string): string {
   const h = createHash("sha256").update(`${importKey}:${oldId.toLowerCase()}`).digest("hex")
   const variant = ((parseInt(h.slice(16, 18), 16) & 0x3f) | 0x80).toString(16).padStart(2, "0")
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-${variant}${h.slice(18, 20)}-${h.slice(20, 32)}`
-}
-
-async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
-  for (let attempt = 0; ; attempt++) {
-    try {
-      return await fn()
-    } catch (error) {
-      if (attempt >= 5 || !isDsqlWriteConflict(error)) throw error
-      await new Promise((r) => setTimeout(r, 50 * 2 ** attempt))
-    }
-  }
 }
 
 function chunks<T>(list: T[], size: number): T[][] {
@@ -418,34 +407,6 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
       console.error("[workspace-import] rollback failed; partial rows may remain for workspace", newWorkspaceId, rollbackError)
     })
     throw error
-  }
-}
-
-/**
- * Deletes rows by id. Self-referencing models (comment replies, doc trees, subtasks) trip Prisma's emulated Restrict when a
- * parent and its children go in one statement, so on P2014 fall back to repeated passes, one row at a time, until every row
- * whose children are gone has been removed.
- */
-async function deleteIdsLeafFirst(delegate: ReturnType<typeof delegateFor>, ids: string[]) {
-  try {
-    await withRetry(() => delegate.deleteMany({ where: { id: { in: ids } } }))
-    return
-  } catch (error) {
-    if ((error as { code?: string }).code !== "P2014") throw error
-  }
-  let pending = ids
-  while (pending.length) {
-    const next: string[] = []
-    for (const id of pending) {
-      try {
-        await withRetry(() => delegate.deleteMany({ where: { id } }))
-      } catch (error) {
-        if ((error as { code?: string }).code !== "P2014") throw error
-        next.push(id)
-      }
-    }
-    if (next.length === pending.length) throw new WorkspaceImportError("Could not remove partially imported rows")
-    pending = next
   }
 }
 

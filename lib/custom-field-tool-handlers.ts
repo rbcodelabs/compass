@@ -20,6 +20,7 @@ import {
   toCustomFieldDefinitionData,
 } from "@/lib/custom-field-definitions"
 import type {
+  CustomFieldDefinitionData,
   CustomFieldObjectType,
   CustomFieldType,
   CustomFieldValue,
@@ -177,8 +178,62 @@ export function validateValueForFieldType(
   }
 }
 
-function isClearingValue(value: CustomFieldValue): boolean {
+export function isClearingValue(value: CustomFieldValue): boolean {
   return value === null || value === "" || (Array.isArray(value) && value.length === 0)
+}
+
+type FieldWritePreparation =
+  | { ok: true; field: CustomFieldDefinitionData; clearing: boolean }
+  | { ok: false; error: string }
+
+/**
+ * The validation shared by set_custom_field_value and set_custom_field_values:
+ * the field must exist, belong to the target workspace and object type, and
+ * accept `value`. `subject` names the target in the workspace-mismatch message.
+ */
+export async function prepareFieldWrite(
+  prisma: ReturnType<typeof getPrisma>,
+  { workspaceId, objectType, fieldId, value, subject }: {
+    workspaceId: string
+    objectType: CustomFieldObjectType
+    fieldId: string
+    value: CustomFieldValue
+    subject: string
+  }
+): Promise<FieldWritePreparation> {
+  const fieldRow = await prisma.customFieldDefinition.findUnique({
+    where: { id: fieldId },
+    include: { sharedOptionSet: { select: { id: true, name: true, options: true } } },
+  })
+  if (!fieldRow) {
+    return { ok: false, error: `Custom field "${fieldId}" not found.` }
+  }
+
+  // Cross-tenant / cross-objectType guard. assertEntityAccess (which the tool
+  // gate already ran) only verifies the OBJECT's workspace — it never looks at
+  // fieldId — so without this check a caller could point a legitimate object
+  // at a field definition from a workspace they aren't even a member of, or at
+  // a field meant for a different object type.
+  if (fieldRow.workspaceId !== workspaceId) {
+    return { ok: false, error: `Custom field "${fieldId}" does not belong to the same workspace as ${subject}.` }
+  }
+  if (fieldRow.objectType !== objectType) {
+    return { ok: false, error: `Custom field "${fieldRow.name}" is defined for ${fieldRow.objectType}, not ${objectType}.` }
+  }
+
+  const field = toCustomFieldDefinitionData(fieldRow)
+
+  // Clearing takes priority over type validation, and must for every field
+  // type — null/""/[] is how a caller says "unset this field", regardless of
+  // what type it is, exactly matching upsertFieldValue's own clearing check.
+  // Validating first would reject e.g. value: "" against a NUMBER field as
+  // "not a number" instead of clearing it.
+  const clearing = isClearingValue(value)
+  if (!clearing) {
+    const validationError = validateValueForFieldType(field.fieldType, field.options, value)
+    if (validationError) return { ok: false, error: validationError }
+  }
+  return { ok: true, field, clearing }
 }
 
 export async function setCustomFieldValue({
@@ -199,45 +254,15 @@ export async function setCustomFieldValue({
   }
 
   const prisma = getPrisma()
-  const fieldRow = await prisma.customFieldDefinition.findUnique({
-    where: { id: fieldId },
-    include: { sharedOptionSet: { select: { id: true, name: true, options: true } } },
+  const prepared = await prepareFieldWrite(prisma, {
+    workspaceId,
+    objectType,
+    fieldId,
+    value,
+    subject: `${objectType} "${objectId}"`,
   })
-  if (!fieldRow) {
-    return fail(`Custom field "${fieldId}" not found.`)
-  }
-
-  // Cross-tenant / cross-objectType guard. assertEntityAccess (which the tool
-  // gate already ran) only verifies the OBJECT's workspace — it never looks at
-  // fieldId — so without this check a caller could point a legitimate object
-  // at a field definition from a workspace they aren't even a member of, or at
-  // a field meant for a different object type.
-  if (fieldRow.workspaceId !== workspaceId) {
-    return fail(
-      `Custom field "${fieldId}" does not belong to the same workspace as ${objectType} "${objectId}".`
-    )
-  }
-  if (fieldRow.objectType !== objectType) {
-    return fail(
-      `Custom field "${fieldRow.name}" is defined for ${fieldRow.objectType}, not ${objectType}.`
-    )
-  }
-
-  const field = toCustomFieldDefinitionData(fieldRow)
-
-  // Clearing takes priority over type validation, and must for every field
-  // type — null/""/[] is how a caller says "unset this field", regardless of
-  // what type it is, exactly matching upsertFieldValue's own clearing check.
-  // Validating first would reject e.g. value: "" against a NUMBER field as
-  // "not a number" instead of clearing it.
-  const clearing = isClearingValue(value)
-
-  if (!clearing) {
-    const validationError = validateValueForFieldType(field.fieldType, field.options, value)
-    if (validationError) {
-      return fail(validationError)
-    }
-  }
+  if (!prepared.ok) return fail(prepared.error)
+  const { field, clearing } = prepared
 
   if (clearing) {
     await prisma.customFieldValue.deleteMany({ where: { fieldId, objectId } })

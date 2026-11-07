@@ -64,6 +64,20 @@ test.describe("Workspace export / import", () => {
     await expect(page.getByTestId("export-workspace")).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath("imported-workspace-settings.png") });
 
+    // ── 3b. Delete the imported copy from its settings page ────────────────
+    // Regression for TASK-103: deleting a workspace that holds doc versions, subtasks and comments used to return 500 after the
+    // members were already removed, stranding it. The copy of the fixture workspace carries that kind of data.
+    await page.getByRole("button", { name: "Delete workspace" }).first().click();
+    const dialog = page.getByRole("dialog");
+    await dialog.getByRole("textbox").fill(`Imported ${importedSlug}`);
+    await dialog.getByRole("button", { name: "Delete workspace" }).click();
+    await expect(page).not.toHaveURL(new RegExp(`/${importedSlug}`), { timeout: 90_000 });
+    await expect(page.getByText(/something went wrong|internal server error/i)).toHaveCount(0);
+    await page.goto(`/${orgSlug}/settings`);
+    await expect(page.getByText(`/${orgSlug}/${importedSlug}`)).toHaveCount(0);
+    const gone = await page.request.get(`/${orgSlug}/${importedSlug}/settings`, { maxRedirects: 0 });
+    expect(gone.status(), "deleted workspace must no longer be reachable").not.toBe(200);
+
     // ── 4. A bad file is rejected with a readable message ──────────────────
     await page.goto(`/${orgSlug}/settings`);
     const form2 = page.getByTestId("import-workspace-form");
