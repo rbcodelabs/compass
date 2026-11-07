@@ -36,4 +36,14 @@ test.describe("Opportunity statuses", () => {
       await expect(page.getByRole("option", { name: label })).toBeVisible();
     }
   });
+
+  test("mobile: the Unreviewed column leads the board and its info hint opens", async ({ page, base }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(`${base}/discovery`);
+    await page.waitForLoadState("networkidle");
+    await expect(page.getByRole("heading", { level: 3 }).first()).toHaveText(/^Unreviewed/);
+    await page.getByRole("button", { name: "About the Unreviewed status" }).focus();
+    await expect(page.getByText("nobody has triaged it yet", { exact: false })).toBeVisible();
+    await page.screenshot({ path: "test-results/unreviewed-board-mobile.png" });
+  });
 });
