@@ -1,5 +1,6 @@
 import type { ReactNode } from "react"
 import type { PortalTemplate } from "@/lib/portal-home/templates"
+import type { PortalHeroMeta } from "@/lib/portal-home/hero-meta"
 import { PortalAuthStatus } from "@/components/portal/portal-auth-status"
 import { PortalNav } from "../portal-nav"
 import { BrandMark, PortalFooter } from "./brand"
@@ -19,20 +20,22 @@ export interface PortalShellProps {
   email: string | null
   /** The published home has a docs widget: the nav offers a Docs link to it. */
   showDocs: boolean
-  /** The published home has an announcement widget: the hero skips its own buttons. */
-  hasAnnouncement: boolean
+  /** Editorial hero meta line figures (real data only). */
+  heroMeta?: PortalHeroMeta
+  /** Docs hub "Popular" quick-search chips: published doc titles. */
+  searchSuggestions?: string[]
   children: ReactNode
 }
 
 /** The chrome around every portal page (home, roadmap, feedback) for the published template. */
 export function PortalShell(props: PortalShellProps) {
-  const { template, orgSlug, workspaceSlug, workspaceName, logoUrl, roadmapPublic, feedbackEnabled, email, showDocs, hasAnnouncement, children } = props
+  const { template, orgSlug, workspaceSlug, workspaceName, logoUrl, roadmapPublic, feedbackEnabled, email, showDocs, heroMeta, searchSuggestions, children } = props
   const base = `/portal/${orgSlug}/${workspaceSlug}`
   const nav = (variant: "default" | "onBrand" | "onDark") => (
     <PortalNav orgSlug={orgSlug} workspaceSlug={workspaceSlug} roadmapPublic={roadmapPublic} feedbackEnabled={feedbackEnabled} showDocs={showDocs} variant={variant} />
   )
   const auth = (className: string) => (email ? <div className={className}><PortalAuthStatus email={email} /></div> : null)
-  const hero: HeroProps = { name: workspaceName, base, roadmapPublic, feedbackEnabled, hasAnnouncement }
+  const hero: HeroProps = { name: workspaceName, base, roadmapPublic, feedbackEnabled, meta: heroMeta, suggestions: searchSuggestions }
 
   if (template === "shell") {
     return (

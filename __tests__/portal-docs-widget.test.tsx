@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest"
 import { renderToStaticMarkup } from "react-dom/server"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { DocsForm, DocsRenderer } from "@/components/portal-home/widgets/docs"
-import { stripLeadingTitle } from "@/lib/portal-docs/format"
+import { popularSearchTerms, stripLeadingTitle } from "@/lib/portal-docs/format"
 import { docsDefinition } from "@/lib/portal-home/widgets/docs"
 
 const config = docsDefinition.defaultConfig()
@@ -21,6 +21,16 @@ describe("Docs widget renderer", () => {
     expect(html).toContain('href="/portal/acme/main/docs/00000000-0000-4000-8000-000000000001"')
     expect(html).toContain('href="/portal/acme/main/docs"')
     expect(html).toContain("@xl:grid-cols-2") // widens to a card grid with the widget, not the viewport
+  })
+
+  it("carries a right-aligned date and a tinted cover for the editorial and hub templates (shown via the template scope)", () => {
+    const html = renderToStaticMarkup(<DocsRenderer config={config} data={{ type: "docs", docs: [doc(1), doc(2), doc(3), doc(4), doc(5)] }} />)
+    expect(html).toContain('data-testid="docs-widget-date"')
+    expect(html).toContain("group-data-[tpl=editorial]/home:block")
+    expect(html).toContain("group-data-[tpl=hub]/home:flex")
+    // cover tints use the existing status tokens, cycling by position
+    expect(html.match(/data-testid="docs-widget-cover"/g)).toHaveLength(5)
+    for (const token of ["bg-primary/10", "bg-status-info-surface", "bg-status-success-surface", "bg-status-warning-surface"]) expect(html).toContain(token)
   })
 
   it("shows a friendly empty state", () => {
@@ -49,6 +59,16 @@ describe("Docs widget form", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: /Guide 1/ }))
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ docIds: [doc(2).id, doc(1).id] }))
     cleanup()
+  })
+})
+
+describe("popularSearchTerms", () => {
+  it("derives chips from real titles: drops blanks and duplicates, shortens long ones, caps the count", () => {
+    expect(popularSearchTerms(["  ", "SSO setup", "sso setup", "API keys", "Data export", "Fourth"])).toEqual(["SSO setup", "API keys", "Data export"])
+    const long = popularSearchTerms(["Getting started with the very long named product guide"])[0]
+    expect(long.length).toBeLessThanOrEqual(32)
+    expect("Getting started with the very long named product guide".startsWith(long)).toBe(true)
+    expect(popularSearchTerms([])).toEqual([])
   })
 })
 

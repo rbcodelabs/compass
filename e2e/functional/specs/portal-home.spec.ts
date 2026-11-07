@@ -45,10 +45,16 @@ test.describe("Portal Home", () => {
 
     await privateCard.hover();
     await privateCard.getByLabel("Card actions").click();
+    // "Edit" opens the Roadmap Item detail (overlay panel), which edits in place; there is no title input to read an id from.
     await page.getByRole("menuitem", { name: "Edit" }).click();
-    const inputId = await page.locator('input[id^="edit-title-"]').getAttribute("id");
-    const privateItemId = inputId!.replace("edit-title-", "");
+    await expect(page.locator('[data-slot="roadmap-item-detail"]').first()).toBeVisible({ timeout: 15_000 });
     await page.keyboard.press("Escape");
+    // The id the home editor's pickers use for the same item (admin options include private items, flagged).
+    const optionsRes = await page.request.get(`/api/portal-home/${orgSlug}/${workspaceSlug}/options`);
+    expect(optionsRes.ok()).toBe(true);
+    const privateOption = (await optionsRes.json()).roadmapItems.find((i: { title: string }) => i.title === privateTitle);
+    expect(privateOption?.isPrivate).toBe(true);
+    const privateItemId: string = privateOption.id;
 
     await page.goto(`${base}/settings`);
     await page.waitForLoadState("networkidle");
@@ -191,7 +197,8 @@ test.describe("Portal Home", () => {
 
       // ── 6. Mobile: single column ──────────────────────────────────────────
       await anonPage.setViewportSize({ width: 390, height: 800 });
-      await anonPage.reload();
+      // The previous step left this page on the team-home login redirect: return to the portal home.
+      await anonPage.goto(`${baseURL}${homeUrl}`);
       await anonPage.waitForLoadState("networkidle");
       const lefts = await anonPage.locator('[data-testid="portal-home-board"] > section').evaluateAll((els) =>
         els.map((el) => Math.round(el.getBoundingClientRect().left)),

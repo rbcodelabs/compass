@@ -1,6 +1,8 @@
 import Link from "next/link"
 import { ArrowRight } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { formatDocDate } from "@/lib/portal-docs/format"
+import { heroMetaParts, type PortalHeroMeta } from "@/lib/portal-home/hero-meta"
 import { HubSearch } from "./hub-search"
 
 export interface HeroProps {
@@ -8,16 +10,18 @@ export interface HeroProps {
   base: string
   roadmapPublic: boolean
   feedbackEnabled: boolean
-  /** The home already has an announcement widget (it carries its own headline and buttons): no hero buttons. */
-  hasAnnouncement: boolean
+  /** Real, customer-visible figures for the editorial meta line. Omitted/empty parts are not shown. */
+  meta?: PortalHeroMeta
+  /** Published doc titles (newest first) the docs hub offers as "Popular" quick searches. */
+  suggestions?: string[]
 }
 
 export function portalTagline(name: string): string {
   return `Follow what we are building and tell us what would make ${name} better for you.`
 }
 
-function HeroActions({ base, roadmapPublic, feedbackEnabled, hasAnnouncement, className, primaryClass, secondaryClass }: HeroProps & { className?: string; primaryClass: string; secondaryClass: string }) {
-  if (hasAnnouncement || (!roadmapPublic && !feedbackEnabled)) return null
+function HeroActions({ base, roadmapPublic, feedbackEnabled, className, primaryClass, secondaryClass }: HeroProps & { className?: string; primaryClass: string; secondaryClass: string }) {
+  if ((!roadmapPublic && !feedbackEnabled)) return null
   return (
     <div className={cn("mt-8 flex flex-wrap gap-3", className)}>
       {roadmapPublic ? (
@@ -31,6 +35,22 @@ function HeroActions({ base, roadmapPublic, feedbackEnabled, hasAnnouncement, cl
         </Link>
       ) : null}
     </div>
+  )
+}
+
+/** "Updated Nov 5 · 6 items in progress · 4 published docs": only what is real, nothing when there is nothing. */
+function HeroMeta({ meta, className }: { meta?: PortalHeroMeta; className?: string }) {
+  const parts = meta ? heroMetaParts(meta, formatDocDate) : []
+  if (parts.length === 0) return null
+  return (
+    <p data-testid="portal-hero-meta" className={cn("mt-8 flex flex-wrap gap-x-2.5 gap-y-1 text-[13px] text-text-subtle", className)}>
+      {parts.map((part, index) => (
+        <span key={part} className="flex gap-x-2.5">
+          {index > 0 ? <span aria-hidden>·</span> : null}
+          <span>{part}</span>
+        </span>
+      ))}
+    </p>
   )
 }
 
@@ -49,6 +69,7 @@ export function EditorialHero(props: HeroProps) {
         primaryClass="inline-flex h-10 items-center gap-2 rounded-lg bg-primary px-5 text-sm font-medium text-primary-foreground hover:bg-primary-hover"
         secondaryClass="inline-flex h-10 items-center rounded-lg border border-border-strong bg-surface-panel px-5 text-sm font-medium text-text-primary hover:bg-surface-inset"
       />
+      <HeroMeta meta={props.meta} className="justify-center" />
     </section>
   )
 }
@@ -73,13 +94,13 @@ export function BentoHero(props: HeroProps) {
 }
 
 /** Docs hub: a search-first hero inside the dark header band. */
-export function HubHero({ name }: HeroProps) {
+export function HubHero({ name, suggestions }: HeroProps) {
   return (
     <section aria-label="Search the docs" className="mx-auto w-full max-w-3xl px-6 pb-14 pt-8 text-center">
       <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[#A294FF]">Help and docs</p>
       <h1 className="mb-3 mt-3 text-balance text-4xl leading-[1.02] font-bold tracking-[-0.04em] text-[#FAF9F6] sm:text-6xl">How can we help?</h1>
       <p className="mx-auto mb-7 max-w-lg text-lg text-[#B9B3A9]">Guides and answers from the {name} team.</p>
-      <HubSearch />
+      <HubSearch suggestions={suggestions} />
     </section>
   )
 }

@@ -5,6 +5,9 @@ import { WorkspaceThemeStyle } from "@/components/branding/workspace-theme-style
 import { resolveWorkspaceBranding } from "@/lib/branding";
 import { buildDefaultWidgets } from "@/lib/portal-home/defaults";
 import { loadPublishedHome } from "@/lib/portal-home/service";
+import { loadPortalHeroMeta } from "@/lib/portal-home/hero-meta";
+import { listPublishedDocs } from "@/lib/portal-docs/service";
+import { popularSearchTerms } from "@/lib/portal-docs/format";
 import { ThemeProvider } from "@/components/theme/theme-provider";
 import { workspaceThemeInitScript } from "@/lib/theme";
 import { PortalShell } from "@/components/portal-home/templates/portal-shell";
@@ -48,6 +51,18 @@ export default async function PortalLayout({ children, params }: Props) {
     published.widgets ??
     buildDefaultWidgets({ workspaceName, orgSlug, workspaceSlug, roadmapPublic, feedbackEnabled });
 
+  const showDocs = widgets.some((widget) => widget.type === "docs");
+  // Template extras, derived from data customers may already see. Each is only loaded for the template that
+  // renders it, so the other templates pay no extra queries.
+  const heroMeta =
+    workspace && published.template === "editorial"
+      ? await loadPortalHeroMeta(prisma, { workspaceId: workspace.id, roadmapPublic, showDocs })
+      : undefined;
+  const searchSuggestions =
+    workspace && published.template === "docs_hub" && showDocs
+      ? popularSearchTerms((await listPublishedDocs(prisma, workspace.id, { limit: 6 })).map((doc) => doc.title))
+      : undefined;
+
   // ThemeProvider is the app's one dark-mode mechanism (the `dark` class on <html>): the visitor's stored
   // preference, else their system setting. Every template uses semantic tokens, so each follows it.
   return (
@@ -65,8 +80,9 @@ export default async function PortalLayout({ children, params }: Props) {
           roadmapPublic={roadmapPublic}
           feedbackEnabled={feedbackEnabled}
           email={portalSession?.email ?? null}
-          showDocs={widgets.some((widget) => widget.type === "docs")}
-          hasAnnouncement={widgets.some((widget) => widget.type === "announcement")}
+          showDocs={showDocs}
+          heroMeta={heroMeta}
+          searchSuggestions={searchSuggestions}
         >
           {children}
         </PortalShell>

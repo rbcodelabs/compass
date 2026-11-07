@@ -4,7 +4,6 @@ import { useId, useRef, useState } from "react"
 import { Check, Info, Link2 } from "lucide-react"
 import { Switch } from "@/components/ui/switch"
 import { Button } from "@/components/ui/button"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { StatusBadge } from "@/components/patterns/status-badge"
 import { pushUndoToast } from "@/lib/ui/undo-toast"
@@ -38,8 +37,10 @@ export function DocPublishControl({ docId, orgSlug, workspaceSlug, initialPublis
   const [pending, setPending] = useState(false)
   const [status, setStatus] = useState("")
   const [copied, setCopied] = useState(false)
+  const [infoOpen, setInfoOpen] = useState(false)
   const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const labelId = useId()
+  const infoId = useId()
 
   const disabledReason = !publishable
     ? "This doc's content is stored outside Compass (or is a canvas), so it cannot be published to the portal yet."
@@ -100,8 +101,9 @@ export function DocPublishControl({ docId, orgSlug, workspaceSlug, initialPublis
   )
 
   return (
-    <div className="mx-auto w-full max-w-4xl px-8 pb-2" data-testid="doc-publish-control" data-published={published}>
-      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-lg border border-border-default bg-surface-inset px-3 py-2">
+    <div className="mx-auto w-full max-w-4xl px-4 pb-2 sm:px-8" data-testid="doc-publish-control" data-published={published}>
+      <div className="rounded-lg border border-border-default bg-surface-inset px-3 py-2" onKeyDown={(event) => { if (event.key === "Escape") setInfoOpen(false) }}>
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
           <TooltipProvider>
             <Tooltip>
@@ -119,18 +121,17 @@ export function DocPublishControl({ docId, orgSlug, workspaceSlug, initialPublis
           )}
         </div>
         <div className="flex items-center gap-1.5">
-          <Popover>
-            <PopoverTrigger
-              aria-label="About publishing"
-              className="inline-flex size-7 items-center justify-center rounded-md text-text-subtle hover:bg-muted hover:text-text-primary focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
-            >
-              <Info className="size-4" aria-hidden />
-            </PopoverTrigger>
-            <PopoverContent align="end" className="w-72 rounded-lg border border-border-default bg-surface-card p-3 text-sm leading-5 text-text-secondary shadow-md">
-              <p className="font-medium text-text-primary">Publishing to the portal</p>
-              <p className="mt-1">{PUBLISH_INFO_COPY}</p>
-            </PopoverContent>
-          </Popover>
+          {/* An inline disclosure, not a floating popover: the sticky editor toolbar sits directly below this row, and a popover covered its buttons. */}
+          <button
+            type="button"
+            aria-label="About publishing"
+            aria-expanded={infoOpen}
+            aria-controls={infoId}
+            onClick={() => setInfoOpen((open) => !open)}
+            className="inline-flex size-7 items-center justify-center rounded-md text-text-subtle hover:bg-muted hover:text-text-primary focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none aria-expanded:bg-muted aria-expanded:text-text-primary"
+          >
+            <Info className="size-4" aria-hidden />
+          </button>
           {published ? (
             <Button type="button" variant="outline" size="sm" onClick={() => void copyLink()} data-testid="doc-publish-copy">
               {copied ? <Check aria-hidden /> : <Link2 aria-hidden />}
@@ -138,6 +139,10 @@ export function DocPublishControl({ docId, orgSlug, workspaceSlug, initialPublis
             </Button>
           ) : null}
         </div>
+      </div>
+      {infoOpen ? (
+        <p id={infoId} className="mt-2 border-t border-border-default pt-2 text-sm leading-5 text-text-secondary" data-testid="doc-publish-info">{PUBLISH_INFO_COPY}</p>
+      ) : null}
       </div>
       <p className="sr-only" role="status" aria-live="polite">{status}</p>
     </div>

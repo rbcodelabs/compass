@@ -175,6 +175,24 @@ function captureAnchor(editor: Editor): PendingAnchor | null {
 
 export function DocEditor({ doc, versions, comments: initialComments, revalidatePathStr, orgSlug, workspaceSlug, workspaceId, linkedTasks, decisionAction, followAction, publishAction, specHeader, specScopes, readOnly = false, recordCreators, patchRecordField, initialCommentsPin, initialHistoryPin, mentionOptions = NO_MENTION_OPTIONS, confirmedAgentIds: initialConfirmedAgentIds = [], taskCards: initialTaskCards = {}, lastWriter }: DocEditorProps) {
   const [title, setTitle] = useState(doc.title);
+  const titleRef = useRef<HTMLTextAreaElement>(null);
+  // Grow the one-row title textarea to its content (a long title wraps; it must never clip or scroll sideways).
+  useLayoutEffect(() => {
+    const el = titleRef.current;
+    if (!el) return;
+    // Browsers with `field-sizing: content` size the textarea natively; everywhere else measure it.
+    if (typeof CSS !== "undefined" && CSS.supports?.("field-sizing", "content")) return;
+    const fit = () => {
+      el.style.height = "auto";
+      el.style.height = `${el.scrollHeight}px`;
+    };
+    fit();
+    // The wrap point moves when the width changes or the web font finishes loading.
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(fit);
+    observer?.observe(el);
+    void document.fonts?.ready.then(fit);
+    return () => observer?.disconnect();
+  }, [title]);
   const [icon, setIcon] = useState(doc.icon ?? "");
   const [showIconInput, setShowIconInput] = useState(false);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
@@ -703,7 +721,7 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
       {remote && <RemoteUpdateBanner writer={remote.writer} onReload={handleReloadRemote} onKeepMine={handleKeepMine} />}
 
       {/* Icon + title on a single row */}
-      <div className="mx-auto w-full max-w-4xl flex items-center gap-2 px-8 pb-2">
+      <div className="mx-auto w-full max-w-4xl flex items-center gap-2 px-4 pb-2 sm:px-8">
         <DocsLibraryButton />
         {/* Icon picker */}
         <div className="relative shrink-0">
@@ -733,15 +751,17 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
           )}
         </div>
 
-        {/* Title */}
-        <input
+        {/* Title: a one-row textarea that grows with its content, so a long title wraps instead of clipping on a phone. */}
+        <textarea
+          ref={titleRef}
           disabled={isRestoring}
-          type="text"
+          rows={1}
           value={title}
-          onChange={(e) => setTitle(e.target.value)}
+          onChange={(e) => setTitle(e.target.value.replace(/\r?\n/g, " "))}
           onBlur={handleSaveTitle}
+          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); e.currentTarget.blur(); } }}
           placeholder="Untitled"
-          className="flex-1 min-w-0 text-2xl font-bold text-text-primary bg-transparent border-none outline-none placeholder:text-text-disabled"
+          className="flex-1 min-w-0 w-full resize-none overflow-hidden [field-sizing:content] text-xl sm:text-2xl font-bold leading-tight text-text-primary bg-transparent border-none outline-none placeholder:text-text-disabled"
         />
       </div>
 

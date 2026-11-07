@@ -17,3 +17,24 @@ export function stripLeadingTitle(body: string, title: string): string {
   if (!match || match[1].trim().toLowerCase() !== title.trim().toLowerCase()) return body
   return body.slice(match[0].length).replace(/^\s+/, "")
 }
+
+/**
+ * The docs hub's "Popular" quick searches, derived from real published doc titles (no analytics exist, and
+ * none are faked): untitled/duplicate titles drop out, long titles are shortened on a word boundary, at most
+ * `max` are returned in the order given (newest published first).
+ */
+export function popularSearchTerms(titles: readonly string[], max = 3): string[] {
+  const seen = new Set<string>()
+  const terms: string[] = []
+  for (const raw of titles) {
+    let title = raw.trim().replace(/\s+/g, " ")
+    if (!title) continue
+    if (title.length > 32) title = `${title.slice(0, 32).replace(/\s+\S*$/, "")}`.trim() || title.slice(0, 32)
+    const key = title.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    terms.push(title)
+    if (terms.length === max) break
+  }
+  return terms
+}

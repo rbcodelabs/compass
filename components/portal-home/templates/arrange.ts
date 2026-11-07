@@ -35,7 +35,10 @@ export function templateAttrs(template: PortalTemplate | string | null | undefin
   return { "data-tpl": TEMPLATE_KEY[resolved], "data-hero": resolved === "bento" ? "solid" : "light" }
 }
 
-/** Rail widgets: link lists, the feedback prompt and anything the admin sized Small. Docs always lead the main column. */
+/**
+ * Rail widgets: link lists, the feedback prompt and anything the admin sized Small. The main column leads with
+ * the announcement (the news a visitor should see first), then Docs, then everything else in the admin's order.
+ */
 export function splitHubRegions<T extends Pick<PortalHomeWidget, "type" | "size">>(widgets: readonly T[]): { main: T[]; rail: T[] } {
   const main: T[] = []
   const rail: T[] = []
@@ -43,6 +46,7 @@ export function splitHubRegions<T extends Pick<PortalHomeWidget, "type" | "size"
     const toRail = widget.type !== "docs" && (widget.type === "key_links" || widget.type === "feedback_cta" || widget.size === "S")
     ;(toRail ? rail : main).push(widget)
   }
-  // Stable: docs first, everything else keeps its relative order.
-  return { main: [...main.filter((w) => w.type === "docs"), ...main.filter((w) => w.type !== "docs")], rail }
+  // Stable: announcements, then docs, everything else keeps its relative order.
+  const lead = (type: string) => main.filter((w) => w.type === type)
+  return { main: [...lead("announcement"), ...lead("docs"), ...main.filter((w) => w.type !== "announcement" && w.type !== "docs")], rail }
 }

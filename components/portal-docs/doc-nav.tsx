@@ -32,12 +32,12 @@ export function DocNavList({ docs, base, currentId }: { docs: PublicDocSummary[]
 export function DocBreadcrumb({ items }: { items: { label: string; href?: string }[] }) {
   return (
     <nav aria-label="Breadcrumb" className="text-sm text-text-subtle">
-      <ol className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
+      <ol className="flex flex-nowrap items-center gap-x-1.5">
         {items.map((item, index) => (
-          <li key={`${item.label}-${index}`} className="flex min-w-0 items-center gap-1.5">
+          <li key={`${item.label}-${index}`} className={cn("flex items-center gap-1.5", item.href ? "shrink-0 last:min-w-0" : "min-w-0 flex-1")}>
             {index > 0 ? <span aria-hidden>/</span> : null}
             {item.href ? (
-              <Link href={item.href} className="hover:text-text-primary hover:underline">{item.label}</Link>
+              <Link href={item.href} className="max-w-[40vw] truncate hover:text-text-primary hover:underline sm:max-w-none">{item.label}</Link>
             ) : (
               <span aria-current="page" className="truncate text-text-secondary">{item.label}</span>
             )}

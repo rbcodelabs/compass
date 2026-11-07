@@ -19,7 +19,17 @@ vi.mock("next/navigation", () => ({
 const loadPublishedHome = vi.fn()
 const getPortalSession = vi.fn()
 vi.mock("@/lib/db", () => ({
-  default: () => ({ workspace: { findFirst: vi.fn(async () => ({ id: "w1", name: "Acme", roadmapPublic: true, feedbackEnabled: false, brandingPaletteId: null, brandingPrimaryHex: null, brandingFontPresetId: null, brandingFontFamily: null, brandingLogoUrl: null })) } }),
+  default: () => ({
+    workspace: { findFirst: vi.fn(async () => ({ id: "w1", name: "Acme", roadmapPublic: true, feedbackEnabled: false, brandingPaletteId: null, brandingPrimaryHex: null, brandingFontPresetId: null, brandingFontFamily: null, brandingLogoUrl: null })) },
+    roadmapItem: { count: vi.fn(async () => 3), aggregate: vi.fn(async () => ({ _max: { updatedAt: new Date("2026-11-05T10:00:00Z") } })) },
+    doc: {
+      aggregate: vi.fn(async () => ({ _count: { _all: 2 }, _max: { updatedAt: new Date("2026-11-06T10:00:00Z") } })),
+      findMany: vi.fn(async () => [
+        { id: "d1", title: "Getting started with Acme", content: "x", updatedAt: new Date("2026-11-06T10:00:00Z"), publishedAt: new Date("2026-11-06T10:00:00Z") },
+        { id: "d2", title: "API and webhooks guide", content: "y", updatedAt: new Date("2026-11-05T10:00:00Z"), publishedAt: new Date("2026-11-05T10:00:00Z") },
+      ]),
+    },
+  }),
 }))
 vi.mock("@/lib/portal-auth", () => ({ getPortalSession: () => getPortalSession() }))
 vi.mock("@/lib/portal-home/service", async (importOriginal) => ({
@@ -58,9 +68,9 @@ describe("template selection and fallback", () => {
     expect(templateAttrs("nonsense")).toEqual({ "data-tpl": "editorial", "data-hero": "light" })
   })
 
-  it("splits the hub into a main column (docs first) and a rail (links, feedback, small widgets)", () => {
+  it("splits the hub into a main column (announcement, then docs) and a rail (links, feedback, small widgets)", () => {
     const { main, rail } = splitHubRegions(WIDGETS)
-    expect(main.map((w) => w.id)).toEqual(["d", "a", "t"])
+    expect(main.map((w) => w.id)).toEqual(["a", "d", "t"])
     expect(rail.map((w) => w.id)).toEqual(["l"])
     expect(splitHubRegions([widget("x", "docs", "S", 0)]).main).toHaveLength(1)
   })
@@ -100,7 +110,7 @@ describe("PortalHomeBoard arrangement", () => {
     const el = board("docs_hub")
     const main = el.querySelector('[data-region="main"]')!
     const rail = el.querySelector('[data-region="rail"]')!
-    expect(Array.from(main.children).map((c) => c.getAttribute("data-widget-type"))).toEqual(["docs", "announcement", "rich_text"])
+    expect(Array.from(main.children).map((c) => c.getAttribute("data-widget-type"))).toEqual(["announcement", "docs", "rich_text"])
     expect(Array.from(rail.children).map((c) => c.getAttribute("data-widget-type"))).toEqual(["key_links"])
     expect(el.querySelector("#docs")?.getAttribute("data-widget-type")).toBe("docs")
   })
@@ -136,7 +146,7 @@ describe("TemplatePicker", () => {
 describe("PortalShell", () => {
   const props: Omit<PortalShellProps, "template"> = {
     orgSlug: "acme", workspaceSlug: "main", workspaceName: "Acme", logoUrl: null,
-    roadmapPublic: true, feedbackEnabled: false, email: "pat@example.com", showDocs: true, hasAnnouncement: false,
+    roadmapPublic: true, feedbackEnabled: false, email: "pat@example.com", showDocs: true,
     children: <p>page body</p>,
   }
 
@@ -163,17 +173,39 @@ describe("PortalShell", () => {
     expect(screen.getByTestId("portal-shell-editorial")).toBeTruthy()
   })
 
-  it("shows the hero on the home page only, and never repeats an announcement's buttons", () => {
+  it("shows the hero (with its buttons) on the home page only", () => {
     render(<PortalShell {...props} template="editorial" />)
     expect(screen.getByRole("heading", { level: 1, name: "Acme" })).toBeTruthy()
     expect(screen.getByRole("link", { name: /View the roadmap/ })).toBeTruthy()
     cleanup()
-    render(<PortalShell {...props} hasAnnouncement template="editorial" />)
-    expect(screen.queryByRole("link", { name: /View the roadmap/ })).toBeNull()
-    cleanup()
     pathname.mockReturnValue("/portal/acme/main/roadmap")
     render(<PortalShell {...props} template="editorial" />)
     expect(screen.queryByRole("heading", { level: 1 })).toBeNull()
+  })
+
+  it("editorial hero meta line shows only real figures, in order, and is absent with none", () => {
+    render(<PortalShell {...props} template="editorial" heroMeta={{ updatedAt: "2026-11-05T10:00:00Z", inProgress: 6, docs: 1 }} />)
+    expect(screen.getByTestId("portal-hero-meta").textContent).toBe("Updated Nov 5, 2026·6 items in progress·1 published doc")
+    cleanup()
+    render(<PortalShell {...props} template="editorial" heroMeta={{ updatedAt: null, inProgress: null, docs: null }} />)
+    expect(screen.queryByTestId("portal-hero-meta")).toBeNull()
+    cleanup()
+    render(<PortalShell {...props} template="editorial" />)
+    expect(screen.queryByTestId("portal-hero-meta")).toBeNull()
+  })
+
+  it("hub hero offers Popular chips from the given titles; clicking one filters the docs", () => {
+    render(
+      <PortalShell {...props} template="docs_hub" searchSuggestions={["API guide"]}>
+        <section data-widget-type="docs"><ul><li>Getting started</li><li>API guide</li></ul></section>
+      </PortalShell>,
+    )
+    fireEvent.click(within(screen.getByTestId("hub-popular")).getByRole("button", { name: "API guide" }))
+    expect((screen.getByRole("searchbox") as HTMLInputElement).value).toBe("API guide")
+    expect(screen.getAllByRole("listitem", { hidden: true }).filter((li) => !li.hidden).map((li) => li.textContent)).toEqual(["API guide"])
+    cleanup()
+    render(<PortalShell {...props} template="docs_hub" />)
+    expect(screen.queryByTestId("hub-popular")).toBeNull()
   })
 
   it("omits Docs from the nav when the home has no docs widget", () => {
@@ -221,9 +253,21 @@ describe("portal layout", () => {
   it("uses the published template", async () => {
     await renderLayout({ widgets: WIDGETS, template: "bento" })
     expect(screen.getByTestId("portal-shell-bento")).toBeTruthy()
-    // docs widget present -> Docs link; announcement present -> no hero buttons
+    // docs widget present -> Docs link; the hero keeps its buttons even with an announcement widget
     expect(screen.getByRole("link", { name: "Docs" })).toBeTruthy()
-    expect(screen.queryByRole("link", { name: /View the roadmap/ })).toBeNull()
+    expect(screen.getByRole("link", { name: /View the roadmap/ })).toBeTruthy()
+  })
+
+  it("editorial hero meta is derived from public roadmap and published docs; the hub gets Popular chips from doc titles", async () => {
+    await renderLayout({ widgets: WIDGETS, template: "editorial" })
+    expect(screen.getByTestId("portal-hero-meta").textContent).toBe("Updated Nov 6, 2026·3 items in progress·2 published docs")
+    expect(screen.queryByTestId("hub-popular")).toBeNull()
+    cleanup()
+    pathname.mockReturnValue("/portal/acme/main")
+    await renderLayout({ widgets: WIDGETS, template: "docs_hub" })
+    const chips = within(screen.getByTestId("hub-popular")).getAllByRole("button").map((b) => b.textContent)
+    expect(chips).toEqual(["Getting started with Acme", "API and webhooks guide"])
+    expect(screen.queryByTestId("portal-hero-meta")).toBeNull()
   })
 
   it("opts in to the app's dark-mode mechanism: theme scope wrapper and a stored 'dark' preference applies the dark class", async () => {

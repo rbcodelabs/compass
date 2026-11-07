@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowUp, FileText, X } from "lucide-react"
+import { ArrowDown, ArrowUp, BookOpen, FileCode, FileText, ScrollText, X } from "lucide-react"
 import { DOCS_WIDGET_MAX_ITEMS, type DocsConfig } from "@/lib/portal-home/widgets/docs"
 import type { DocCardItem, ResolvedWidgetData } from "@/lib/portal-home/data"
 import { formatDocDate } from "@/lib/portal-docs/format"
@@ -17,21 +17,45 @@ function docsIndexOf(docs: DocCardItem[]): string | null {
   return first ? first.replace(/\/[^/]+$/, "") : null
 }
 
-function DocCard({ doc }: { doc: DocCardItem }) {
+/**
+ * Cover tints for the docs hub's featured-doc cards: the existing status tokens (brand, info, success, warning),
+ * cycled by position so neighbouring cards differ. Purely decorative; carries no meaning.
+ */
+const COVERS = [
+  { tint: "bg-primary/10 text-primary", Icon: FileText },
+  { tint: "bg-status-info-surface text-status-info", Icon: BookOpen },
+  { tint: "bg-status-success-surface text-status-success", Icon: FileCode },
+  { tint: "bg-status-warning-surface text-status-warning", Icon: ScrollText },
+] as const
+
+/**
+ * One doc. The same markup restyles per template through the `group/home` scope (see widget-frame): a plain row
+ * by default, a row with the date right-aligned in editorial, a cover-tile card in the docs hub.
+ */
+function DocCard({ doc, index }: { doc: DocCardItem; index: number }) {
+  const cover = COVERS[index % COVERS.length]
   return (
     <li className="min-w-0">
       <PortalLink
         href={doc.href}
-        className="group flex h-full items-start gap-3 rounded-lg border border-transparent p-2.5 transition-colors hover:border-border-default hover:bg-surface-inset focus-visible:border-border-focus focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+        className="group flex h-full items-start gap-3 rounded-lg border border-transparent p-2.5 transition-[background-color,border-color,box-shadow,transform] hover:border-border-default hover:bg-surface-inset focus-visible:border-border-focus focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 group-data-[tpl=hub]/home:flex-col group-data-[tpl=hub]/home:gap-0 group-data-[tpl=hub]/home:overflow-hidden group-data-[tpl=hub]/home:rounded-xl group-data-[tpl=hub]/home:border-border-default group-data-[tpl=hub]/home:bg-surface-panel group-data-[tpl=hub]/home:p-0 group-data-[tpl=hub]/home:hover:-translate-y-0.5 group-data-[tpl=hub]/home:hover:bg-surface-panel group-data-[tpl=hub]/home:hover:shadow-md"
       >
-        <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-md bg-surface-inset text-text-subtle group-hover:bg-surface-panel" aria-hidden>
+        <span className={`relative hidden h-28 w-full shrink-0 items-center justify-center overflow-hidden group-data-[tpl=hub]/home:flex ${cover.tint}`} data-testid="docs-widget-cover" aria-hidden>
+          <span className="absolute -top-14 -right-10 size-36 rounded-full bg-current opacity-[0.08]" />
+          <span className="absolute -bottom-10 -left-6 size-24 rounded-full bg-current opacity-[0.08]" />
+          <cover.Icon className="relative size-10" strokeWidth={1.5} />
+        </span>
+        <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-md bg-surface-inset text-text-subtle group-hover:bg-surface-panel group-data-[tpl=hub]/home:hidden" aria-hidden>
           <FileText className="size-4" />
         </span>
-        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <span className="truncate text-sm font-semibold text-text-primary group-hover:text-primary">{doc.title || "Untitled"}</span>
-          {doc.excerpt ? <span className="line-clamp-2 text-xs leading-5 text-text-secondary">{doc.excerpt}</span> : null}
-          <span className="text-xs text-text-subtle">Updated {formatDocDate(doc.updatedAt)}</span>
+        <span className="flex min-w-0 flex-1 flex-col gap-0.5 group-data-[tpl=hub]/home:w-full group-data-[tpl=hub]/home:gap-1.5 group-data-[tpl=hub]/home:p-4">
+          <span className="truncate text-sm font-semibold text-text-primary group-hover:text-primary group-data-[tpl=hub]/home:text-base">{doc.title || "Untitled"}</span>
+          {doc.excerpt ? <span className="line-clamp-2 text-xs leading-5 text-text-secondary group-data-[tpl=hub]/home:line-clamp-3 group-data-[tpl=hub]/home:text-sm">{doc.excerpt}</span> : null}
+          <span className="text-xs text-text-subtle sm:group-data-[tpl=editorial]/home:hidden">Updated {formatDocDate(doc.updatedAt)}</span>
         </span>
+        <time dateTime={doc.updatedAt} className="hidden shrink-0 pt-0.5 text-[13px] whitespace-nowrap text-text-subtle tabular-nums sm:group-data-[tpl=editorial]/home:block" data-testid="docs-widget-date">
+          {formatDocDate(doc.updatedAt)}
+        </time>
       </PortalLink>
     </li>
   )
@@ -50,9 +74,9 @@ export function DocsRenderer({ config, data }: RendererProps<DocsConfig, DocsDat
         {data.docs.length === 0 ? (
           <EmptyState compact icon={<FileText className="size-4" aria-hidden />} title="No docs published yet" description="Guides and references will appear here once they are published." />
         ) : (
-          <ul className="grid grid-cols-1 gap-1 @xl:grid-cols-2 @xl:gap-2" data-testid="docs-widget-list">
-            {data.docs.map((doc) => (
-              <DocCard key={doc.id} doc={doc} />
+          <ul className="grid grid-cols-1 gap-1 @xl:grid-cols-2 @xl:gap-2 @xl:group-data-[tpl=editorial]/home:grid-cols-1 @xl:group-data-[tpl=editorial]/home:gap-0 @xl:group-data-[tpl=hub]/home:gap-4" data-testid="docs-widget-list">
+            {data.docs.map((doc, index) => (
+              <DocCard key={doc.id} doc={doc} index={index} />
             ))}
           </ul>
         )}
