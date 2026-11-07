@@ -200,7 +200,7 @@ test.describe("Opportunity composer panel", () => {
     await page.getByRole("button", { name: "New Opportunity", exact: true }).click();
     const composer = page.locator('[data-slot="opportunity-composer"]');
     await expect(composer).toBeVisible();
-    await expect(composer.getByRole("combobox", { name: "Status" })).toHaveText(/Exploring/);
+    await expect(composer.getByRole("combobox", { name: "Status" })).toHaveText(/Unreviewed/);
     await composer.getByLabel("Title").fill(created);
     await composer.getByRole("button", { name: "Submit", exact: true }).click();
 

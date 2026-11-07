@@ -23,17 +23,17 @@ describe("resolveColumns", () => {
 
   it("honours a complete saved order", () => {
     const r = resolveColumns({ order: ["EXPLORING", "ACTIVE", "VALIDATING", "PRIORITIZED"] }, STATUSES, DEFAULT, NO_CARDS)
-    expect(r.order).toEqual(["EXPLORING", "ACTIVE", "VALIDATING", "PRIORITIZED"])
+    expect(r.order).toEqual(["EXPLORING", "ACTIVE", "VALIDATING", "PRIORITIZED", "UNREVIEWED"])
   })
 
   it("appends statuses missing from the saved order, in default order", () => {
     const r = resolveColumns({ order: ["EXPLORING", "VALIDATING"] }, STATUSES, DEFAULT, NO_CARDS)
-    expect(r.order).toEqual(["EXPLORING", "VALIDATING", "ACTIVE", "PRIORITIZED"])
+    expect(r.order).toEqual(["EXPLORING", "VALIDATING", "UNREVIEWED", "ACTIVE", "PRIORITIZED"])
   })
 
   it("drops unknown keys and de-duplicates", () => {
     const r = resolveColumns({ order: ["GONE", "ACTIVE", "ACTIVE", "EXPLORING"], hidden: ["GONE"] }, STATUSES, DEFAULT, NO_CARDS)
-    expect(r.order).toEqual(["ACTIVE", "EXPLORING", "PRIORITIZED", "VALIDATING"])
+    expect(r.order).toEqual(["ACTIVE", "EXPLORING", "UNREVIEWED", "PRIORITIZED", "VALIDATING"])
     expect(r.visible).toEqual(r.order)
   })
 
@@ -47,7 +47,7 @@ describe("resolveColumns", () => {
   it("forces a hidden column visible when it has cards", () => {
     const r = resolveColumns({ hidden: ["EXPLORING", "ACTIVE"] }, STATUSES, DEFAULT, { EXPLORING: 3, ACTIVE: 0 })
     expect(r.forcedVisible).toEqual(["EXPLORING"])
-    expect(r.visible).toEqual(["PRIORITIZED", "VALIDATING", "EXPLORING"])
+    expect(r.visible).toEqual(["UNREVIEWED", "PRIORITIZED", "VALIDATING", "EXPLORING"])
   })
 
   it("can hide every column when none has cards", () => {
