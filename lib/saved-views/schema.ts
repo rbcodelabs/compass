@@ -39,18 +39,18 @@ const boardFiltersSchema = z.object({
   customField: z.object({ fieldId: uuid, value: z.string().min(1).max(200) }).optional(),
 })
 
-function boardDisplaySchema(statuses: readonly string[]) {
+function boardDisplaySchema(statuses: readonly string[], extraGroupings: readonly string[] = []) {
   return z.object({
     view: z.enum(["board", "table"]).default("board"),
-    /** "status" or a custom-field id. */
-    groupBy: z.union([z.literal("status"), uuid]).default("status"),
+    /** "status", a surface-specific grouping (Solutions: "squad", "opportunity") or a custom-field id. */
+    groupBy: z.union([z.literal("status"), ...extraGroupings.map((g) => z.literal(g)), uuid]).default("status"),
     sort: z.enum(["manual", "score"]).default("manual"),
     columns: columnsByGroupSchema.transform(keepKnownStatuses(statuses)),
   })
 }
 
 const opportunitiesDisplaySchema = boardDisplaySchema(OPPORTUNITY_BOARD_STATUSES)
-const solutionsDisplaySchema = boardDisplaySchema(SOLUTION_BOARD_STATUSES)
+const solutionsDisplaySchema = boardDisplaySchema(SOLUTION_BOARD_STATUSES, ["squad", "opportunity"])
 
 export type BoardViewFilters = z.infer<typeof boardFiltersSchema>
 export type BoardViewDisplay = z.infer<typeof opportunitiesDisplaySchema>

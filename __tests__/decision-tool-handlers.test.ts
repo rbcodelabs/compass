@@ -45,7 +45,7 @@ describe("decision MCP handlers", () => {
 
     expect(result.structuredContent.ok).toBe(true)
     expect(result.content[0].text).toContain("request-1")
-    expect(mockPrepareRelease).toHaveBeenCalledWith({ ...scope, requestedById: "user-1" })
+    expect(mockPrepareRelease).toHaveBeenCalledWith({ ...scope, requestedById: "user-1", requestedByAgentId: null })
   })
 
   it("returns the current immutable review packet", async () => {

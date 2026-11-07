@@ -595,19 +595,30 @@ describe("Cmd/Ctrl+J", () => {
 // ── Expand while streaming ───────────────────────────────────────────────────
 
 describe("expand to full page while a turn is streaming", () => {
-  it("is disabled mid-turn, says why, and re-enables when the turn ends", () => {
+  it("is disabled mid-turn until the conversation exists, says why, and re-enables when the turn ends", () => {
     renderRail();
     fireEvent.click(screen.getByRole("button", { name: "fire-streaming-start" }));
 
     const expand = screen.getByRole("button", { name: /open in full page/i });
     expect(expand).toBeDisabled();
-    expect(expand).toHaveAttribute("title", expect.stringMatching(/response finishes/i));
+    expect(expand).toHaveAttribute("title", expect.stringMatching(/started the conversation/i));
     fireEvent.click(expand);
     expect(push).not.toHaveBeenCalled();
     expect(rail()).not.toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "fire-streaming-end" }));
     expect(screen.getByRole("button", { name: "Open in full page" })).toBeEnabled();
+  });
+
+  it("is enabled mid-turn once the conversation id is known, and opens it on the full page", () => {
+    renderRail();
+    fireEvent.click(screen.getByRole("button", { name: "fire-streaming-start" }));
+    fireEvent.click(screen.getByRole("button", { name: "fire-created" }));
+
+    const expand = screen.getByRole("button", { name: "Open in full page" });
+    expect(expand).toBeEnabled();
+    fireEvent.click(expand);
+    expect(push).toHaveBeenCalledWith("/acme/product/agent?c=conv-new");
   });
 });
 

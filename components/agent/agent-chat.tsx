@@ -22,7 +22,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { Loader2, Sparkles } from "lucide-react"
+import { Archive, ArchiveRestore, Loader2, Sparkles, X as XIcon } from "lucide-react"
+import { fetchArchivedConversations, setConversationArchived, type ArchivedConversation } from "@/lib/agent-archive-client"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
@@ -156,6 +157,22 @@ export function AgentChat({
 }: Props) {
   const isRail = variant === "rail"
   const router = useRouter()
+  // Archive: the page list shows active chats; "Archived" swaps it for the archived ones.
+  const [showArchived, setShowArchived] = useState(false)
+  const [archivedChats, setArchivedChats] = useState<ArchivedConversation[]>([])
+  const toggleArchivedList = useCallback(async () => {
+    if (!showArchived) setArchivedChats(await fetchArchivedConversations(workspaceId))
+    setShowArchived((v) => !v)
+  }, [showArchived, workspaceId])
+  const changeArchived = useCallback(
+    async (id: string, archived: boolean) => {
+      if (!(await setConversationArchived(workspaceId, id, archived))) return
+      if (archived && id === activeConversationId) router.push(`${basePath}/agent`)
+      if (!archived) setArchivedChats((list) => list.filter((c) => c.id !== id))
+      router.refresh()
+    },
+    [workspaceId, activeConversationId, basePath, router],
+  )
   const [messages, setMessages] = useState<Message[]>(initialMessages)
   // Prefilled (editable) composer instruction from a "Send to agent" hand-off
   // — only for a brand-new chat. Lazy initializer so this never overwrites
@@ -313,12 +330,13 @@ export function AgentChat({
   // closure would still see the previous value. Optimistic text only: the server
   // replaces a claimed turn's message with the registered per-kind instruction
   // (lib/agent-handoff-kinds.ts).
-  const send = useCallback(async (handoff = false, retry = false, handoffKind?: Processing["kind"]) => {
-    const text = handoff
+  const send = useCallback(async (handoff = false, retry = false, handoffKind?: Processing["kind"], queuedText?: string) => {
+    const text = queuedText ?? (handoff
       ? handoffKind === "RESEARCH_SYNTHESIS" ? "Synthesize my saved research for this study." : "Use my saved interview to update the item."
-      : input.trim()
+      : input.trim())
     if (!text || sending.current) return
-    setInput("")
+    // A queued message was already cleared from the field; whatever is typed now is the next draft.
+    if (queuedText === undefined) setInput("")
     setMessages((m) => [...m, { id: `local-${Date.now()}`, role: "user", content: text }])
 
     // Only turn 1 of a brand-new conversation carries seedContext — never a
@@ -543,6 +561,23 @@ export function AgentChat({
   const runStartedByOther = Boolean(runStarterId && runStarterId !== userId)
   const canCancelRun = !runStartedByOther || roster?.viewerRole === "OWNER"
   const composerDisabled = isStreaming || composerBlocked || Boolean(accessLost)
+  // While a turn streams the user can still write a follow-up; it is held here and sent when the turn settles.
+  const canQueue = isStreaming && !composerBlocked && !accessLost
+  const [queued, setQueued] = useState<string | null>(null)
+  const queueFollowUp = () => {
+    const text = input.trim()
+    if (!text) return
+    setQueued((q) => (q ? q + "\n\n" + text : text))
+    setInput("")
+  }
+  const sendRef2 = useRef(send)
+  useEffect(() => { sendRef2.current = send }, [send])
+  useEffect(() => {
+    if (!queued || isStreaming || composerBlocked || accessLost || sending.current) return
+    const text = queued
+    setQueued(null)
+    void sendRef2.current(false, false, undefined, text)
+  }, [queued, isStreaming, composerBlocked, accessLost, sending])
   // Who is answering and on what, shown in the composer card while a detached run is live.
   const runStatusLine =
     activeRun && !activeRun.done
@@ -569,16 +604,19 @@ export function AgentChat({
       <aside className="hidden w-64 shrink-0 flex-col border-r border-default bg-surface-inset md:flex">
         <ScrollArea className="min-h-0 flex-1 p-2">
           <ul className="flex flex-col gap-1">
-            {conversations.length === 0 && (
-              <li className="px-2 py-6 text-center text-sm text-text-subtle">No conversations yet</li>
+            {(showArchived ? archivedChats : conversations).length === 0 && (
+              <li className="px-2 py-6 text-center text-sm text-text-subtle">
+                {showArchived ? "No archived chats" : "No conversations yet"}
+              </li>
             )}
-            {conversations.map((c) => {
+            {(showArchived ? archivedChats : conversations).map((c) => {
               const active = c.id === activeConversationId
+              const label = showArchived ? "Restore chat" : "Archive chat"
               return (
-                <li key={c.id}>
+                <li key={c.id} className="group relative">
                   <Link
                     href={`${basePath}/agent?c=${c.id}`}
-                    className={`block truncate rounded-lg px-3 py-2 text-sm transition-colors ${
+                    className={`block truncate rounded-lg py-2 pl-3 pr-9 text-sm transition-colors ${
                       active
                         ? "bg-surface-interactive text-text-primary"
                         : "text-text-secondary hover:bg-surface-interactive-hover hover:text-text-primary"
@@ -586,11 +624,26 @@ export function AgentChat({
                   >
                     {c.title || "Untitled chat"}
                   </Link>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
+                    onClick={() => void changeArchived(c.id, !showArchived)}
+                    aria-label={label}
+                    title={label}
+                  >
+                    {showArchived ? <ArchiveRestore aria-hidden="true" /> : <Archive aria-hidden="true" />}
+                  </Button>
                 </li>
               )
             })}
           </ul>
         </ScrollArea>
+        <div className="border-t border-default p-2">
+          <Button variant="ghost" size="sm" className="w-full justify-start" onClick={() => void toggleArchivedList()}>
+            {showArchived ? "Back to chats" : "Archived chats"}
+          </Button>
+        </div>
       </aside>
       )}
 
@@ -724,21 +777,31 @@ export function AgentChat({
             textareaRef={composerRef}
             value={input}
             onChange={setInput}
-            onSend={() => { if (!composerDisabled && input.trim()) void send() }}
-            textareaDisabled={composerDisabled}
+            onSend={() => {
+              if (canQueue) queueFollowUp()
+              else if (!composerDisabled && input.trim()) void send()
+            }}
+            textareaDisabled={composerDisabled && !canQueue}
             sendDisabled={composerDisabled || !input.trim()}
             running={Boolean(activeRun && !activeRun.done)}
-            onStop={() => { if (activeRun) void cancelRun(activeRun.id) }}
+            onStop={() => { setQueued(null); if (activeRun) void cancelRun(activeRun.id) }}
             stopDisabled={!canCancelRun}
             stopTitle={canCancelRun ? "Stop this run (Esc)" : "Only the person who asked, or the owner, can stop this run"}
             readOnly={Boolean(accessLost)}
             runStartedByMe={!runStartedByOther}
-            status={runStatusLine && (
-              <span className="flex min-w-0 items-center gap-2 text-[12.5px] text-muted-foreground">
-                <Loader2 className="size-3.5 shrink-0 animate-spin motion-reduce:animate-none" aria-hidden="true" />
-                <span className="min-w-0 truncate font-medium text-foreground">{runStatusLine}</span>
-              </span>
-            )}
+            status={(runStatusLine || queued) ? (
+              <>
+                {runStatusLine && (
+                  <span className="flex min-w-0 items-center gap-2 text-[12.5px] text-muted-foreground">
+                    <Loader2 className="size-3.5 shrink-0 animate-spin motion-reduce:animate-none" aria-hidden="true" />
+                    <span className="min-w-0 truncate font-medium text-foreground">{runStatusLine}</span>
+                  </span>
+                )}
+                {queued && (
+                  <AttachedChip label={queued} hint="Queued, sends when the agent finishes" onRemove={() => setQueued(null)} />
+                )}
+              </>
+            ) : null}
             contextChips={
               pendingSeedEntity || docChip ? (
                 <>
@@ -765,6 +828,17 @@ export function AgentChat({
           />
         </div>
       </div>
+    </div>
+  )
+}
+
+function AttachedChip({ label, hint, onRemove }: { label: string; hint: string; onRemove: () => void }) {
+  return (
+    <div title={`${hint}: ${label}`} className="inline-flex h-6 min-w-0 max-w-full items-center gap-1 rounded-md border border-border bg-muted pr-0.5 pl-2 text-xs">
+      <span className="min-w-0 truncate font-medium text-foreground">{label}</span>
+      <button type="button" aria-label={`Remove ${label}`} onClick={onRemove} className="relative grid size-[18px] shrink-0 place-items-center rounded text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
+        <XIcon className="size-3" aria-hidden="true" />
+      </button>
     </div>
   )
 }

@@ -1,7 +1,8 @@
 import { isPlatformAdminEmail } from "@/lib/platform-admin";
 import { redirect } from "next/navigation"
+import type { Metadata } from "next"
 import { getUserWorkspaces } from "@/lib/workspace"
-import { requireWorkspaceContext } from "@/lib/workspace-context"
+import { getWorkspaceContext, requireWorkspaceContext } from "@/lib/workspace-context"
 import { getSessionUser } from "@/lib/session"
 import { Sidebar } from "@/components/sidebar"
 import { BottomNav } from "@/components/bottom-nav"
@@ -41,6 +42,17 @@ export const maxDuration = 300
 interface WorkspaceLayoutProps {
   children: React.ReactNode
   params: Promise<{ orgSlug: string; workspaceSlug: string }>
+}
+
+// Puts the workspace name in the tab title (Roadmap · Acme · Compass) so tabs
+// from different workspaces can be told apart. getWorkspaceContext is wrapped in
+// React cache(), so this shares the layout lookup rather than issuing another.
+export async function generateMetadata({ params }: Pick<WorkspaceLayoutProps, "params">): Promise<Metadata> {
+  const { orgSlug, workspaceSlug } = await params
+  const ctx = await getWorkspaceContext(orgSlug, workspaceSlug)
+  if (ctx.status !== "ok") return {}
+  const name = ctx.workspace.name
+  return { title: { default: name + " · Compass", template: "%s · " + name + " · Compass" } }
 }
 
 export default async function WorkspaceLayout({
