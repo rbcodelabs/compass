@@ -64,6 +64,14 @@ describe("LinkedOpportunitiesSection", () => {
     expect(screen.getByText("Not scored")).toBeInTheDocument()
   })
 
+  it("orders the columns Opportunity | Score | Status so the headline number is second", () => {
+    view({ scoringActive: true, items: [row(1)] })
+    expect(screen.getAllByRole("columnheader").map((h) => h.textContent)).toEqual(["Opportunity", "Score", "Status"])
+    const cells = within(screen.getByTestId("linked-opportunity-row")).getAllByRole("cell")
+    expect(cells[1]).toHaveAttribute("data-testid", "linked-opportunity-score")
+    expect(screen.getByRole("table").className).toMatch(/min-w-\[24rem\]/)
+  })
+
   it("hides the score column entirely when no scoring model is active", () => {
     view({ scoringActive: false, items: [row(1, { rawScore: undefined, normalizedScore: undefined, scoreStale: undefined })] })
     expect(screen.queryByRole("columnheader", { name: "Score" })).toBeNull()

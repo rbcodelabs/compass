@@ -15,7 +15,7 @@ const formatScore = (value: number) => value.toLocaleString("en-US", { maximumFr
 /**
  * The read-only "Linked opportunities" list on the Objective panel. Rows are opportunities linked directly to the objective or through
  * one of its key results, already sorted by the server (raw score descending, unscored last). The score column appears only when the
- * workspace has an active Opportunity scoring model. The table keeps a minimum width and scrolls horizontally inside a height-bounded
+ * workspace has an active Opportunity scoring model. Column order is Opportunity | Score | Status so the headline number stays on screen in a narrow panel; the column minimums (12 + 5 + 7 rem) sum to the 24rem table minimum. The table keeps a minimum width and scrolls horizontally inside a height-bounded
  * container (never squashes), so a long list and a narrow panel both stay readable. Entity names come from useLabels(); the generic
  * "Status" / "Score" column headers are plain words (there are no label keys for them). Both link kinds are always listed; the preset's
  * link emphasis only decides which provenance note ("Direct" / "via Key Result") is shown.
@@ -47,13 +47,13 @@ export function LinkedOpportunitiesSection({
           >
           <Table
             containerClassName="overflow-visible"
-            className={scoringActive ? "min-w-[26rem]" : "min-w-[20rem]"}
+            className={scoringActive ? "min-w-[24rem]" : "min-w-[19rem]"}
           >
             <TableHeader className="sticky top-0 z-10 bg-background">
               <TableRow>
                 <TableHead scope="col" className="min-w-[12rem]">{labels.opportunity.singular}</TableHead>
-                <TableHead scope="col" className="w-28 min-w-[7rem]">Status</TableHead>
                 {scoringActive && <TableHead scope="col" className="w-24 min-w-[5rem] text-right">Score</TableHead>}
+                <TableHead scope="col" className="w-28 min-w-[7rem]">Status</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -75,11 +75,6 @@ export function LinkedOpportunitiesSection({
                         {showDirect && via ? " · " : null}
                         {via ? `via ${labels.keyResult.singular}: ${via}` : null}
                       </p>
-                    </TableCell>
-                    <TableCell className="align-top">
-                      <Badge className={`${status?.className ?? "bg-surface-inset text-text-secondary"} shrink-0`}>
-                        {status?.label ?? item.status}
-                      </Badge>
                     </TableCell>
                     {scoringActive && (
                       <TableCell className="text-right align-top tabular-nums" data-testid="linked-opportunity-score">
@@ -106,6 +101,11 @@ export function LinkedOpportunitiesSection({
                         )}
                       </TableCell>
                     )}
+                    <TableCell className="align-top">
+                      <Badge className={`${status?.className ?? "bg-surface-inset text-text-secondary"} shrink-0`}>
+                        {status?.label ?? item.status}
+                      </Badge>
+                    </TableCell>
                   </TableRow>
                 )
               })}

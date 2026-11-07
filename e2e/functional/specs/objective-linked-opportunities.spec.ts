@@ -157,6 +157,28 @@ test("20 linked rows are bounded, scrollable and sorted by raw score with unscor
   expect(metrics.maxHeight).toBeLessThanOrEqual(330);
   expect(metrics.tableMin).toBeGreaterThanOrEqual(400);
 
+  // 390px: the Score (headline number) is the second column and is inside the visible region without scrolling.
+  const region = section(page).getByRole("region");
+  const narrow = await region.evaluate((el) => {
+    const box = el.getBoundingClientRect();
+    const cell = el.querySelector('[data-testid="linked-opportunity-score"]')!.getBoundingClientRect();
+    return { cellRight: cell.right, cellLeft: cell.left, regionRight: box.right, regionLeft: box.left, scrollLeft: el.scrollLeft };
+  });
+  expect(narrow.scrollLeft).toBe(0);
+  expect(narrow.cellLeft).toBeGreaterThanOrEqual(narrow.regionLeft);
+  expect(narrow.cellRight).toBeLessThanOrEqual(narrow.regionRight + 0.5);
+
+  // 1440x900: with the Score column shown the table fits its region exactly (no horizontal overflow, no clipped header).
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await expect(section(page).getByRole("columnheader", { name: "Score" })).toBeVisible();
+  const wide = await section(page).getByRole("region").evaluate((el) => {
+    const table = el.querySelector("table") as HTMLElement;
+    const head = Array.from(el.querySelectorAll("th")).find((th) => th.textContent === "Score")!.getBoundingClientRect();
+    return { scrollWidth: el.scrollWidth, clientWidth: el.clientWidth, tableScroll: table.scrollWidth, headRight: head.right, regionRight: el.getBoundingClientRect().right };
+  });
+  expect(wide.scrollWidth).toBeLessThanOrEqual(wide.clientWidth);
+  expect(wide.headRight).toBeLessThanOrEqual(wide.regionRight + 0.5);
+
   // The link goes to the opportunity page.
   await expect(rows.first().getByRole("link")).toHaveAttribute("href", /\/discovery\/[0-9a-f-]{36}$/);
 });
