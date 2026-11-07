@@ -135,12 +135,8 @@ async function fetchObjective(id: string, workspaceId: string) {
   // The parent KR's objective must be in this workspace too; otherwise the link is hidden, not followed.
   const parentKeyResult = item.parentKeyResult && item.parentKeyResult.objective.workspaceId === workspaceId ? item.parentKeyResult : null;
   const customFields = await loadCustomFieldsForObject(getPrisma(), { workspaceId, objectType: "OBJECTIVE", objectId: id });
-  // Read-only "Linked opportunities": direct links and key-result links, each only when the workspace's preset offers that link kind.
-  const links = resolveThinkingModel(await loadThinkingModelSource(getPrisma(), workspaceId)).links;
-  const linkedOpportunities = await loadObjectiveLinkedOpportunities(getPrisma(), workspaceId, item, {
-    includeDirect: links.oppToObjective !== "hidden",
-    includeViaKeyResults: links.oppToKr !== "hidden",
-  });
+  // Read-only "Linked opportunities": direct and key-result links, always both (the preset only affects UI emphasis).
+  const linkedOpportunities = await loadObjectiveLinkedOpportunities(getPrisma(), workspaceId, item);
   return { ...item, parentKeyResult, customFields, linkedOpportunities, ...(await fetchLinkedTasksBundle(workspaceId, "OBJECTIVE", id)) };
 }
 

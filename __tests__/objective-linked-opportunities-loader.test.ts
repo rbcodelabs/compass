@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
 
-const model = vi.hoisted(() => ({ value: { version: 2 } as { version: number } | null }))
+const model = vi.hoisted(() => ({ value: { version: 2, status: "ACTIVE" } as { version: number; status: string } | null }))
 vi.mock("@/lib/scoring-model", () => ({ resolveWorkspaceScoringModel: async () => model.value }))
 
 import { loadObjectiveLinkedOpportunities } from "@/lib/objective-linked-opportunities"
@@ -52,34 +52,42 @@ describe("getLinkedOpportunitiesByObjective", () => {
 
 describe("loadObjectiveLinkedOpportunities", () => {
   it("merges direct and key-result links, dedupes and sorts by raw score", async () => {
-    model.value = { version: 2 }
-    const result = await loadObjectiveLinkedOpportunities(fakeDb(), WS, objective, { includeDirect: true, includeViaKeyResults: true })
+    model.value = { version: 2, status: "ACTIVE" }
+    const result = await loadObjectiveLinkedOpportunities(fakeDb(), WS, objective)
     expect(result.scoringActive).toBe(true)
     expect(result.items.map((i) => i.id)).toEqual(["o3", "o1", "o2"])
     expect(result.items[0]).toMatchObject({ direct: true, viaKeyResults: [{ id: "kr1", title: "Signups" }], scoreStale: true })
     expect(result.items.some((i) => i.id === "foreign")).toBe(false)
   })
 
-  it("honours the preset's link emphasis (hidden link kinds are not read)", async () => {
-    const onlyKr = await loadObjectiveLinkedOpportunities(fakeDb(), WS, objective, { includeDirect: false, includeViaKeyResults: true })
-    expect(onlyKr.items.map((i) => i.id).sort()).toEqual(["o2", "o3"])
-    const onlyDirect = await loadObjectiveLinkedOpportunities(fakeDb(), WS, objective, { includeDirect: true, includeViaKeyResults: false })
-    expect(onlyDirect.items.map((i) => i.id).sort()).toEqual(["o1", "o3"])
+  it.each(["CLASSIC", "OPPORTUNITY_FIRST_OKR", "TORRES_OST"])("returns both direct and key-result links under the %s preset (the preset never filters data)", async () => {
+    // The loader takes no preset input: Classic and Torres hide one kind in the UI but both kinds are real links.
+    const result = await loadObjectiveLinkedOpportunities(fakeDb(), WS, objective)
+    expect(result.items.map((i) => i.id).sort()).toEqual(["o1", "o2", "o3"])
+    expect(result.items.find((i) => i.id === "o1")).toMatchObject({ direct: true, viaKeyResults: [] })
+    expect(result.items.find((i) => i.id === "o2")).toMatchObject({ direct: false, viaKeyResults: [{ id: "kr1" }] })
+  })
+
+  it("treats an assigned but ARCHIVED model as no active model (no score fields)", async () => {
+    model.value = { version: 2, status: "ARCHIVED" }
+    const result = await loadObjectiveLinkedOpportunities(fakeDb(), WS, objective)
+    expect(result.scoringActive).toBe(false)
+    expect(result.items.every((i) => !("rawScore" in i))).toBe(true)
   })
 
   it("omits scores when the workspace has no active Opportunity model", async () => {
     model.value = null
-    const result = await loadObjectiveLinkedOpportunities(fakeDb(), WS, objective, { includeDirect: true, includeViaKeyResults: true })
+    const result = await loadObjectiveLinkedOpportunities(fakeDb(), WS, objective)
     expect(result.scoringActive).toBe(false)
     expect(result.items.every((i) => !("rawScore" in i))).toBe(true)
   })
 
   it("returns an empty list for an objective with no links", async () => {
-    model.value = { version: 1 }
+    model.value = { version: 1, status: "ACTIVE" }
     const empty = { id: "obj2", keyResults: [] }
     const db = fakeDb() as unknown as { opportunityObjectiveLink: { findMany: () => Promise<unknown[]> } }
     db.opportunityObjectiveLink.findMany = async () => []
-    const result = await loadObjectiveLinkedOpportunities(db as never, WS, empty, { includeDirect: true, includeViaKeyResults: true })
+    const result = await loadObjectiveLinkedOpportunities(db as never, WS, empty)
     expect(result).toEqual({ scoringActive: true, items: [] })
   })
 })

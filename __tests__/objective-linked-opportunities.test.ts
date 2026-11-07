@@ -79,6 +79,19 @@ describe("assembleLinkedOpportunities", () => {
     expect(items[0].scoreStale).toBe(true)
   })
 
+  it("keeps raw-descending order even when the top score is stale (the stale flag is a marker, not a demotion)", () => {
+    const { items } = assembleLinkedOpportunities({
+      direct: [
+        opp("fresh", "Fresh", 100, { score: { rawScore: 100, normalizedScore: 2, modelVersion: 2 } }),
+        opp("stale", "Stale", 900, { score: { rawScore: 900, normalizedScore: 18, modelVersion: 1 } }),
+      ],
+      viaKeyResults: [],
+      liveModelVersion: 2,
+    })
+    expect(items.map((i) => i.id)).toEqual(["stale", "fresh"])
+    expect(items.map((i) => i.scoreStale)).toEqual([true, false])
+  })
+
   it("omits every score field when the workspace has no active model, sorting by status then title", () => {
     const result = assembleLinkedOpportunities({
       direct: [

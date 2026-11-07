@@ -49,6 +49,11 @@ const byText = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
 const byTitleThenId = (a: LinkedOpportunityRow, b: LinkedOpportunityRow) =>
   a.title.localeCompare(b.title, "en") || byText(a.id, b.id)
 
+/**
+ * Sort rule (kept literal to the spec): scored rows by RAW score descending, unscored last, ties by title then id. A score saved under an
+ * older model version is NOT demoted; instead it carries `scoreStale`, which the UI shows as a prominent "Stale" marker with an
+ * explanation, so the order stays predictable and the caveat stays visible.
+ */
 export function assembleLinkedOpportunities(input: AssembleInput): LinkedOpportunities {
   const scoringActive = input.liveModelVersion !== null
   const byId = new Map<string, { source: LinkedOpportunityInput; direct: boolean; krs: Map<string, { id: string; title: string }> }>()
@@ -92,25 +97,31 @@ export function assembleLinkedOpportunities(input: AssembleInput): LinkedOpportu
 }
 
 /**
- * Load and assemble. `includeDirect` / `includeViaKeyResults` follow the workspace's thinking-model link emphasis (a preset that
- * hides a link kind never shows it here). The caller already read the objective under this workspace's filter.
+ * Load and assemble. BOTH link kinds are always read, whatever the workspace's thinking-model preset: a preset only decides which
+ * kinds the UI emphasises, never whether a real link exists (the Key Result panel always lists its opportunities and the canvas draws
+ * DIRECT links even when the preset hides them). The caller already read the objective under this workspace's filter.
+ *
+ * "Active" scoring model means the workspace's assigned Opportunity model with status ACTIVE; an assigned but ARCHIVED model counts as
+ * none, so the Score column is hidden. Scores are never recomputed.
+ *
+ * Agent/MCP parity (deliberately not extended): get_okr_cycle is `direct("getOkrCycle")` in lib/rest/parity-manifest.ts, but the REST
+ * cycle select has no objectives, so adding linked opportunities to the MCP output would widen an existing mismatch and need REST
+ * schema/OpenAPI changes. Agents read the same data with list_links, get_opportunity_score and list_top_opportunities.
  */
 export async function loadObjectiveLinkedOpportunities(
   db: AppPrismaClient,
   workspaceId: string,
   objective: { id: string; keyResults: readonly { id: string; title: string }[] },
-  options: { includeDirect: boolean; includeViaKeyResults: boolean },
 ): Promise<LinkedOpportunities> {
-  const directLinks = options.includeDirect
-    ? ((await getLinkedOpportunitiesByObjective(db, workspaceId, [objective.id], { preverified: true })).get(objective.id) ?? [])
-    : []
-  const krIds = options.includeViaKeyResults ? objective.keyResults.map((kr) => kr.id) : []
+  const directLinks = (await getLinkedOpportunitiesByObjective(db, workspaceId, [objective.id], { preverified: true })).get(objective.id) ?? []
+  const krIds = objective.keyResults.map((kr) => kr.id)
   const krLinked = krIds.length
     ? await db.opportunity.findMany({ where: { workspaceId, linkedKeyResultId: { in: krIds } }, select: { id: true, linkedKeyResultId: true } })
     : []
 
   const ids = [...new Set([...directLinks.map((o) => o.id), ...krLinked.map((o) => o.id)])]
   const model = await resolveWorkspaceScoringModel(workspaceId, "OPPORTUNITY")
+  const activeModel = model && model.status === "ACTIVE" ? model : null
   const rows = ids.length
     ? await db.opportunity.findMany({
         where: { id: { in: ids }, workspaceId },
@@ -124,5 +135,5 @@ export async function loadObjectiveLinkedOpportunities(
     keyResult,
     opportunities: krLinked.filter((o) => o.linkedKeyResultId === keyResult.id).flatMap((o) => inputs.get(o.id) ?? []),
   }))
-  return assembleLinkedOpportunities({ direct, viaKeyResults, liveModelVersion: model ? model.version : null })
+  return assembleLinkedOpportunities({ direct, viaKeyResults, liveModelVersion: activeModel ? activeModel.version : null })
 }

@@ -44,8 +44,10 @@ describe("LinkedOpportunitiesSection", () => {
     expect(screen.getByText("Validating")).toBeInTheDocument()
     const score = screen.getByTestId("linked-opportunity-score")
     expect(score).toHaveTextContent("4,000")
-    expect(score).not.toHaveTextContent("80")
-    expect(score).toHaveAttribute("title", "Normalized 80 / 100")
+    expect(score.querySelector("span.font-semibold")).toHaveTextContent("4,000")
+    expect(score).toHaveTextContent("normalized 80 out of 100")
+    expect(score.querySelector(".sr-only")).not.toBeNull()
+    expect(score).not.toHaveAttribute("title")
   })
 
   it("shows direct / via key result indicators and unscored rows", () => {
@@ -55,7 +57,7 @@ describe("LinkedOpportunitiesSection", () => {
         row(1, { direct: false, viaKeyResults: [{ id: "kr1", title: "Grow signups" }] }),
         row(2, { rawScore: null, normalizedScore: null }),
       ],
-    })
+    }, { thinkingModel: "OPPORTUNITY_FIRST_OKR" })
     const vias = screen.getAllByTestId("linked-opportunity-via")
     expect(vias[0]).toHaveTextContent("via Key Result: Grow signups")
     expect(vias[1]).toHaveTextContent("Direct")
@@ -74,10 +76,31 @@ describe("LinkedOpportunitiesSection", () => {
     const { container } = view({ scoringActive: true, items })
     expect(screen.getAllByTestId("linked-opportunity-row")).toHaveLength(20)
     expect(screen.getByText(/\(20\)/)).toBeInTheDocument()
-    const scroller = container.querySelector('[data-slot="table-container"]') as HTMLElement
+    const scroller = screen.getByRole("region", { name: "Linked Opportunities" })
+    expect(scroller).toHaveAttribute("tabindex", "0")
     expect(scroller.className).toMatch(/max-h-/)
     expect(scroller.className).toMatch(/overflow-auto/)
     expect(within(scroller).getByRole("table").className).toMatch(/min-w-\[/)
+    expect(container.querySelectorAll('th[scope="col"]')).toHaveLength(3)
+  })
+
+  it("marks a stale score prominently with an explanation, without reordering", () => {
+    view({ scoringActive: true, items: [row(1, { rawScore: 900, scoreStale: true })] })
+    const stale = screen.getByTestId("linked-opportunity-stale")
+    expect(stale).toHaveTextContent("Stale")
+    expect(stale.getAttribute("title")).toMatch(/earlier version/)
+  })
+
+  it("lists both link kinds under every preset; the preset only decides which provenance note shows", () => {
+    const items = [row(1, { direct: true }), row(2, { direct: false, viaKeyResults: [{ id: "kr", title: "KR A" }] })]
+    for (const [preset, direct, kr] of [["CLASSIC", false, true], ["OPPORTUNITY_FIRST_OKR", true, true], ["TORRES_OST", true, false]] as const) {
+      view({ scoringActive: true, items }, { thinkingModel: preset })
+      expect(screen.getAllByTestId("linked-opportunity-row"), preset).toHaveLength(2)
+      const notes = screen.getAllByTestId("linked-opportunity-via").map((n) => n.textContent)
+      expect(notes.join("|").includes("Direct"), preset).toBe(direct)
+      expect(notes.join("|").includes("via "), preset).toBe(kr)
+      cleanup()
+    }
   })
 
   it("uses renamed thinking-model labels", () => {

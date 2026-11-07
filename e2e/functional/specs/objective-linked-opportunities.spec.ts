@@ -92,6 +92,7 @@ test.afterAll(async () => {
   // Opportunities and objectives live under the e2e org, which global-teardown removes wholesale.
 });
 
+// The workspace is on the Opportunity-first preset for the first tests (set in beforeAll); the Torres test switches it and afterAll restores it.
 const section = (page: import("@playwright/test").Page) => page.getByTestId("linked-opportunities");
 
 test("empty objective shows the empty state", async ({ page, base }) => {
@@ -147,7 +148,7 @@ test("20 linked rows are bounded, scrollable and sorted by raw score with unscor
   await expect(section(page).getByTestId("linked-opportunity-via").filter({ hasText: "Direct" }).first()).toBeVisible();
 
   // Bounded height with its own scroll (not a page-long table) and a minimum table width (scrolls, never squashes).
-  const metrics = await section(page).locator('[data-slot="table-container"]').evaluate((el) => ({
+  const metrics = await section(page).getByRole("region").evaluate((el) => ({
     scrollable: el.scrollHeight > el.clientHeight,
     maxHeight: el.clientHeight,
     tableMin: (el.querySelector("table") as HTMLElement).getBoundingClientRect().width,
@@ -170,4 +171,18 @@ test("score column is hidden when the workspace has no active Opportunity scorin
   await expect(section(page).getByRole("link", { name: `${TAG} opp no-model` })).toBeVisible({ timeout: 60_000 });
   await expect(section(page).getByRole("columnheader", { name: "Score" })).toHaveCount(0);
   await expect(section(page).getByTestId("linked-opportunity-score")).toHaveCount(0);
+});
+
+test("a Torres workspace still lists a key-result-linked opportunity (the preset never hides data)", async ({ page, base }) => {
+  test.setTimeout(180_000);
+  await setScoringConfig(seed.modelId);
+  const prisma = getPrisma();
+  await prisma.workspace.update({ where: { id: seed.workspaceId }, data: { thinkingModel: "TORRES_OST" } });
+  const objective = await createObjective(`${TAG} torres objective`);
+  const keyResult = await prisma.keyResult.create({ data: { objectiveId: objective.id, title: `${TAG} torres KR`, target: 10, current: 0, unit: null } });
+  const viaKr = await createOpportunity(`${TAG} opp torres via-kr`, 777, seed.modelId);
+  await prisma.opportunity.update({ where: { id: viaKr.id }, data: { linkedKeyResultId: keyResult.id } });
+  await page.goto(`${base}/okrs?detail=${encodeURIComponent(`objective:${objective.id}`)}`);
+  await expect(section(page).getByRole("link", { name: `${TAG} opp torres via-kr` })).toBeVisible({ timeout: 60_000 });
+  await expect(section(page).getByTestId("linked-opportunity-score")).toContainText("777");
 });

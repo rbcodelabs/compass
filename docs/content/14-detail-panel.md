@@ -34,10 +34,10 @@ Each panel shows the essentials for that item — its status, key fields, and th
 
 ### Linked opportunities on an Objective
 
-An Objective's panel lists the Opportunities that serve it: those linked directly to the Objective and those linked through one of its Key Results (an opportunity that is both appears once). Each row shows the opportunity's title (it opens the opportunity's page), its status, and a small **Direct** and/or **via Key Result: …** note.
+An Objective's panel lists the Opportunities that serve it: those linked directly to the Objective and those linked through one of its Key Results (an opportunity that is both appears once). Both kinds are always listed, whichever [thinking model](/help/27-thinking-models) the workspace uses. Each row shows the opportunity's title (it opens the opportunity's page), its status, and a small **Direct** and/or **via Key Result: …** note (the note for a link kind your thinking model de-emphasises is left out).
 
-- When the workspace has an active Opportunity [scoring model](/help/11-scoring-models), a **Score** column shows each opportunity's **raw score** and the list is ordered by it, highest first, with unscored opportunities last. The raw score is shown rather than the 0-100 value because multiplicative models reach into the thousands; hover the score to see the normalized value. A score saved under an older version of the model is marked **stale**.
-- With no active scoring model there is no Score column, and the list is ordered by status, then title.
+- When the workspace has an active (not archived) Opportunity [scoring model](/help/11-scoring-models), a **Score** column shows each opportunity's **raw score** and the list is ordered by it, highest first, with unscored opportunities last. The raw score is shown rather than the 0-100 value because multiplicative models reach into the thousands; the normalized value is available to screen readers. A score saved under an older version of the model keeps its place in the order but carries a **Stale** badge.
+- With no active scoring model (none assigned, or the assigned one is archived) there is no Score column, and the list is ordered by status, then title.
 - A long list scrolls inside the section, and the table scrolls sideways in a narrow panel instead of squeezing its columns.
 - The names follow your [thinking model](/help/27-thinking-models) (for example **Linked Bets** if you renamed Opportunities to Bets). The section is read-only: make or remove links from the opportunity's page.
 
