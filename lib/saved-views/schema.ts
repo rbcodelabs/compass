@@ -50,9 +50,10 @@ function boardDisplaySchema(statuses: readonly string[], extraGroupings: readonl
     /**
      * Pinned/docked columns and column order (lib/board-layout.ts). Absent = the default layout; a layout that fails
      * validation degrades to absent via `.catch`, so it can never take the rest of the display document down. Not a URL
-     * param: client state the saved-views menu reads (components/solutions/solutions-column-layout.tsx). Solutions (status
-     * grouping) uses it today; on that board it SUPERSEDES `columns.status.order`, which is still read for views saved
-     * before layouts existed. Opportunities accept the field but do not act on it yet.
+     * param: client state the saved-views menu reads (components/solutions/solutions-column-layout.tsx,
+     * components/discovery/discovery-column-layout.tsx). Both the Solutions and the Opportunities board use it, for their
+     * status grouping only; on those boards it SUPERSEDES `columns.status.order`, which is still read for views saved
+     * before layouts existed. Other groupings (a custom field) ignore it.
      */
     columnLayout: boardLayoutSchema.optional().catch(undefined),
   })

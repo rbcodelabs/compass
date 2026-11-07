@@ -4,10 +4,13 @@ import { useMemo } from "react";
 import { SavedViewsMenu } from "@/components/saved-views/saved-views-menu";
 import { useLabels } from "@/components/thinking-model/thinking-model-provider";
 import { useUrlState } from "@/hooks/use-url-state";
+import { useOpportunitiesColumnLayoutContext } from "@/components/discovery/discovery-column-layout";
+import { effectiveStoredLayout, resolveOpportunityBoardLayout } from "@/lib/discovery/board-layout";
 import {
   OPPORTUNITIES_URL_PARAMS,
   isOpportunitiesStateModified,
   resolveSurfaceState,
+  withLiveColumnLayout,
   type OpportunitiesState,
 } from "@/lib/saved-views/opportunities-state";
 import type { SavedViewRecord } from "@/lib/saved-views/service";
@@ -25,11 +28,13 @@ export type DiscoverySavedViews = {
 };
 
 /**
- * The live state of the board as the URL describes it, resolved with the same pure
- * function the server page uses, so "Save" captures exactly what is on screen.
+ * The live state of the board. `urlState` is what the URL describes, resolved with the same pure function the server
+ * page uses (build hrefs from this). `state` is that plus the board's column layout, which is client state (see
+ * discovery-column-layout.tsx): it is what "Save" captures, so it captures exactly what is on screen, and what "modified" compares.
  */
 export function useDiscoveryViewState(savedViews: Pick<DiscoverySavedViews, "views" | "savedViewId">) {
   const { params, setAll } = useUrlState();
+  const columnLayout = useOpportunitiesColumnLayoutContext();
   const saved = useMemo(
     () => savedViews.views.find((v) => v.id === savedViews.savedViewId) ?? null,
     [savedViews.views, savedViews.savedViewId],
@@ -38,16 +43,20 @@ export function useDiscoveryViewState(savedViews: Pick<DiscoverySavedViews, "vie
     () => (saved ? { filters: saved.filters as OpportunitiesState["filters"], display: saved.display as OpportunitiesState["display"] } : null),
     [saved],
   );
-  const state = useMemo(
+  const urlState = useMemo(
     () => resolveSurfaceState("OPPORTUNITIES_BOARD", Object.fromEntries(params.entries()), savedState),
     [params, savedState],
   );
-  return { state, saved, savedState, modified: isOpportunitiesStateModified(state, savedState), setAll };
+  const state = useMemo(
+    () => (columnLayout ? withLiveColumnLayout(urlState, columnLayout.layout) : urlState),
+    [urlState, columnLayout],
+  );
+  return { state, urlState, saved, savedState, modified: isOpportunitiesStateModified(state, savedState), setAll, columnLayout };
 }
 
 export function DiscoverySavedViewsMenu({ savedViews }: { savedViews: DiscoverySavedViews }) {
   const labels = useLabels();
-  const { state, modified, setAll } = useDiscoveryViewState(savedViews);
+  const { state, modified, setAll, savedState, columnLayout } = useDiscoveryViewState(savedViews);
 
   return (
     <SavedViewsMenu
@@ -63,7 +72,14 @@ export function DiscoverySavedViewsMenu({ savedViews }: { savedViews: DiscoveryS
       extendedActions
       deleteNote={`${labels.opportunity.plural} are not affected.`}
       // A bare `?saved=<id>`; the page expands it to the view's full state. Also what "Reset" does.
-      onSelect={(view) => setAll(view ? new URLSearchParams({ [OPPORTUNITIES_URL_PARAMS.savedView]: view.id }) : new URLSearchParams())}
+      onSelect={(view) => {
+        // Re-selecting the view already open is "Reset": the URL goes back to the view, and so must the board's column layout
+        // (client state that a URL change alone would not touch).
+        if (view && view.id === savedViews.savedViewId && savedState && columnLayout) {
+          columnLayout.update(() => resolveOpportunityBoardLayout(effectiveStoredLayout(savedState.display)));
+        }
+        setAll(view ? new URLSearchParams({ [OPPORTUNITIES_URL_PARAMS.savedView]: view.id }) : new URLSearchParams());
+      }}
     />
   );
 }

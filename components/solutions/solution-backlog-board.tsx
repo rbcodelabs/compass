@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useRef, useState, useTransition, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, useTransition } from "react";
 import { useLiveRefresh } from "@/hooks/use-live-refresh";
 import { useServerSyncedState } from "@/hooks/use-server-synced-state";
 import { useFlipAnimation } from "@/hooks/use-flip-animation";
@@ -10,11 +10,8 @@ import {
   type DragEndEvent,
   type DragOverEvent,
   type DragStartEvent,
-  closestCenter,
-  pointerWithin,
   KeyboardSensor,
   PointerSensor,
-  type CollisionDetection,
   useDroppable,
   useSensor,
   useSensors,
@@ -33,6 +30,7 @@ import {
   type BoardColumnLayoutControls,
   type BoardDockTab,
 } from "@/components/patterns";
+import { DroppableDockTab, dockAwareCollisionDetection } from "@/components/patterns/board-dock-dnd";
 import { useSolutionsColumnLayout } from "@/components/solutions/solutions-column-layout";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { cn } from "@/lib/utils";
@@ -146,34 +144,6 @@ function BacklogColumn({
         )}
       </SortableContext>
     </BoardColumn>
-  );
-}
-
-/**
- * A tab only counts as a drop target when the pointer is actually on it: closestCenter alone lets a tall column body beat
- * a small tab, because it measures the dragged card's centre rather than the pointer.
- */
-const collisionDetection: CollisionDetection = (args) => {
-  const onTab = pointerWithin(args).find((hit) => args.droppableContainers.find((c) => c.id === hit.id)?.data.current?.dockTab);
-  return onTab ? [onTab] : closestCenter(args);
-};
-
-/**
- * A dock tab, which is also a drop target: a card dropped on it lands in that status exactly as a drop on the open column
- * would, so it registers under the column's own `column-<status>` id with `{ status }` data, which the drag handlers
- * already parse. While that column is the open panel the panel owns that id (two droppables must not share one), so the
- * tab is disabled and parked under an id nothing refers to; the wrapper element stays put so the tab keeps focus.
- */
-function DroppableDockTab({ status, panelOpen, children }: { status: SolutionStatus; panelOpen: boolean; children: ReactNode }) {
-  const { setNodeRef, isOver } = useDroppable({
-    id: panelOpen ? `dock-tab-${status}` : solutionBacklogColumnId(status),
-    data: { status, dockTab: true },
-    disabled: panelOpen,
-  });
-  return (
-    <div ref={setNodeRef} data-slot="solution-dock-tab-drop" data-status={status} className={cn("h-fit rounded-xl", isOver && "ring-2 ring-ring/40")}>
-      {children}
-    </div>
   );
 }
 
@@ -491,7 +461,7 @@ function StatusBacklogBoard({
       <DndContext
         id={dndId}
         sensors={sensors}
-        collisionDetection={collisionDetection}
+        collisionDetection={dockAwareCollisionDetection}
         onDragStart={handleDragStart}
         onDragOver={handleDragOver}
         onDragEnd={handleDragEnd}
@@ -522,7 +492,14 @@ function StatusBacklogBoard({
               onSelectTab={selectDockTab}
               panel={dockOpen && activeDockId ? renderColumn(activeDockId as SolutionStatus, "pinned") : null}
               wrapTab={(tab, node, { panelOpen }) => (
-                <DroppableDockTab status={tab.id as SolutionStatus} panelOpen={panelOpen}>{node}</DroppableDockTab>
+                <DroppableDockTab
+                  columnId={tab.id}
+                  columnDroppableId={solutionBacklogColumnId(tab.id as SolutionStatus)}
+                  panelOpen={panelOpen}
+                  slot="solution-dock-tab-drop"
+                >
+                  {node}
+                </DroppableDockTab>
               )}
             />
           ) : null}

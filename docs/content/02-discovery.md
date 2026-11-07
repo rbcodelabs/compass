@@ -35,7 +35,22 @@ Opportunities move through four columns on the kanban board:
 - **PRIORITIZED** — Opportunities that have been validated and selected for investment. Your team is working on solutions.
 - **ACTIVE** — The opportunity your team is actively building toward right now. Typically only one or two opportunities are ACTIVE at a time.
 
-Drag cards between columns to update status. Use **Filters** at the top of the page to filter opportunities by squad, or switch between **Board** and **Tree** views using the view control.
+Drag cards between columns to update status. Use **Filters** at the top of the page to filter opportunities by squad, or switch between **Board** and **Tree** views using the view control. By default the columns run **Active**, **Prioritized**, **Validating**, **Exploring** (work in flight first); you can [pin and reorder them](#pin-collapse-and-reorder-columns-on-the-opportunity-board).
+
+### Pin, collapse and reorder columns on the Opportunity board
+
+The Opportunity board uses the same **dock** as the [Solutions backlog](#pin-collapse-and-reorder-columns) and the Roadmap board. On a wide screen (the medium breakpoint and up), any status column can be **pinned**: it moves into one dock on the right, outside the scrolling area, so it stays put while the other columns scroll. Nothing is pinned until you pin it, so the board looks the same as before.
+
+The dock is **one slot**, however many columns you pin: a panel showing one pinned column, with a narrow rail of **tabs** at its right edge, one per pinned column (its name and card count). Pinning more columns adds tabs; it never makes the dock wider.
+
+- **Pin or unpin.** Use the pin button in a column’s header (it appears when you hover the header) or **Pin to the right** / **Unpin** in the column’s **⋯** menu. A pinned column becomes the active tab and the dock opens on it.
+- **Switch and collapse.** Click a tab to show that column. Click the active tab, or the **Collapse** button in the panel’s header, to close the panel and leave only the tab rail. Arrow keys move between tabs; Enter or Space shows one.
+- **Drag cards.** A tab is a drop target even while the dock is closed: drop a card on the **Active** tab and its status becomes Active. Cards in the open panel can be dragged out to any other column. Dragging a card up or down within a column (the open panel included) still sets its order, and **Sort by score** still switches that off and ranks every column, docked or not, by score.
+- **Reorder columns.** **Move left** / **Move right** in a column’s **⋯** menu, or **Move up** / **Move down** in the **Columns** menu in the header. Both change the same column order, and a pinned column’s place in that order is its place among the tabs. **Columns** also still shows and hides columns; a hidden column that holds cards is shown anyway.
+- **Narrow screens.** Below the medium breakpoint nothing is docked: pinned columns appear in the scrolling board in their saved order, and the pin button is hidden. Your layout comes back when the screen is wide again.
+- Only the **Status** grouping docks. The custom-field board ([Card sorting by a custom field](#card-sorting-by-a-custom-field)) ignores pinning.
+
+Which columns are pinned, which tab is active, whether the dock is open and the column order are part of a saved view (the **Modified** badge appears when they differ from it, and **Reset** puts the saved layout back). With no saved view selected, Compass remembers the layout in this browser for each workspace. Views saved before this existed keep their column order, and a layout that can’t be read falls back to the default order with the rest of the view intact.
 
 ### Exporting opportunities to CSV
 
@@ -45,7 +60,7 @@ Open the **⋯** (Discovery tools) menu and choose **Export CSV** to download th
 
 In Board view, use the **Group by** picker next to Filters to switch how cards are grouped:
 
-- **Status** (default) — the Opportunity board described above, columns are Opportunity statuses.
+- **Status** (default) — the Opportunity board described above, columns are Opportunity statuses. This is the only grouping whose columns can be pinned.
 - **A custom field** — every Opportunity single-select custom field with at least one option is listed after the built-in groupings (for example a **MoSCoW** field with Must, Should, Could, and Won't). See [Card sorting by a custom field](#card-sorting-by-a-custom-field) below.
 
 Solutions are not grouped here any more — they have their own backlog, described in [The Solutions backlog](#the-solutions-backlog). An old link with `groupBy=opportunity` opens that page instead.
