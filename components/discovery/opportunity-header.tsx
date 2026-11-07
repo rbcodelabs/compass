@@ -20,28 +20,20 @@ import {
   linkOpportunityToKeyResult,
 } from "@/app/[orgSlug]/[workspaceSlug]/discovery/actions";
 import type { OpportunityStatus, SquadData } from "@/lib/types";
+import { OPPORTUNITY_STATUSES, OPPORTUNITY_STATUS_DEFINITIONS, opportunityStatusTooltip } from "@/lib/opportunity-status";
 import { MarkdownContent } from "@/components/markdown-content";
 import { usePanelContext } from "@/components/panels/panel-context";
 import { useLabels, useThinkingModel } from "@/components/thinking-model/thinking-model-provider";
 import { OpportunityObjectivePicker, type PickerObjective } from "@/components/discovery/opportunity-objective-picker";
 import { EditableText, patchEntityField, type EditContext } from "@/components/panels/panel-parts";
 
-const STATUS_LABELS: Record<OpportunityStatus, string> = {
-  EXPLORING: "Exploring",
-  VALIDATING: "Validating",
-  PRIORITIZED: "Prioritized",
-  ACTIVE: "Active",
-  ARCHIVED: "Archived",
-};
+const STATUS_LABELS: Record<OpportunityStatus, string> = Object.fromEntries(
+  OPPORTUNITY_STATUSES.map((s) => [s, OPPORTUNITY_STATUS_DEFINITIONS[s].label]),
+) as Record<OpportunityStatus, string>;
 
-const STATUS_BADGE_CLASSES: Record<OpportunityStatus, string> = {
-  EXPLORING: "bg-violet-100 text-violet-700 border-violet-200",
-  VALIDATING: "bg-amber-100 text-amber-700 border-amber-200",
-  PRIORITIZED: "bg-blue-100 text-blue-700 border-blue-200",
-  ACTIVE:
-    "bg-green-100 text-green-700 border-green-200",
-  ARCHIVED: "bg-surface-inset text-text-subtle border-border-default",
-};
+const STATUS_BADGE_CLASSES: Record<OpportunityStatus, string> = Object.fromEntries(
+  OPPORTUNITY_STATUSES.map((s) => [s, OPPORTUNITY_STATUS_DEFINITIONS[s].triggerClassName]),
+) as Record<OpportunityStatus, string>;
 
 type KR = {
   id: string;
@@ -144,7 +136,7 @@ export function OpportunityHeader({
           </SelectTrigger>
           <SelectContent>
             {(Object.keys(STATUS_LABELS) as OpportunityStatus[]).map((s) => (
-              <SelectItem key={s} value={s}>
+              <SelectItem key={s} value={s} title={opportunityStatusTooltip(s)}>
                 {STATUS_LABELS[s]}
               </SelectItem>
             ))}

@@ -80,14 +80,25 @@ export default async function AgentPage({ params, searchParams }: AgentPageProps
   // is the first frame, so a chat page load pays for no extra query.
   const initialView = resolveInitialAgentView(cookieStore.get(AGENT_VIEW_COOKIE)?.value, conversationId)
   // A failed board query must not take the whole page (chat included) down: null makes the board fetch for itself.
-  const initialBoardCards =
-    initialView === "board" ? await listAgentBoardCards(prisma, { workspaceId: workspace.id, userId }).catch(() => null) : null
+  // The same query feeds the chat list status groups, so it runs for both views; a failure just means a flat list.
+  const boardCards = await listAgentBoardCards(prisma, { workspaceId: workspace.id, userId }).catch(() => null)
+  const initialBoardCards = initialView === "board" ? boardCards : null
+  const statusById = new Map((boardCards ?? []).map((card) => [card.id, card]))
 
   return (
     <AgentPageShell
       workspaceId={workspace.id}
       basePath={`/${orgSlug}/${workspaceSlug}`}
-      conversations={conversations.map((c) => ({ id: c.id, title: c.title }))}
+      conversations={conversations.map((c) => {
+        const card = statusById.get(c.id)
+        return {
+          id: c.id,
+          title: c.title,
+          ...(card
+            ? { messageCount: card.messageCount, runStatus: card.runStatus, lastActivityAt: card.lastActivityAt, reviewedAt: card.reviewedAt }
+            : {}),
+        }
+      })}
       activeConversationId={activeConversationId}
       initialMessages={initialMessages}
       userId={userId}

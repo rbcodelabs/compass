@@ -735,6 +735,13 @@ describe("applyToolGate", () => {
       }
     )
 
+    it.each(["set_custom_field_values", "group_by_custom_field"])("%s is workspace-member gated", async (tool) => {
+      mockPrisma.workspace.findFirst.mockResolvedValue(null)
+      await expect(applyToolGate(tool, MEMBER, { workspaceId: "ws-1" })).rejects.toThrow(/not found or access denied/)
+      mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
+      await expect(applyToolGate(tool, MEMBER, { workspaceId: "ws-1" })).resolves.toBeUndefined()
+    })
+
     it("set_custom_field_value allows a member and reaches the handler's own field-level checks", async () => {
       mockPrisma.task.findUnique.mockResolvedValue({ workspaceId: "ws-1" })
       mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })

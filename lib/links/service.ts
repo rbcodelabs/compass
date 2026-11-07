@@ -68,7 +68,8 @@ const FEATURE_OFF = "This link type cannot be used: it is not enabled for this d
 const MODULE_OFF = "This link type cannot be used: it is not enabled for this workspace. A workspace admin can enable the module it belongs to in Settings > Modules."
 
 /** A legacy-mirrored type is written only by its legacy writer (lib/links/legacy-mirror.ts), which passes viaLegacyWriter. */
-function assertWritableHere(def: LinkTypeDef, viaLegacyWriter: boolean | undefined) {
+function assertWritableHere(def: LinkTypeDef, viaLegacyWriter: boolean | undefined, viaInternalWriter?: boolean) {
+  if (def.internal && !viaInternalWriter) throw new TypedLinkError(`${def.key} is managed by its owning feature, not the generic link tools.`, "INVALID")
   if (def.legacy && !viaLegacyWriter) {
     const tool = def.compat?.mcpTools[0]
     throw new TypedLinkError(`${def.key} is written through ${tool ?? "its existing link tool"}, not the generic link tools.`, "INVALID")
@@ -126,6 +127,8 @@ export type LinkEntitiesInput = {
   ctx: LinkContext
   /** Set only by lib/links/legacy-mirror.ts, the single writer of a legacy-mirrored type. */
   viaLegacyWriter?: boolean
+  /** Set only by the module that owns an `internal` type (lib/agent-conversation-links.ts). */
+  viaInternalWriter?: boolean
   /** With viaLegacyWriter only: an existing row takes `origin` (and, when it becomes DIRECT, this call's source and actor), because the legacy row is the truth. */
   reconcileOrigin?: boolean
 }
@@ -138,7 +141,7 @@ export type LinkEntitiesResult = { link: EntityLinkRow; created: boolean; from: 
  */
 export async function linkEntities(tx: Tx, input: LinkEntitiesInput): Promise<LinkEntitiesResult> {
   const def = requireLinkType(input.linkType)
-  assertWritableHere(def, input.viaLegacyWriter)
+  assertWritableHere(def, input.viaLegacyWriter, input.viaInternalWriter)
   await assertEnabled(def, input.expectedWorkspaceId)
   const origin = input.origin ?? "DIRECT"
   if (def.origins && !def.origins.includes(origin)) throw new TypedLinkError(`${def.key} does not allow origin ${origin}.`, "INVALID")
@@ -216,7 +219,7 @@ async function enforceCardinality(tx: Tx, def: LinkTypeDef, workspaceId: string,
   }
 }
 
-export type UnlinkEntitiesInput = { linkType: string; fromId: string; toId: string; expectedWorkspaceId: string; viaLegacyWriter?: boolean }
+export type UnlinkEntitiesInput = { linkType: string; fromId: string; toId: string; expectedWorkspaceId: string; viaLegacyWriter?: boolean; viaInternalWriter?: boolean }
 
 /**
  * Removes the link (a hard delete; the audit trail is the workspace update capture). Only the `from`
@@ -225,7 +228,7 @@ export type UnlinkEntitiesInput = { linkType: string; fromId: string; toId: stri
  */
 export async function unlinkEntities(tx: Tx, input: UnlinkEntitiesInput): Promise<{ removed: number; removedIds: string[]; def: LinkTypeDef }> {
   const def = requireLinkType(input.linkType)
-  assertWritableHere(def, input.viaLegacyWriter)
+  assertWritableHere(def, input.viaLegacyWriter, input.viaInternalWriter)
   // A mirror row must stay removable after the flag is turned off, or the legacy unlink would strand it.
   if (!input.viaLegacyWriter) await assertEnabled(def, input.expectedWorkspaceId)
   const from = await requireEndpoint(tx, def.from, input.expectedWorkspaceId, input.fromId)

@@ -87,6 +87,10 @@ export function resolveWorkspaceRoadmapState(params: RawSearchParams, saved: Sta
   const view = first(params[p.view])
   if (view !== undefined) display.view = view === "timeline" || view === "gallery" ? view : "board"
 
+  // The column layout is not a URL param, so an `edited=1` snapshot (which drops the saved view as the base)
+  // must not drop it too: it always comes from the saved view. Live changes to it are client state.
+  display.columnLayout = saved?.display.columnLayout
+
   return { filters, display }
 }
 

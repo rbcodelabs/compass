@@ -7,9 +7,9 @@ import { GripVertical, Layers, Bug, MoreHorizontal } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { CardMenu } from "@/components/ui/card-menu";
 import { Badge } from "@/components/ui/badge";
-import { BoardColumn, EmptyState } from "@/components/patterns";
+import { BoardColumn, EmptyState, PINNED_COLUMN_BODY_CLASS, PINNED_COLUMN_CLASS, type BoardColumnLayoutControls } from "@/components/patterns";
 import { usePanelContext } from "@/components/panels/panel-context";
-import { CollapsedSidebarTab, NOT_SCHEDULED_TITLE, SIDEBAR_WIDTH_CLASS, SidebarCollapseButton } from "./schedule/sidebar-chrome";
+import { NOT_SCHEDULED_TITLE } from "./schedule/sidebar-chrome";
 import { HORIZON_META, QUICK_ADD_HORIZONS } from "@/lib/roadmap";
 import type { Horizon } from "@/lib/types";
 
@@ -106,18 +106,23 @@ export function UnscheduledItemsPanel({
   );
 }
 
+/**
+ * The "Not scheduled" column: an ordinary board column (id "unscheduled", see lib/roadmap/board-layout.ts) that
+ * defaults to pinned. `placement` is where the board renders it: "scroller" is a column inside the scrolling board
+ * (below md, or once the user unpins it); "pinned" is docked on the right, outside the scroller, so dragging a card to
+ * any horizon never needs a scroll mid-drag. Pin / collapse / reorder come in through `layoutControls`, like every column.
+ */
 export function UnscheduledItemsColumn({
   items,
   onQuickAdd,
   allowedHorizons = QUICK_ADD_HORIZONS,
   pendingItemKeys = NO_PENDING_ITEMS,
   interactionMode = "compact",
-  layout = "column",
-  onCollapse,
+  placement = "scroller",
+  layoutControls,
 }: Props & {
-  /** "column" is the last swipe column inside the scrolling board (mobile); "sidebar" is a fixed-width pane beside it. */
-  layout?: "column" | "sidebar";
-  onCollapse?: () => void;
+  placement?: "scroller" | "pinned";
+  layoutControls?: BoardColumnLayoutControls;
 }) {
   return (
     <BoardColumn
@@ -125,14 +130,14 @@ export function UnscheduledItemsColumn({
       count={items.length}
       accent="neutral"
       data-testid="roadmap-unscheduled-column"
-      actions={onCollapse ? <SidebarCollapseButton onClick={onCollapse} /> : undefined}
+      layoutControls={layoutControls}
       className={
-        layout === "sidebar"
-          ? `h-full ${SIDEBAR_WIDTH_CLASS} min-w-0 flex-none overflow-hidden`
+        placement === "pinned"
+          ? PINNED_COLUMN_CLASS
           : "w-[calc(100cqw-1.5rem)] min-w-0 flex-none sm:w-[calc(100cqw-2rem)] md:w-72 md:min-w-[280px] md:flex-1 md:overflow-hidden md:h-full"
       }
       bodyId="unscheduled-items-column"
-      bodyClassName="min-h-44 md:min-h-0 md:max-h-none md:flex-1 md:overflow-y-auto"
+      bodyClassName={placement === "pinned" ? PINNED_COLUMN_BODY_CLASS : "min-h-44 md:min-h-0 md:max-h-none md:flex-1 md:overflow-y-auto"}
     >
       {items.length === 0 ? (
         <EmptyState compact title="No items waiting to be scheduled." />
@@ -150,28 +155,6 @@ export function UnscheduledItemsColumn({
         ))
       )}
     </BoardColumn>
-  );
-}
-
-/**
- * The "Not scheduled" pane docked to the right of the roadmap board (md and up). It lives outside the
- * board's horizontal scroller, so it stays put while the horizon columns scroll — dragging an item to
- * any column never needs a scroll mid-drag. Starts collapsed to a slim rail so the columns get the room; expand it to schedule items.
- */
-export function UnscheduledItemsSidebar(props: Props) {
-  const [open, setOpen] = React.useState(false);
-  return (
-    <aside
-      data-testid="roadmap-unscheduled-sidebar"
-      aria-label={NOT_SCHEDULED_TITLE}
-      className="hidden min-h-0 shrink-0 py-3 pr-3 md:flex lg:pr-4"
-    >
-      {open ? (
-        <UnscheduledItemsColumn {...props} layout="sidebar" onCollapse={() => setOpen(false)} />
-      ) : (
-        <CollapsedSidebarTab count={props.items.length} onClick={() => setOpen(true)} />
-      )}
-    </aside>
   );
 }
 

@@ -123,6 +123,12 @@ export type LinkTypeDef<A = unknown> = {
   /** Participant, PM-interview and synthesis contexts. Default (and only value used today) is "deny". */
   restrictedContexts: "deny" | "allow"
   legacy?: LegacyAdapter
+  /**
+   * An internal type is written, read and removed ONLY by the module that owns it (lib/agent-conversation-links.ts), which applies
+   * its own access rules. The generic list/summary reads omit it (they would leak what the owner filters) and the generic writers
+   * refuse it unless the owner passes `viaInternalWriter`.
+   */
+  internal?: true
   /** Existing per-type tools/operations that stay as thin wrappers over this type. */
   compat?: { mcpTools: readonly string[]; restOps: readonly string[] }
 }
@@ -433,6 +439,54 @@ const docSpecifiesScope: LinkTypeDef = {
   compat: { mcpTools: [], restOps: [] },
 }
 
+// ── CONVERSATION_CREATED / CONVERSATION_MENTIONS (RM-19: agent conversations <-> Opportunities, Solutions, Tasks) ──
+
+/** The conversation link types, shared with lib/agent-conversation-links.ts (the only writer and reader outside the registry contract). */
+export const CONVERSATION_CREATED_LINK_TYPE = "CONVERSATION_CREATED"
+export const CONVERSATION_MENTIONS_LINK_TYPE = "CONVERSATION_MENTIONS"
+export const CONVERSATION_LINK_TARGET_TYPES = ["OPPORTUNITY", "SOLUTION", "TASK"] as const satisfies readonly LinkableEntityType[]
+
+/**
+ * An agent conversation CREATED an Opportunity, Solution or Task (the agent's create tool ran in that conversation). A native, internal type
+ * (no legacy mirror): lib/agent-conversation-links.ts writes it from the MCP tool dispatcher (source AGENT, origin DIRECT), the
+ * 113 backfill derives it from the legacy AGENT_CONVERSATION task links (origin MIGRATION), and a person can remove it from the object's
+ * Conversations section. Idempotent; many-to-many. A CREATED link is never downgraded to MENTIONS.
+ */
+const conversationCreated: LinkTypeDef = {
+  key: CONVERSATION_CREATED_LINK_TYPE,
+  from: "AGENT_CONVERSATION",
+  to: CONVERSATION_LINK_TARGET_TYPES,
+  direction: "directed",
+  cardinality: { from: "many", to: "many" },
+  labels: { forward: "Created", inverse: "Created in conversation" },
+  origins: ["DIRECT", "MIGRATION"],
+  duplicatePolicy: "idempotent",
+  authorize: defaultAuthorize,
+  lifecycle: { onFromDeleted: "delete", onToDeleted: "delete", onArchive: "keep" },
+  summaries: {},
+  restrictedContexts: "deny",
+  internal: true,
+  compat: { mcpTools: [], restOps: [] },
+}
+
+/** An agent conversation read or updated an existing Opportunity, Solution or Task through its tools. Same rules as CONVERSATION_CREATED. */
+const conversationMentions: LinkTypeDef = {
+  key: CONVERSATION_MENTIONS_LINK_TYPE,
+  from: "AGENT_CONVERSATION",
+  to: CONVERSATION_LINK_TARGET_TYPES,
+  direction: "directed",
+  cardinality: { from: "many", to: "many" },
+  labels: { forward: "Mentioned", inverse: "Mentioned in conversation" },
+  origins: ["DIRECT", "MIGRATION"],
+  duplicatePolicy: "idempotent",
+  authorize: defaultAuthorize,
+  lifecycle: { onFromDeleted: "delete", onToDeleted: "delete", onArchive: "keep" },
+  summaries: {},
+  restrictedContexts: "deny",
+  internal: true,
+  compat: { mcpTools: [], restOps: [] },
+}
+
 /** Append-only. Add one entry per type; never edit or reuse a key. */
 const DEFINITIONS: readonly LinkTypeDef[] = [
   experimentInformedByStudy,
@@ -443,6 +497,8 @@ const DEFINITIONS: readonly LinkTypeDef[] = [
   artifactSupportsDecision,
   taskReferences,
   docSpecifiesScope,
+  conversationCreated,
+  conversationMentions,
 ]
 
 export const LINK_TYPES: Readonly<Record<string, LinkTypeDef>> = Object.freeze(
@@ -485,7 +541,7 @@ export async function linkTypesForEntityInWorkspace(entityType: LinkableEntityTy
 /** Every enabled type in which `entityType` is an endpoint, with the side(s) it plays. */
 export function linkTypesForEntity(entityType: LinkableEntityType): { def: LinkTypeDef; asFrom: boolean; asTo: boolean }[] {
   // A legacy-mirrored type is invisible to reads: the legacy table is still the source of truth.
-  return DEFINITIONS.filter((def) => isLinkTypeEnabled(def) && !def.legacy).flatMap((def) => {
+  return DEFINITIONS.filter((def) => isLinkTypeEnabled(def) && !def.legacy && !def.internal).flatMap((def) => {
     const asFrom = def.from === entityType
     const asTo = toTypesOf(def).includes(entityType)
     return asFrom || asTo ? [{ def, asFrom, asTo }] : []

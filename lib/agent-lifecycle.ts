@@ -35,4 +35,18 @@ export async function deleteWorkspaceAgentData(prisma: AppPrismaClient, workspac
   await prisma.agentConversation.deleteMany({ where: { workspaceId } });
   await prisma.agentToolCall.deleteMany({ where: { workspaceId } });
   await prisma.agentWorkspaceGrant.deleteMany({ where: { workspaceId } });
+  // Default-agent picks for this workspace, then the agents the workspace itself owns: they have no meaning outside it. Personal
+  // (USER-owned) agents are untouched; they only lose their grant above.
+  await prisma.userDefaultAgent.deleteMany({ where: { workspaceId } });
+  await prisma.workspaceDefaultAgent.deleteMany({ where: { workspaceId } });
+  const ownedAgentIds = (await prisma.agent.findMany({ where: { ownerType: "WORKSPACE", ownerWorkspaceId: workspaceId }, select: { id: true } })).map((agent) => agent.id);
+  if (ownedAgentIds.length) {
+    // Credentials issued to these agents die with them rather than outliving the identity they authenticate.
+    await prisma.apiKey.deleteMany({ where: { agentId: { in: ownedAgentIds } } });
+    await prisma.oAuthToken.deleteMany({ where: { agentId: { in: ownedAgentIds } } });
+    await prisma.oAuthAuthorizationCode.deleteMany({ where: { agentId: { in: ownedAgentIds } } });
+    await prisma.oAuthConsent.deleteMany({ where: { agentId: { in: ownedAgentIds } } });
+    await prisma.agentOrgAdminGrant.deleteMany({ where: { agentId: { in: ownedAgentIds } } });
+    await prisma.agent.deleteMany({ where: { id: { in: ownedAgentIds } } });
+  }
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition, useCallback, useEffect, useId } from "react";
+import { useState, useTransition, useCallback, useEffect, useId, useRef } from "react";
 import { useLiveRefresh } from "@/hooks/use-live-refresh";
 import { useServerSyncedState } from "@/hooks/use-server-synced-state";
 import { useFlipAnimation } from "@/hooks/use-flip-animation";
@@ -11,6 +11,9 @@ import {
   DragEndEvent,
   DragOverEvent,
   closestCenter,
+  pointerWithin,
+  useDroppable,
+  type CollisionDetection,
   PointerSensor,
   KeyboardSensor,
   useSensor,
@@ -31,15 +34,18 @@ import { RoadmapColumn } from "./roadmap-column";
 import { RoadmapCard, type RoadmapCardData } from "./roadmap-card";
 import {
   UnscheduledItemsColumn,
-  UnscheduledItemsSidebar,
   UnscheduledItemPreview,
   parseUnscheduledDragId,
   type UnscheduledItem,
 } from "./unscheduled-items-panel";
 import { usePanelContext } from "@/components/panels/panel-context";
-import { INTERNAL_BOARD_HORIZONS, getInternalBoardHorizons, isLaunchHorizon } from "@/lib/roadmap";
+import { HORIZON_META, INTERNAL_BOARD_HORIZONS, getInternalBoardHorizons, isLaunchHorizon } from "@/lib/roadmap";
 import type { Horizon, SquadData } from "@/lib/types";
-import { Board } from "@/components/patterns/board";
+import { Board, BOARD_FADE_END_TRACK_CLASS, BoardDock, type BoardColumnLayoutControls, type BoardDockTab } from "@/components/patterns/board";
+import { canMoveColumn, collapseDock, isPinned, moveColumn, pinColumn, setActiveColumn, togglePinColumn, type BoardLayout, type MoveDirection } from "@/lib/board-layout";
+import { UNSCHEDULED_COLUMN_ID } from "@/lib/roadmap/board-layout";
+import { useRoadmapColumnLayout } from "./column-layout-context";
+import { NOT_SCHEDULED_TITLE } from "./schedule/sidebar-chrome";
 import { RoadmapSwimlanes } from "./roadmap-swimlanes";
 import { cn } from "@/lib/utils";
 import { useMediaQuery } from "@/hooks/use-media-query";
@@ -222,6 +228,35 @@ export function applyRoadmapItemPatch(
   return patch.horizon ? moveCardToHorizon(next, itemId, patch.horizon) : next;
 }
 
+/**
+ * closestCenter alone lets a tall column body beat a small dock tab, because it measures the dragged card's centre rather
+ * than the pointer. A tab is only a target when the pointer is actually on it, so check that first.
+ */
+// A tab needs its own droppable id: the open panel's column registers `column-<horizon>` too, and two droppables sharing
+// an id clobber each other in dnd-kit's registry (unmounting the panel would unregister the tab). Drops on a tab are
+// translated back to the column's id by `droppedOnId`.
+const DOCK_TAB_PREFIX = "dock-tab-";
+const dockTabDroppableId = (horizon: Horizon) => `${DOCK_TAB_PREFIX}${horizon}`;
+const droppedOnId = (over: { id: string | number }): string => {
+  const id = String(over.id);
+  return id.startsWith(DOCK_TAB_PREFIX) ? `column-${id.slice(DOCK_TAB_PREFIX.length)}` : id;
+};
+
+const collisionDetection: CollisionDetection = (args) => {
+  const onTab = pointerWithin(args).find((hit) => args.droppableContainers.find((c) => c.id === hit.id)?.data.current?.dockTab);
+  return onTab ? [onTab] : closestCenter(args);
+};
+
+/**
+ * A dock tab for a horizon column, which is also a drop target: a card dropped on it lands in that horizon exactly as a
+ * drop on the open column would. Disabled while that column is the open panel (the panel itself is the drop target then,
+ * and two droppables must not share an id).
+ */
+function DroppableDockTab({ horizon, disabled, children }: { horizon: Horizon; disabled: boolean; children: React.ReactNode }) {
+  const { setNodeRef, isOver } = useDroppable({ id: dockTabDroppableId(horizon), data: { horizon, dockTab: true }, disabled });
+  return <div ref={setNodeRef} className={cn("h-fit rounded-xl", isOver && "ring-2 ring-ring/40")}>{children}</div>;
+}
+
 export function RoadmapBoard({
   initialItems,
   workspaceId,
@@ -291,6 +326,98 @@ export function RoadmapBoard({
   // aria-describedby ids from a global counter and hydration mismatches.
   const dndId = useId();
   const isDesktop = useMediaQuery("(min-width: 768px)", false);
+
+  // Column layout: which columns are pinned (docked in ONE dock on the right, outside the scroller), which pinned
+  // column the dock shows, whether the dock is collapsed to its tab rail, and the column order. Docking applies from md
+  // up only; below md every column is an ordinary scroller column, in the same order. In swimlane mode the horizons are
+  // lane-grid columns, so only the Not scheduled column can dock there.
+  const { layout, update: updateLayout } = useRoadmapColumnLayout(workspaceId);
+  const orderedColumnIds = layout.columnOrder.filter((id) => id === UNSCHEDULED_COLUMN_ID || (visibleHorizons as string[]).includes(id));
+  const isDocked = (id: string) => isDesktop && (spec ? id === UNSCHEDULED_COLUMN_ID : layout.pinnedColumnIds.includes(id));
+  const dockedColumnIds = orderedColumnIds.filter(isDocked);
+  const scrollerColumnIds = orderedColumnIds.filter((id) => !isDocked(id));
+  // The stored active column may be one that isn't rendered (a hidden launch horizon): show the first visible one then.
+  const activeDockId = layout.activePinnedId && dockedColumnIds.includes(layout.activePinnedId) ? layout.activePinnedId : (dockedColumnIds[0] ?? null);
+  const dockOpen = activeDockId !== null && !layout.dockCollapsed;
+
+  // Keyboard users keep their place: after a layout change the control that now represents the column gets focus.
+  const pendingFocus = useRef<string | null>(null);
+  useEffect(() => {
+    const target = pendingFocus.current;
+    if (!target) return;
+    pendingFocus.current = null;
+    containerRef.current?.querySelector<HTMLElement>(`[data-column-control="${target}"]`)?.focus();
+  }, [layout, containerRef]);
+  const changeLayout = (transition: (current: BoardLayout) => BoardLayout, focus?: string) => {
+    if (focus) pendingFocus.current = focus;
+    updateLayout(transition);
+  };
+
+  // The active tab of an open dock closes it; any other tab shows its column and opens the dock. (A column the layout
+  // does not list as pinned, i.e. Not scheduled forced into the dock by swimlane mode, is pinned first.)
+  function selectDockTab(id: string) {
+    if (dockOpen && id === activeDockId) changeLayout(collapseDock, `${id}:tab`);
+    else changeLayout((l) => setActiveColumn(isPinned(l, id) ? l : pinColumn(l, id), id), `${id}:tab`);
+  }
+
+  function layoutControlsFor(id: string, label: string): BoardColumnLayoutControls {
+    // A column moves among the columns rendered in its own region (the dock's tabs, or the scroller; everything on narrow screens).
+    const scope = { among: (other: string) => orderedColumnIds.includes(other) && (!isDesktop || isDocked(other) === isDocked(id)) };
+    const docked = isDocked(id);
+    return {
+      columnId: id,
+      label,
+      pinned: docked,
+      pinnable: isDesktop && !(spec && id === UNSCHEDULED_COLUMN_ID),
+      onTogglePin: () => changeLayout((l) => togglePinColumn(l, id), `${id}:pin`),
+      canMoveLeft: canMoveColumn(layout, id, "left", scope),
+      canMoveRight: canMoveColumn(layout, id, "right", scope),
+      onMove: (direction: MoveDirection) => changeLayout((l) => moveColumn(l, id, direction, scope), `${id}:menu`),
+      onCollapse: docked ? () => changeLayout(collapseDock, `${id}:tab`) : undefined,
+    };
+  }
+
+  function renderColumn(id: string, placement: "scroller" | "pinned") {
+    if (id === UNSCHEDULED_COLUMN_ID) {
+      return (
+        <UnscheduledItemsColumn
+          key={id}
+          items={unscheduled}
+          onQuickAdd={handleQuickAdd}
+          placement={placement}
+          layoutControls={layoutControlsFor(id, NOT_SCHEDULED_TITLE)}
+        />
+      );
+    }
+    const horizon = id as Horizon;
+    return (
+      <RoadmapColumn
+        key={horizon}
+        horizon={horizon}
+        items={displayColumns[horizon]}
+        workspaceId={workspaceId}
+        orgSlug={orgSlug}
+        workspaceSlug={workspaceSlug}
+        revalidatePathStr={revalidatePathStr}
+        onItemAdded={handleItemAdded}
+        onArchive={handleArchive}
+        availableKRs={availableKRs}
+        availableSolutions={availableSolutions}
+        availableOpportunities={availableOpportunities}
+        availableExperiments={availableExperiments}
+        limit={horizon === "NOW" ? nowLimit : horizon === "NEXT" ? nextLimit : undefined}
+        launchWorkflowEnabled={launchWorkflowEnabled}
+        placement={placement}
+        layoutControls={layoutControlsFor(id, HORIZON_META[horizon].label)}
+      />
+    );
+  }
+
+  const dockTabs: BoardDockTab[] = dockedColumnIds.map((id) => ({
+    id,
+    title: id === UNSCHEDULED_COLUMN_ID ? NOT_SCHEDULED_TITLE : HORIZON_META[id as Horizon].label,
+    count: id === UNSCHEDULED_COLUMN_ID ? unscheduled.length : displayColumns[id as Horizon].length,
+  }));
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: { distance: 8 },
@@ -405,7 +532,7 @@ export function RoadmapBoard({
     if (!over) return;
 
     const activeId = active.id as string;
-    const overId = over.id as string;
+    const overId = droppedOnId(over);
 
     const sourceHorizon = findHorizon(columns, activeId);
     if (!sourceHorizon) return;
@@ -467,7 +594,7 @@ export function RoadmapBoard({
       setActiveUnscheduledItem(null);
       if (!over) return;
 
-      const overId = over.id as string;
+      const overId = droppedOnId(over);
       const { horizon: destHorizon, laneKey } = resolveDrop(overId);
       if (!destHorizon) return; // dropped somewhere that isn't a horizon column/card
 
@@ -495,7 +622,7 @@ export function RoadmapBoard({
       return;
     }
 
-    const overId = over.id as string;
+    const overId = droppedOnId(over);
 
     const currentHorizon = findHorizon(columns, activeId);
     if (!currentHorizon) {
@@ -593,7 +720,7 @@ export function RoadmapBoard({
     <DndContext
       id={dndId}
       sensors={sensors}
-      collisionDetection={closestCenter}
+      collisionDetection={collisionDetection}
       onDragStart={handleDragStart}
       onDragOver={handleDragOver}
       onDragEnd={handleDragEnd}
@@ -610,6 +737,7 @@ export function RoadmapBoard({
         <div className="flex min-h-0 min-w-0 flex-1 flex-col md:flex-row">
         <Board
           label="Roadmap board"
+          fadeEnd={dockedColumnIds.length > 0}
           className={cn(
             "block min-h-[24rem] flex-1 scroll-px-3 overflow-x-auto p-0 sm:scroll-px-4",
             // Lanes stack vertically, so the board scrolls both ways in lane mode. Snapping is off there:
@@ -620,7 +748,11 @@ export function RoadmapBoard({
         >
           <div
             data-slot="roadmap-board-track"
-            className="flex h-full w-max min-w-full items-stretch gap-3 px-3 pt-3 pb-3 sm:px-4 sm:pt-4 md:px-4 md:pt-3"
+            className={cn(
+              "flex h-full w-max min-w-full items-stretch gap-3 px-3 pt-3 pb-3 sm:px-4 sm:pt-4 md:px-4 md:pt-3",
+              // Room for the scroller's tapered edge, so the last column at full scroll-end is not faded.
+              dockedColumnIds.length > 0 && BOARD_FADE_END_TRACK_CLASS,
+            )}
           >
             {spec && lanes ? (
               <RoadmapSwimlanes
@@ -642,30 +774,24 @@ export function RoadmapBoard({
                 availableExperiments={availableExperiments}
               />
             ) : null}
-            {!spec && visibleHorizons.map((horizon) => (
-              <RoadmapColumn
-                key={horizon}
-                horizon={horizon}
-                items={displayColumns[horizon]}
-                workspaceId={workspaceId}
-                orgSlug={orgSlug}
-                workspaceSlug={workspaceSlug}
-                revalidatePathStr={revalidatePathStr}
-                onItemAdded={handleItemAdded}
-                onArchive={handleArchive}
-                availableKRs={availableKRs}
-                availableSolutions={availableSolutions}
-                availableOpportunities={availableOpportunities}
-                availableExperiments={availableExperiments}
-                limit={horizon === "NOW" ? nowLimit : horizon === "NEXT" ? nextLimit : undefined}
-                launchWorkflowEnabled={launchWorkflowEnabled}
-              />
-            ))}
-            {/* Below md the pane is the last swipe column; from md up it docks beside the board instead. */}
-            {!isDesktop ? <UnscheduledItemsColumn items={unscheduled} onQuickAdd={handleQuickAdd} /> : null}
+            {!spec ? scrollerColumnIds.map((id) => renderColumn(id, "scroller")) : null}
+            {/* In swimlane mode (and below md) the Not scheduled column is the last swipe column; otherwise it is docked beside the board. */}
+            {spec && !isDocked(UNSCHEDULED_COLUMN_ID) ? renderColumn(UNSCHEDULED_COLUMN_ID, "scroller") : null}
           </div>
         </Board>
-        {isDesktop ? <UnscheduledItemsSidebar items={unscheduled} onQuickAdd={handleQuickAdd} /> : null}
+        {/* The dock sits OUTSIDE the horizontal scroller, so it stays put while the rest scroll and a drag from it never needs a mid-drag scroll. */}
+        {dockTabs.length > 0 ? (
+          <BoardDock
+            tabs={dockTabs}
+            activeId={activeDockId}
+            collapsed={!dockOpen}
+            onSelectTab={selectDockTab}
+            panel={dockOpen && activeDockId ? renderColumn(activeDockId, "pinned") : null}
+            wrapTab={(tab, node, { panelOpen }) =>
+              tab.id === UNSCHEDULED_COLUMN_ID ? node : <DroppableDockTab horizon={tab.id as Horizon} disabled={panelOpen}>{node}</DroppableDockTab>
+            }
+          />
+        ) : null}
         </div>
       </div>
 

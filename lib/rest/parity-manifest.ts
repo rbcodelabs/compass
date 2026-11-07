@@ -1,7 +1,7 @@
 /** Auditable MCP → REST ledger. It documents parity but never drives routing. */
 export const MCP_PARITY_CATALOG = {
-  toolCount: 210,
-  sortedToolNamesSha256: "301882f685d43a66a2c76d5cb5a2ac763eddd8bcd7c5c08145cb0202a005df95",
+  toolCount: 212,
+  sortedToolNamesSha256: "2a9f517831caf4cf0181f491e53f5bd627e4a4797d1bd8c6df35b7411708ffe0",
 } as const
 
 export type McpRestParityDisposition =
@@ -108,6 +108,7 @@ export const MCP_REST_PARITY_MANIFEST = {
   get_workspace_by_slug: direct("getWorkspaceBySlug"),
   get_workspace_scoring_model: direct("getWorkspaceScoringModel"),
   get_workspace_summary: direct("getWorkspaceSummary"),
+  group_by_custom_field: composition(["listRoadmapItems", "listOpportunities", "listCustomFieldValues"], "Grouping is a server-side convenience; over REST list the roadmap items or opportunities, read the field with listCustomFieldValues per object, and group client-side."),
   list_workspace_modules: direct("listWorkspaceModules"),
   update_workspace_module: direct("updateWorkspaceModule"),
   issue_research_link: direct("issueResearchParticipantLink"),
@@ -192,6 +193,7 @@ export const MCP_REST_PARITY_MANIFEST = {
   slack_search_users: slackExcluded,
   set_card_sort_round_state: composition(["revealCardSortRound", "closeCardSortRound"], "Use the explicit irreversible reveal or close action; REST has no generic state PATCH or unreveal operation."),
   set_custom_field_value: direct("setCustomFieldValue"),
+  set_custom_field_values: composition(["setCustomFieldValue"], "REST sets one value per call; an MCP agent batches one field and value across up to 25 objects (100 for human keys), and a REST client repeats setCustomFieldValue per object."),
   set_launch_tier: direct("setLaunchTier"),
   set_objective_parent_kr: direct("updateObjective"),
   set_workspace_scoring_model: direct("updateWorkspaceScoringModel"),

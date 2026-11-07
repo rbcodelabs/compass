@@ -31,6 +31,7 @@ vi.mock("@/components/panels/key-result-panel", () => ({ KeyResultPanel: () => n
 vi.mock("@/components/panels/solution-panel", () => ({ SolutionPanel: () => null }));
 vi.mock("@/components/panels/assumption-panel", () => ({ AssumptionPanel: () => null }));
 vi.mock("@/components/panels/roadmap-item-panel", () => ({ RoadmapItemPanel: () => null }));
+vi.mock("@/components/panels/decision-panel", () => ({ DecisionPanel: () => null }));
 vi.mock("@/components/panels/feedback-panel", () => ({ FeedbackPanel: () => null }));
 vi.mock("@/components/feedback/feedback-composer", () => ({ FeedbackComposer: () => null }));
 vi.mock("@/components/discovery/opportunity-composer", () => ({ OpportunityComposer: () => null }));

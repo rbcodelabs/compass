@@ -246,7 +246,7 @@ async function captureInSandbox(input: {
         CAPTURE_TIMEOUT_MS: String(options.timeoutMs ?? DEFAULT_PAGE_TIMEOUT_MS),
         CAPTURE_BYPASS_SECRET: target.kind === "url" ? (bypassSecret ?? "") : "",
       },
-      detached: true,
+      detached: true as const,
     }
 
     let output = ""

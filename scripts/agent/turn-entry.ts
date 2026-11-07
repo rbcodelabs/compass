@@ -101,7 +101,7 @@ import { collectFinalDocState, isValidDocName, type CollectedDocState } from "./
 import { DEFAULT_HEARTBEAT_MS, RunReporter } from "./run-reporter.ts"
 import { createHash, randomUUID } from "node:crypto"
 import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs"
-import { basename } from "node:path"
+import { basename, resolve as resolvePath } from "node:path"
 import { gunzipSync, gzipSync } from "node:zlib"
 
 const MCP_BASE_URL = process.env.MCP_BASE_URL
@@ -738,7 +738,7 @@ async function main(): Promise<void> {
           hooks: {
             PreToolUse: [
               // The cloned-repo workdir is readable (never writable) by the native file tools.
-              { matcher: DOCS_GUARDED_TOOLS_MATCHER, hooks: [createDocsPreToolUseHook(docsRoot, { readOnlyRoots: githubShell ? [REPOS_DIR] : [] })] },
+              { matcher: DOCS_GUARDED_TOOLS_MATCHER, hooks: [createDocsPreToolUseHook(docsRoot, { readOnlyRoots: [...(githubShell ? [REPOS_DIR] : []), resolvePath(docsRoot, "..", "uploads")] })] },
               { matcher: WEB_FETCH_MATCHER, hooks: [createWebFetchPreToolUseHook(allowedFetchUrls)] },
               ...(githubShell ? [{ matcher: BASH_MATCHER, hooks: [createBashPreToolUseHook(process.env)] }] : []),
             ],

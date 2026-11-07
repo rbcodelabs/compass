@@ -69,6 +69,11 @@ async function find(tx: Tx, type: LinkableEntityType, workspaceId: string, ids: 
       const rows = await tx.researchTurn.findMany({ where: { id, session: { study: { workspaceId } } }, select: { id: true } })
       return rows.map((row) => ({ id: row.id, title: "Research turn" }))
     }
+    case "AGENT_CONVERSATION": {
+      // Existence only, in the workspace. Who may SEE a conversation is decided by lib/agent-conversation-access.ts at read time.
+      const rows = await tx.agentConversation.findMany({ where: { id, workspaceId }, select: { id: true, title: true } })
+      return rows.map((row) => ({ id: row.id, title: row.title?.trim() || "Agent conversation" }))
+    }
   }
 }
 
@@ -131,6 +136,8 @@ export async function touchEndpoint(tx: Tx, type: LinkableEntityType, workspaceI
     case "REVIEW_REQUEST":
     case "METRIC":
     case "RESEARCH_TURN":
+    // Touching a conversation would reorder the chat list, and no conversation link type is to-one.
+    case "AGENT_CONVERSATION":
       return false
   }
 }

@@ -116,3 +116,50 @@ describe("roadmap view URL round-trip", () => {
     expect(countActiveFilters({ ...DEFAULT_ROADMAP_FILTERS, dateFrom: "2026-01-01" })).toBe(1)
   })
 })
+
+describe("display.columnLayout (pinned columns)", () => {
+  const layout = { columnOrder: ["NEXT", "NOW", "unscheduled"], pinnedColumnIds: ["NEXT"], activePinnedId: "NEXT", dockCollapsed: false }
+
+  it("is absent by default, so an untouched board adds nothing to a saved view", () => {
+    expect(DEFAULT_ROADMAP_DISPLAY.columnLayout).toBeUndefined()
+    expect(parseStoredDisplay({}).columnLayout).toBeUndefined()
+  })
+
+  it("round-trips a valid layout through the display parse and the create/update input schema", () => {
+    expect(parseStoredDisplay({ sort: "title", columnLayout: layout })).toMatchObject({ sort: "title", columnLayout: layout })
+    const input = roadmapViewInputSchema.parse({ name: "v", filters: {}, display: { columnLayout: layout } })
+    expect(input.display.columnLayout).toEqual(layout)
+  })
+
+  it("an older-shape layout (per-column collapsedColumnIds) still parses; the stale field is dropped", () => {
+    const old = { columnOrder: ["NOW"], pinnedColumnIds: ["NOW"], collapsedColumnIds: ["NOW"] }
+    expect(parseStoredDisplay({ sort: "title", columnLayout: old })).toMatchObject({ sort: "title", columnLayout: { columnOrder: ["NOW"], pinnedColumnIds: ["NOW"] } })
+    expect(parseStoredDisplay({ columnLayout: old }).columnLayout).not.toHaveProperty("collapsedColumnIds")
+  })
+
+  it("a layout that does not validate degrades to absent WITHOUT discarding the rest of the display document", () => {
+    for (const bad of ["junk", 7, [], {}, { columnOrder: "NOW", pinnedColumnIds: [] }, { columnOrder: [1], pinnedColumnIds: [] }]) {
+      const parsed = parseStoredDisplay({ view: "timeline", groupBy: "squad", sort: "title", columnLayout: bad })
+      expect(parsed).toMatchObject({ view: "timeline", groupBy: "squad", sort: "title" })
+      expect(parsed.columnLayout).toBeUndefined()
+    }
+  })
+
+  it("a write payload with a bad layout is accepted with the layout dropped, never rejected", () => {
+    const input = roadmapViewInputSchema.safeParse({ name: "v", filters: {}, display: { sort: "title", columnLayout: { nope: true } } })
+    expect(input.success).toBe(true)
+    expect(input.success && input.data.display).toMatchObject({ sort: "title" })
+    expect(input.success && input.data.display.columnLayout).toBeUndefined()
+  })
+
+  it("other invalid display fields still fall back to the whole default (unchanged behaviour)", () => {
+    expect(parseStoredDisplay({ sort: "bogus", columnLayout: layout })).toEqual(DEFAULT_ROADMAP_DISPLAY)
+  })
+
+  it("is part of the state key (so 'modified' sees it) but not of the URL", () => {
+    const withLayout = { ...full, display: { ...full.display, columnLayout: layout } }
+    expect(roadmapStateKey(withLayout)).not.toBe(roadmapStateKey(full))
+    expect(roadmapStateKey({ ...withLayout, display: { ...withLayout.display, columnLayout: { ...layout, pinnedColumnIds: [...layout.pinnedColumnIds] } } })).toBe(roadmapStateKey(withLayout))
+    expect(roadmapStateToParams(withLayout).toString()).toBe(roadmapStateToParams(full).toString())
+  })
+})

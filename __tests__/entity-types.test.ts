@@ -9,14 +9,20 @@ import {
   ENTITY_TYPE_VOCABULARY,
   isLinkableEntityType,
   normalizeEntityType,
+  PUBLIC_LINK_ENTITY_TYPES,
   toPanelEntityType,
   toUrlEntityType,
   toWorkspaceEntityType,
 } from "@/lib/entity-types";
 
 describe("the entity-type vocabulary", () => {
-  it("is exactly COMMENT_TARGET_TYPES plus METRIC and RESEARCH_TURN (written out to avoid an import cycle, pinned here)", () => {
-    expect([...ENTITY_TYPE_VOCABULARY]).toEqual([...COMMENT_TARGET_TYPES, "METRIC", "RESEARCH_TURN"]);
+  it("is exactly COMMENT_TARGET_TYPES plus METRIC, RESEARCH_TURN and AGENT_CONVERSATION (written out to avoid an import cycle, pinned here)", () => {
+    expect([...ENTITY_TYPE_VOCABULARY]).toEqual([...COMMENT_TARGET_TYPES, "METRIC", "RESEARCH_TURN", "AGENT_CONVERSATION"]);
+  });
+
+  it("keeps the internal AGENT_CONVERSATION type out of the public generic link schemas (REST and MCP)", () => {
+    expect([...PUBLIC_LINK_ENTITY_TYPES]).toEqual(ENTITY_TYPE_VOCABULARY.filter((type) => type !== "AGENT_CONVERSATION"));
+    expect(PUBLIC_LINK_ENTITY_TYPES).not.toContain("AGENT_CONVERSATION");
   });
 
   it("contains every followable subject type, so follows and links share one vocabulary", () => {
@@ -47,7 +53,9 @@ describe("the entity-type vocabulary", () => {
     expect(toUrlEntityType("RESEARCH_STUDY")).toBeNull();
   });
 
-  it("adapts to the access-control entity type; METRIC and RESEARCH_TURN have none", () => {
+  it("adapts to the access-control entity type; METRIC, RESEARCH_TURN and AGENT_CONVERSATION have none", () => {
+    expect(toWorkspaceEntityType("AGENT_CONVERSATION")).toBeNull();
+    expect(toPanelEntityType("AGENT_CONVERSATION")).toBeNull();
     expect(toWorkspaceEntityType("EXPERIMENT")).toBe("experiment");
     expect(toWorkspaceEntityType("RESEARCH_STUDY")).toBe("researchStudy");
     expect(toWorkspaceEntityType("REVIEW_REQUEST")).toBe("reviewRequest");

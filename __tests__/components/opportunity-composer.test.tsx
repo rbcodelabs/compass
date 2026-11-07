@@ -78,7 +78,7 @@ describe("OpportunityComposer — fields", () => {
     expect(titleInput()).toHaveAttribute("maxLength", "255");
     expect(screen.getByRole("textbox", { name: "Description" })).toBeInTheDocument();
     expect(screen.getByLabelText(/Customer segment/)).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: "Status" })).toHaveTextContent("Exploring");
+    expect(screen.getByRole("combobox", { name: "Status" })).toHaveTextContent("Unreviewed");
     expect(screen.getByRole("combobox", { name: "Squad" })).toHaveTextContent("No squad");
     expect(screen.getByRole("combobox", { name: "Key result" })).toHaveTextContent("Link a key result");
     expect(screen.getByRole("combobox", { name: "Seed from feedback" })).toBeInTheDocument();

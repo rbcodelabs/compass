@@ -1,10 +1,11 @@
 import { readFileSync } from "node:fs"
 import path from "node:path"
-import { Sandbox } from "@vercel/sandbox"
+import { bootSandboxFromSnapshot } from "@/lib/agent-sandbox"
+import type { SandboxHandle } from "@/lib/sandbox-provider"
 import { getGoldenSnapshotId } from "@/lib/agent-runtime-config"
 import { analysisOperationMs, analysisStep, assertAnalysisDeadline } from "@/lib/research-analysis-deadline"
 
-async function stopAnalysisSandbox(sandbox: Sandbox) {
+async function stopAnalysisSandbox(sandbox: SandboxHandle) {
   const controller = new AbortController()
   try {
     await analysisStep(() => sandbox.stop({ signal: controller.signal }), Date.now() + 5_000, controller)
@@ -19,9 +20,9 @@ export async function runResearchAnalysisAgent(prompt: string, deadline = Date.n
   const key = process.env.ANTHROPIC_API_KEY
   if (!snapshotId || !key) throw new Error("Research analysis runtime unavailable")
   if (prompt.length > 510_000) throw new Error("Analysis input too large")
-  let sandbox: Sandbox | undefined
+  let sandbox: SandboxHandle | undefined
   try {
-    sandbox = await analysisStep(() => Sandbox.create({ source: { type: "snapshot", snapshotId }, timeout: Math.max(1, deadline - Date.now()), signal: controller.signal }), deadline, controller, stopAnalysisSandbox)
+    sandbox = await analysisStep(() => bootSandboxFromSnapshot(snapshotId, { timeoutMs: Math.max(1, deadline - Date.now()), signal: controller.signal }), deadline, controller, stopAnalysisSandbox)
     const active = sandbox
     await step(() => active.writeFiles([
       { path: "entry.ts", content: readFileSync(path.join(process.cwd(), "scripts/agent/research-analysis-entry.ts"), "utf8") },

@@ -7,7 +7,7 @@
  * workspaces that approved at least one GitHub repo. See the ADR linked from the
  * PR that introduced it, and the threat-model comment in the sandbox half.
  */
-import type { NetworkPolicy } from "@vercel/sandbox"
+import type { NetworkPolicy } from "@/lib/sandbox-provider"
 import type { AgentHarness } from "@/lib/agent-harness"
 import type { ResolvedAgentModel } from "@/lib/agent-model"
 import { DEFAULT_BEDROCK_REGION } from "@/lib/agent-model"

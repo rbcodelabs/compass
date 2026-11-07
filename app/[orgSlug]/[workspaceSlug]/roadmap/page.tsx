@@ -21,6 +21,7 @@ import { RoadmapGallery } from "@/components/roadmap/roadmap-gallery";
 import { loadRoadmapGalleryExtras, type GalleryGroupMode } from "@/lib/roadmap/gallery";
 import { NativeTimeline } from "@/components/roadmap/native-timeline/native-timeline";
 import { RoadmapHeader } from "@/components/roadmap/roadmap-header";
+import { RoadmapColumnLayoutProvider } from "@/components/roadmap/column-layout-context";
 import type { Horizon, SquadData, TaskStatus } from "@/lib/types";
 import type { RoadmapCardData } from "@/components/roadmap/roadmap-card";
 import type { UnscheduledItem } from "@/components/roadmap/unscheduled-items-panel";
@@ -335,6 +336,7 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
   ];
 
   return (
+<<<<<<< HEAD
     <>
       {view === "gallery" && galleryExtras ? (
         <div className="flex min-h-full min-w-0 flex-1 flex-col md:h-full md:min-h-0">
@@ -364,6 +366,14 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
           </div>
         </div>
       ) : view === "timeline" ? (
+=======
+    // The board and the saved-views menu (in the header, a sibling) share the column layout through this provider.
+    <RoadmapColumnLayoutProvider
+      workspaceId={workspace.id}
+      savedView={savedView ? { id: savedView.id, version: savedView.updatedAt, columnLayout: savedView.display.columnLayout } : null}
+    >
+      {view === "timeline" ? (
+>>>>>>> origin/main
         <Suspense>
           <NativeTimeline
             key={filterKey}
@@ -420,6 +430,6 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
           </div>
         </div>
       )}
-    </>
+    </RoadmapColumnLayoutProvider>
   );
 }

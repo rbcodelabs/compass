@@ -9,6 +9,7 @@
  * hand-edited row) degrades to the default rather than failing the page.
  */
 import { z } from "zod"
+import { boardLayoutKey, boardLayoutSchema } from "@/lib/board-layout"
 import type { RoadmapDeliveryStatus } from "@/lib/roadmap-delivery-status"
 
 export const ROADMAP_HORIZONS = ["NOW", "NEXT", "LATER", "LAUNCHING", "LAUNCHED", "SHIPPED"] as const
@@ -53,6 +54,14 @@ export const roadmapViewDisplaySchema = z.object({
   sort: z.enum(ROADMAP_VIEW_SORTS).default("manual"),
   /** Workspace roadmaps only: group by this SELECT custom field instead of `groupBy`. */
   groupField: uuid.optional(),
+  /**
+   * Workspace board only: which columns are pinned/collapsed and the column order (lib/board-layout.ts).
+   * Absent = the default layout. A layout that fails validation (hand-edited, from a newer build) degrades to
+   * absent via `.catch`, so it can never take the rest of the display document down with it; unknown or missing
+   * column ids inside a valid layout are reconciled when it is resolved against the live columns.
+   * Not a URL param: it is client state that the saved-views menu reads (components/roadmap/column-layout-context.tsx).
+   */
+  columnLayout: boardLayoutSchema.optional().catch(undefined),
 })
 
 export type RoadmapViewDisplay = z.infer<typeof roadmapViewDisplaySchema>
@@ -198,6 +207,7 @@ export function roadmapStateKey(state: { filters: RoadmapViewFilters; display: R
     f.dateFrom ?? null, f.dateTo ?? null, f.keyResult ?? null, f.solution ?? null,
     f.customField ? [f.customField.fieldId, f.customField.value] : null,
     state.display.view, state.display.groupBy, state.display.sort, state.display.groupField ?? null,
+    state.display.columnLayout ? boardLayoutKey(state.display.columnLayout) : null,
   ])
 }
 
