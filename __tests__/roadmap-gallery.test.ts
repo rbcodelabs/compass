@@ -105,3 +105,13 @@ describe("gallery URL state", () => {
     expect(resolveRoadmapGroupBy(parseGroupByParam("status"), [])).toEqual({ mode: "status" })
   })
 })
+
+describe("withoutGalleryOnlyDisplay", () => {
+  it("maps gallery/status to the cross-workspace defaults and leaves other state alone", async () => {
+    const { withoutGalleryOnlyDisplay } = await import("@/lib/roadmap-views/schema")
+    const filters = {} as never
+    expect(withoutGalleryOnlyDisplay({ filters, display: { ...DEFAULT_ROADMAP_DISPLAY, view: "gallery", groupBy: "status" } }).display).toMatchObject({ view: "board", groupBy: "horizon" })
+    const same = { filters, display: { ...DEFAULT_ROADMAP_DISPLAY, view: "timeline" as const, groupBy: "squad" as const } }
+    expect(withoutGalleryOnlyDisplay(same)).toBe(same)
+  })
+})

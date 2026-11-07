@@ -8,6 +8,7 @@ import {
   ROADMAP_URL_PARAMS,
   resolveRoadmapState,
   roadmapStateKey,
+  withoutGalleryOnlyDisplay,
   type RawSearchParams,
 } from "@/lib/roadmap-views/schema";
 import { RoadmapToolbar } from "@/components/roadmap/cross-workspace/roadmap-toolbar";
@@ -44,7 +45,7 @@ export default async function OrgRoadmapPage({ params, searchParams }: OrgRoadma
   // An id that no longer exists (deleted, or not visible to this viewer) just means "no saved view".
   const savedView = views.find((v) => v.id === savedId) ?? null;
 
-  const state = resolveRoadmapState(query, savedView);
+  const state = withoutGalleryOnlyDisplay(resolveRoadmapState(query, savedView));
   const readableIds = actor.workspaces.map((w) => w.id);
 
   const [facets, { items, truncated }] = await Promise.all([
