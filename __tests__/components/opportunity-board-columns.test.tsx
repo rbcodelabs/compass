@@ -33,13 +33,17 @@ const card = (id: string, status: OpportunityCardData["status"]): OpportunityCar
 }) as OpportunityCardData
 
 const BY_STATUS = {
-  EXPLORING: [card("e1", "EXPLORING")], VALIDATING: [], PRIORITIZED: [], ACTIVE: [], ARCHIVED: [],
+  UNREVIEWED: [], EXPLORING: [card("e1", "EXPLORING")], VALIDATING: [], PRIORITIZED: [], ACTIVE: [], ARCHIVED: [],
 }
 
 // Column titles only: the empty-state headings ("No ... yet") are h3s too.
 const headings = () =>
   screen.getAllByRole("heading", { level: 3 })
-    .map((h) => h.textContent?.replace(/hidden in view, has cards/, "").trim() ?? "")
+    .map((h) => {
+      const copy = h.cloneNode(true) as HTMLElement
+      copy.querySelectorAll("[data-slot=tooltip-trigger]").forEach((el) => el.remove())
+      return copy.textContent?.replace(/hidden in view, has cards/, "").trim() ?? ""
+    })
     .filter((text) => !text.startsWith("No "))
 
 function renderBoard(props: Partial<React.ComponentProps<typeof OpportunityBoard>> = {}) {
@@ -49,21 +53,21 @@ function renderBoard(props: Partial<React.ComponentProps<typeof OpportunityBoard
 describe("OpportunityBoard column layout", () => {
   afterEach(cleanup)
 
-  it("renders Active first with no layout", () => {
+  it("renders Unreviewed first, then Active, with no layout", () => {
     renderBoard()
-    expect(headings()).toEqual(["Active", "Prioritized", "Validating", "Exploring"])
+    expect(headings()).toEqual(["Unreviewed", "Active", "Prioritized", "Validating", "Exploring"])
   })
 
   it("renders the resolved saved order, appending omitted statuses", () => {
     const { visible } = resolveOpportunityColumns({ order: ["EXPLORING", "VALIDATING"], hidden: [] }, {})
     renderBoard({ columnOrder: visible })
-    expect(headings()).toEqual(["Exploring", "Validating", "Active", "Prioritized"])
+    expect(headings()).toEqual(["Exploring", "Validating", "Unreviewed", "Active", "Prioritized"])
   })
 
   it("omits hidden empty columns", () => {
     const { visible } = resolveOpportunityColumns({ order: [], hidden: ["VALIDATING", "PRIORITIZED"] }, { EXPLORING: 1 })
     renderBoard({ columnOrder: visible })
-    expect(headings()).toEqual(["Active", "Exploring"])
+    expect(headings()).toEqual(["Unreviewed", "Active", "Exploring"])
   })
 
   it("marks a hidden column that still has cards", () => {
@@ -99,12 +103,12 @@ describe("ColumnsPopover", () => {
   it("reorders with the move buttons through the order param", async () => {
     open(undefined, {})
     fireEvent.click(await screen.findByRole("button", { name: "Move Exploring up" }))
-    expect(lastHref()).toBe("/acme/core/discovery?order=ACTIVE%2CPRIORITIZED%2CEXPLORING%2CVALIDATING")
+    expect(lastHref()).toBe("/acme/core/discovery?order=UNREVIEWED%2CACTIVE%2CPRIORITIZED%2CEXPLORING%2CVALIDATING")
   })
 
   it("cannot move the first column up or the last down", async () => {
     open(undefined, {})
-    expect(await screen.findByRole("button", { name: "Move Active up" })).toBeDisabled()
+    expect(await screen.findByRole("button", { name: "Move Unreviewed up" })).toBeDisabled()
     expect(screen.getByRole("button", { name: "Move Exploring down" })).toBeDisabled()
   })
 
@@ -127,7 +131,7 @@ describe("ColumnsPopover", () => {
 describe("OpportunityBoard live sync", () => {
   afterEach(cleanup)
 
-  const column = (title: string) => screen.getByRole("heading", { level: 3, name: title }).closest("section")!
+  const column = (title: string) => screen.getByRole("heading", { level: 3, name: new RegExp(`^${title}`) }).closest("section")!
   const board = (byStatus: React.ComponentProps<typeof OpportunityBoard>["opportunitiesByStatus"]) => (
     <OpportunityBoard opportunitiesByStatus={byStatus} orgSlug="acme" workspaceSlug="core" workspaceId="w1" />
   )
