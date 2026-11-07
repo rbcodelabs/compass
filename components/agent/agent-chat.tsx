@@ -224,6 +224,9 @@ export function AgentChat({
   const agentSelection = agentPick === "builtin" || agentChoices.agents.some((agent) => agent.id === agentPick) ? agentPick : ""
   const driveConnected = agentChoices.connectors.some((c) => c.slug === GOOGLE_DRIVE_CONNECTOR_SLUG)
   // A paste that is nothing but Drive links becomes chips instead of text; anything else pastes as usual.
+  const addGoogleResource = useCallback((ref: GoogleResourceRef) => {
+    setGoogleResources((list) => (list.some((r) => r.fileId === ref.fileId) ? list : [...list, ref].slice(0, AGENT_MAX_GOOGLE_RESOURCES_PER_TURN)))
+  }, [])
   const pasteGoogleLinks = useCallback((text: string): boolean => {
     const refs = googleResourcesFromPaste(text)
     if (!refs.length) return false
@@ -915,6 +918,9 @@ export function AgentChat({
                     disabled={composerDisabled}
                     uploadCount={attachedUploads.length}
                     items={attachedItems}
+                    driveConnected={driveConnected}
+                    googleResources={googleResources}
+                    onPickGoogle={addGoogleResource}
                     onUploaded={(u) => { setAttachError(null); setAttachedUploads((l) => [...l, u]) }}
                     onPickItem={(i) => { setAttachError(null); setAttachedItems((l) => [...l, i]) }}
                     onError={setAttachError}
