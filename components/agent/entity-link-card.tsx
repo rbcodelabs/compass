@@ -9,6 +9,8 @@ import { useOptionalPanelContext, type PanelType } from "@/components/panels/pan
 import { useWorkItemLinkScope } from "@/components/work-item-link-scope"
 import { PullRequestChip } from "@/components/github/pull-request-chip"
 import { parsePullRequestUrl } from "@/lib/github-pull-request-links"
+import { useLabels } from "@/components/thinking-model/thinking-model-provider"
+import type { ResolvedLabels } from "@/lib/thinking-model/labels"
 import { cn } from "@/lib/utils"
 
 /**
@@ -86,24 +88,28 @@ function useEntitySummary(link: ParsedEntityLink | null): { summary: EntitySumma
 }
 
 // What the single meta line of an entity summary is, per type, so the hover card can label it.
-const META_LABEL: Partial<Record<string, string>> = {
-  solution: "Opportunity",
-  assumption: "Solution",
-  keyResult: "Progress",
-  roadmapItem: "Horizon",
-  feedback: "Type",
-  artifact: "Type",
-  doc: "Type",
+// The two entity names come from the workspace's thinking model (a renamed Opportunity must not read "Opportunity" here).
+function metaLabelFor(type: string, labels: ResolvedLabels): string | undefined {
+  switch (type) {
+    case "solution": return labels.opportunity.singular
+    case "assumption": return labels.solution.singular
+    case "keyResult": return "Progress"
+    case "roadmapItem": return "Horizon"
+    case "feedback":
+    case "artifact":
+    case "doc": return "Type"
+    default: return undefined
+  }
 }
 
-function pillData(summary: EntitySummary, href: string): EntityPillData {
+function pillData(summary: EntitySummary, href: string, labels: ResolvedLabels): EntityPillData {
   return {
     kind: summary.type,
     typeLabel: summary.typeLabel,
     title: summary.title,
     status: summary.status,
     description: summary.description,
-    facts: summary.meta ? [{ label: META_LABEL[summary.type] ?? "Details", value: summary.meta }] : [],
+    facts: summary.meta ? [{ label: metaLabelFor(summary.type, labels) ?? "Details", value: summary.meta }] : [],
     href,
   }
 }
@@ -132,6 +138,7 @@ function EntityAgentLink({ href, children }: { href?: string; children?: ReactNo
   const panels = useOptionalPanelContext()
   const scope = useWorkItemLinkScope()
   const { summary, settled } = useEntitySummary(link)
+  const labels = useLabels()
 
   if (!href) return <span>{children}</span>
   const external = /^(?:https?:)?\/\//i.test(href)
@@ -164,5 +171,5 @@ function EntityAgentLink({ href, children }: { href?: string; children?: ReactNo
       panels.openPanel(link.type as PanelType, link.id)
     }
   }
-  return <EntityPill data={pillData(summary, internalHref)} onClick={onClick} dataAttrs={{ "data-entity-card": summary.type }} clientNav />
+  return <EntityPill data={pillData(summary, internalHref, labels)} onClick={onClick} dataAttrs={{ "data-entity-card": summary.type }} clientNav />
 }

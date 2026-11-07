@@ -48,7 +48,7 @@ import { AGENT_SANDBOX_IDLE_MS, agentSandboxReuseEnabled, type PreviousRunState 
 // nothing when the value can only be edited by someone who can also redeploy.
 
 /** Default wall-clock budget for one run. */
-export const DEFAULT_AGENT_RUN_BUDGET_MS = 20 * 60_000
+export const DEFAULT_AGENT_RUN_BUDGET_MS = 60 * 60_000
 /** Hard ceiling a caller may request. Well inside the platform's 24h sandbox cap. */
 export const MAX_AGENT_RUN_BUDGET_MS = 60 * 60_000
 /** Floor, so a caller cannot ask for a budget that expires before the boot finishes. */

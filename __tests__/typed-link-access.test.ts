@@ -59,6 +59,15 @@ const LINK_MODULE = "lib/typed-links.ts";
 // and DELETE its own in afterAll; the narrower per-statement check below enforces that so a raw INSERT or UPDATE cannot slip in.
 // link-authoring.spec.ts (Phase 4B) does the same: every edge is created through the UI, raw SQL only counts and deletes by workspace id.
 const E2E_CLEANUP_SPECS = new Set(["e2e/functional/specs/typed-links.spec.ts", "e2e/functional/specs/thinking-model-tree.spec.ts", "e2e/functional/specs/link-authoring.spec.ts", "e2e/functional/specs/optional-cycle-thinking-model.spec.ts", "e2e/functional/global-teardown.ts"]);
+/**
+ * lib/workspace-export/ copies a whole workspace between workspaces/organizations, including its link rows, by walking every exported
+ * model generically (dynamic delegates, model introspection, and the link model names in its classification registry). It is the only
+ * other code allowed to do so. The tenant-safety rules this guard protects are kept by the importer instead of lib/typed-links.ts:
+ * every row's workspaceId is the NEW workspace's id, and a link whose endpoint is not itself part of the import is dropped
+ * (DROP_ON_UNRESOLVED in lib/workspace-export/import.ts), so an imported link can never point into another workspace.
+ * Both are asserted in __tests__/workspace-export*.integration.test.ts.
+ */
+const isWorkspaceExportModule = (file: string) => relPosix(file).startsWith("lib/workspace-export/");
 const isLinkModuleOrSchema = (file: string) => relPosix(file) === LINK_MODULE || relPosix(file) === "prisma/schema.prisma" || E2E_CLEANUP_SPECS.has(relPosix(file));
 
 // Files that legitimately use non-literal Prisma delegates or model introspection today, each over a fixed
@@ -143,7 +152,7 @@ describe("typed link models are reached only through lib/typed-links.ts", () => 
 
   it("nothing in app/, lib/, components/, hooks/, scripts/, e2e/, prisma/ seeds or root scripts references the link models or tables except that module and the migration hook", () => {
     const offenders = files
-      .filter((file) => !isMigrationOwned(file) && !isLinkModuleOrSchema(file))
+      .filter((file) => !isMigrationOwned(file) && !isLinkModuleOrSchema(file) && !isWorkspaceExportModule(file))
       .flatMap((file) => {
         const hits = findLinkReferences(readFileSync(file, "utf-8")).filter(
           (hit) => !(hit === "dynamic delegate access" || hit === "model introspection") || !ALLOWED_GENERIC_ACCESS.has(rel(file).split(path.sep).join("/")),

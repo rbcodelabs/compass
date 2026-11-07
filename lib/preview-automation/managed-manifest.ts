@@ -241,7 +241,10 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   "110_agent_sandbox_class": "3756f4a2853f5b8a9d09322c94b24bfd220ea7def3d4809afecd385196a03f1e",
   // External artifact share: four new tables plus their ASYNC indexes (no foreign keys, IF NOT EXISTS, one DDL per statement). Additive: nothing
   // touches `artifacts`. The 110 postcondition proves the columns and that every index is valid and ready.
-  "110_artifact_external_share": "f68abc7262d4152869d68a11b41451384caa4ab0f8377d0759daec98782e3cd7"
+  "110_artifact_external_share": "f68abc7262d4152869d68a11b41451384caa4ab0f8377d0759daec98782e3cd7",
+  // Agent conversation archive: one nullable ADD COLUMN (agent_conversations.archived_at), no default, no backfill, no index, no FK. Additive.
+  // Digest recorded from the shipped SQL after reading it (single ALTER TABLE ... ADD COLUMN IF NOT EXISTS).
+  "112_agent_conversation_archive": "5b9d029dd2de58f7e91adc163491fd2d56616de655ebeecaaae0ddc5b27eeba7"
 };
 
 /**
