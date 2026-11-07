@@ -275,6 +275,8 @@ test.describe("Roadmap — not yet on the roadmap", () => {
       // pinned selects) legitimately leave their own validated solutions
       // unscheduled. The empty state itself is covered by
       // __tests__/components/unscheduled-items-column.test.tsx.
+      // The reload above reset the pane to its collapsed default, so expand it before reading the column.
+      await page.getByRole("button", { name: /^Expand Not scheduled/ }).click();
       const boardUnscheduled = page.getByTestId("roadmap-unscheduled-column");
       await expect(boardUnscheduled).toBeVisible();
       for (const title of [solTitle, sol2Title, bugTitle]) {
