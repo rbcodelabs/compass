@@ -93,7 +93,7 @@ export default async function SolutionsPage({ params, searchParams }: Props) {
   const boardState = resolveSolutionsState(search, selectedState);
   // A bare ?saved=id becomes the full (edited=1) form, so every control keeps editing single params.
   if (selectedView && needsSolutionsViewExpansion(search)) {
-    redirect(solutionsHref("/" + orgSlug + "/" + workspaceSlug + "/solutions", boardState, selectedView.id));
+    redirect(solutionsHref(`/${orgSlug}/${workspaceSlug}/solutions`, boardState, selectedView.id));
   }
   const {
     squad: squadFilter,

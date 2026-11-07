@@ -40,7 +40,6 @@ import {
 import type { SelectOption, SolutionStatus } from "@/lib/types";
 import { announceRoadmapSync } from "@/lib/ui/roadmap-sync-toast";
 import { SOLUTION_COLUMN_ACCENT } from "@/lib/saved-views/solution-columns";
-import { DEFAULT_SOLUTION_COLUMN_ORDER } from "@/lib/saved-views/columns";
 
 export type SolutionBacklogItem = SolutionCardData & {
   opportunity: {
@@ -136,7 +135,7 @@ export type SolutionBacklogProps = {
   hasActiveScoringModel?: boolean;
   /** "Sort by score" view mode. Read-only: it disables dragging and never persists. */
   sortByScore?: boolean;
-  /** Status columns to render, in order (the resolved saved-view / URL layout). Defaults to the active-first order. */
+  /** Status columns to render, in order (the resolved saved-view / URL layout). Defaults to the canonical status order; the Solutions page passes the resolved (active-first by default) layout. */
   columnOrder?: readonly SolutionStatus[];
   /** Columns the layout hides that are shown because they hold cards. */
   forcedVisibleColumns?: readonly SolutionStatus[];
@@ -262,7 +261,7 @@ function StatusBacklogBoard({
   workspaceId,
   hasActiveScoringModel = false,
   sortByScore = false,
-  columnOrder = DEFAULT_SOLUTION_COLUMN_ORDER,
+  columnOrder = SOLUTION_STATUS_ORDER,
   forcedVisibleColumns = [],
 }: Omit<SolutionBacklogProps, "groupBy" | "squads" | "groupField">) {
   const labels = useLabels();
