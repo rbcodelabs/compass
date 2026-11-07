@@ -69,6 +69,7 @@ describe("Tasks board layout binding", () => {
     const two = pinColumn(pinColumn(resolveTaskBoardLayout(undefined), "DONE"), "BLOCKED")
     expect(two.columnOrder.filter((id) => two.pinnedColumnIds.includes(id))).toEqual(["BLOCKED", "DONE"])
     const swapped = moveColumn(two, "DONE", "left")
-    expect(swapped.columnOrder.slice(2, 5)).toEqual(["IN_PROGRESS", "DONE", "BLOCKED"])
+    // Tabs swap places; the unpinned column between them keeps its slot.
+    expect(swapped.columnOrder.slice(3, 6)).toEqual(["DONE", "IN_REVIEW", "BLOCKED"])
   })
 })

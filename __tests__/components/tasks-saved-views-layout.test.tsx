@@ -121,7 +121,7 @@ describe("TasksSavedViewsMenu", () => {
     fireEvent.click(screen.getByTestId("saved-views-trigger"));
     fireEvent.click(await screen.findByTestId("save-view-new"));
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Urgent + Done pinned" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: /^Save$/ }));
     await waitFor(() => expect(create).toHaveBeenCalled());
     const [orgSlug, surface, workspaceId, payload] = create.mock.calls[0];
     expect([orgSlug, surface, workspaceId]).toEqual(["org", "TASKS_BOARD", "w1"]);

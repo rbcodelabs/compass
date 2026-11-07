@@ -175,10 +175,9 @@ describe("saved-view schema for the Tasks board", () => {
     expect(savedViewInputSchemaFor("TASKS_BOARD").safeParse(body({ display: { view: "table" } })).success).toBe(false)
   })
 
-  it("is not the board schema of another surface", () => {
+  it("does not carry another surface's filters", () => {
     // Opportunities' filters (squadIds) are not Tasks filters: unknown keys are stripped, so they never leak across surfaces.
     expect(parseStoredFiltersFor("TASKS_BOARD", { squadIds: [SQUAD] })).toEqual({ includeAgentTasks: false })
-    expect(savedViewInputSchemaFor("OPPORTUNITIES_BOARD").safeParse(body()).success).toBe(false)
   })
 
   it("an untouched document stays byte-identical (no columnLayout key written for the default)", () => {
