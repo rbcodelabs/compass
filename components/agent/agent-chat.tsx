@@ -722,11 +722,9 @@ export function AgentChat({
 
             {/* Only shown for a detached run, because it is only true of one: the
                 synchronous fallback still dies with this request. */}
-            {activeRun && !activeRun.done && (
+            {activeRun && !activeRun.done && runStartedByOther && (
               <p className="pl-10 text-xs text-text-subtle">
-                {runStartedByOther
-                  ? `${nameOf(runStarterId) ?? "Another participant"} asked this. You can watch, and send your own message once it finishes.`
-                  : "This runs on the server — you can close this tab and pick the reply up here later."}
+                {`${nameOf(runStarterId) ?? "Another participant"} asked this. You can watch, and send your own message once it finishes.`}
               </p>
             )}
 
