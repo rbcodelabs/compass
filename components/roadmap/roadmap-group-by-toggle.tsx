@@ -1,6 +1,7 @@
 "use client";
 
 import { useUrlState } from "@/hooks/use-url-state";
+import { useLabels } from "@/components/thinking-model/thinking-model-provider";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 export type RoadmapGroupByFieldOption = { id: string; label: string };
@@ -24,6 +25,7 @@ export function RoadmapGroupByToggle({ value, customFieldOptions, variant = "tim
   const { set } = useUrlState();
   const isBoard = variant === "board";
   const isGallery = variant === "gallery";
+  const labels = useLabels();
   // On the board, Phase and None are the same thing: no swimlanes. "phase" is the
   // URL default (param omitted), so it doubles as the board's "None" item.
   const selected = isBoard && value === "none" ? "phase" : value;
@@ -39,7 +41,7 @@ export function RoadmapGroupByToggle({ value, customFieldOptions, variant = "tim
         ) : (
           <SelectItem value="phase">{isGallery ? "Horizon" : "Phase"}</SelectItem>
         )}
-        {isGallery && <SelectItem value="status">Solution status</SelectItem>}
+        {isGallery && <SelectItem value="status">{labels.solution.singular} status</SelectItem>}
         <SelectItem value="squad">Squad</SelectItem>
         {!isBoard && <SelectItem value="none">None</SelectItem>}
         {!isGallery && customFieldOptions.map((option) => (

@@ -116,7 +116,7 @@ const HORIZON_ORDER = ["NOW", "NEXT", "LATER", "LAUNCHING", "LAUNCHED", "SHIPPED
 export function groupGalleryItems(
   items: readonly RoadmapCardData[],
   mode: GalleryGroupMode,
-  ctx: { squads: readonly SquadData[]; extras: Readonly<Record<string, GalleryItemExtras>> },
+  ctx: { squads: readonly SquadData[]; extras: Readonly<Record<string, GalleryItemExtras>>; noSolutionLabel?: string },
 ): GalleryGroup[] {
   if (mode === "none") return items.length ? [{ key: "all", label: "All items", color: null, items: [...items] }] : []
 
@@ -143,7 +143,7 @@ export function groupGalleryItems(
     color = (key) => ctx.squads.find((squad) => squad.id === key)?.color ?? null
   } else {
     order = [...SOLUTION_STATUS_ORDER, NO_SOLUTION_KEY]
-    label = (key) => (key === NO_SOLUTION_KEY ? "No solution" : SOLUTION_STATUS_LABELS[key] ?? key)
+    label = (key) => (key === NO_SOLUTION_KEY ? ctx.noSolutionLabel ?? "No solution" : SOLUTION_STATUS_LABELS[key] ?? key)
   }
   // Unknown keys (a status added later) still render, after the known ones.
   const keys = [...order.filter((key) => buckets.has(key)), ...[...buckets.keys()].filter((key) => !order.includes(key))]

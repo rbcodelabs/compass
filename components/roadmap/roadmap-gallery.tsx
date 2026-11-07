@@ -8,6 +8,7 @@ import { setPanelSeed } from "@/lib/panel-seed";
 import { captureGalleryPreview } from "@/app/[orgSlug]/[workspaceSlug]/roadmap/actions";
 import { groupGalleryItems, type GalleryArtifact, type GalleryGroupMode, type GalleryItemExtras } from "@/lib/roadmap/gallery";
 import { cn } from "@/lib/utils";
+import { useLabels } from "@/components/thinking-model/thinking-model-provider";
 import type { RoadmapCardData } from "./roadmap-card";
 import type { SquadData } from "@/lib/types";
 
@@ -24,6 +25,8 @@ function Hero({ item, extras, workspaceId, orgSlug, workspaceSlug }: { item: Roa
   const [active, setActive] = useState(0);
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const labels = useLabels();
+  const solution = labels.solution.singular.toLowerCase();
   const { artifacts, moreArtifacts } = extras;
   const current = artifacts[Math.min(active, Math.max(artifacts.length - 1, 0))];
   const withShot = artifacts.filter((artifact) => artifact.thumbnail);
@@ -35,8 +38,8 @@ function Hero({ item, extras, workspaceId, orgSlug, workspaceSlug }: { item: Roa
       <div className={frame} data-testid="gallery-hero-empty">
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 p-4 text-center text-text-subtle [background:repeating-linear-gradient(135deg,transparent_0_10px,var(--color-surface-panel)_10px_20px)]">
           <Plus aria-hidden="true" className="size-5" />
-          <p className="max-w-[26ch] text-xs">{item.solutionId ? "No artifact is linked to this solution yet" : "No solution is linked to this item yet"}</p>
-          <p className="text-xs">Open the item to {item.solutionId ? "link an artifact" : "link a solution"}.</p>
+          <p className="max-w-[26ch] text-xs">{item.solutionId ? `No artifact is linked to this ${solution} yet` : `No ${solution} is linked to this item yet`}</p>
+          <p className="text-xs">Open the item to {item.solutionId ? "link an artifact" : `link a ${solution}`}.</p>
         </div>
       </div>
     );
@@ -170,7 +173,8 @@ export function RoadmapGallery({ items, extras, squads, groupMode, workspaceId, 
   workspaceSlug: string;
 }) {
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
-  const groups = groupGalleryItems(items, groupMode, { squads, extras });
+  const labels = useLabels();
+  const groups = groupGalleryItems(items, groupMode, { squads, extras, noSolutionLabel: `No ${labels.solution.singular.toLowerCase()}` });
   const empty: GalleryItemExtras = { solutionStatus: null, artifacts: [], moreArtifacts: 0 };
 
   if (items.length === 0) {
