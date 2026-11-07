@@ -4,7 +4,8 @@
  *
  * Self-seeds: /docs redirects to an existing document when one exists, otherwise a new one is created.
  */
-import { test, expect, type Page } from "../fixtures/index";
+import type { Page } from "@playwright/test";
+import { test, expect } from "../fixtures/index";
 
 async function openDoc(page: Page, base: string) {
   await page.goto(`${base}/docs`);
