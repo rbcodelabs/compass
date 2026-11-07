@@ -167,11 +167,11 @@ describe("getEntityDetail — OKR nested reads are scoped by workspaceId", () =>
 
   it("hides an objective's parent KR when that KR's objective is in another workspace or has no workspaceId", async () => {
     const parent = (workspaceId: string | null) => ({ id: "pkr", title: "P", objective: { id: "po", workspaceId, title: "PO", cycle: { id: "c", title: "C", status: "ACTIVE" } } });
-    models.objective.findFirst.mockResolvedValueOnce({ id: ID, parentKeyResult: parent(WS) });
+    models.objective.findFirst.mockResolvedValueOnce({ id: ID, keyResults: [], parentKeyResult: parent(WS) });
     expect(((await getEntityDetail("objective", ID, WS)) as { data: { parentKeyResult: unknown } }).data.parentKeyResult).not.toBeNull();
-    models.objective.findFirst.mockResolvedValueOnce({ id: ID, parentKeyResult: parent("other-ws") });
+    models.objective.findFirst.mockResolvedValueOnce({ id: ID, keyResults: [], parentKeyResult: parent("other-ws") });
     expect(((await getEntityDetail("objective", ID, WS)) as { data: { parentKeyResult: unknown } }).data.parentKeyResult).toBeNull();
-    models.objective.findFirst.mockResolvedValueOnce({ id: ID, parentKeyResult: parent(null) });
+    models.objective.findFirst.mockResolvedValueOnce({ id: ID, keyResults: [], parentKeyResult: parent(null) });
     expect(((await getEntityDetail("objective", ID, WS)) as { data: { parentKeyResult: unknown } }).data.parentKeyResult).toBeNull();
   });
 });
@@ -198,7 +198,7 @@ describe("getEntityDetail — workspace scoping", () => {
       // the launch workflow flag comes from the workspace module, resolved only by fetchRoadmapItem
       // (flattened onto the panel payload, see lib/entity-detail.ts) but is
       // harmless to include for every type in this generic matrix.
-      models[model].findFirst.mockResolvedValue({ id: ID, evidence: [] });
+      models[model].findFirst.mockResolvedValue({ id: ID, evidence: [], keyResults: [] });
       await getEntityDetail(type, ID, WS);
       expect(models[model].findFirst).toHaveBeenCalledTimes(1);
       expect(models[model].findFirst).toHaveBeenCalledWith(
@@ -346,7 +346,7 @@ describe("getEntityDetail — return shape", () => {
       // the launch workflow flag comes from the workspace module, resolved only by fetchRoadmapItem
       // (flattened onto the panel payload, see lib/entity-detail.ts) but is
       // harmless to include for every type in this generic matrix.
-      models[model].findFirst.mockResolvedValue({ id: ID, evidence: [] });
+      models[model].findFirst.mockResolvedValue({ id: ID, evidence: [], keyResults: [] });
 
       const result = await getEntityDetail(type, ID, WS);
 
@@ -374,7 +374,7 @@ describe("getEntityDetail — return shape", () => {
     { type: "roadmapItem" as const, model: "roadmapItem" as const, objectType: "ROADMAP_ITEM" },
     { type: "solution" as const, model: "solution" as const, objectType: "SOLUTION" },
   ])("loads $objectType custom fields with their current values", async ({ type, model, objectType }) => {
-    models[model].findFirst.mockResolvedValue({ id: ID, evidence: [] });
+    models[model].findFirst.mockResolvedValue({ id: ID, evidence: [], keyResults: [] });
     models.customFieldDefinition.findMany.mockResolvedValue([
       {
         id: "field-area",
@@ -416,7 +416,7 @@ describe("getEntityDetail — return shape", () => {
       // the launch workflow flag comes from the workspace module, resolved only by fetchRoadmapItem
       // (flattened onto the panel payload, see lib/entity-detail.ts) but is
       // harmless to include for every type in this generic matrix.
-      models[model].findFirst.mockResolvedValue({ id: ID, evidence: [] });
+      models[model].findFirst.mockResolvedValue({ id: ID, evidence: [], keyResults: [] });
       const result = await getEntityDetail(type, ID, WS);
       expect(result).toEqual({ type, data: expect.objectContaining({ id: ID }) });
       // no other model was touched
