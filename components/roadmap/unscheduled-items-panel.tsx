@@ -156,10 +156,10 @@ export function UnscheduledItemsColumn({
 /**
  * The "Not scheduled" pane docked to the right of the roadmap board (md and up). It lives outside the
  * board's horizontal scroller, so it stays put while the horizon columns scroll — dragging an item to
- * any column never needs a scroll mid-drag. Collapses to a slim rail to give the columns the room back.
+ * any column never needs a scroll mid-drag. Starts collapsed to a slim rail so the columns get the room; expand it to schedule items.
  */
 export function UnscheduledItemsSidebar(props: Props) {
-  const [open, setOpen] = React.useState(true);
+  const [open, setOpen] = React.useState(false);
   return (
     <aside
       data-testid="roadmap-unscheduled-sidebar"

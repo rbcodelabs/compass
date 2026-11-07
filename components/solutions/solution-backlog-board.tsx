@@ -39,6 +39,7 @@ import {
 } from "@/lib/solution-backlog-grouping";
 import type { SelectOption, SolutionStatus } from "@/lib/types";
 import { announceRoadmapSync } from "@/lib/ui/roadmap-sync-toast";
+import { SOLUTION_COLUMN_ACCENT } from "@/lib/saved-views/solution-columns";
 
 export type SolutionBacklogItem = SolutionCardData & {
   opportunity: {
@@ -48,14 +49,6 @@ export type SolutionBacklogItem = SolutionCardData & {
   };
   /** Normalized option value of the active group field (null = Unspecified). Set only when grouped by a field. */
   fieldValue?: string | null;
-};
-
-const COLUMN_ACCENT: Record<SolutionStatus, "neutral" | "info" | "warning" | "success" | "danger"> = {
-  IDEA: "neutral",
-  VALIDATED: "success",
-  IN_DELIVERY: "info",
-  SHIPPED: "warning",
-  KILLED: "danger",
 };
 
 function findStatus(columns: SolutionBacklogColumns<SolutionBacklogItem>, id: string): SolutionStatus | null {
@@ -93,10 +86,12 @@ function BacklogColumn({
   status,
   items,
   ctx,
+  forcedVisible = false,
 }: {
   status: SolutionStatus;
   items: SolutionBacklogItem[];
   ctx: CardContext;
+  forcedVisible?: boolean;
 }) {
   const labels = useLabels();
   const { setNodeRef, isOver } = useDroppable({ id: solutionBacklogColumnId(status), data: { status } });
@@ -106,8 +101,9 @@ function BacklogColumn({
       data-slot="solution-backlog-column"
       data-status={status}
       title={SOLUTION_STATUS[status].label}
+      data-forced-visible={forcedVisible ? "true" : undefined}
       count={items.length}
-      accent={COLUMN_ACCENT[status]}
+      accent={SOLUTION_COLUMN_ACCENT[status]}
       // Fixed minimum width with horizontal scroll on the track: columns are
       // never squashed to fit the viewport.
       className="w-72 min-w-[280px] flex-none md:h-full md:overflow-hidden"
@@ -139,6 +135,10 @@ export type SolutionBacklogProps = {
   hasActiveScoringModel?: boolean;
   /** "Sort by score" view mode. Read-only: it disables dragging and never persists. */
   sortByScore?: boolean;
+  /** Status columns to render, in order (the resolved saved-view / URL layout). Defaults to the canonical status order; the Solutions page passes the resolved (active-first by default) layout. */
+  columnOrder?: readonly SolutionStatus[];
+  /** Columns the layout hides that are shown because they hold cards. */
+  forcedVisibleColumns?: readonly SolutionStatus[];
   /** Column grouping. Defaults to Status, the only grouping whose cards can be dragged. */
   groupBy?: SolutionGroupBy;
   /** The workspace squads, for the Squad grouping. */
@@ -261,6 +261,8 @@ function StatusBacklogBoard({
   workspaceId,
   hasActiveScoringModel = false,
   sortByScore = false,
+  columnOrder = SOLUTION_STATUS_ORDER,
+  forcedVisibleColumns = [],
 }: Omit<SolutionBacklogProps, "groupBy" | "squads" | "groupField">) {
   const labels = useLabels();
   const revalidatePathStr = `/${orgSlug}/${workspaceSlug}/solutions`;
@@ -378,8 +380,14 @@ function StatusBacklogBoard({
             data-slot="solution-backlog-track"
             className="flex h-full w-max min-w-full items-stretch gap-3 px-3 pt-3 pb-3 sm:px-4 sm:pt-4 md:px-4 md:pt-3"
           >
-            {SOLUTION_STATUS_ORDER.map((status) => (
-              <BacklogColumn key={status} status={status} items={visible[status]} ctx={ctx} />
+            {columnOrder.map((status) => (
+              <BacklogColumn
+                key={status}
+                status={status}
+                items={visible[status]}
+                ctx={ctx}
+                forcedVisible={forcedVisibleColumns.includes(status)}
+              />
             ))}
           </div>
         </Board>

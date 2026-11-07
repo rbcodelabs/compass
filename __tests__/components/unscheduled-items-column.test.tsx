@@ -73,12 +73,15 @@ describe("UnscheduledItemsColumn", () => {
 describe("UnscheduledItemsSidebar", () => {
   const items = [{ kind: "feedback" as const, id: "feedback-1", title: "Fix the broken export" }];
 
-  it("docks the Not scheduled pane and collapses to a rail that shows the count", () => {
+  it("docks the Not scheduled pane collapsed by default, expands, to a rail that shows the count", () => {
     render(
       <DndContext>
         <UnscheduledItemsSidebar items={items} onQuickAdd={vi.fn()} />
       </DndContext>
     );
+
+    expect(screen.queryByTestId("roadmap-unscheduled-column")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Expand Not scheduled (1)" }));
 
     const sidebar = screen.getByTestId("roadmap-unscheduled-sidebar");
     expect(within(sidebar).getByTestId("roadmap-unscheduled-column")).toBeInTheDocument();
