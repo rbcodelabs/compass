@@ -182,6 +182,12 @@ export function createTenantFakePrisma() {
     { id: "ri-b", workspaceId: WS_B.id, title: "B roadmap item" },
   ];
   const taskLinks: Graph[] = [];
+  // Agent conversations (RM-19): existence + title only; who may SEE one is lib/agent-conversation-access.ts, tested separately.
+  const agentConversations: Graph[] = [
+    { id: "conv-a", workspaceId: WS_A.id, userId: "user-alice", title: "A chat", archivedAt: null },
+    { id: "conv-a2", workspaceId: WS_A.id, userId: "user-carol", title: null, archivedAt: null },
+    { id: "conv-b", workspaceId: WS_B.id, userId: "user-bob", title: "B chat", archivedAt: null },
+  ];
   const workspaceRows = workspaces as unknown as Graph[];
   const tables: Record<string, Graph[]> = {
     opportunityObjectiveLink: opportunityObjectiveLinks,
@@ -194,6 +200,7 @@ export function createTenantFakePrisma() {
     task: tasks,
     roadmapItem: roadmapItems,
     taskLink: taskLinks,
+    agentConversation: agentConversations,
     experiment: experiments,
     researchStudy: researchStudies,
     workspace: workspaceRows,
@@ -515,6 +522,7 @@ export function createTenantFakePrisma() {
     task: delegate("task"),
     roadmapItem: delegate("roadmapItem"),
     taskLink: delegate("taskLink"),
+    agentConversation: delegate("agentConversation"),
     experiment: delegate("experiment"),
     researchStudy: delegate("researchStudy"),
     $transaction: async (work: (tx: unknown) => unknown) => work(client),
@@ -542,7 +550,7 @@ export function createTenantFakePrisma() {
       const workspace = workspaces.find((w) => w.id === workspaceId);
       if (workspace && !workspace.members.includes(userId)) workspace.members.push(userId);
     },
-    state: { feedback, opportunities, squads, writes, solutions: graphSolutions, objectives, keyResults, assumptions, solutionComments, okrCycles, opportunityObjectiveLinks, solutionKeyResultLinks, workspaces, experiments, researchStudies, entityLinks, artifacts, reviewRequests, artifactLinks, tasks, roadmapItems, taskLinks, docs },
+    state: { feedback, opportunities, squads, writes, solutions: graphSolutions, objectives, keyResults, assumptions, solutionComments, okrCycles, opportunityObjectiveLinks, solutionKeyResultLinks, workspaces, experiments, researchStudies, entityLinks, artifacts, reviewRequests, artifactLinks, tasks, roadmapItems, taskLinks, docs, agentConversations },
     /** Snapshot of every feedback row, for before/after "nothing changed" assertions. */
     snapshotFeedback: () => JSON.parse(JSON.stringify(feedback)) as unknown,
   };

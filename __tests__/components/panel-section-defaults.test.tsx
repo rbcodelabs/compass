@@ -5,6 +5,7 @@ import "@testing-library/jest-dom/vitest";
 
 import { PANEL_SECTION_COOKIE_NAME } from "@/lib/panel-section-state";
 
+vi.mock("@/components/links/linked-conversations-section", () => ({ LinkedConversationsSection: () => null }));
 vi.mock("@/components/panels/panel-context", () => ({
   usePanelContext: () => ({
     openPanel: vi.fn(),

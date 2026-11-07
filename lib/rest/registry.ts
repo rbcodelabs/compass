@@ -11,7 +11,7 @@ import { FEEDBACK_ATTACHMENT_ALLOWED_MIME_TYPES, FEEDBACK_ATTACHMENT_MAX_FILE_BY
 import { FEEDBACK_STATUSES } from "@/lib/feedback-meta"
 import { linkMetricSchema, metricInputSchema, targetSchema, updateMetricBindingSchema } from "@/lib/analytics/service"
 import { COMMENT_TARGET_TYPES } from "@/lib/comments"
-import { ENTITY_TYPE_VOCABULARY } from "@/lib/entity-types"
+import { PUBLIC_LINK_ENTITY_TYPES } from "@/lib/entity-types"
 import { ACTIVE_FOLLOWABLE_SUBJECT_TYPES } from "@/lib/followable"
 import { DOC_TYPES } from "@/lib/doc-types"
 import { DOC_IMAGE_ALLOWED_MIME_TYPES, DOC_IMAGE_MAX_BYTES } from "@/lib/doc-images"
@@ -146,13 +146,13 @@ const customValuePath = z.object({ workspaceId: uuid, objectType: customObjectTy
 const customFieldValueCreate = z.object({ fieldId: uuid, value: z.unknown().nullable() }).strict()
 const entityLinksQuery = cursorQuery.extend({
   opportunityId: uuid.optional(), objectiveId: uuid.optional(), solutionId: uuid.optional(), keyResultId: uuid.optional(),
-  entityType: z.enum(ENTITY_TYPE_VOCABULARY).optional(), entityId: uuid.optional(), linkType: z.string().trim().min(1).max(60).optional(),
+  entityType: z.enum(PUBLIC_LINK_ENTITY_TYPES).optional(), entityId: uuid.optional(), linkType: z.string().trim().min(1).max(60).optional(),
 }).strict().refine((value) => {
   const legacy = [value.opportunityId, value.objectiveId, value.solutionId, value.keyResultId].filter(Boolean).length
   if (value.entityType || value.entityId || value.linkType) return legacy === 0 && Boolean(value.entityType) && Boolean(value.entityId)
   return legacy === 1
 }, { message: "Provide exactly one entity id, or entityType with entityId (and optionally linkType)." })
-const entityLinkCreate = z.object({ linkType: z.string().trim().min(1).max(60), fromId: uuid, toId: uuid, toType: z.enum(ENTITY_TYPE_VOCABULARY).optional() }).strict()
+const entityLinkCreate = z.object({ linkType: z.string().trim().min(1).max(60), fromId: uuid, toId: uuid, toType: z.enum(PUBLIC_LINK_ENTITY_TYPES).optional() }).strict()
 const entityLinkPath = z.object({ workspaceId: uuid, linkType: z.string().trim().min(1).max(60), fromId: uuid, toId: uuid })
 const urlBoolean = z.enum(["true", "false"]).transform((value) => value === "true")
 const timestamp = z.string().datetime()

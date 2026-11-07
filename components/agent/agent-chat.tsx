@@ -29,6 +29,8 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { type PlanItem, type SerializedRun, type Subagent, type ToolStep } from "@/lib/agent-run-stream"
 import { AgentActivity, PlanCard } from "@/components/agent/agent-activity"
+import { LinkedObjectsCard } from "@/components/agent/linked-objects-card"
+import type { ConversationObjectLink } from "@/lib/links/conversation-links"
 import { useAgentTurn } from "@/components/agent/use-agent-turn"
 import { useAgentChoices } from "@/components/agent/use-agent-choices"
 import { ToolsMenu, connectorsEnabledFor } from "@/components/agent/tools-menu"
@@ -423,6 +425,26 @@ export function AgentChat({
     return () => lookup.abort()
   }, [activeConversationId, workspaceId, planVersion, isStreaming])
   const conversationPlan = planState && planState.conversationId === activeConversationId ? planState.plan : []
+
+  // The Opportunities, Solutions and Tasks this conversation created or touched (entity links the agent's tools write automatically).
+  // Read from the server so it survives a reload and reaches participants; refetched as tool steps land and when a turn ends.
+  const [linkedState, setLinkedState] = useState<{ conversationId: string; items: ConversationObjectLink[] } | null>(null)
+  useEffect(() => {
+    if (!activeConversationId) return
+    const lookup = new AbortController()
+    void (async () => {
+      try {
+        const res = await fetch(`/api/agent/conversations/${activeConversationId}/links?workspaceId=${encodeURIComponent(workspaceId)}`, { signal: lookup.signal })
+        if (!res.ok) return
+        const body = await res.json() as { items?: ConversationObjectLink[] }
+        setLinkedState({ conversationId: activeConversationId, items: Array.isArray(body.items) ? body.items : [] })
+      } catch {
+        // Best-effort: the card simply stays as it was.
+      }
+    })()
+    return () => lookup.abort()
+  }, [activeConversationId, workspaceId, liveToolSteps.length, isStreaming])
+  const linkedObjects = linkedState && linkedState.conversationId === activeConversationId ? linkedState.items : []
 
   // Reattach to a run already in flight for this conversation.
   //
@@ -822,6 +844,11 @@ export function AgentChat({
             {conversationPlan.length > 0 && (
               <div className="pl-10">
                 <PlanCard plan={conversationPlan} running={isStreaming} taskHref={(taskId) => `${basePath}/tasks/${taskId}`} />
+              </div>
+            )}
+            {linkedObjects.length > 0 && (
+              <div className="pl-10">
+                <LinkedObjectsCard items={linkedObjects} orgSlug={orgSlug} workspaceSlug={workspaceSlug} />
               </div>
             )}
             <div ref={bottomRef} />
