@@ -458,6 +458,19 @@ describe("GitHub shell additions", () => {
     expect(checkDocsToolUse("Read", { file_path: path.join(repos, "README.md") }, root).allowed).toBe(false)
   })
 
+  it("an uploads dir beside the docs root is read-only and does not widen access to the sandbox root", () => {
+    const uploads = path.join(base, "uploads")
+    mkdirSync(uploads, { recursive: true })
+    writeFileSync(path.join(uploads, "ab-notes.txt"), "hi")
+    writeFileSync(path.join(base, "entry.ts"), "x")
+    const opts = { readOnlyRoots: [uploads] }
+    expect(checkDocsToolUse("Read", { file_path: path.join(uploads, "ab-notes.txt") }, root, opts).allowed).toBe(true)
+    expect(checkDocsToolUse("Write", { file_path: path.join(uploads, "ab-notes.txt") }, root, opts).allowed).toBe(false)
+    expect(checkDocsToolUse("Edit", { file_path: path.join(uploads, "ab-notes.txt") }, root, opts).allowed).toBe(false)
+    expect(checkDocsToolUse("Read", { file_path: path.join(uploads, "..", "entry.ts") }, root, opts).allowed).toBe(false)
+    expect(checkDocsToolUse("Read", { file_path: path.join(base, "entry.ts") }, root, opts).allowed).toBe(false)
+  })
+
   it("does not follow a symlink out of the read-only root", () => {
     const repos = path.join(base, "repos")
     symlinkSync(path.join(outside, "secret.txt"), path.join(repos, "escape.md"))

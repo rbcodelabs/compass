@@ -19,6 +19,7 @@ import { getTasksLinkedTo } from "@/lib/task-links-read";
 import { RoadmapBoard } from "@/components/roadmap/roadmap-board";
 import { NativeTimeline } from "@/components/roadmap/native-timeline/native-timeline";
 import { RoadmapHeader } from "@/components/roadmap/roadmap-header";
+import { RoadmapColumnLayoutProvider } from "@/components/roadmap/column-layout-context";
 import type { Horizon, SquadData, TaskStatus } from "@/lib/types";
 import type { RoadmapCardData } from "@/components/roadmap/roadmap-card";
 import type { UnscheduledItem } from "@/components/roadmap/unscheduled-items-panel";
@@ -327,7 +328,11 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
   ];
 
   return (
-    <>
+    // The board and the saved-views menu (in the header, a sibling) share the column layout through this provider.
+    <RoadmapColumnLayoutProvider
+      workspaceId={workspace.id}
+      savedView={savedView ? { id: savedView.id, version: savedView.updatedAt, columnLayout: savedView.display.columnLayout } : null}
+    >
       {view === "timeline" ? (
         <Suspense>
           <NativeTimeline
@@ -385,6 +390,6 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
           </div>
         </div>
       )}
-    </>
+    </RoadmapColumnLayoutProvider>
   );
 }

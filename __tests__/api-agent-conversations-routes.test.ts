@@ -227,3 +227,31 @@ describe("GET /api/agent/conversations/:conversationId/messages", () => {
     expect((await response.json()).messages[0]).toMatchObject({ authorUserId: "user-1", authorName: "Dana" })
   })
 })
+
+describe("GET /api/agent/conversations?q= (search)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockAuth.mockResolvedValue(SESSION)
+  })
+
+  it("scopes the search by the shared access predicate and returns snippets", async () => {
+    mockPrisma.agentConversation.findMany.mockResolvedValue([
+      { id: CONVERSATION_ID, title: "Roadmap chat", updatedAt: new Date() },
+    ])
+    mockPrisma.agentMessage.findMany.mockResolvedValue([
+      { conversationId: CONVERSATION_ID, content: "we should add Search to the rail" },
+    ])
+    const res = await listConversations(listReq({ workspaceId: WORKSPACE_ID, q: "search" }))
+    expect(res.status).toBe(200)
+    const where = mockPrisma.agentConversation.findMany.mock.calls[0][0].where
+    expect(where.AND[0]).toEqual(accessibleConversationsWhere(WORKSPACE_ID, "user-1"))
+    const body = await res.json()
+    expect(body.conversations[0].snippet).toContain("Search")
+  })
+
+  it("falls back to the plain list when q is blank", async () => {
+    mockPrisma.agentConversation.findMany.mockResolvedValue([])
+    await listConversations(listReq({ workspaceId: WORKSPACE_ID, q: "   " }))
+    expect(mockPrisma.agentMessage.findMany).not.toHaveBeenCalled()
+  })
+})

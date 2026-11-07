@@ -13,6 +13,8 @@ const mockPrisma = {
   objective: {
     findMany: vi.fn(),
   },
+  customFieldDefinition: { findMany: vi.fn() },
+  customFieldValue: { findMany: vi.fn() },
 }
 
 vi.mock("@/lib/db", () => ({
@@ -71,6 +73,8 @@ describe("list_opportunities MCP tool", () => {
     mockPrisma.opportunityObjectiveLink.findMany.mockResolvedValue([])
     mockPrisma.objective.findMany.mockResolvedValue([])
     mockPrisma.opportunity.count.mockResolvedValue(2)
+    mockPrisma.customFieldDefinition.findMany.mockResolvedValue([])
+    mockPrisma.customFieldValue.findMany.mockResolvedValue([])
   })
 
   it("groups multiline descriptions under each item and preserves structured list metadata", async () => {
@@ -473,5 +477,34 @@ describe("list_opportunities keyset pagination", () => {
     expect(queryFor(0).take).toBe(51)
     expect((result.structuredContent.data as { count: number }).count).toBe(50)
     expect(result.content[0].text).toContain("Showing 1-50 of 139.")
+  })
+
+  it("includeCustomFields adds OPPORTUNITY field values per item, scoped to the workspace's definitions (TASK-100)", async () => {
+    mockPrisma.opportunity.findMany.mockResolvedValue([
+      { id: "opportunity-1", title: "One", description: null, status: "ACTIVE", squad: null, linkedKeyResult: null, _count: { solutions: 0 } },
+      { id: "opportunity-2", title: "Two", description: null, status: "ACTIVE", squad: null, linkedKeyResult: null, _count: { solutions: 0 } },
+    ])
+    mockPrisma.customFieldDefinition.findMany.mockResolvedValue([
+      { id: "field-customer", name: "Customer", fieldType: "TEXT", objectType: "OPPORTUNITY", options: null, sharedOptionSetId: null, required: false, order: 0 },
+    ])
+    mockPrisma.customFieldValue.findMany.mockResolvedValue([{ objectId: "opportunity-1", fieldId: "field-customer", value: "Acme" }])
+
+    const result = await getHandler("list_opportunities")({ workspaceId: "workspace-1", includeCustomFields: true })
+
+    expect(mockPrisma.customFieldDefinition.findMany.mock.calls[0][0].where).toMatchObject({ workspaceId: "workspace-1", objectType: { in: ["OPPORTUNITY"] } })
+    expect(mockPrisma.customFieldValue.findMany.mock.calls[0][0].where).toEqual({ fieldId: { in: ["field-customer"] }, objectId: { in: ["opportunity-1", "opportunity-2"] } })
+    const data = result.structuredContent.data as { items: Array<{ customFields: Record<string, unknown> }>; fields: unknown[] }
+    expect(data.items.map((i) => i.customFields)).toEqual([{ Customer: "Acme" }, { Customer: null }])
+    expect(data.fields).toEqual([{ id: "field-customer", name: "Customer", fieldType: "TEXT" }])
+    expect(result.content[0].text).toContain("Fields: Customer: Acme")
+  })
+
+  it("does not read custom fields unless asked", async () => {
+    mockPrisma.opportunity.findMany.mockResolvedValue([
+      { id: "opportunity-1", title: "One", description: null, status: "ACTIVE", squad: null, linkedKeyResult: null, _count: { solutions: 0 } },
+    ])
+    const result = await getHandler("list_opportunities")({ workspaceId: "workspace-1" })
+    expect(mockPrisma.customFieldValue.findMany).not.toHaveBeenCalled()
+    expect((result.structuredContent.data as { items: Array<Record<string, unknown>> }).items[0]).not.toHaveProperty("customFields")
   })
 })

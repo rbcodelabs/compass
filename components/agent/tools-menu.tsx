@@ -5,14 +5,17 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import type { ConnectorChoice } from "@/components/agent/use-agent-choices"
 
 /**
- * Whether the turn will carry the user's connected accounts. Mirrors app/api/agent/turn/route.ts: a named agent (picked, or
- * the resolved default) never borrows its invoker's connectors; only the built-in Compass agent does. `agentSelection` is ""
- * (follow the default), "builtin", or an agent id, exactly as the Agent selector holds it.
+ * Whether the turn will carry the user connected accounts. Mirrors app/api/agent/turn/route.ts: the built-in Compass
+ * agent does, and so does a personal agent the user runs (it acts as its owner); a shared agent never does.
+ * The agentSelection argument is "" (follow the default), "builtin", or an agent id, as the Agent selector holds it.
+ * An agent missing from the list fails closed.
  */
-export function connectorsEnabledFor(agentSelection: string, defaultAgentId: string | null): boolean {
+export function connectorsEnabledFor(agentSelection: string, defaultAgentId: string | null, agents: Array<{ id: string; shared: boolean }> = []): boolean {
   if (agentSelection === "builtin") return true
-  if (agentSelection) return false
-  return !defaultAgentId
+  const agentId = agentSelection || defaultAgentId
+  if (!agentId) return true
+  const agent = agents.find((candidate) => candidate.id === agentId)
+  return !!agent && !agent.shared
 }
 
 /** Read-only view of what a session can use: the Compass tools plus the user's connected accounts, and why any are off. */
@@ -47,7 +50,7 @@ export function ToolsMenu({ connectors, enabled, loaded }: { connectors: Connect
         </ul>
         {connectors.length === 0 && <p className="mt-2 text-muted-foreground">No connected accounts. Connect one in Settings → Agents.</p>}
         {connectors.length > 0 && !enabled && (
-          <p className="mt-2 text-muted-foreground">A named agent doesn’t use your connected accounts. Switch the Agent to Compass Agent to use them.</p>
+          <p className="mt-2 text-muted-foreground">A shared agent doesn’t use your connected accounts. Switch the Agent to Compass Agent or one of your personal agents to use them.</p>
         )}
       </PopoverContent>
     </Popover>

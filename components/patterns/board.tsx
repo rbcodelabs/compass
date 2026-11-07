@@ -1,10 +1,42 @@
 import type { ComponentProps, ReactNode, Ref } from "react";
 import { cn } from "@/lib/utils";
+import { BoardColumnLayoutActions, type BoardColumnLayoutControls } from "./board-pinned";
 
-export function Board({ children, label = "Board", className }: { children: ReactNode; label?: string; className?: string }) {
+/*
+ * Pinned columns (opt-in; boards that don't pass `layoutControls` render exactly as before).
+ *
+ * Docking is a property of ANY column, not of one board. A board that wants it:
+ *   1. keeps a layout with lib/board-layout.ts (`resolveBoardLayout` for the starting layout, then the pure
+ *      `pinColumn` / `unpinColumn` / `moveColumn` / `setColumnCollapsed` transitions) and persists it however
+ *      it likes (the roadmap board stores it in the saved view, see components/roadmap/column-layout-context.tsx);
+ *   2. renders the unpinned columns, in `columnOrder`, inside `<Board>` (the horizontal scroller);
+ *   3. renders the pinned columns in a `<BoardDock>` that is a SIBLING of `<Board>` (outside the scroller): one fixed-width
+ *      panel showing the active pinned column (a `<BoardColumn className={PINNED_COLUMN_CLASS}
+ *      bodyClassName={PINNED_COLUMN_BODY_CLASS}>`) and a tab rail with one tab per pinned column, so the dock never
+ *      grows as more are pinned;
+ *   4. passes each `BoardColumn` a `layoutControls` object (pin toggle, collapse dock, move left/right).
+ * Below md a board should ignore pinning and render every column in the scroller.
+ * Components live in ./board-pinned.tsx; all are re-exported from this module.
+ */
+export * from "./board-pinned";
+
+/**
+ * The width of the scroller's tapered right edge, in two literal class strings (Tailwind needs literals) that MUST stay in
+ * step: the mask fades the last 2rem of the scrollport, and the board's inner track takes `md:pr-8` (2rem) of right padding
+ * while docked columns exist, so at full scroll-end the last column sits wholly outside the fade.
+ */
+export const BOARD_FADE_END_CLASS = "md:[mask-image:linear-gradient(to_right,black_calc(100%-2rem),transparent)]";
+export const BOARD_FADE_END_TRACK_CLASS = "md:pr-8";
+
+/**
+ * `fadeEnd`: tapers the last 2rem of the scrollport (md and up) so columns fade out instead of being hard-cut where a
+ * `BoardPinnedRegion` sits beside the scroller. Add `BOARD_FADE_END_TRACK_CLASS` to the board's inner track alongside it.
+ * Use it only while pinned columns are rendered.
+ */
+export function Board({ children, label = "Board", className, fadeEnd = false }: { children: ReactNode; label?: string; className?: string; fadeEnd?: boolean }) {
   // Mobile columns size against this scrollport, including nested swimlanes,
   // rather than the viewport (which may also contain panels or lane gutters).
-  return <div role="region" aria-label={label} className={cn("@container flex min-w-0 snap-x gap-4 overflow-x-auto pb-3", className)}>{children}</div>;
+  return <div role="region" aria-label={label} className={cn("@container flex min-w-0 snap-x gap-4 overflow-x-auto pb-3", fadeEnd && BOARD_FADE_END_CLASS, className)}>{children}</div>;
 }
 
 type BoardColumnProps = Omit<ComponentProps<"section">, "title"> & {
@@ -22,14 +54,16 @@ type BoardColumnProps = Omit<ComponentProps<"section">, "title"> & {
   bodyClassName?: string;
   bodyRef?: Ref<HTMLDivElement>;
   bodyId?: string;
+  /** Opt in to pin / collapse / reorder controls in the header. See the usage note above. */
+  layoutControls?: BoardColumnLayoutControls;
 };
 
-export function BoardColumn({ title, count, limit, description, accent, actions, children, emptyState, footer, className, bodyClassName, bodyRef, bodyId, ...props }: BoardColumnProps) {
+export function BoardColumn({ title, count, limit, description, accent, actions, children, emptyState, footer, className, bodyClassName, bodyRef, bodyId, layoutControls, ...props }: BoardColumnProps) {
   const accents = { neutral: "bg-status-neutral", info: "bg-status-info", success: "bg-status-success", warning: "bg-status-warning", danger: "bg-status-danger" };
   const overLimit = typeof count === "number" && typeof limit === "number" && count > limit;
   const badgeLabel = typeof limit === "number" ? `${count}/${limit}` : String(count);
   return (
-    <section className={cn("flex w-72 shrink-0 snap-start flex-col rounded-xl border border-border-default bg-surface-inset p-3", className)} {...props}>
+    <section className={cn("group/board-column flex w-72 shrink-0 snap-start flex-col rounded-xl border border-border-default bg-surface-inset p-3", className)} {...props}>
       {/*
         md+: the header pins to the top of THIS column's own scroll region (the body div
         below), so it stays visible while just that column's cards scroll — no coordination
@@ -53,6 +87,7 @@ export function BoardColumn({ title, count, limit, description, accent, actions,
             </span>
           )}
           {actions}
+          {layoutControls ? <BoardColumnLayoutActions controls={layoutControls} /> : null}
         </div>
         {description && <div className="mt-1 text-xs text-text-subtle">{description}</div>}
       </header>

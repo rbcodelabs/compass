@@ -11,6 +11,10 @@ import { CASCADE_CHUNK_SIZE, chunked, deleteWorkspaceCascade } from "@/lib/delet
 import { WS_A, createTenantFakePrisma } from "../helpers/tenant-fake-prisma";
 
 vi.mock("@/lib/artifact-storage", () => ({ getArtifactStorage: () => ({}) }));
+// The registry-driven final sweep walks every content model with real paging; this where-honouring fake neither holds those models nor
+// honours take/cursor. The sweep is exercised (and its tenant scoping proven) against real Postgres in
+// workspace-export-coverage.integration.test.ts, so these tests stay about the hand-written steps above it.
+vi.mock("@/lib/workspace-export/sweep", () => ({ sweepWorkspaceOwnedRows: async () => ({}) }));
 
 type Call = { model: string; op: string; args: unknown };
 
