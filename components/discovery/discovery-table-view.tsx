@@ -30,6 +30,7 @@ import {
   OPPORTUNITY_SEGMENT_MAX_LENGTH,
   OPPORTUNITY_TITLE_MAX_LENGTH,
 } from "@/lib/opportunity-draft";
+import { DEFAULT_OPPORTUNITY_STATUS } from "@/lib/opportunity-status";
 import { SOLUTION_STATUS } from "@/lib/solution-status";
 import type { OpportunityStatus, SolutionStatus } from "@/lib/types";
 
@@ -161,7 +162,7 @@ export function buildOpportunityCreation(
       { id: "squad", label: "Squad", kind: "select", options: squadOptions, width: "9rem" },
       { id: "description", label: "Description", kind: "text", maxLength: BATCH_DESCRIPTION_MAX_LENGTH },
     ],
-    makeValues: (): GridDraftValues => ({ title: "", segment: "", status: "EXPLORING", squad: "", description: "" }),
+    makeValues: (): GridDraftValues => ({ title: "", segment: "", status: DEFAULT_OPPORTUNITY_STATUS, squad: "", description: "" }),
     validate: (values) => {
       const errors: Record<string, string> = {};
       const title = (values.title ?? "").trim();
