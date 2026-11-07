@@ -174,11 +174,17 @@ export async function agentRunMayUseOwnerConnectors(prisma: AppPrismaClient, inp
   try {
     const run = await prisma.agentRun.findFirst({
       where: { id: input.agentRunId, agentId: input.agentId, userId: input.userId, invokedByUserId: input.userId, kind: "CHAT" },
-      select: { id: true },
+      select: { id: true, workspaceId: true },
     })
     if (!run) return false
     const agent = await findAgentById(prisma, input.agentId)
-    return !!agent && agentKind(agent) === "CLOUD" && agentMayUseOwnerConnectors(agent, input.userId)
+    if (!agent || agentKind(agent) !== "CLOUD" || !agentMayUseOwnerConnectors(agent, input.userId)) return false
+    // The turn route checked the owner's membership and the agent's grant when the run started; a run can outlive
+    // both, so they are checked again here. Connected accounts are not workspace data, but a person who has lost the
+    // workspace (or an agent whose access to it was revoked) must not keep acting through it.
+    const member = await prisma.workspaceMember.findFirst({ where: { workspaceId: run.workspaceId, userId: input.userId }, select: { id: true } })
+    if (!member) return false
+    return (await liveGrantedWorkspaceIds(agent, "READ")).includes(run.workspaceId)
   } catch {
     return false
   }

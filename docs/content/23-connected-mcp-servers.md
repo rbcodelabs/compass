@@ -50,7 +50,7 @@ Your connected accounts follow the person, so they go only where that person is 
 - **A shared agent never does**, whoever runs it, because it belongs to the workspace and not to one person.
 - **Runs started by a task assignment or an @mention never do**, even for a personal agent, because they can start without you at the keyboard.
 
-Compass re-checks this against the live chat run on every connector request, not only when the turn starts. The Tools menu under the message box shows whether the selected agent will carry your connections.
+Compass re-checks this against the live chat run on every connector request, not only when the turn starts: the run must still be live, the agent still active with access to the workspace, and you still a member of it. The Tools menu under the message box shows whether the selected agent will carry your connections.
 
 ## What the agent can see
 
