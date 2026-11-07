@@ -50,7 +50,7 @@ test.describe("Portal Home", () => {
     await expect(page.locator('[data-slot="roadmap-item-detail"]').first()).toBeVisible({ timeout: 15_000 });
     await page.keyboard.press("Escape");
     // The id the home editor's pickers use for the same item (admin options include private items, flagged).
-    const optionsRes = await page.request.get(`/api/portal-home/${orgSlug}/${workspaceSlug}/options`);
+    const optionsRes = await page.request.get(`/api/portal-home/${orgSlug}/${workspaceSlug}/options`, { maxRetries: 3 }); // a cold dev-server route compile can reset the first connection
     expect(optionsRes.ok()).toBe(true);
     const privateOption = (await optionsRes.json()).roadmapItems.find((i: { title: string }) => i.title === privateTitle);
     expect(privateOption?.isPrivate).toBe(true);
