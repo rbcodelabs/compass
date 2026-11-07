@@ -14,6 +14,7 @@
  *    dangling edge would misdraw the chain). Truncation is reported.
  */
 import { buildCanvasEdges, type CanvasEdgeOptions } from "@/lib/canvas/edges"
+import { OPPORTUNITY_STATUSES, OPPORTUNITY_STATUS_DEFINITIONS } from "@/lib/opportunity-status"
 import type { CanvasOverview } from "@/lib/canvas/data"
 import {
   CHAIN_NODE_TYPES,
@@ -39,7 +40,7 @@ export type BuildChainGraphOptions = {
 }
 
 const OBJECTIVE_TONE: Record<string, StatusTone> = { ON_TRACK: "info", AT_RISK: "warning", OFF_TRACK: "danger", COMPLETE: "success" }
-const OPPORTUNITY_TONE: Record<string, StatusTone> = { EXPLORING: "neutral", VALIDATING: "info", PRIORITIZED: "info", ACTIVE: "success", ARCHIVED: "neutral" }
+const OPPORTUNITY_TONE: Record<string, StatusTone> = Object.fromEntries(OPPORTUNITY_STATUSES.map((s) => [s, OPPORTUNITY_STATUS_DEFINITIONS[s].graphTone]))
 const SOLUTION_TONE: Record<string, StatusTone> = { IDEA: "neutral", VALIDATED: "success", IN_DELIVERY: "info", SHIPPED: "success", KILLED: "neutral" }
 const ASSUMPTION_TONE: Record<string, StatusTone> = { UNTESTED: "warning", TESTING: "info", VALIDATED: "success", INVALIDATED: "danger" }
 const EXPERIMENT_TONE: Record<string, StatusTone> = { DESIGNING: "neutral", RUNNING: "info", COMPLETE: "success", KILLED: "neutral", NOT_PURSUED: "neutral" }

@@ -15,6 +15,7 @@ import { OpportunityFieldBoard, type FieldBoardOpportunity } from "@/components/
 import { DiscoverySortToggle } from "@/components/discovery/discovery-sort-toggle";
 import { resolveWorkspaceScoringModel, toScoreSummary } from "@/lib/scoring-model";
 import type { OpportunityStatus, SolutionStatus, SquadData } from "@/lib/types";
+import { OPPORTUNITY_PIPELINE_STATUSES } from "@/lib/opportunity-status";
 import type { OpportunityCardData } from "@/components/discovery/opportunity-card";
 import { DiscoverySavedViewsMenu } from "@/components/discovery/discovery-saved-views";
 import { ColumnsPopover } from "@/components/discovery/columns-popover";
@@ -71,12 +72,7 @@ type Props = {
   }>;
 };
 
-const ACTIVE_STATUSES: OpportunityStatus[] = [
-  "EXPLORING",
-  "VALIDATING",
-  "PRIORITIZED",
-  "ACTIVE",
-];
+const ACTIVE_STATUSES: OpportunityStatus[] = [...OPPORTUNITY_PIPELINE_STATUSES];
 
 export default async function DiscoveryPage({ params, searchParams }: Props) {
   const session = await auth();

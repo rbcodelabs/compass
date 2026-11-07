@@ -3,13 +3,13 @@ import {
   DEFAULT_OPPORTUNITY_COLUMN_ORDER, MAX_COLUMN_KEYS, columnLayoutSchema, columnsByGroupSchema, resolveColumns,
 } from "@/lib/saved-views/columns"
 
-const STATUSES = ["EXPLORING", "VALIDATING", "PRIORITIZED", "ACTIVE"]
+const STATUSES = ["UNREVIEWED", "EXPLORING", "VALIDATING", "PRIORITIZED", "ACTIVE"]
 const DEFAULT = [...DEFAULT_OPPORTUNITY_COLUMN_ORDER]
 const NO_CARDS = {}
 
 describe("DEFAULT_OPPORTUNITY_COLUMN_ORDER", () => {
-  it("is Active, Prioritized, Validating, Exploring", () => {
-    expect(DEFAULT).toEqual(["ACTIVE", "PRIORITIZED", "VALIDATING", "EXPLORING"])
+  it("is Unreviewed first, then Active, Prioritized, Validating, Exploring", () => {
+    expect(DEFAULT).toEqual(["UNREVIEWED", "ACTIVE", "PRIORITIZED", "VALIDATING", "EXPLORING"])
   })
 })
 

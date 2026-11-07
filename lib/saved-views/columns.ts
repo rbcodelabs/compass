@@ -17,6 +17,7 @@ export const MAX_COLUMN_KEYS = 50
 
 /** Default Opportunities board order when no view is selected. Single source of truth for the board. */
 export const DEFAULT_OPPORTUNITY_COLUMN_ORDER = [
+  "UNREVIEWED",
   "ACTIVE",
   "PRIORITIZED",
   "VALIDATING",

@@ -115,6 +115,7 @@ import {
 } from "@/lib/solution-comment-tool-handlers"
 import { updateSolutionStatus } from "@/lib/solution-status-tool-handlers"
 import { createOpportunities, createOpportunity, updateOpportunity, updateOpportunityKeyResult, updateOpportunityStatus } from "@/lib/opportunity-tool-handlers"
+import { DEFAULT_OPPORTUNITY_STATUS, OPPORTUNITY_PIPELINE_STATUSES, OPPORTUNITY_PIPELINE_TEXT, OPPORTUNITY_STATUSES, OPPORTUNITY_STATUS_GUIDE } from "@/lib/opportunity-status"
 import { listAssumptions, listSolutions } from "@/lib/discovery-query-tool-handlers"
 import {
   listScoringModels,
@@ -1107,7 +1108,7 @@ const _handler = createMcpHandler(
           workspaceId: z.string().uuid().describe("UUID of the workspace"),
           includeCustomFields: z.boolean().optional().describe("Include each opportunity's custom field values (default false)"),
           customFieldIds: z.array(z.string().uuid()).min(1).max(30).optional().describe("Only these OPPORTUNITY custom fields in the output (implies includeCustomFields)"),
-          status: z.enum(["EXPLORING", "VALIDATING", "PRIORITIZED", "ACTIVE", "ARCHIVED"]).optional().describe("Filter by status"),
+          status: z.enum(OPPORTUNITY_STATUSES).optional().describe("Filter by status"),
           squadId: z.string().uuid().optional().describe("Filter by squad"),
           updatedSince: z.string().datetime().optional().describe("Filter to opportunities updated at or after this ISO timestamp"),
           updatedBefore: z.string().datetime().optional().describe("Filter to opportunities updated before this ISO timestamp (useful for stale-work scans)"),
@@ -1349,7 +1350,7 @@ const _handler = createMcpHandler(
         inputSchema: {
           workspaceId: z.string().uuid().describe("UUID of the workspace"),
           status: z.enum(["IDEA", "VALIDATED", "IN_DELIVERY", "SHIPPED", "KILLED"]).optional().describe("Filter by solution lifecycle status"),
-          opportunityStatus: z.enum(["EXPLORING", "VALIDATING", "PRIORITIZED", "ACTIVE", "ARCHIVED"]).optional().describe("Filter by parent opportunity status"),
+          opportunityStatus: z.enum(OPPORTUNITY_STATUSES).optional().describe("Filter by parent opportunity status"),
           squadId: z.string().uuid().optional().describe("Filter by the parent opportunity's squad"),
           hasRoadmapItem: z.boolean().optional().describe("Filter by whether the solution is linked to any roadmap item"),
           updatedSince: z.string().datetime().optional().describe("Filter to solutions updated at or after this ISO timestamp"),
@@ -1373,7 +1374,7 @@ const _handler = createMcpHandler(
           status: z.enum(["UNTESTED", "TESTING", "VALIDATED", "INVALIDATED"]).optional().describe("Filter by assumption status"),
           riskLevel: z.enum(["HIGH", "MEDIUM", "LOW"]).optional().describe("Filter by recorded risk level"),
           solutionStatus: z.enum(["IDEA", "VALIDATED", "IN_DELIVERY", "SHIPPED", "KILLED"]).optional().describe("Filter by parent solution status"),
-          opportunityStatus: z.enum(["EXPLORING", "VALIDATING", "PRIORITIZED", "ACTIVE", "ARCHIVED"]).optional().describe("Filter by ancestor opportunity status"),
+          opportunityStatus: z.enum(OPPORTUNITY_STATUSES).optional().describe("Filter by ancestor opportunity status"),
           squadId: z.string().uuid().optional().describe("Filter by the ancestor opportunity's squad"),
           updatedSince: z.string().datetime().optional().describe("Filter to assumptions updated at or after this ISO timestamp"),
           updatedBefore: z.string().datetime().optional().describe("Filter to assumptions updated before this ISO timestamp (useful for stale-work scans)"),
@@ -1388,13 +1389,13 @@ const _handler = createMcpHandler(
       "create_opportunity",
       {
         title: "Create Opportunity",
-        description: "Creates a new customer or product Opportunity. Optionally link to a Key Result and assign to a squad.",
+        description: `Creates a new customer or product Opportunity. Optionally link to a Key Result and assign to a squad. New opportunities start as ${DEFAULT_OPPORTUNITY_STATUS} (the triage inbox) unless you pass a status.`,
         inputSchema: {
           workspaceId: z.string().uuid().describe("UUID of the workspace"),
           title: z.string().min(1).describe("Short title for the opportunity"),
           description: z.string().optional().describe("What problem or need this represents"),
           customerSegment: z.string().optional().describe("The customer segment affected"),
-          status: z.enum(["EXPLORING", "VALIDATING", "PRIORITIZED", "ACTIVE"]).optional().default("EXPLORING"),
+          status: z.enum(OPPORTUNITY_PIPELINE_STATUSES).optional().default(DEFAULT_OPPORTUNITY_STATUS),
           keyResultId: z.string().uuid().optional().describe("UUID of a Key Result this opportunity is driving"),
           squadId: z.string().uuid().optional().describe("UUID of the owning squad"),
         },
@@ -1410,7 +1411,7 @@ const _handler = createMcpHandler(
         description:
           "Creates several Opportunities in one call: up to 25 items for agent callers (100 for human API keys). Each item is created in its own transaction and reported separately, so one invalid item never blocks the others; the call succeeds even when some items fail, so read data.results. " +
           "Pass your own `clientId` (a UUID) per item to make retries safe: resending an item that was already created returns { ok: true, deduped: true } instead of a duplicate, and an id that is taken by different content returns CONFLICT. Omit it only if you will not retry. " +
-          "Items take title, description, customerSegment, status (EXPLORING, VALIDATING, PRIORITIZED or ACTIVE) and squadId; use create_opportunity to link a Key Result.",
+          "Items take title, description, customerSegment, status (UNREVIEWED, EXPLORING, VALIDATING, PRIORITIZED or ACTIVE; defaults to UNREVIEWED) and squadId; use create_opportunity to link a Key Result.",
         inputSchema: {
           workspaceId: z.string().uuid().describe("UUID of the workspace"),
           items: z.array(z.object({
@@ -1418,7 +1419,7 @@ const _handler = createMcpHandler(
             title: z.string().describe("Short title (at most 255 characters)"),
             description: z.string().nullable().optional(),
             customerSegment: z.string().nullable().optional(),
-            status: z.string().optional().describe("EXPLORING (default), VALIDATING, PRIORITIZED or ACTIVE"),
+            status: z.string().optional().describe("UNREVIEWED (default), EXPLORING, VALIDATING, PRIORITIZED or ACTIVE"),
             squadId: z.string().uuid().nullable().optional(),
           }).strict()).min(1).max(100),
         },
@@ -1474,10 +1475,10 @@ const _handler = createMcpHandler(
       "update_opportunity_status",
       {
         title: "Update Opportunity Status",
-        description: "Moves an opportunity through its discovery pipeline: EXPLORING → VALIDATING → PRIORITIZED → ACTIVE → ARCHIVED.",
+        description: `Moves an opportunity through its discovery pipeline: ${OPPORTUNITY_PIPELINE_TEXT}. ${OPPORTUNITY_STATUS_GUIDE}`,
         inputSchema: {
           opportunityId: z.string().uuid().describe("UUID of the opportunity"),
-          status: z.enum(["EXPLORING", "VALIDATING", "PRIORITIZED", "ACTIVE", "ARCHIVED"]).describe("New status"),
+          status: z.enum(OPPORTUNITY_STATUSES).describe("New status"),
         },
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },

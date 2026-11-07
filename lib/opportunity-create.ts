@@ -9,6 +9,7 @@
  */
 import type { AppPrismaClient } from "@/lib/db"
 import { feedbackOpportunityLinkData } from "@/lib/feedback"
+import { DEFAULT_OPPORTUNITY_STATUS } from "@/lib/opportunity-status"
 import {
   OPPORTUNITY_LINK_OBJECTIVES_MAX,
   OPPORTUNITY_SEED_FEEDBACK_MAX,
@@ -80,7 +81,7 @@ export function normalizeNewOpportunityInput(
   if (customerSegment && customerSegment.length > OPPORTUNITY_SEGMENT_MAX_LENGTH) {
     return { ok: false, error: `Customer segment must be ${OPPORTUNITY_SEGMENT_MAX_LENGTH} characters or fewer.` }
   }
-  const status = input.status ?? "EXPLORING"
+  const status = input.status ?? DEFAULT_OPPORTUNITY_STATUS
   if (!isNewOpportunityStatus(status)) return { ok: false, error: "Choose a valid starting status." }
   const feedbackIds = [...new Set((input.feedbackIds ?? []).filter((id) => typeof id === "string" && id))]
   if (feedbackIds.length > OPPORTUNITY_SEED_FEEDBACK_MAX) {
