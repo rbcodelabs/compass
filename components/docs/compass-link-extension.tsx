@@ -11,12 +11,13 @@
  *
  * Other links keep an ordinary anchor. Without a DocEmbedCardsProvider (e.g. description editors) the chip shows the cached text only.
  */
-import { useEffect } from "react";
+import { useEffect, type MouseEvent } from "react";
 import Link from "@tiptap/extension-link";
 import { MarkViewContent, ReactMarkViewRenderer, type MarkViewProps } from "@tiptap/react";
 import { isDocEmbedKind, type DocEmbedKind } from "@/lib/doc-embeds";
 import { isUuid } from "@/lib/canvas-cards";
-import { humanizeStatus } from "@/lib/spec-docs/labels";
+import { DOC_EMBED_KIND_LABEL } from "@/lib/spec-docs/labels";
+import { EntityPill } from "@/components/patterns/entity-pill";
 import { useEmbedEntry } from "@/components/docs/doc-embed-cards";
 import { safeInternalHref } from "@/components/docs/spec-embed-card";
 
@@ -29,9 +30,6 @@ export function parseCompassHref(href: unknown): { kind: DocEmbedKind; id: strin
   return { kind: match[1], id: match[2] };
 }
 
-const CHIP =
-  "inline-flex max-w-full items-baseline gap-1 rounded-md border border-border-default bg-surface-card px-1.5 py-px align-baseline text-sm text-text-primary no-underline hover:bg-surface-interactive cursor-pointer";
-
 function CompassChip({ kind, id }: { kind: DocEmbedKind; id: string }) {
   const { entry, request } = useEmbedEntry({ kind, id });
   useEffect(() => request(), [request]);
@@ -39,29 +37,26 @@ function CompassChip({ kind, id }: { kind: DocEmbedKind; id: string }) {
   const ok = card?.state === "ok" ? card : null;
   const href = ok ? safeInternalHref(ok.href) : null;
   const unavailable = card?.state === "unavailable";
+  const onClick = (event: MouseEvent<HTMLAnchorElement>) => {
+    // Inside a contenteditable a plain anchor does not navigate; follow the live href ourselves, keeping new-tab modifiers.
+    if (!href) return;
+    event.preventDefault();
+    if (event.metaKey || event.ctrlKey || event.shiftKey) window.open(href, "_blank", "noopener");
+    else window.location.assign(href);
+  };
+  const data = ok && href ? { kind, typeLabel: DOC_EMBED_KIND_LABEL[kind], title: ok.title, status: ok.status, facts: ok.facts, href } : null;
+  const state = ok ? "ok" : unavailable ? "unavailable" : "loading";
+  // The pill text is the stored link text (editable in place); the hover card shows the record's LIVE title, status and facts.
   return (
-    <a
-      data-compass-link=""
-      data-kind={kind}
-      data-state={ok ? "ok" : unavailable ? "unavailable" : "loading"}
+    <EntityPill
+      data={data}
       href={href ?? undefined}
-      title={unavailable ? "Record unavailable" : undefined}
-      className={`${CHIP}${unavailable ? " border-dashed text-text-secondary" : ""}`}
-      onClick={(event) => {
-        // Inside a contenteditable a plain anchor does not navigate; follow the live href ourselves, keeping new-tab modifiers.
-        if (!href) return;
-        event.preventDefault();
-        if (event.metaKey || event.ctrlKey || event.shiftKey) window.open(href, "_blank", "noopener");
-        else window.location.assign(href);
-      }}
+      onClick={onClick}
+      className={unavailable ? "border-dashed text-text-secondary" : undefined}
+      dataAttrs={{ "data-compass-link": "", "data-kind": kind, "data-state": state }}
     >
       <MarkViewContent as="span" />
-      {ok?.status ? (
-        <span className="shrink-0 rounded-full bg-status-neutral-surface px-1.5 text-xs text-status-neutral" contentEditable={false}>
-          {humanizeStatus(ok.status)}
-        </span>
-      ) : null}
-    </a>
+    </EntityPill>
   );
 }
 

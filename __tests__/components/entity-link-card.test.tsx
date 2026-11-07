@@ -22,14 +22,14 @@ afterEach(() => {
 })
 
 describe("agent transcript link cards", () => {
-  it("renders a Compass entity link as a card with live title and status", async () => {
+  it("renders a Compass entity link as a pill with live title and status", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => summary })
     vi.stubGlobal("fetch", fetchMock)
     const href = `/acme/web/tasks/${ID}`
     const { container } = render(<Markdown>{`Created [the task](${href}) for you.`}</Markdown>)
 
     await waitFor(() => expect(screen.getByText("Ship the card")).toBeTruthy())
-    expect(screen.getByText("In progress")).toBeTruthy()
+    expect(screen.getByRole("img", { name: "In progress" })).toBeTruthy()
     expect(container.querySelector('[data-entity-card="task"]')?.getAttribute("href")).toBe(href)
     expect(String(fetchMock.mock.calls[0][0])).toContain("type=task")
     expect(String(fetchMock.mock.calls[0][0])).toContain(`id=${ID}`)
