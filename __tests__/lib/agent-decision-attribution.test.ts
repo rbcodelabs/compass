@@ -87,15 +87,15 @@ describe("request_release_authorization", () => {
   const scope = { workspaceId: "ws", provider: "GITHUB" as const, repositoryOwner: "o", repositoryName: "r", pullRequestNumber: 1, baseRef: "main", headSha: "a".repeat(40), targetEnvironment: "PRODUCTION" as const, releasePolicyId: "p", taskIds: [] }
 
   it.each([
-    ["a cloud run", cloudRun, null],
-    ["a person", { purpose: "USER", userId: "u1" }, "u1"],
-    ["a personal agent key", { purpose: "AGENT", userId: "owner", agentId: "agent-personal" }, "owner"],
-    ["the built-in assistant", { purpose: "AGENT_TURN", userId: "u1", agentId: null }, "u1"],
-  ])("records the requester for %s", async (_label, actor, expected) => {
+    ["a cloud run", cloudRun, null, cloudRun.agentId ?? null],
+    ["a person", { purpose: "USER", userId: "u1" }, "u1", null],
+    ["a personal agent key", { purpose: "AGENT", userId: "owner", agentId: "agent-personal" }, "owner", "agent-personal"],
+    ["the built-in assistant", { purpose: "AGENT_TURN", userId: "u1", agentId: null }, "u1", null],
+  ])("records the requester for %s", async (_label, actor, expected, expectedAgent) => {
     m.actor.current = actor
     m.release.mockResolvedValue({ status: "BLOCKED", code: "X" })
     await requestReleaseAuthorization(scope)
-    expect(m.release).toHaveBeenCalledWith(expect.objectContaining({ requestedById: expected }))
+    expect(m.release).toHaveBeenCalledWith(expect.objectContaining({ requestedById: expected, requestedByAgentId: expectedAgent }))
   })
 })
 
