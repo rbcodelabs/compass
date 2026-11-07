@@ -10,6 +10,7 @@ import {
   DragOverlay,
   type DragStartEvent,
   type DragEndEvent,
+  type DragCancelEvent,
   type DragOverEvent,
   PointerSensor,
   KeyboardSensor,
@@ -44,9 +45,9 @@ import { OpportunityCard, type OpportunityCardData } from "./opportunity-card";
 import { NewOpportunityButton } from "./new-opportunity-button";
 import {
   moveOpportunity,
-  reorderOpportunity,
+  reorderOpportunitiesInColumn,
 } from "@/app/[orgSlug]/[workspaceSlug]/discovery/actions";
-import { orderCards, planDragEnd } from "@/lib/discovery-board-ordering";
+import { dockTabDropStatus, orderCards, planDragEnd } from "@/lib/discovery-board-ordering";
 import type { OpportunityStatus } from "@/lib/types";
 import { DEFAULT_VISIBLE_COLUMNS, OPPORTUNITY_COLUMN_META } from "@/lib/saved-views/opportunity-columns";
 
@@ -306,6 +307,9 @@ export function OpportunityBoard({
     if (!dragEnabled) return;
     const { active, over } = event;
     if (!over) return;
+    // A dock tab is resolved at drag end (see dockTabDropStatus): its column may not be rendered, and moving the
+    // dragged card into an unrendered column mid-drag unmounts it while dnd-kit is still tracking it.
+    if (dockTabDropStatus(over.data.current)) return;
 
     const activeId = active.id as string;
     const overId = over.id as string;
@@ -357,8 +361,22 @@ export function OpportunityBoard({
 
     const activeId = active.id as string;
     const overId = (over?.id as string | undefined) ?? null;
-    const currentStatus = findStatus(columns, activeId);
-    const columnItems = currentStatus ? columns[currentStatus] : [];
+    const tabStatus = dockTabDropStatus(over?.data.current);
+    const foundStatus = findStatus(columns, activeId);
+    // Dropped on a dock tab: that tab's status is the destination (the card has not been moved there during the drag).
+    const currentStatus = tabStatus ?? foundStatus;
+    const columnItems = foundStatus ? columns[foundStatus] : [];
+    if (tabStatus && foundStatus && tabStatus !== foundStatus) {
+      setColumns((prev) => {
+        const item = prev[foundStatus].find((i) => i.id === activeId);
+        if (!item) return prev;
+        return {
+          ...prev,
+          [foundStatus]: prev[foundStatus].filter((i) => i.id !== activeId),
+          [tabStatus]: [...prev[tabStatus], { ...item, status: tabStatus }],
+        };
+      });
+    }
 
     const plan = planDragEnd({
       activeId,
@@ -381,10 +399,29 @@ export function OpportunityBoard({
       setColumns((prev) => ({ ...prev, [currentStatus]: reordered }));
 
       startTransition(async () => {
-        await reorderOpportunity(activeId, plan.newIndex, revalidatePathStr);
+        await reorderOpportunitiesInColumn(currentStatus, reordered.map((item) => item.id), workspaceId, revalidatePathStr);
       });
     }
 
+    setDragSourceStatus(null);
+  }
+
+  /** Escape (or anything else that cancels the drag) puts the card back where the drag began, in its manual order. */
+  function handleDragCancel(event: DragCancelEvent) {
+    const activeId = event.active.id as string;
+    const found = findStatus(columns, activeId);
+    if (dragSourceStatus && found && found !== dragSourceStatus) {
+      setColumns((prev) => {
+        const item = prev[found].find((i) => i.id === activeId);
+        if (!item) return prev;
+        return {
+          ...prev,
+          [found]: prev[found].filter((i) => i.id !== activeId),
+          [dragSourceStatus]: [...prev[dragSourceStatus], { ...item, status: dragSourceStatus }].sort((a, b) => a.sortOrder - b.sortOrder),
+        };
+      });
+    }
+    setActiveItem(null);
     setDragSourceStatus(null);
   }
 
@@ -424,6 +461,7 @@ export function OpportunityBoard({
         onDragStart={handleDragStart}
         onDragOver={handleDragOver}
         onDragEnd={handleDragEnd}
+        onDragCancel={handleDragCancel}
       >
         <div className="flex min-h-0 min-w-0 flex-1 flex-col md:flex-row">
           <Board

@@ -29,7 +29,7 @@ vi.mock("@/app/[orgSlug]/[workspaceSlug]/discovery/actions", () => ({
   updateOpportunityStatus: vi.fn(),
   archiveOpportunity: vi.fn(),
   moveOpportunity: vi.fn(),
-  reorderOpportunity: vi.fn(),
+  reorderOpportunity: vi.fn(), reorderOpportunitiesInColumn: vi.fn(),
   setOpportunityFieldValue: vi.fn(),
 }));
 // The boards poll for live updates via useLiveRefresh, which needs the app router.

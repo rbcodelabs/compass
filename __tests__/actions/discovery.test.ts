@@ -83,6 +83,7 @@ import {
   deleteAssumption,
   moveOpportunity,
   reorderOpportunity,
+  reorderOpportunitiesInColumn,
   reorderSolution,
   reorderAssumption,
   saveOpportunityScore,
@@ -367,6 +368,55 @@ describe("reorderOpportunity", () => {
       where: { id: "opp-1" },
       data: { sortOrder: 3 },
     });
+  });
+});
+
+// ─── reorderOpportunitiesInColumn ─────────────────────────────────────────────
+
+describe("reorderOpportunitiesInColumn", () => {
+  const column = (rows: [string, number][]) =>
+    vi.spyOn(mockOpportunity, "findMany").mockResolvedValue(rows.map(([id, sortOrder]) => ({ id, sortOrder })) as never);
+  const written = () => mockOpportunity.update.mock.calls.map(([arg]) => [arg.where.id, arg.data.sortOrder]);
+
+  it("renumbers the whole column densely in one transaction, so gapped orders cannot undo the reorder", async () => {
+    column([["a", -5000], ["b", -4999], ["c", 7]]);
+    await reorderOpportunitiesInColumn("EXPLORING", ["b", "a", "c"], "ws-1", "/path");
+    expect(mockTransaction).toHaveBeenCalledTimes(1);
+    expect(written()).toEqual([["b", 0], ["a", 1], ["c", 2]]);
+  });
+
+  it("writes only the rows whose number changes, scoped to the workspace and status, with updatedAt", async () => {
+    column([["a", 0], ["b", 1], ["c", 2]]);
+    await reorderOpportunitiesInColumn("ACTIVE", ["a", "c", "b"], "ws-1", "/path");
+    expect(written()).toEqual([["c", 1], ["b", 2]]);
+    expect(mockOpportunity.update.mock.calls[0][0].where).toEqual({ id: "c", workspaceId: "ws-1", status: "ACTIVE" });
+    expect(mockOpportunity.update.mock.calls[0][0].data.updatedAt).toBeInstanceOf(Date);
+  });
+
+  it("with a filtered subset, the subset keeps its positions and hidden cards stay where they were", async () => {
+    column([["a", 0], ["x", 1], ["b", 2], ["y", 3]]);
+    await reorderOpportunitiesInColumn("EXPLORING", ["b", "a"], "ws-1", "/path");
+    expect(written()).toEqual([["b", 0], ["a", 2]]);
+  });
+
+  it("refuses an id that is not in the column (moved or archived since the drag began) and writes nothing", async () => {
+    column([["a", 0], ["b", 1]]);
+    await expect(reorderOpportunitiesInColumn("EXPLORING", ["b", "gone"], "ws-1", "/path")).rejects.toThrow();
+    expect(mockOpportunity.update).not.toHaveBeenCalled();
+  });
+
+  it("refuses duplicates, an empty list and the archived pseudo-column", async () => {
+    column([["a", 0], ["b", 1]]);
+    await expect(reorderOpportunitiesInColumn("EXPLORING", ["a", "a"], "ws-1", "/path")).rejects.toThrow();
+    await expect(reorderOpportunitiesInColumn("EXPLORING", [], "ws-1", "/path")).rejects.toThrow();
+    await expect(reorderOpportunitiesInColumn("ARCHIVED", ["a"], "ws-1", "/path")).rejects.toThrow();
+    expect(mockOpportunity.update).not.toHaveBeenCalled();
+  });
+
+  it("queries only this workspace's column, in the board's own order", async () => {
+    const spy = column([["a", 0]]);
+    await reorderOpportunitiesInColumn("VALIDATING", ["a"], "ws-1", "/path");
+    expect(spy.mock.calls[0][0]).toMatchObject({ where: { workspaceId: "ws-1", status: "VALIDATING" }, orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }, { id: "asc" }] });
   });
 });
 
