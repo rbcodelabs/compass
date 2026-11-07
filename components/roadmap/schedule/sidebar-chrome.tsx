@@ -1,14 +1,12 @@
 "use client";
 
-import { PanelRightClose, PanelRightOpen } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { CollapsedColumnTab, ColumnCollapseButton } from "@/components/patterns/board-pinned";
 
 /**
- * Chrome shared by the two docked "Not scheduled" panes: the board's sidebar and the timeline's
- * rail. Both dock on the right of the chart, use the same title and count styling, collapse from
- * a button in their own header, and fold down to the same thin tab. Keeping the pieces here is
- * what stops the two views drifting apart again; the contents (cards, search, bulk scheduling)
- * stay with each view.
+ * "Not scheduled" chrome for the timeline's rail. The collapse button and thin tab are the generic
+ * pinned-column pieces from components/patterns/board-pinned.tsx (the board's "Not scheduled" column
+ * uses them directly, as an ordinary pinned column), pre-titled here so the two views keep looking
+ * alike; the contents (cards, search, bulk scheduling) stay with each view.
  */
 
 export const NOT_SCHEDULED_TITLE = "Not scheduled";
@@ -16,22 +14,8 @@ export const NOT_SCHEDULED_TITLE = "Not scheduled";
 /** Tailwind needs these as literal strings. 18rem is `w-72`, the width the board's columns use. */
 export const SIDEBAR_WIDTH_CLASS = "w-72";
 
-const COLLAPSE_BUTTON_CLASS =
-  "inline-flex size-6 items-center justify-center rounded text-text-subtle hover:bg-surface-panel hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
-
 export function SidebarCollapseButton({ onClick, controls }: { onClick: () => void; controls?: string }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-label={`Collapse ${NOT_SCHEDULED_TITLE}`}
-      aria-controls={controls}
-      data-testid="sidebar-collapse"
-      className={COLLAPSE_BUTTON_CLASS}
-    >
-      <PanelRightClose aria-hidden className="size-4" />
-    </button>
-  );
+  return <ColumnCollapseButton title={NOT_SCHEDULED_TITLE} onClick={onClick} controls={controls} testId="sidebar-collapse" />;
 }
 
 /** Title, count pill and collapse action, styled like a board column header. */
@@ -55,21 +39,13 @@ export function SidebarTitleRow({ count, countTestId, action }: { count: number;
 /** The thin tab a collapsed pane leaves behind; clicking it expands the pane again. */
 export function CollapsedSidebarTab({ count, onClick, controls, className }: { count: number; onClick: () => void; controls?: string; className?: string }) {
   return (
-    <button
-      type="button"
+    <CollapsedColumnTab
+      title={NOT_SCHEDULED_TITLE}
+      count={count}
       onClick={onClick}
-      aria-label={`Expand ${NOT_SCHEDULED_TITLE} (${count})`}
-      aria-expanded={false}
-      aria-controls={controls}
-      data-testid="sidebar-collapsed-tab"
-      className={cn(
-        "flex h-fit w-10 shrink-0 flex-col items-center gap-2 rounded-xl border border-border-default bg-surface-inset py-3 text-text-subtle hover:bg-surface-panel hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-        className,
-      )}
-    >
-      <PanelRightOpen aria-hidden className="size-4" />
-      <span className="rounded-full bg-surface-panel px-1.5 py-0.5 text-xs tabular-nums">{count}</span>
-      <span className="text-xs font-semibold [writing-mode:vertical-rl]">{NOT_SCHEDULED_TITLE}</span>
-    </button>
+      controls={controls}
+      className={className}
+      testId="sidebar-collapsed-tab"
+    />
   );
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition, useCallback, useEffect, useId } from "react";
+import { useState, useTransition, useCallback, useEffect, useId, useRef } from "react";
 import { useLiveRefresh } from "@/hooks/use-live-refresh";
 import { useServerSyncedState } from "@/hooks/use-server-synced-state";
 import { useFlipAnimation } from "@/hooks/use-flip-animation";
@@ -11,6 +11,7 @@ import {
   DragEndEvent,
   DragOverEvent,
   closestCenter,
+  useDroppable,
   PointerSensor,
   KeyboardSensor,
   useSensor,
@@ -31,15 +32,18 @@ import { RoadmapColumn } from "./roadmap-column";
 import { RoadmapCard, type RoadmapCardData } from "./roadmap-card";
 import {
   UnscheduledItemsColumn,
-  UnscheduledItemsSidebar,
   UnscheduledItemPreview,
   parseUnscheduledDragId,
   type UnscheduledItem,
 } from "./unscheduled-items-panel";
 import { usePanelContext } from "@/components/panels/panel-context";
-import { INTERNAL_BOARD_HORIZONS, getInternalBoardHorizons, isLaunchHorizon } from "@/lib/roadmap";
+import { HORIZON_META, INTERNAL_BOARD_HORIZONS, getInternalBoardHorizons, isLaunchHorizon } from "@/lib/roadmap";
 import type { Horizon, SquadData } from "@/lib/types";
-import { Board } from "@/components/patterns/board";
+import { Board, BoardPinnedRegion, CollapsedColumnTab, type BoardColumnLayoutControls } from "@/components/patterns/board";
+import { moveColumn, canMoveColumn, pinColumn, setColumnCollapsed, togglePinColumn, type BoardLayout, type MoveDirection } from "@/lib/board-layout";
+import { UNSCHEDULED_COLUMN_ID } from "@/lib/roadmap/board-layout";
+import { useRoadmapColumnLayout } from "./column-layout-context";
+import { NOT_SCHEDULED_TITLE } from "./schedule/sidebar-chrome";
 import { RoadmapSwimlanes } from "./roadmap-swimlanes";
 import { cn } from "@/lib/utils";
 import { useMediaQuery } from "@/hooks/use-media-query";
@@ -222,6 +226,19 @@ export function applyRoadmapItemPatch(
   return patch.horizon ? moveCardToHorizon(next, itemId, patch.horizon) : next;
 }
 
+/**
+ * A collapsed pinned horizon: a slim tab that is still a drop target, so a card can be dragged onto a column
+ * that has been folded away (it lands in that horizon exactly as a drop on the open column would).
+ */
+function DroppableCollapsedTab({ horizon, title, count, onExpand }: { horizon: Horizon; title: string; count: number; onExpand: () => void }) {
+  const { setNodeRef, isOver } = useDroppable({ id: `column-${horizon}`, data: { horizon } });
+  return (
+    <div ref={setNodeRef} className={cn("h-fit rounded-xl", isOver && "ring-2 ring-ring/40")}>
+      <CollapsedColumnTab title={title} count={count} onClick={onExpand} columnId={horizon} controls={`roadmap-column-${horizon}`} />
+    </div>
+  );
+}
+
 export function RoadmapBoard({
   initialItems,
   workspaceId,
@@ -291,6 +308,91 @@ export function RoadmapBoard({
   // aria-describedby ids from a global counter and hydration mismatches.
   const dndId = useId();
   const isDesktop = useMediaQuery("(min-width: 768px)", false);
+
+  // Column layout: which columns are pinned (docked on the right, outside the scroller), collapsed, and in what order.
+  // Docking applies from md up only; below md every column is an ordinary scroller column, in the same order. In
+  // swimlane mode the horizons are lane-grid columns, so only the Not scheduled column can dock there.
+  const { layout, update: updateLayout } = useRoadmapColumnLayout(workspaceId);
+  const orderedColumnIds = layout.columnOrder.filter((id) => id === UNSCHEDULED_COLUMN_ID || (visibleHorizons as string[]).includes(id));
+  const isDocked = (id: string) => isDesktop && (spec ? id === UNSCHEDULED_COLUMN_ID : layout.pinnedColumnIds.includes(id));
+  const dockedColumnIds = orderedColumnIds.filter(isDocked);
+  const scrollerColumnIds = orderedColumnIds.filter((id) => !isDocked(id));
+
+  // Keyboard users keep their place: after a layout change the control that now represents the column gets focus.
+  const pendingFocus = useRef<string | null>(null);
+  useEffect(() => {
+    const target = pendingFocus.current;
+    if (!target) return;
+    pendingFocus.current = null;
+    containerRef.current?.querySelector<HTMLElement>(`[data-column-control="${target}"]`)?.focus();
+  }, [layout, containerRef]);
+  const changeLayout = (transition: (current: BoardLayout) => BoardLayout, focus?: string) => {
+    if (focus) pendingFocus.current = focus;
+    updateLayout(transition);
+  };
+
+  function layoutControlsFor(id: string, label: string): BoardColumnLayoutControls {
+    // A column moves among the columns rendered in its own region (docked vs scroller; everything on narrow screens).
+    const scope = { among: (other: string) => orderedColumnIds.includes(other) && (!isDesktop || isDocked(other) === isDocked(id)) };
+    const docked = isDocked(id);
+    return {
+      columnId: id,
+      label,
+      pinned: docked,
+      pinnable: isDesktop && !(spec && id === UNSCHEDULED_COLUMN_ID),
+      onTogglePin: () => changeLayout((l) => togglePinColumn(l, id), `${id}:pin`),
+      canMoveLeft: canMoveColumn(layout, id, "left", scope),
+      canMoveRight: canMoveColumn(layout, id, "right", scope),
+      onMove: (direction: MoveDirection) => changeLayout((l) => moveColumn(l, id, direction, scope), `${id}:menu`),
+      onCollapse: docked ? () => changeLayout((l) => setColumnCollapsed(pinColumn(l, id), id, true), `${id}:tab`) : undefined,
+    };
+  }
+  const expandColumn = (id: string) => changeLayout((l) => setColumnCollapsed(l, id, false), `${id}:collapse`);
+
+  function renderColumn(id: string, placement: "scroller" | "pinned") {
+    if (id === UNSCHEDULED_COLUMN_ID) {
+      return (
+        <UnscheduledItemsColumn
+          key={id}
+          items={unscheduled}
+          onQuickAdd={handleQuickAdd}
+          placement={placement}
+          layoutControls={layoutControlsFor(id, NOT_SCHEDULED_TITLE)}
+        />
+      );
+    }
+    const horizon = id as Horizon;
+    return (
+      <RoadmapColumn
+        key={horizon}
+        horizon={horizon}
+        items={displayColumns[horizon]}
+        workspaceId={workspaceId}
+        orgSlug={orgSlug}
+        workspaceSlug={workspaceSlug}
+        revalidatePathStr={revalidatePathStr}
+        onItemAdded={handleItemAdded}
+        onArchive={handleArchive}
+        availableKRs={availableKRs}
+        availableSolutions={availableSolutions}
+        availableOpportunities={availableOpportunities}
+        availableExperiments={availableExperiments}
+        limit={horizon === "NOW" ? nowLimit : horizon === "NEXT" ? nextLimit : undefined}
+        launchWorkflowEnabled={launchWorkflowEnabled}
+        placement={placement}
+        layoutControls={layoutControlsFor(id, HORIZON_META[horizon].label)}
+      />
+    );
+  }
+
+  function renderDockedColumn(id: string) {
+    if (!layout.collapsedColumnIds.includes(id)) return renderColumn(id, "pinned");
+    if (id === UNSCHEDULED_COLUMN_ID) {
+      return <CollapsedColumnTab key={id} title={NOT_SCHEDULED_TITLE} count={unscheduled.length} columnId={id} controls="unscheduled-items-column" onClick={() => expandColumn(id)} />;
+    }
+    const horizon = id as Horizon;
+    return <DroppableCollapsedTab key={id} horizon={horizon} title={HORIZON_META[horizon].label} count={displayColumns[horizon].length} onExpand={() => expandColumn(id)} />;
+  }
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: { distance: 8 },
@@ -642,30 +744,13 @@ export function RoadmapBoard({
                 availableExperiments={availableExperiments}
               />
             ) : null}
-            {!spec && visibleHorizons.map((horizon) => (
-              <RoadmapColumn
-                key={horizon}
-                horizon={horizon}
-                items={displayColumns[horizon]}
-                workspaceId={workspaceId}
-                orgSlug={orgSlug}
-                workspaceSlug={workspaceSlug}
-                revalidatePathStr={revalidatePathStr}
-                onItemAdded={handleItemAdded}
-                onArchive={handleArchive}
-                availableKRs={availableKRs}
-                availableSolutions={availableSolutions}
-                availableOpportunities={availableOpportunities}
-                availableExperiments={availableExperiments}
-                limit={horizon === "NOW" ? nowLimit : horizon === "NEXT" ? nextLimit : undefined}
-                launchWorkflowEnabled={launchWorkflowEnabled}
-              />
-            ))}
-            {/* Below md the pane is the last swipe column; from md up it docks beside the board instead. */}
-            {!isDesktop ? <UnscheduledItemsColumn items={unscheduled} onQuickAdd={handleQuickAdd} /> : null}
+            {!spec ? scrollerColumnIds.map((id) => renderColumn(id, "scroller")) : null}
+            {/* In swimlane mode (and below md) the Not scheduled column is the last swipe column; otherwise it is docked beside the board. */}
+            {spec && !isDocked(UNSCHEDULED_COLUMN_ID) ? renderColumn(UNSCHEDULED_COLUMN_ID, "scroller") : null}
           </div>
         </Board>
-        {isDesktop ? <UnscheduledItemsSidebar items={unscheduled} onQuickAdd={handleQuickAdd} /> : null}
+        {/* Docked columns sit OUTSIDE the horizontal scroller, so they stay put while the rest scroll and a drag from one never needs a mid-drag scroll. */}
+        {dockedColumnIds.length > 0 ? <BoardPinnedRegion>{dockedColumnIds.map(renderDockedColumn)}</BoardPinnedRegion> : null}
         </div>
       </div>
 
