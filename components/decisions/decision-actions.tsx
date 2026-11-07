@@ -13,13 +13,15 @@ const BUTTON = "rounded-md border px-4 py-2 text-sm font-medium hover:bg-muted d
 const CARD = "flex min-w-0 cursor-pointer items-start gap-3 rounded-lg border bg-background p-3 text-sm transition-colors hover:bg-muted/50 has-[:checked]:border-primary has-[:checked]:bg-primary/5 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring"
 const PUSHBACK = "rounded-md border border-transparent px-3 py-1.5 text-sm text-muted-foreground underline-offset-4 hover:bg-muted hover:text-foreground hover:underline disabled:opacity-50"
 
-export function DecisionActions({ workspaceId, revisionId, fingerprint, options, questions = [] }: {
+export function DecisionActions({ workspaceId, revisionId, fingerprint, options, questions = [], onDecided }: {
   workspaceId: string
   revisionId: string
   fingerprint: string
   options: DecisionOption[]
   /** Questions on a multi-question request; empty for option-less and single-options requests. */
   questions?: TrackedDecisionPacketQuestion[]
+  /** Called once the decision is recorded, for hosts (the sidebar panel) that hold their own copy of the data. */
+  onDecided?: () => void
 }) {
   const [rationale, setRationale] = useState("")
   // Chosen option label per question index (multi-question requests).
@@ -46,6 +48,7 @@ export function DecisionActions({ workspaceId, revisionId, fingerprint, options,
       try {
         await decideReviewAction({ workspaceId, revisionId, fingerprint, optionId: option.id, rationale, ...(submitted ? { answers: submitted } : {}) })
         router.refresh()
+        onDecided?.()
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : "Could not record the decision.")
       }

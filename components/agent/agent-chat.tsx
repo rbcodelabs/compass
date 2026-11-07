@@ -37,11 +37,15 @@ import { ToolsMenu, connectorsEnabledFor } from "@/components/agent/tools-menu"
 import { ModelPicker, modelLabelFor, useModelPick } from "@/components/agent/model-picker"
 import { AgentChip } from "@/components/agent/composer/agent-chip"
 import { ComposerCard } from "@/components/agent/composer/composer-card"
+import { AGENT_MAX_GOOGLE_RESOURCES_PER_TURN, GOOGLE_DRIVE_CONNECTOR_SLUG, googleResourcesFromPaste, type GoogleResourceRef } from "@/lib/agent-google-resources"
 import { Markdown } from "@/components/agent/markdown"
+import { RecentMentions } from "@/components/agent/recent-mentions"
 import { AttachMenu, uploadAgentFiles, type AttachedItem, type AttachedUpload } from "@/components/agent/composer/attach-menu"
 import { SeedContextChip } from "@/components/agent/seed-context-chip"
 import { AgentParticipantsPanel, type Roster } from "@/components/agent/agent-participants"
 import { initialsOf } from "@/lib/user-initials"
+import { formatRelativeTime, groupConversationsByStatus, type AgentListConversation, type BoardColumnId } from "@/lib/agent-board"
+import { cn } from "@/lib/utils"
 
 type Role = "user" | "assistant"
 type Message = {
@@ -57,7 +61,7 @@ type Message = {
   authorUserId?: string | null
   authorName?: string | null
 }
-type ConversationSummary = { id: string; title: string | null }
+type ConversationSummary = AgentListConversation
 type SeedEntity = { entityType: string; entityId: string; label: string; summary: string; sourceUrl: string }
 
 type Props = {
@@ -102,6 +106,8 @@ type Props = {
    * it); ignored by the rail, which has no inline list.
    */
   listOpen?: boolean
+  /** Conversations the shell has marked read this session (after its dwell), overriding the server-rendered status. */
+  reviewedIds?: ReadonlySet<string>
   /**
    * Called when turn 1 of a brand-new chat comes back with the id the server
    * assigned to it.
@@ -155,6 +161,7 @@ export function AgentChat({
   initialAgentId,
   variant = "page",
   listOpen = true,
+  reviewedIds,
   onConversationCreated,
   onStreamingChange,
 }: Props) {
@@ -189,6 +196,7 @@ export function AgentChat({
   const [attachedItems, setAttachedItems] = useState<AttachedItem[]>([])
   const [attachedUploads, setAttachedUploads] = useState<AttachedUpload[]>([])
   const [attachError, setAttachError] = useState<string | null>(null)
+  const [googleResources, setGoogleResources] = useState<GoogleResourceRef[]>([])
   const [dragging, setDragging] = useState(false)
   const dragDepth = useRef(0)
   const [orgSlug, workspaceSlug] = basePath.split("/").filter(Boolean)
@@ -216,6 +224,20 @@ export function AgentChat({
   const agentChoices = useAgentChoices({ workspaceId })
   const [agentPick, setAgentPick] = useState(initialAgentId ?? "")
   const agentSelection = agentPick === "builtin" || agentChoices.agents.some((agent) => agent.id === agentPick) ? agentPick : ""
+  const driveConnected = agentChoices.connectors.some((c) => c.slug === GOOGLE_DRIVE_CONNECTOR_SLUG)
+  // A paste that is nothing but Drive links becomes chips instead of text; anything else pastes as usual.
+  const addGoogleResource = useCallback((ref: GoogleResourceRef) => {
+    setGoogleResources((list) => (list.some((r) => r.fileId === ref.fileId) ? list : [...list, ref].slice(0, AGENT_MAX_GOOGLE_RESOURCES_PER_TURN)))
+  }, [])
+  const pasteGoogleLinks = useCallback((text: string): boolean => {
+    const refs = googleResourcesFromPaste(text)
+    if (!refs.length) return false
+    setGoogleResources((list) => {
+      const known = new Set(list.map((r) => r.fileId))
+      return [...list, ...refs.filter((r) => !known.has(r.fileId))].slice(0, AGENT_MAX_GOOGLE_RESOURCES_PER_TURN)
+    })
+    return true
+  }, [])
   const defaultAgentName = agentChoices.agents.find((agent) => agent.id === agentChoices.defaultAgentId)?.name ?? "Compass Agent"
   const modelPick = useModelPick({ userId, workspaceId, choices: agentChoices, agentSelection })
   const turn = useAgentTurn({
@@ -360,6 +382,8 @@ export function AgentChat({
     setDocChip(null)
     const contextItemsForThisTurn = attachedItems.map(({ type, id }) => ({ type, id }))
     const uploadsForThisTurn = attachedUploads.map((u) => u.ref)
+    const googleLinksForThisTurn = googleResources.map((r) => r.url)
+    setGoogleResources([])
     setAttachedItems([])
     setAttachedUploads([])
     setAttachError(null)
@@ -368,6 +392,7 @@ export function AgentChat({
       message: text,
       contextItems: contextItemsForThisTurn,
       uploads: uploadsForThisTurn,
+      googleLinks: googleLinksForThisTurn,
       conversationId: activeConversationId,
       seedContext: seedContextForThisTurn,
       agentId: agentSelection || undefined,
@@ -379,7 +404,7 @@ export function AgentChat({
       retry,
       continueTurn: !handoff && Boolean(processing?.canContinue),
     })
-  }, [input, activeConversationId, isRail, processing?.canContinue, pendingSeedEntity, attachedItems, attachedUploads, sending, startTurn, agentSelection, modelPick.model])
+  }, [input, activeConversationId, isRail, processing?.canContinue, pendingSeedEntity, attachedItems, attachedUploads, googleResources, sending, startTurn, agentSelection, modelPick.model])
 
   // The agent's plan is its Compass tasks for this conversation (TaskCreate/TaskUpdate), read from the server so it
   // survives a reload and reaches participants. Refetched when a task tool call finishes (planVersion) and when a turn ends.
@@ -615,6 +640,14 @@ export function AgentChat({
     void sendRef2.current(false, false, undefined, text)
   }, [queued, isStreaming, composerBlocked, accessLost, sending])
   // Who is answering and on what, shown in the composer card while a detached run is live.
+  // A chat counts as read only after the shell dwell, so the list follows reviewedIds rather than merely being open.
+  const groups = useMemo(
+    () =>
+      groupConversationsByStatus(
+        conversations.map((c) => (reviewedIds?.has(c.id) && c.lastActivityAt ? { ...c, reviewedAt: c.lastActivityAt } : c))
+      ),
+    [conversations, reviewedIds]
+  )
   const runStatusLine =
     activeRun && !activeRun.done
       ? activeRun.agentName
@@ -668,34 +701,39 @@ export function AgentChat({
                 {showArchived ? "No archived chats" : "No conversations yet"}
               </li>
             )}
-            {(showArchived ? archivedChats : conversations).map((c) => {
-              const active = c.id === activeConversationId
-              const label = showArchived ? "Restore chat" : "Archive chat"
-              return (
-                <li key={c.id} className="group relative">
-                  <Link
-                    href={`${basePath}/agent?c=${c.id}`}
-                    className={`block truncate rounded-lg py-2 pl-3 pr-9 text-sm transition-colors ${
-                      active
-                        ? "bg-surface-interactive text-text-primary"
-                        : "text-text-secondary hover:bg-surface-interactive-hover hover:text-text-primary"
-                    }`}
-                  >
-                    {c.title || "Untitled chat"}
-                  </Link>
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
-                    onClick={() => void changeArchived(c.id, !showArchived)}
-                    aria-label={label}
-                    title={label}
-                  >
-                    {showArchived ? <ArchiveRestore aria-hidden="true" /> : <Archive aria-hidden="true" />}
-                  </Button>
-                </li>
-              )
-            })}
+            {groups && !showArchived
+              ? groups.map((group) => (
+                  <li key={group.id} className="flex flex-col gap-1">
+                    <p className="flex items-center justify-between px-3 pt-3 text-[11px] font-semibold uppercase tracking-wide text-text-subtle">
+                      <span>{group.label}</span>
+                      <span>{group.items.length}</span>
+                    </p>
+                    <ul className="flex flex-col gap-1">
+                      {group.items.map((c) => (
+                        <ConversationRow
+                          key={c.id}
+                          c={c}
+                          status={group.id}
+                          active={c.id === activeConversationId}
+                          basePath={basePath}
+                          archived={false}
+                          onToggleArchived={() => void changeArchived(c.id, true)}
+                        />
+                      ))}
+                    </ul>
+                  </li>
+                ))
+              : (showArchived ? archivedChats : conversations).map((c) => (
+                  <ConversationRow
+                    key={c.id}
+                    c={c}
+                    status={null}
+                    active={c.id === activeConversationId}
+                    basePath={basePath}
+                    archived={showArchived}
+                    onToggleArchived={() => void changeArchived(c.id, !showArchived)}
+                  />
+                ))}
           </ul>
         </ScrollArea>
         <div className="border-t border-default p-2">
@@ -837,6 +875,13 @@ export function AgentChat({
               </button>
             </div>
           )}
+          <RecentMentions
+            messages={messages}
+            onInsert={(text) => {
+              setInput((prev) => (prev.trim() ? prev.trimEnd() + " " + text : text))
+              composerRef.current?.focus()
+            }}
+          />
           <ComposerCard
             textareaRef={composerRef}
             value={input}
@@ -852,6 +897,7 @@ export function AgentChat({
             stopDisabled={!canCancelRun}
             stopTitle={canCancelRun ? "Stop this run (Esc)" : "Only the person who asked, or the owner, can stop this run"}
             readOnly={Boolean(accessLost)}
+            onPasteText={accessLost ? undefined : pasteGoogleLinks}
             runStartedByMe={!runStartedByOther}
             status={(runStatusLine || queued) ? (
               <>
@@ -867,7 +913,7 @@ export function AgentChat({
               </>
             ) : null}
             contextChips={
-              pendingSeedEntity || docChip || attachedItems.length || attachedUploads.length || attachError ? (
+              pendingSeedEntity || docChip || attachedItems.length || attachedUploads.length || googleResources.length || attachError ? (
                 <>
                   {attachedItems.map((i) => (
                     <AttachedChip key={`${i.type}:${i.id}`} label={i.title} hint={i.typeLabel} onRemove={() => setAttachedItems((l) => l.filter((x) => x !== i))} />
@@ -875,6 +921,12 @@ export function AgentChat({
                   {attachedUploads.map((u) => (
                     <AttachedChip key={u.ref} label={u.name} hint="File" file onRemove={() => setAttachedUploads((l) => l.filter((x) => x !== u))} />
                   ))}
+                  {googleResources.map((r) => (
+                    <AttachedChip key={r.fileId} label={r.label} hint={driveConnected ? "Google Drive" : "Google Drive (not connected)"} file onRemove={() => setGoogleResources((l) => l.filter((x) => x !== r))} />
+                  ))}
+                  {googleResources.length > 0 && !driveConnected && agentChoices.loaded && (
+                    <span className="text-xs text-muted-foreground">Connect Google Drive in <Link href="/settings/agents" className="underline underline-offset-2">Settings → Agents</Link> so the agent can read this.</span>
+                  )}
                   {attachError && <span role="alert" className="text-xs text-status-danger">{attachError}</span>}
                   {pendingSeedEntity && (
                     <SeedContextChip label={pendingSeedEntity.label} summary={pendingSeedEntity.summary} sourceUrl={pendingSeedEntity.sourceUrl} onDismiss={() => setPendingSeedEntity(undefined)} />
@@ -893,6 +945,9 @@ export function AgentChat({
                     disabled={composerDisabled}
                     uploadCount={attachedUploads.length}
                     items={attachedItems}
+                    driveConnected={driveConnected}
+                    googleResources={googleResources}
+                    onPickGoogle={addGoogleResource}
                     onUploaded={(u) => { setAttachError(null); setAttachedUploads((l) => [...l, u]) }}
                     onPickItem={(i) => { setAttachError(null); setAttachedItems((l) => [...l, i]) }}
                     onError={setAttachError}
@@ -901,7 +956,7 @@ export function AgentChat({
                 {agentChoices.agents.length > 0 && (
                   <AgentChip choices={agentChoices} value={agentSelection} defaultAgentName={defaultAgentName} disabled={composerDisabled} onChange={setAgentPick} />
                 )}
-                <ToolsMenu connectors={agentChoices.connectors} enabled={connectorsEnabledFor(agentSelection, agentChoices.defaultAgentId)} loaded={agentChoices.loaded} />
+                <ToolsMenu connectors={agentChoices.connectors} enabled={connectorsEnabledFor(agentSelection, agentChoices.defaultAgentId, agentChoices.agents)} loaded={agentChoices.loaded} />
                 {modelPick.visible && (
                   <ModelPicker choices={agentChoices} value={modelPick.model} defaultLabel={modelPick.defaultLabel} disabled={composerDisabled} onChange={modelPick.select} />
                 )}
@@ -977,5 +1032,66 @@ function MessageRow({
         </div>
       </div>
     </div>
+  )
+}
+
+const STATUS_STYLE: Record<BoardColumnId, { label: string; dot: string; badge: string }> = {
+  working: { label: "Working", dot: "bg-status-info animate-pulse", badge: "bg-status-info-surface text-status-info" },
+  new: { label: "New", dot: "bg-status-warning", badge: "bg-status-warning-surface text-status-warning" },
+  done: { label: "Done", dot: "bg-status-success", badge: "bg-status-success-surface text-status-success" },
+  failed: { label: "Failed", dot: "bg-status-danger", badge: "bg-status-danger-surface text-status-danger" },
+  ready: { label: "Ready", dot: "bg-status-neutral", badge: "bg-status-neutral-surface text-status-neutral" },
+}
+
+/** One chat-list row. With a status it shows a dot, a labelled badge and the time of last activity. */
+function ConversationRow({
+  c,
+  status,
+  active,
+  basePath,
+  archived,
+  onToggleArchived,
+}: {
+  c: AgentListConversation
+  status: BoardColumnId | null
+  active: boolean
+  basePath: string
+  archived: boolean
+  onToggleArchived: () => void
+}) {
+  const archiveLabel = archived ? "Restore chat" : "Archive chat"
+  const style = status ? STATUS_STYLE[status] : null
+  return (
+    <li className="group relative">
+      <Link
+        href={basePath + "/agent?c=" + c.id}
+        aria-current={active ? "page" : undefined}
+        className={cn(
+          "block rounded-lg py-2 pl-3 pr-9 text-sm transition-colors",
+          active ? "bg-surface-interactive text-text-primary" : "text-text-secondary hover:bg-surface-interactive-hover hover:text-text-primary"
+        )}
+      >
+        <span className="flex items-center gap-2">
+          {style && <span aria-hidden="true" className={cn("size-2 shrink-0 rounded-full", style.dot)} />}
+          <span className={cn("min-w-0 flex-1 truncate", status === "new" && "font-semibold")}>{c.title || "Untitled chat"}</span>
+        </span>
+        {style && c.lastActivityAt && (
+          <span className="mt-1 flex items-center gap-2 pl-4 text-xs">
+            <span className={cn("rounded px-1.5 py-0.5 font-medium", style.badge)}>{style.label}</span>
+            <span className="text-text-subtle">{formatRelativeTime(c.lastActivityAt)}</span>
+          </span>
+        )}
+      </Link>
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        className="absolute right-1 top-1.5 opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
+        onClick={onToggleArchived}
+        aria-label={archiveLabel}
+        title={archiveLabel}
+      >
+        {archived ? <ArchiveRestore aria-hidden="true" /> : <Archive aria-hidden="true" />}
+      </Button>
+    </li>
   )
 }

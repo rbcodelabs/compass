@@ -28,6 +28,8 @@ export type PullRequestSummary = {
 }
 
 export const PR_READ_PERMISSIONS = ["pull_requests:read", "checks:read", "statuses:read", "metadata:read"] as const
+/** Fallback when the App has not been granted the checks permissions: the PR still loads, checks read as unavailable. */
+export const PR_BASIC_PERMISSIONS = ["pull_requests:read", "metadata:read"] as const
 
 type GhPull = {
   html_url?: string
@@ -89,7 +91,16 @@ export type PullRequestFetchResult = { ok: true; summary: PullRequestSummary } |
 export async function fetchPullRequestSummary(ref: PullRequestRef, fetcher: typeof fetch = fetch): Promise<PullRequestFetchResult> {
   if (!githubConnectorUid()) return { ok: false, reason: "not_configured" }
   try {
-    const { token } = await mintRepoInstallationToken({ owner: ref.owner, names: [ref.repo], permissions: PR_READ_PERMISSIONS })
+    const target = { owner: ref.owner, names: [ref.repo] }
+    let token: string
+    let canReadChecks = true
+    try {
+      token = (await mintRepoInstallationToken({ ...target, permissions: PR_READ_PERMISSIONS })).token
+    } catch {
+      // Connect refuses a token when the App lacks any requested permission, so retry without the checks permissions.
+      canReadChecks = false
+      token = (await mintRepoInstallationToken({ ...target, permissions: PR_BASIC_PERMISSIONS })).token
+    }
     const root = ["https://api.github.com/repos", encodeURIComponent(ref.owner), encodeURIComponent(ref.repo)].join("/")
     const headers = { Authorization: "Bearer " + token, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" }
     const res = await fetcher(root + "/pulls/" + ref.number, { headers, cache: "no-store" })
@@ -100,7 +111,7 @@ export async function fetchPullRequestSummary(ref: PullRequestRef, fetcher: type
     let checks: PullRequestChecks = "unknown"
     let failing: string[] = []
     const sha = pr.head?.sha
-    if (sha && sha.length === 40 && SHA.test(sha)) {
+    if (canReadChecks && sha && sha.length === 40 && SHA.test(sha)) {
       const [runs, status] = await Promise.all([
         fetcher(root + "/commits/" + sha + "/check-runs?per_page=100", { headers, cache: "no-store" }),
         fetcher(root + "/commits/" + sha + "/status", { headers, cache: "no-store" }),
