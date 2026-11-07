@@ -42,6 +42,7 @@ import { FollowButton } from "@/components/following/follow-button";
 import { FleshThisOutLink } from "@/components/research/flesh-this-out-link";
 import { PmInterviewHistory } from "@/components/research/pm-interview-history";
 import { LinkedTasksSection, type LinkedTaskData } from "@/components/tasks/linked-tasks-section";
+import { LinkedConversationsSection } from "@/components/links/linked-conversations-section";
 import { CustomFieldsPanel } from "@/components/custom-fields/custom-fields-panel";
 import { LinkedSpecsSection } from "@/components/specs/linked-specs-section";
 import { SolutionKeyResultPicker } from "@/components/discovery/solution-key-result-picker";
@@ -307,6 +308,7 @@ export function SolutionPanel({
           onChanged={refresh}
         />
       </Section>
+      <LinkedConversationsSection entityType="SOLUTION" entityId={data.id} orgSlug={orgSlug} workspaceSlug={workspaceSlug} />
       <PmInterviewHistory orgSlug={orgSlug} workspaceSlug={workspaceSlug} interviews={data.pmInterviews} />
       <Discussion targetType="SOLUTION" targetId={id} />
     </PanelContainer>

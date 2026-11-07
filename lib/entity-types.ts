@@ -4,7 +4,7 @@ import type { WorkspaceEntityType } from "@/lib/mcp-authz"
 
 /**
  * The one entity-type vocabulary for generic links (ADR "One generic entity_links table for
- * association links", section 3). It is exactly COMMENT_TARGET_TYPES plus METRIC and RESEARCH_TURN.
+ * association links", section 3). It is exactly COMMENT_TARGET_TYPES plus METRIC, RESEARCH_TURN and AGENT_CONVERSATION.
  *
  * Written out here, not imported from lib/comments.ts: that module pulls in the notification
  * emitter, and lib/followable.ts already documents (and pins with a test) the same duplication to
@@ -17,9 +17,20 @@ export const ENTITY_TYPE_VOCABULARY = [
   "OBJECTIVE", "KEY_RESULT", "OPPORTUNITY", "SOLUTION", "ASSUMPTION",
   "EXPERIMENT", "ROADMAP_ITEM", "FEEDBACK_ITEM", "TASK", "DOC", "ARTIFACT",
   "RESEARCH_STUDY", "REVIEW_REQUEST", "METRIC", "RESEARCH_TURN",
+  // Agent conversations: only the CONVERSATION_* link types (lib/agent-conversation-links.ts) use it. It has no access-control
+  // mapping on purpose, so the generic link tools can never read or write a conversation endpoint.
+  "AGENT_CONVERSATION",
 ] as const
 
 export type LinkableEntityType = (typeof ENTITY_TYPE_VOCABULARY)[number]
+
+/**
+ * The types the PUBLIC generic link surface (REST and the MCP link_entities / list_links tools) accepts. AGENT_CONVERSATION is internal:
+ * its link types are written and read only by lib/links/conversation-links.ts, which applies the conversation access rules, so it is
+ * left out of the public schemas (and the generated REST client stays unchanged).
+ */
+export type PublicLinkEntityType = Exclude<LinkableEntityType, "AGENT_CONVERSATION">
+export const PUBLIC_LINK_ENTITY_TYPES = ENTITY_TYPE_VOCABULARY.filter((type): type is PublicLinkEntityType => type !== "AGENT_CONVERSATION") as unknown as readonly [PublicLinkEntityType, ...PublicLinkEntityType[]]
 
 export function isLinkableEntityType(value: unknown): value is LinkableEntityType {
   return typeof value === "string" && (ENTITY_TYPE_VOCABULARY as readonly string[]).includes(value)
@@ -54,6 +65,7 @@ const PANEL_ENTITY_TYPE: Record<LinkableEntityType, EntityType | null> = {
   REVIEW_REQUEST: null,
   METRIC: null,
   RESEARCH_TURN: null,
+  AGENT_CONVERSATION: null,
 }
 
 export function toPanelEntityType(type: LinkableEntityType): EntityType | null {
@@ -84,6 +96,7 @@ const WORKSPACE_ENTITY_TYPE: Record<LinkableEntityType, WorkspaceEntityType | nu
   REVIEW_REQUEST: "reviewRequest",
   METRIC: null,
   RESEARCH_TURN: null,
+  AGENT_CONVERSATION: null,
 }
 
 export function toWorkspaceEntityType(type: LinkableEntityType): WorkspaceEntityType | null {

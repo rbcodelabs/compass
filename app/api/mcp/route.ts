@@ -28,6 +28,7 @@ import {
 import { widenRefSchemas, resolveToolRefs } from "@/lib/mcp-work-item-refs"
 import { runWithMcpActor, getMcpActor, peekMcpActor, isResearchActor, assertWorkspaceMember, McpAuthzError } from "@/lib/mcp-authz"
 import { registerArtifactResources } from "@/lib/artifact-resource"
+import { linkAgentToolCall } from "@/lib/links/conversation-links"
 import { applyToolGate, AGENT_TOOL_POLICY, scopesSatisfy, type ToolScope } from "@/lib/mcp-tool-gates"
 import { bearerChallenge, requiredScopeForPayload } from "@/lib/mcp-oauth-challenge"
 import { SCOPE_MCP_READ } from "@/lib/oauth/constants"
@@ -184,7 +185,7 @@ import {
   unlinkSolutionFromKeyResultTool,
 } from "@/lib/typed-link-tool-handlers"
 import { linkEntitiesTool, linkSummariesForCaller, listLinksTool, unlinkEntitiesTool } from "@/lib/link-tool-handlers"
-import { ENTITY_TYPE_VOCABULARY } from "@/lib/entity-types"
+import { PUBLIC_LINK_ENTITY_TYPES } from "@/lib/entity-types"
 import { decisionOptionsInputSchema, decisionQuestionsInputSchema } from "@/lib/decision-option-schema"
 import { applyRecordedDecision, closeDecisionNoAction, getDecision, getReviewRequest, listDecisions, listReviewRequests, requestDecision, requestReleaseAuthorization } from "@/lib/decision-tool-handlers"
 import { uiGetState, uiNavigate, uiScreenshot } from "@/lib/ui-control-tool-handlers"
@@ -301,7 +302,12 @@ const _handler = createMcpHandler(
         await applyToolGate(name, actor, args, resolveOnce)
         // A service actor returns from the gate early; its handler still needs UUIDs.
         await resolveOnce()
-      }, () => withAnalyticsTool(name, () => withInterviewMutation(name, args, () => handler(args, extra)))))
+      }, () => withAnalyticsTool(name, () => withInterviewMutation(name, args, async () => {
+        const result = await handler(args, extra)
+        // RM-19: an agent turn's create/read/update of an opportunity, solution or task links the conversation to it. Never throws.
+        await linkAgentToolCall(name, args, result)
+        return result
+      }))))
     })
 
     register("get_current_identity", { title: "Current Identity", description: "Returns the authenticated caller and currently accessible workspaces.", inputSchema: {}, outputSchema: TOOL_OUTPUT_SCHEMA }, async () => {
@@ -1557,7 +1563,7 @@ const _handler = createMcpHandler(
           objectiveId: z.string().uuid().optional().describe("UUID of an objective"),
           solutionId: z.string().uuid().optional().describe("UUID of a solution"),
           keyResultId: z.string().uuid().optional().describe("UUID of a Key Result"),
-          entityType: z.enum(ENTITY_TYPE_VOCABULARY).optional().describe("Generic mode: the type of the entity to list links for (use with entityId)"),
+          entityType: z.enum(PUBLIC_LINK_ENTITY_TYPES).optional().describe("Generic mode: the type of the entity to list links for (use with entityId)"),
           entityId: z.string().uuid().optional().describe("Generic mode: UUID of the entity (use with entityType)"),
           linkType: z.string().max(60).optional().describe("Generic mode: restrict to one link type, e.g. EXPERIMENT_INFORMED_BY_STUDY"),
           limit: z.number().int().min(1).max(100).optional().default(50).describe("Page size (default 50)"),
@@ -1588,7 +1594,7 @@ const _handler = createMcpHandler(
           linkType: z.string().min(1).max(60).describe("A registered link type key, e.g. EXPERIMENT_INFORMED_BY_STUDY"),
           fromId: z.string().uuid().describe("UUID of the entity on the `from` end of the link type"),
           toId: z.string().uuid().describe("UUID of the entity on the `to` end of the link type"),
-          toType: z.enum(ENTITY_TYPE_VOCABULARY).optional().describe("Only for link types that allow several `to` types"),
+          toType: z.enum(PUBLIC_LINK_ENTITY_TYPES).optional().describe("Only for link types that allow several `to` types"),
         },
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },

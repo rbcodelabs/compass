@@ -111,6 +111,13 @@ describe("endpoints are resolvable and tenant-scoped", () => {
   });
 
   it.each(defs.flatMap((def) => [def.from, ...toTypesOf(def)].map((type) => [def.key, type] as const)))("%s: endpoint type %s has an access-control mapping for the MCP gate", (_key, type) => {
+    // The conversation link types are internal: the generic tools must NOT be able to name a conversation, so AGENT_CONVERSATION
+    // deliberately has no mapping and the MCP gate refuses it ("cannot be linked").
+    if (type === "AGENT_CONVERSATION") {
+      expect(getLinkType(_key)?.internal).toBe(true);
+      expect(toWorkspaceEntityType(type)).toBeNull();
+      return;
+    }
     expect(toWorkspaceEntityType(type)).not.toBeNull();
   });
 
@@ -126,7 +133,7 @@ describe("endpoints are resolvable and tenant-scoped", () => {
 
   it("touchEndpoint reports false for the types without an updatedAt column", async () => {
     const real = await vi.importActual<typeof import("@/lib/links/endpoints")>("@/lib/links/endpoints");
-    for (const type of ["REVIEW_REQUEST", "METRIC", "RESEARCH_TURN"] as const) expect(await real.touchEndpoint({} as AppTransactionClient, type, "ws", "id")).toBe(false);
+    for (const type of ["REVIEW_REQUEST", "METRIC", "RESEARCH_TURN", "AGENT_CONVERSATION"] as const) expect(await real.touchEndpoint({} as AppTransactionClient, type, "ws", "id")).toBe(false);
   });
 });
 
@@ -137,7 +144,7 @@ describe("tenant isolation for every from/to pair", () => {
   it.each(pairs.map((pair) => [`${pair.key}: ${pair.from} -> ${pair.to}`, pair] as const))("%s: only same-workspace endpoints link", async (_label, pair) => {
     const create = vi.fn();
     const guarded = { entityLink: { findFirst: vi.fn(), create, count: vi.fn() } } as unknown as AppTransactionClient;
-    const base = { linkType: pair.key, toType: pair.to, ctx, viaLegacyWriter: true, origin: getLinkType(pair.key)?.origins?.[0] };
+    const base = { linkType: pair.key, toType: pair.to, ctx, viaLegacyWriter: true, viaInternalWriter: true, origin: getLinkType(pair.key)?.origins?.[0] };
     // from in A, to in A, but the caller declares workspace B
     await expect(linkEntities(guarded, { ...base, fromId: `${pair.from}-A`, toId: `${pair.to}-A`, expectedWorkspaceId: "ws-B" })).rejects.toThrow(/not found/);
     // declared workspace A, but the to end is not A's
@@ -157,6 +164,8 @@ describe("delete paths and the workspace cascade cover every type", () => {
     // Artifact links (phase 6): a single Artifact delete, and the workspace Decision teardown for the Review request end.
     artifacts: read("lib/artifacts.ts"),
     decisionData: read("lib/delete-workspace-decision-data.ts"),
+    // Agent conversation purge (account deletion and the retention job) removes a conversation's links before the conversation.
+    conversationPurge: read("lib/agent-conversation-purge.ts"),
   };
   const all = Object.values(sources).join("\n");
 
