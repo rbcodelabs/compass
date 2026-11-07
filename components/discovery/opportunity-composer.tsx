@@ -35,6 +35,7 @@ import { FEEDBACK_STATUS_META, type FeedbackStatus } from "@/lib/feedback-meta";
 import { useLabels, useThinkingModel } from "@/components/thinking-model/thinking-model-provider";
 import { ComposerObjectiveField } from "@/components/discovery/composer-objective-field";
 import { linkPlaceholder } from "@/lib/thinking-model/copy";
+import { DEFAULT_OPPORTUNITY_STATUS, OPPORTUNITY_PIPELINE_STATUSES, OPPORTUNITY_STATUS_DEFINITIONS, opportunityStatusTooltip } from "@/lib/opportunity-status";
 import {
   NEW_OPPORTUNITY_STATUSES,
   OPPORTUNITY_SEED_FEEDBACK_MAX,
@@ -54,12 +55,9 @@ import {
 export const OPPORTUNITY_OUTLINE =
   "## Who's affected\n\n\n\n## Current pain\n\n\n\n## Evidence\n\n\n\n## Desired outcome\n\n";
 
-const STATUS_LABELS: Record<NewOpportunityStatus, string> = {
-  EXPLORING: "Exploring",
-  VALIDATING: "Validating",
-  PRIORITIZED: "Prioritized",
-  ACTIVE: "Active",
-};
+const STATUS_LABELS: Record<NewOpportunityStatus, string> = Object.fromEntries(
+  OPPORTUNITY_PIPELINE_STATUSES.map((s) => [s, OPPORTUNITY_STATUS_DEFINITIONS[s].label]),
+) as Record<NewOpportunityStatus, string>;
 
 const NO_SQUAD = "__none__";
 
@@ -119,7 +117,7 @@ function ComposerForm({
   const [customerSegment, setCustomerSegment] = useState(restored?.customerSegment ?? "");
   // A column's preset is an explicit choice made just now, so it wins over the
   // status saved with an older draft.
-  const [status, setStatus] = useState<NewOpportunityStatus>(presetStatus ?? restored?.status ?? "EXPLORING");
+  const [status, setStatus] = useState<NewOpportunityStatus>(presetStatus ?? restored?.status ?? DEFAULT_OPPORTUNITY_STATUS);
   const [squadId, setSquadId] = useState<string | null>(restored?.squadId ?? null);
   const [keyResultId, setKeyResultId] = useState<string | null>(restored?.keyResultId ?? null);
   const [feedbackIds, setFeedbackIds] = useState<string[]>(restored?.feedbackIds ?? []);
@@ -406,7 +404,7 @@ function StatusField({
         </SelectTrigger>
         <SelectContent>
           {NEW_OPPORTUNITY_STATUSES.map((status) => (
-            <SelectItem key={status} value={status}>
+            <SelectItem key={status} value={status} title={opportunityStatusTooltip(status)}>
               {STATUS_LABELS[status]}
             </SelectItem>
           ))}

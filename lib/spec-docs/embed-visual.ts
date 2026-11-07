@@ -26,7 +26,7 @@ const GLYPH_TONE: Record<StatusGlyphName, StatusTone> = {
 type Entry = readonly [value: string, glyph: StatusGlyphName, label: string]
 
 const STATUS_TABLE: Partial<Record<DocEmbedKind, readonly Entry[]>> = {
-  opportunity: [["EXPLORING", "notStarted", "Exploring"], ["VALIDATING", "progress", "Validating"], ["PRIORITIZED", "ready", "Prioritized"], ["ACTIVE", "active", "Active"], ["ARCHIVED", "archived", "Archived"]],
+  opportunity: [["UNREVIEWED", "notStarted", "Unreviewed"], ["EXPLORING", "notStarted", "Exploring"], ["VALIDATING", "progress", "Validating"], ["PRIORITIZED", "ready", "Prioritized"], ["ACTIVE", "active", "Active"], ["ARCHIVED", "archived", "Archived"]],
   solution: [["IDEA", "notStarted", "Idea"], ["VALIDATED", "validated", "Validated"], ["IN_DELIVERY", "progress", "In delivery"], ["SHIPPED", "done", "Shipped"], ["KILLED", "stopped", "Killed"]],
   assumption: [["UNTESTED", "notStarted", "Untested"], ["TESTING", "progress", "Testing"], ["VALIDATED", "validated", "Validated"], ["INVALIDATED", "disproved", "Invalidated"]],
   experiment: [["DESIGNING", "notStarted", "Designing"], ["RUNNING", "progress", "Running"], ["COMPLETE", "done", "Complete"], ["KILLED", "stopped", "Killed"]],

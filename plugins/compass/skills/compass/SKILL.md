@@ -94,7 +94,7 @@ Organization
 |---|---|
 | OKRCycle | DRAFT → ACTIVE → CLOSED |
 | Objective | ON_TRACK / AT_RISK / OFF_TRACK / COMPLETE |
-| Opportunity | EXPLORING → VALIDATING → PRIORITIZED → ACTIVE → ARCHIVED |
+| Opportunity | UNREVIEWED → EXPLORING → VALIDATING → PRIORITIZED → ACTIVE → ARCHIVED |
 | Solution | IDEA → VALIDATED → IN_DELIVERY → SHIPPED / KILLED |
 | Assumption | UNTESTED → TESTING → VALIDATED / INVALIDATED |
 | Experiment | DESIGNING → RUNNING → COMPLETE / KILLED |
@@ -149,8 +149,8 @@ The API key is stored in the Vercel project settings and in `.env.local` as `MCP
 | `list_solutions` | Discover solutions across a workspace by solution status, parent opportunity status/squad, and roadmap-link presence; returns stable Opportunity and Roadmap Item IDs; recency-filterable. Each item also carries `linkedKeyResults` (`{ id, title, objectiveId }`) |
 | `list_assumptions` | Discover assumptions by status, risk, parent Solution status, and parent Opportunity status/squad; returns ancestry IDs and experiment counts; recency-filterable |
 | `get_opportunity` | Full tree: opportunity → solutions → assumptions → experiments. Also carries `linkedObjectives` |
-| `create_opportunity` | Create with optional KR link and squad assignment |
-| `update_opportunity_status` | Move through EXPLORING → VALIDATING → PRIORITIZED → ACTIVE → ARCHIVED |
+| `create_opportunity` | Create with optional KR link and squad assignment; new opportunities start UNREVIEWED unless a status is passed |
+| `update_opportunity_status` | Move through UNREVIEWED → EXPLORING → VALIDATING → PRIORITIZED → ACTIVE → ARCHIVED |
 | `link_opportunity_to_kr` | Associate an opportunity to its one driving Key Result (`keyResultId: null` clears). A Key Result from another workspace is rejected. Also writes a `LEGACY` link to that Key Result's Objective. Always use this tool for the pointer: `OPPORTUNITY_TARGETS_KEY_RESULT` in `entity_links` is only a flagged mirror of it and `link_entities` refuses it |
 | `link_opportunity_to_objective` | `workspaceId, opportunityId, objectiveId`. Idempotent: `created:true`, or `created:false` on repeat; `originFlipped:true` when it upgrades a `LEGACY` link to `DIRECT`. A `DIRECT` link survives clearing the opportunity's Key Result. Always use this tool, not `link_entities`, which refuses `OPPORTUNITY_TARGETS_OBJECTIVE` (a flagged mirror that keeps the `DIRECT`/`LEGACY` origin) |
 | `unlink_opportunity_from_objective` | Same inputs. `removed:1`, or `removed:0` when none. `removed:0, stillLinkedViaKeyResult:true` is a **successful no-op**: the opportunity's Key Result is under that Objective so the link stays (see *Links*) |
@@ -530,7 +530,7 @@ list_roadmap_items(workspaceId, updatedSince: "2026-09-11T00:00:00Z", sort: "rec
 # ...and the same for assumptions / experiments / tasks / docs / feedback
 
 # What has gone stale — untouched work, oldest first
-list_opportunities(workspaceId, status: "EXPLORING", sort: "leastRecentlyUpdated")
+list_opportunities(workspaceId, status: "UNREVIEWED", sort: "leastRecentlyUpdated")
 list_experiments(workspaceId,   status: "DESIGNING", sort: "leastRecentlyUpdated")
 ```
 

@@ -17,21 +17,13 @@ import {
   archiveOpportunity,
 } from "@/app/[orgSlug]/[workspaceSlug]/discovery/actions";
 import type { OpportunityScoreSummary, OpportunityStatus } from "@/lib/types";
+import { OPPORTUNITY_PIPELINE_STATUSES, OPPORTUNITY_STATUSES, OPPORTUNITY_STATUS_DEFINITIONS } from "@/lib/opportunity-status";
 
-const STATUS_ORDER: OpportunityStatus[] = [
-  "EXPLORING",
-  "VALIDATING",
-  "PRIORITIZED",
-  "ACTIVE",
-];
+const STATUS_ORDER: OpportunityStatus[] = [...OPPORTUNITY_PIPELINE_STATUSES];
 
-const STATUS_LABELS: Record<OpportunityStatus, string> = {
-  EXPLORING: "Exploring",
-  VALIDATING: "Validating",
-  PRIORITIZED: "Prioritized",
-  ACTIVE: "Active",
-  ARCHIVED: "Archived",
-};
+const STATUS_LABELS: Record<OpportunityStatus, string> = Object.fromEntries(
+  OPPORTUNITY_STATUSES.map((s) => [s, OPPORTUNITY_STATUS_DEFINITIONS[s].label]),
+) as Record<OpportunityStatus, string>;
 
 export type OpportunityCardData = {
   id: string;
