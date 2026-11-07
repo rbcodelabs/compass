@@ -18,6 +18,19 @@ Open a Roadmap item's detail panel to discuss it with the team. Shared Discussio
 
 On mobile, each column fills the available board width with small side gutters. Swipe sideways to reach the next column.
 
+### Pin, collapse and reorder columns
+
+On a wide screen (the medium breakpoint and up) any Board column can be **pinned**: it docks on the right, outside the scrolling area, so it stays put while the other columns scroll. That makes a pinned column a fixed drop target, for example when you drag a card to Now from far down the board.
+
+- **Pin or unpin.** Use the pin button in a column's header (it appears when you hover the header) or **Pin to the right** / **Unpin** in the column's **⋯** menu. Pinned columns sit side by side at the right edge, in the order they appear on the board.
+- **Collapse.** A pinned column has a **Collapse** button that folds it to a slim tab showing its name and item count. Click the tab to expand it again.
+- **Move left / Move right.** The **⋯** menu on any column reorders it without dragging, so it works from the keyboard too. Move actions are disabled at the ends.
+- **Not scheduled** is an ordinary column. By default it is pinned on the right and collapsed. Expand it, unpin it, collapse it again or move it like any other column, and Compass remembers what you chose.
+- **Swimlanes.** With **Group board by** on, only **Not scheduled** docks (the lanes need the horizon columns inside the grid), and it can't be unpinned while lanes are shown.
+- **Narrow screens.** Below the medium breakpoint nothing is docked: pinned columns appear in the scrolling board in their saved order, so **Not scheduled** is still the last swipe column on a phone, and the pin button is hidden. Your layout comes back when the screen is wide again.
+
+Pinned columns, their collapsed state and the column order are part of a [saved view](#saved-views). With no saved view selected, Compass remembers the layout in this browser for each workspace. If a saved layout can't be read, the board falls back to the default layout and the rest of the view still applies.
+
 ### Board swimlanes
 
 Use **Group board by** in the header to split the Board into horizontal swimlanes — one row per **Squad**, or one row per option of any single-select custom field on roadmap items. Each lane keeps the same horizon columns, with a sticky header so Now/Next/Later stay visible as you scroll, and ends with a **No squad** / **No \<field\>** lane for items with no value (or a value that no longer exists). Click a lane's header to collapse or expand it; the count shows how many items it holds. Choose **No swimlanes** to return to the classic board. Multi-select fields aren't offered, since an item could belong to several lanes at once.
@@ -123,8 +136,8 @@ Use **Reload timeline** to fetch a fresh snapshot after changes made elsewhere. 
 
 Compass surfaces validated or in-delivery Solutions from Discovery, and Bug-type Feedback items, that don't have a roadmap item yet. These are the same items that already have a "Promote to roadmap" action on the Discovery solution card or the Feedback board; this is a second entry point that lets you schedule them without leaving the roadmap.
 
-- **On the Board** — these candidates live in a **Not scheduled** sidebar docked on the right of the board (it collapses to a thin tab, and becomes the last swipe column on phones). Drag a card from it onto any roadmap horizon to schedule it there, or use its **⋯** menu to add it directly to Now/Next/Later without dragging. The sidebar remains visible when empty so the board layout stays consistent.
-- **On the Timeline** — the collapsible **Not scheduled** sidebar, docked on the right of the chart (or, on narrower screens, above it), the same sidebar the Board view shows. See [Build the roadmap from Discovery](#build-the-roadmap-from-discovery) below.
+- **On the Board** — these candidates live in the **Not scheduled** column, which by default is pinned to the right of the board and collapsed to a thin tab (expand it to see the cards; it remembers whether you left it open, and you can unpin or move it like any other column, see [Pin, collapse and reorder columns](#pin-collapse-and-reorder-columns)). On phones it is the last swipe column. Drag a card from it onto any roadmap horizon to schedule it there, or use its **⋯** menu to add it directly to Now/Next/Later without dragging. The column remains visible when empty so the board layout stays consistent.
+- **On the Timeline** — the collapsible **Not scheduled** sidebar, docked on the right of the chart (or, on narrower screens, above it), which looks like the Board's **Not scheduled** column but is a separate sidebar with its own open/closed setting. See [Build the roadmap from Discovery](#build-the-roadmap-from-discovery) below.
 
 Ideas (as opposed to Bugs) aren't included in the list — they're expected to go through Opportunity → Solution discovery first, same as everywhere else in Compass.
 
@@ -168,7 +181,7 @@ Checklist templates themselves (create_checklist_template, list_checklist_templa
 
 ## Saved Views
 
-Save the way you like to look at the roadmap and come back to it with one click. On a workspace roadmap, open the **Saved views** menu to save the current squad, custom-field filter, grouping and Board/Timeline choice. Opening a saved view applies those settings to the URL, so you can still change or clear any of them afterwards.
+Save the way you like to look at the roadmap and come back to it with one click. On a workspace roadmap, open the **Saved views** menu to save the current squad, custom-field filter, grouping, Board/Timeline choice and, on the Board, your column layout (which columns are pinned or collapsed, and their order). Opening a saved view applies those settings to the URL, so you can still change or clear any of them afterwards.
 
 Views are **personal** by default. The owner can share a view with the workspace or the whole organization. Only the owner can edit a view; the owner (or an admin, for shared views) can delete it. Sharing a view never widens access to the items themselves.
 

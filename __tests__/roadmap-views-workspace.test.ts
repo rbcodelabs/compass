@@ -98,3 +98,23 @@ describe("workspace URL round-trip", () => {
     expect(isWorkspaceStateModified(base, null)).toBe(false)
   })
 })
+
+describe("column layout in a workspace view", () => {
+  const layout = { columnOrder: ["NOW", "NEXT", "LATER", "LAUNCHING", "LAUNCHED", "SHIPPED", "unscheduled"], pinnedColumnIds: ["LATER", "unscheduled"], collapsedColumnIds: [] as string[] }
+  const withLayout = { ...saved, display: roadmapViewDisplaySchema.parse({ ...saved.display, columnLayout: layout }) }
+
+  it("comes from the saved view whether or not the URL is an edited=1 snapshot (it is not a URL param)", () => {
+    expect(resolveWorkspaceRoadmapState({}, withLayout).display.columnLayout).toEqual(layout)
+    expect(resolveWorkspaceRoadmapState({ edited: "1", squad: SQUAD }, withLayout).display.columnLayout).toEqual(layout)
+    expect(resolveWorkspaceRoadmapState({}, null).display.columnLayout).toBeUndefined()
+  })
+
+  it("filter edits on a saved view do not make it 'modified' because of the layout", () => {
+    const edited = resolveWorkspaceRoadmapState({ edited: "1", squad: SQUAD, field: FIELD, fieldValue: "Growth", groupBy: "squad", view: "timeline" }, withLayout)
+    expect(isWorkspaceStateModified(edited, withLayout)).toBe(false)
+  })
+
+  it("is not written to the URL", () => {
+    expect(workspaceStateToParams(resolveWorkspaceRoadmapState({}, withLayout)).toString()).toBe(workspaceStateToParams(resolveWorkspaceRoadmapState({}, saved)).toString())
+  })
+})
