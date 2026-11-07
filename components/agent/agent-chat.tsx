@@ -877,7 +877,7 @@ export function AgentChat({
                     <AttachedChip key={r.fileId} label={r.label} hint={driveConnected ? "Google Drive" : "Google Drive (not connected)"} file onRemove={() => setGoogleResources((l) => l.filter((x) => x !== r))} />
                   ))}
                   {googleResources.length > 0 && !driveConnected && agentChoices.loaded && (
-                    <span className="text-xs text-muted-foreground">Connect Google Drive in <a href="/settings/agents" className="underline underline-offset-2">Settings → Agents</a> so the agent can read this.</span>
+                    <span className="text-xs text-muted-foreground">Connect Google Drive in <Link href="/settings/agents" className="underline underline-offset-2">Settings → Agents</Link> so the agent can read this.</span>
                   )}
                   {attachError && <span role="alert" className="text-xs text-status-danger">{attachError}</span>}
                   {pendingSeedEntity && (
