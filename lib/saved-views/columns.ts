@@ -17,11 +17,11 @@ export const MAX_COLUMN_KEYS = 50
 
 /** Default Opportunities board order when no view is selected. Single source of truth for the board. */
 export const DEFAULT_OPPORTUNITY_COLUMN_ORDER = [
-  "UNREVIEWED",
   "ACTIVE",
   "PRIORITIZED",
   "VALIDATING",
   "EXPLORING",
+  "UNREVIEWED",
 ] as const satisfies readonly OpportunityStatus[]
 
 /** Default Solutions board order: work in flight first, finished and abandoned work last. */

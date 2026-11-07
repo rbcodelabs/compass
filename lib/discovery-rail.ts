@@ -3,11 +3,11 @@ import type { OpportunityStatus } from "@/lib/types";
 export type ActiveOpportunityStatus = Exclude<OpportunityStatus, "ARCHIVED">;
 
 export const ACTIVE_OPPORTUNITY_STATUS_ORDER: ActiveOpportunityStatus[] = [
-  "UNREVIEWED",
   "EXPLORING",
   "VALIDATING",
   "PRIORITIZED",
   "ACTIVE",
+  "UNREVIEWED",
 ];
 
 export type GroupedOpportunities<T> = {

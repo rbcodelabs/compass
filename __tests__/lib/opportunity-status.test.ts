@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest"
 import {
   DEFAULT_OPPORTUNITY_STATUS,
+  OPPORTUNITY_LIFECYCLE_STATUSES,
   OPPORTUNITY_PIPELINE_STATUSES,
+  OPPORTUNITY_PIPELINE_TEXT,
   OPPORTUNITY_STATUSES,
   OPPORTUNITY_STATUS_DEFINITIONS,
   isOpportunityStatus,
@@ -16,9 +18,11 @@ import { OPPORTUNITY_COLUMN_META } from "@/lib/saved-views/opportunity-columns"
 import { OPPORTUNITY_BOARD_STATUSES } from "@/lib/saved-views/schema"
 
 describe("opportunity status definitions", () => {
-  it("lists the pipeline in order with ARCHIVED last", () => {
-    expect([...OPPORTUNITY_STATUSES]).toEqual(["UNREVIEWED", "EXPLORING", "VALIDATING", "PRIORITIZED", "ACTIVE", "ARCHIVED"])
-    expect([...OPPORTUNITY_PIPELINE_STATUSES]).toEqual(["UNREVIEWED", "EXPLORING", "VALIDATING", "PRIORITIZED", "ACTIVE"])
+  it("shows Unreviewed after the other board columns while the lifecycle still starts there", () => {
+    expect([...OPPORTUNITY_STATUSES]).toEqual(["EXPLORING", "VALIDATING", "PRIORITIZED", "ACTIVE", "UNREVIEWED", "ARCHIVED"])
+    expect([...OPPORTUNITY_PIPELINE_STATUSES]).toEqual(["EXPLORING", "VALIDATING", "PRIORITIZED", "ACTIVE", "UNREVIEWED"])
+    expect([...OPPORTUNITY_LIFECYCLE_STATUSES]).toEqual(["UNREVIEWED", "EXPLORING", "VALIDATING", "PRIORITIZED", "ACTIVE", "ARCHIVED"])
+    expect(OPPORTUNITY_PIPELINE_TEXT).toBe("UNREVIEWED → EXPLORING → VALIDATING → PRIORITIZED → ACTIVE → ARCHIVED")
   })
 
   it("gives every status a label, tone, badge, definition and entry criterion", () => {
@@ -65,9 +69,9 @@ describe("opportunity status definitions", () => {
     }
   })
 
-  it("puts UNREVIEWED first on the board and still resolves saved layouts that omit it", () => {
+  it("puts UNREVIEWED last on the board and still resolves saved layouts that omit it", () => {
     expect([...OPPORTUNITY_BOARD_STATUSES]).toEqual([...OPPORTUNITY_PIPELINE_STATUSES])
-    expect(DEFAULT_OPPORTUNITY_COLUMN_ORDER[0]).toBe("UNREVIEWED")
+    expect(DEFAULT_OPPORTUNITY_COLUMN_ORDER.at(-1)).toBe("UNREVIEWED")
     // A view saved before UNREVIEWED existed: it is appended, not dropped or crashing.
     const legacy = resolveColumns({ order: ["EXPLORING", "VALIDATING", "PRIORITIZED", "ACTIVE"] }, OPPORTUNITY_BOARD_STATUSES, DEFAULT_OPPORTUNITY_COLUMN_ORDER, {})
     expect(legacy.order).toEqual(["EXPLORING", "VALIDATING", "PRIORITIZED", "ACTIVE", "UNREVIEWED"])

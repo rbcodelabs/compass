@@ -53,21 +53,21 @@ function renderBoard(props: Partial<React.ComponentProps<typeof OpportunityBoard
 describe("OpportunityBoard column layout", () => {
   afterEach(cleanup)
 
-  it("renders Unreviewed first, then Active, with no layout", () => {
+  it("renders Active first and Unreviewed last with no layout", () => {
     renderBoard()
-    expect(headings()).toEqual(["Unreviewed", "Active", "Prioritized", "Validating", "Exploring"])
+    expect(headings()).toEqual(["Active", "Prioritized", "Validating", "Exploring", "Unreviewed"])
   })
 
   it("renders the resolved saved order, appending omitted statuses", () => {
     const { visible } = resolveOpportunityColumns({ order: ["EXPLORING", "VALIDATING"], hidden: [] }, {})
     renderBoard({ columnOrder: visible })
-    expect(headings()).toEqual(["Exploring", "Validating", "Unreviewed", "Active", "Prioritized"])
+    expect(headings()).toEqual(["Exploring", "Validating", "Active", "Prioritized", "Unreviewed"])
   })
 
   it("omits hidden empty columns", () => {
     const { visible } = resolveOpportunityColumns({ order: [], hidden: ["VALIDATING", "PRIORITIZED"] }, { EXPLORING: 1 })
     renderBoard({ columnOrder: visible })
-    expect(headings()).toEqual(["Unreviewed", "Active", "Exploring"])
+    expect(headings()).toEqual(["Active", "Exploring", "Unreviewed"])
   })
 
   it("marks a hidden column that still has cards", () => {
@@ -103,13 +103,13 @@ describe("ColumnsPopover", () => {
   it("reorders with the move buttons through the order param", async () => {
     open(undefined, {})
     fireEvent.click(await screen.findByRole("button", { name: "Move Exploring up" }))
-    expect(lastHref()).toBe("/acme/core/discovery?order=UNREVIEWED%2CACTIVE%2CPRIORITIZED%2CEXPLORING%2CVALIDATING")
+    expect(lastHref()).toBe("/acme/core/discovery?order=ACTIVE%2CPRIORITIZED%2CEXPLORING%2CVALIDATING%2CUNREVIEWED")
   })
 
   it("cannot move the first column up or the last down", async () => {
     open(undefined, {})
-    expect(await screen.findByRole("button", { name: "Move Unreviewed up" })).toBeDisabled()
-    expect(screen.getByRole("button", { name: "Move Exploring down" })).toBeDisabled()
+    expect(await screen.findByRole("button", { name: "Move Active up" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Move Unreviewed down" })).toBeDisabled()
   })
 
   it("shows the hidden count and lets a forced-visible column be un-hidden", async () => {

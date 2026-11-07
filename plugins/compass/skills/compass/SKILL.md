@@ -94,7 +94,7 @@ Organization
 |---|---|
 | OKRCycle | DRAFT → ACTIVE → CLOSED |
 | Objective | ON_TRACK / AT_RISK / OFF_TRACK / COMPLETE |
-| Opportunity | UNREVIEWED → EXPLORING → VALIDATING → PRIORITIZED → ACTIVE → ARCHIVED |
+| Opportunity | UNREVIEWED → EXPLORING → VALIDATING → PRIORITIZED → ACTIVE → ARCHIVED (lifecycle order; the board shows Unreviewed as its last column) |
 | Solution | IDEA → VALIDATED → IN_DELIVERY → SHIPPED / KILLED |
 | Assumption | UNTESTED → TESTING → VALIDATED / INVALIDATED |
 | Experiment | DESIGNING → RUNNING → COMPLETE / KILLED |

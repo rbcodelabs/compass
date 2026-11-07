@@ -8,16 +8,18 @@
  * drift apart. Pure: no React, no Prisma, so server, client and tests can all
  * import it.
  *
- * Pipeline: UNREVIEWED -> EXPLORING -> VALIDATING -> PRIORITIZED -> ACTIVE
- * (-> ARCHIVED, which is not a pipeline stage and not a board column).
+ * Lifecycle: UNREVIEWED -> EXPLORING -> VALIDATING -> PRIORITIZED -> ACTIVE
+ * (-> ARCHIVED, which is not a pipeline stage and not a board column). That is
+ * the order an opportunity moves in; the arrays below are display order, which
+ * puts the Unreviewed inbox after the other board columns.
  */
 import type { OpportunityStatus } from "@/lib/types"
 
-/** Every status, in pipeline order, ARCHIVED last. */
-export const OPPORTUNITY_STATUSES = ["UNREVIEWED", "EXPLORING", "VALIDATING", "PRIORITIZED", "ACTIVE", "ARCHIVED"] as const satisfies readonly OpportunityStatus[]
+/** Every status in display order: the working statuses, then the Unreviewed inbox (the last board column), then ARCHIVED. */
+export const OPPORTUNITY_STATUSES = ["EXPLORING", "VALIDATING", "PRIORITIZED", "ACTIVE", "UNREVIEWED", "ARCHIVED"] as const satisfies readonly OpportunityStatus[]
 
-/** Statuses that are pipeline stages (board columns); everything but ARCHIVED. */
-export const OPPORTUNITY_PIPELINE_STATUSES = ["UNREVIEWED", "EXPLORING", "VALIDATING", "PRIORITIZED", "ACTIVE"] as const satisfies readonly OpportunityStatus[]
+/** Board columns, in display order; everything but ARCHIVED. Unreviewed sits last. */
+export const OPPORTUNITY_PIPELINE_STATUSES = ["EXPLORING", "VALIDATING", "PRIORITIZED", "ACTIVE", "UNREVIEWED"] as const satisfies readonly OpportunityStatus[]
 
 /**
  * The status every newly created opportunity gets unless the caller picks one
@@ -120,10 +122,13 @@ export function opportunityStatusTooltip(status: OpportunityStatus): string {
   return `${d.definition} ${d.entryCriterion}`
 }
 
+/** The order an opportunity moves through (not display order). */
+export const OPPORTUNITY_LIFECYCLE_STATUSES = ["UNREVIEWED", "EXPLORING", "VALIDATING", "PRIORITIZED", "ACTIVE", "ARCHIVED"] as const satisfies readonly OpportunityStatus[]
+
 /** "UNREVIEWED → EXPLORING → ..." for MCP tool descriptions and docs. */
-export const OPPORTUNITY_PIPELINE_TEXT = [...OPPORTUNITY_PIPELINE_STATUSES, "ARCHIVED"].join(" → ")
+export const OPPORTUNITY_PIPELINE_TEXT = OPPORTUNITY_LIFECYCLE_STATUSES.join(" → ")
 
 /** One line per status, for embedding in MCP tool descriptions. */
-export const OPPORTUNITY_STATUS_GUIDE = OPPORTUNITY_STATUSES.map(
+export const OPPORTUNITY_STATUS_GUIDE = OPPORTUNITY_LIFECYCLE_STATUSES.map(
   (s) => `${s}: ${OPPORTUNITY_STATUS_DEFINITIONS[s].definition}`,
 ).join(" ")

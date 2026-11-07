@@ -14,9 +14,17 @@ import { expect } from "./index";
 export async function createOpportunityFromBoard(
   page: Page,
   title: string,
-  { column = 0, closePanel = true }: { column?: number; closePanel?: boolean } = {},
+  { column = 0, closePanel = true }: { column?: number | string; closePanel?: boolean } = {},
 ) {
-  await page.getByRole("button", { name: /Add opportunity/i }).nth(column).click();
+  // A string selects the column by its title, so callers do not depend on the board's default column order.
+  const add =
+    typeof column === "number"
+      ? page.getByRole("button", { name: /Add opportunity/i }).nth(column)
+      : page
+          .getByRole("heading", { level: 3, name: new RegExp(`^${column}`) })
+          .locator("xpath=ancestor::section[1]")
+          .getByRole("button", { name: /Add opportunity/i });
+  await add.click();
   const composer = page.locator('[data-slot="opportunity-composer"]');
   await expect(composer).toBeVisible();
   await composer.getByLabel("Title").fill(title);

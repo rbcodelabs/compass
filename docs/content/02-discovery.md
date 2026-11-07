@@ -28,7 +28,7 @@ In Table view, select the chevron next to an opportunity to reveal its child sol
 
 On touch screens, swipe over card content to scroll vertically or move horizontally between board columns. Use the dotted drag handle to move a card instead. On desktop, column headers stay visible while their cards scroll.
 
-Opportunities move through five statuses, shown as columns on the kanban board. Every new opportunity starts in **UNREVIEWED**, however it is created (the board, the table, the composer, an agent, the API, or feedback you promote). Existing opportunities keep the status they already have.
+Opportunities move through five statuses, from Unreviewed to Active (the table below is in that order). The kanban board shows them as columns with Unreviewed last. Every new opportunity starts in **UNREVIEWED**, however it is created (the board, the table, the composer, an agent, the API, or feedback you promote). Existing opportunities keep the status they already have.
 
 | Status | What it means | Move it here when |
 |---|---|---|
@@ -42,13 +42,13 @@ Opportunities move through five statuses, shown as columns on the kanban board. 
 
 Hover the **i** next to a column title to read its definition and entry criterion. The status dropdown in an opportunity's header shows the same text, because both read from one shared definition.
 
-The board opens with Unreviewed first, followed by Active, Prioritized, Validating and Exploring. Use the **Columns** control to reorder or hide any of them; saved views that predate Unreviewed simply pick it up as an extra column.
+The board opens with Active, Prioritized, Validating and Exploring, followed by Unreviewed as the last column. Use the **Columns** control to reorder or hide any of them; saved views that predate Unreviewed simply pick it up as an extra column.
 
 Drag cards between columns to update status. Use **Filters** at the top of the page to filter opportunities by squad, or switch between **Board** and **Tree** views using the view control.
 
 ### Exporting opportunities to CSV
 
-Open the **⋯** (Discovery tools) menu and choose **Export CSV** to download the opportunities on the page as a spreadsheet-ready file. The export respects the squad and tag filters currently applied, so the file matches what you are looking at; view, group-by and sort are presentation only and do not change it. Columns: Title, Status, Squad, Customer segment, Score, Solutions, Evidence, and a Link back to the opportunity. Rows are ordered by status (Unreviewed, Exploring, Validating, Prioritized, Active, then Archived), keeping the manual order within each status. Archived opportunities are included, so filter the Status column in your spreadsheet to hide them. Score is blank when an opportunity has no score or the workspace has no active scoring model.
+Open the **⋯** (Discovery tools) menu and choose **Export CSV** to download the opportunities on the page as a spreadsheet-ready file. The export respects the squad and tag filters currently applied, so the file matches what you are looking at; view, group-by and sort are presentation only and do not change it. Columns: Title, Status, Squad, Customer segment, Score, Solutions, Evidence, and a Link back to the opportunity. Rows are ordered by status (Exploring, Validating, Prioritized, Active, Unreviewed, then Archived), keeping the manual order within each status. Archived opportunities are included, so filter the Status column in your spreadsheet to hide them. Score is blank when an opportunity has no score or the workspace has no active scoring model.
 
 ### Group by: Status or a custom field
 
