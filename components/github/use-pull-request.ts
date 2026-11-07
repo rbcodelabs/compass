@@ -25,10 +25,11 @@ function load(orgSlug: string, workspaceSlug: string, ref: PullRequestRef): Prom
   const request = fetch("/api/panels/github-pr?" + qs.toString())
     .then(async (res): Promise<Entry | null> => {
       if (res.ok) return { summary: (await res.json()) as PullRequestSummary, fetchedAt: Date.now() }
-      if (res.status === 401 || res.status === 403 || res.status === 404 || res.status === 503) return { summary: null, fetchedAt: Date.now() }
-      return null
+      // Any failure settles as unavailable (the chip falls back to a plain link instead of a skeleton forever). It is retried after
+      // REVALIDATE_AFTER_MS on the next focus.
+      return { summary: null, fetchedAt: Date.now() }
     })
-    .catch(() => null)
+    .catch((): Entry => ({ summary: null, fetchedAt: Date.now() }))
     .finally(() => inflight.delete(key))
   inflight.set(key, request)
   return request

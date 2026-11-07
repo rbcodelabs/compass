@@ -87,7 +87,7 @@ type RailMessage = {
   authorUserId?: string | null
   authorName?: string | null
 }
-type RailThread = { id: string; title: string | null }
+type RailThread = { id: string; title: string | null; snippet?: string | null }
 
 /**
  * A new chat's transcript, as a stable reference.
@@ -250,6 +250,9 @@ export function AgentRail({ workspaceId, basePath, userInitials, userId }: Agent
   const [orgSlug = "", workspaceSlug = ""] = basePath.split("/").filter(Boolean)
 
   const [threads, setThreads] = useState<RailThread[]>([])
+  const [searchText, setSearchText] = useState("")
+  // Server results for the current (debounced) query; null while not searching.
+  const [searchResults, setSearchResults] = useState<RailThread[] | null>(null)
   // Stored *with* the id it was loaded for, and read back through that id
   // below. Keeping them in separate pieces of state lets a thread switch put
   // one thread's transcript on screen under another thread's id for as long as
@@ -303,6 +306,33 @@ export function AgentRail({ workspaceId, basePath, userInitials, userId }: Agent
       // composer and the active transcript do not depend on it.
     }
   }, [workspaceId])
+
+  useEffect(() => {
+    const q = searchText.trim()
+    if (!q) {
+      setSearchResults(null)
+      return
+    }
+    setSearchResults(null)
+    const controller = new AbortController()
+    const timer = setTimeout(async () => {
+      try {
+        const response = await fetch(
+          "/api/agent/conversations?workspaceId=" + encodeURIComponent(workspaceId) + "&q=" + encodeURIComponent(q),
+          { signal: controller.signal },
+        )
+        if (!response.ok) return
+        const data = (await response.json()) as { conversations?: RailThread[] }
+        setSearchResults(data.conversations ?? [])
+      } catch {
+        // Aborted or offline: leave the "Searching…" state until the next query.
+      }
+    }, 250)
+    return () => {
+      clearTimeout(timer)
+      controller.abort()
+    }
+  }, [searchText, workspaceId])
 
   useEffect(() => {
     if (open) void loadThreads()
@@ -577,21 +607,46 @@ export function AgentRail({ workspaceId, basePath, userInitials, userId }: Agent
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-64 p-0">
             <div className="max-h-64 overflow-y-auto p-1">
-            {(showArchived ? archivedThreads : threads).length === 0 && (
-              <DropdownMenuItem disabled>
-                {showArchived ? "No archived chats" : "No conversations yet"}
-              </DropdownMenuItem>
+            {!showArchived && (
+              <input
+                type="search"
+                value={searchText}
+                onChange={(e) => setSearchText(e.target.value)}
+                onKeyDown={(e) => e.stopPropagation()}
+                placeholder="Search conversations…"
+                aria-label="Search conversations"
+                className="mb-1 w-full rounded-md border border-border bg-background px-2 py-1 text-sm outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              />
             )}
-            {(showArchived ? archivedThreads : threads).map((thread) => (
-              <DropdownMenuItem
-                key={thread.id}
-                onClick={() => (showArchived ? void restoreThread(thread.id) : selectConversation(thread.id))}
-                className={cn(thread.id === conversationId && "font-semibold")}
-              >
-                {showArchived && <ArchiveRestore className="size-4 shrink-0 text-text-subtle" aria-hidden="true" />}
-                <span className="truncate">{thread.title || "Untitled chat"}</span>
-              </DropdownMenuItem>
-            ))}
+            {(() => {
+              const q = showArchived ? "" : searchText.trim()
+              const list = showArchived ? archivedThreads : q ? (searchResults ?? []) : threads
+              if (q && searchResults === null) {
+                return <DropdownMenuItem disabled>Searching…</DropdownMenuItem>
+              }
+              if (list.length === 0) {
+                return (
+                  <DropdownMenuItem disabled>
+                    {showArchived ? "No archived chats" : q ? "No matches" : "No conversations yet"}
+                  </DropdownMenuItem>
+                )
+              }
+              return list.map((thread) => (
+                <DropdownMenuItem
+                  key={thread.id}
+                  onClick={() => (showArchived ? void restoreThread(thread.id) : selectConversation(thread.id))}
+                  className={cn("items-start", thread.id === conversationId && "font-semibold")}
+                >
+                  {showArchived && <ArchiveRestore className="size-4 shrink-0 text-text-subtle" aria-hidden="true" />}
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate">{thread.title || "Untitled chat"}</span>
+                    {thread.snippet && (
+                      <span className="block truncate text-xs font-normal text-text-subtle">{thread.snippet}</span>
+                    )}
+                  </span>
+                </DropdownMenuItem>
+              ))
+            })()}
             </div>
             <DropdownMenuSeparator className="my-0" />
             <div className="p-1">
