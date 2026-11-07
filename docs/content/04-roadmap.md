@@ -30,14 +30,14 @@ The dock is **one slot**, however many columns you pin. It is a panel that shows
 - **Drop onto a tab.** While the dock is closed, a tab for a horizon is still a drop target: drag a card onto it and the card moves to that horizon.
 - **Reorder.** Use **Move left** / **Move right** in the column's **⋯** menu. For a pinned column this changes the order of the tabs; for the others it changes their order on the board.
 - **Not scheduled** is an ordinary column. By default it is the one pinned column, with the dock closed. Open it, unpin it, add other tabs next to it or move it like any other column, and Compass remembers what you chose.
-- **Swimlanes.** With **Group board by** on, only **Not scheduled** docks (the lanes need the horizon columns inside the grid), and it can't be unpinned while lanes are shown.
+- **Swimlanes.** With swimlanes on (the **Group board by** control in the header), only **Not scheduled** docks (the lanes need the horizon columns inside the grid), and it can't be unpinned while lanes are shown.
 - **Narrow screens.** Below the medium breakpoint nothing is docked: pinned columns appear in the scrolling board in their saved order, so **Not scheduled** is still the last swipe column on a phone, and the pin button is hidden. Your layout comes back when the screen is wide again.
 
 Which columns are pinned, which tab is active, whether the dock is open and the column order are part of a [saved view](#saved-views). With no saved view selected, Compass remembers the layout in this browser for each workspace. If a saved layout can't be read, the board falls back to the default layout and the rest of the view still applies.
 
 ### Board swimlanes
 
-Use **Group board by** in the header to split the Board into horizontal swimlanes — one row per **Squad**, or one row per option of any single-select custom field on roadmap items. Each lane keeps the same horizon columns, with a sticky header so Now/Next/Later stay visible as you scroll, and ends with a **No squad** / **No \<field\>** lane for items with no value (or a value that no longer exists). Click a lane's header to collapse or expand it; the count shows how many items it holds. Choose **No swimlanes** to return to the classic board. Multi-select fields aren't offered, since an item could belong to several lanes at once.
+Use the **Group board by** control in the header (an icon button; hover it to see the current mode, and a small dot on the icon means swimlanes are on) to split the Board into horizontal swimlanes — one row per **Squad**, or one row per option of any single-select custom field on roadmap items. Each lane keeps the same horizon columns, with a sticky header so Now/Next/Later stay visible as you scroll, and ends with a **No squad** / **No \<field\>** lane for items with no value (or a value that no longer exists). Click a lane's header to collapse or expand it; the count shows how many items it holds. Choose **No swimlanes** to return to the classic board. Multi-select fields aren't offered, since an item could belong to several lanes at once.
 
 Drag a card into another lane to **reassign** it: the card's squad (or custom-field value) becomes the lane's, and dropping into the *No …* lane clears it. Dragging also changes the horizon in the same move if you drop in a different column. If the change can't be saved, the card snaps back and a message explains. Dragging an item from **Not scheduled** into a lane schedules it and sets that lane's value. Launching and Launched remain workflow-managed: dropping there opens the item instead of moving it.
 
@@ -107,7 +107,7 @@ The native chart groups items by horizon and squad by default, with separate tra
 
 ### Timeline grouping
 
-Use the **Group by** control next to the timeline navigation to change how rows are organized:
+Use the **Group timeline by** control next to the timeline navigation (an icon button; hover it to see the current grouping, and a small dot on the icon means it is not the default Phase) to change how rows are organized:
 
 - **Phase** (default) — a header row per horizon (Now/Next/Later/Launching/Launched/Shipped), with squad sub-lanes underneath.
 - **Squad** — one header and lane per squad, plus a No squad group. No horizon rows.
