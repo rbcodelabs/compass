@@ -69,8 +69,16 @@ async function feedbackLinks(titles: string[]) {
   });
 }
 
-async function openColumnComposer(page: Page, column: number) {
-  await page.getByRole("button", { name: /Add opportunity/i }).nth(column).click();
+async function openColumnComposer(page: Page, column: number | string) {
+  // A string selects the column by its title, so the spec does not depend on the board's default column order.
+  const add =
+    typeof column === "number"
+      ? page.getByRole("button", { name: /Add opportunity/i }).nth(column)
+      : page
+          .getByRole("heading", { level: 3, name: new RegExp(`^${column}`) })
+          .locator("xpath=ancestor::section[1]")
+          .getByRole("button", { name: /Add opportunity/i });
+  await add.click();
   const composer = page.locator('[data-slot="opportunity-composer"]');
   await expect(composer).toBeVisible();
   return composer;
@@ -86,7 +94,7 @@ test.describe("Opportunity composer panel", () => {
     await page.waitForLoadState("networkidle");
 
     // The Validating column's button presets Validating.
-    const composer = await openColumnComposer(page, 1);
+    const composer = await openColumnComposer(page, "Validating");
     await expect(page).toHaveURL(/detail=opportunity-new%3Anew-validating/);
     await expect(page.locator('[data-slot="pinned-panel"]')).toContainText("New opportunity");
     await expect(page.locator('[data-slot="sheet-content"]')).toHaveCount(0);
@@ -167,7 +175,7 @@ test.describe("Opportunity composer panel", () => {
     // Esc closes the panel but keeps the draft.
     await composer.getByLabel("Title").press("Escape");
     await expect(page.locator('[data-slot="opportunity-composer"]')).toHaveCount(0);
-    composer = await openColumnComposer(page, 2);
+    composer = await openColumnComposer(page, "Prioritized");
     await expect(composer.getByLabel("Title")).toHaveValue(title);
     // A different column's button re-presets the status but keeps the text.
     await expect(composer.getByRole("combobox", { name: "Status" })).toHaveText(/Prioritized/);
