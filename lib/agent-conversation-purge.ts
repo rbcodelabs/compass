@@ -10,6 +10,7 @@
 import type { AppPrismaClient } from "@/lib/db"
 import { getAgentSessionStorage, type ArtifactStorage } from "@/lib/artifact-storage"
 import { DELETE_BATCH_SIZE, deleteInBatches, isMissingTable, pages } from "@/lib/batched-delete"
+import { deleteLinksForEntity } from "@/lib/links/service"
 
 /** Run-event payloads can be large (tool results, Drive file contents), so their pages are smaller than the default. */
 export const RUN_EVENT_BATCH_SIZE = 100
@@ -144,6 +145,7 @@ export async function purgeConversations(
     }
     await prisma.pMInterview.updateMany({ where: { agentConversationId: { in: ids } }, data: { agentConversationId: null } })
     await deleteInBatches(prisma.apiKey, { scopeConversationId: { in: ids } })
+    await deleteLinksForEntity(prisma, "AGENT_CONVERSATION", ids)
     await deleteRunsWhere(prisma, { conversationId: { in: ids } })
     await deleteInBatches(prisma.agentMessage, { conversationId: { in: ids } })
     await tolerateMissingTable(() => deleteInBatches(prisma.agentConversationParticipant, { conversationId: { in: ids } }), 0)

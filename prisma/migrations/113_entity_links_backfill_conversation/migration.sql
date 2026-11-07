@@ -1,0 +1,17 @@
+-- Migration 113: backfill entity_links for agent conversation links
+-- (RM-19: agent conversations <-> Opportunities, Solutions and Tasks).
+--
+-- NO DDL, and EXPLICIT-ONLY: an untargeted POST never runs it. POST it by name
+-- ({"script":"113_entity_links_backfill_conversation"}) after the code that writes CONVERSATION_CREATED / CONVERSATION_MENTIONS is
+-- deployed, so nothing is created unlinked while it runs. The legacy task_links rows stay the source of truth for the plan card and
+-- the task screen; nothing here changes or deletes them.
+--
+--   CONVERSATION_CREATED <- task_links WHERE linked_type = 'AGENT_CONVERSATION' (conversation -> task; origin MIGRATION, source AGENT,
+--                           created_at copied). A CONVERSATION_MENTIONS row for the same pair is removed.
+--
+-- Batched at 500 rows (keyset-paged) with an anti-join and no ON CONFLICT. Dangling and cross-workspace legacy rows are quarantined:
+-- never linked, never deleted, REPORTED. Before the receipt the hook proves zero unmatched consistent legacy rows, zero duplicate pairs,
+-- no pair holding both link types, and the written workspace_id equal to the conversation's.
+--
+-- This file intentionally contains no executable statement; the work is the hook
+-- (lib/migrations/entity-links-conversation-backfill.ts).

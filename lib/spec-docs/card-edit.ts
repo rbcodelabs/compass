@@ -25,7 +25,7 @@ export type CardEditSpec = {
 }
 
 const SPECS: Partial<Record<DocEmbedKind, CardEditSpec>> = {
-  opportunity: { entityType: "opportunity", statuses: ["EXPLORING", "VALIDATING", "PRIORITIZED", "ACTIVE", "ARCHIVED"] },
+  opportunity: { entityType: "opportunity", statuses: ["EXPLORING", "VALIDATING", "PRIORITIZED", "ACTIVE", "UNREVIEWED", "ARCHIVED"] },
   solution: { entityType: "solution", statuses: ["IDEA", "VALIDATED", "IN_DELIVERY", "SHIPPED", "KILLED"] },
   assumption: { entityType: "assumption", statuses: ["UNTESTED", "TESTING", "VALIDATED", "INVALIDATED"] },
   experiment: { entityType: "experiment", statuses: ["DESIGNING", "RUNNING", "COMPLETE", "KILLED"] },

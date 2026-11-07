@@ -245,6 +245,8 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   // Agent conversation archive: one nullable ADD COLUMN (agent_conversations.archived_at), no default, no backfill, no index, no FK. Additive.
   // Digest recorded from the shipped SQL after reading it (single ALTER TABLE ... ADD COLUMN IF NOT EXISTS).
   "112_agent_conversation_archive": "5b9d029dd2de58f7e91adc163491fd2d56616de655ebeecaaae0ddc5b27eeba7",
+  // Agent conversation links (RM-19): no executable SQL (comments only). The work is the TypeScript hook pinned in REVIEWED_MIGRATION_CODE_SHA256.
+  "113_entity_links_backfill_conversation": "76e164fc94afd8ac2a69e0be16121c0955b22ec0c2955ab89f6873d088daab66",
   // Doc publishing: two nullable ADD COLUMNs on docs (published_at, published_by_id), no default, no backfill, no index, no FK. Additive; NULL = private.
   // The 113 postcondition (both columns exist, typed, nullable) is pinned in REVIEWED_MIGRATION_CODE_SHA256. Digest recorded from the shipped SQL after reading it.
   "113_doc_publishing": "a4b32cc07df478c2f228264697b039dbc42140e83519417180b7f43c81da5d0d",
@@ -339,6 +341,11 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
   // The 097 backfill hook and the OCC retry it imports; editing either re-reviews the migration.
   "097_entity_links_backfill_task": {
     "lib/migrations/entity-links-task-backfill.ts": "90ee98823171cf7e1ac43aed2427ab6733a26d1b863ed7fa763ee8f6cd932d54",
+    "lib/migrations/workspace-id-on-solution-objective.ts": "43295c27b84b319d6cfcada757c7dab6c598c930e237aa642c8d05fa94a3f8c7",
+  },
+  // The 113 backfill hook and the OCC retry it imports; editing either re-reviews the migration.
+  "113_entity_links_backfill_conversation": {
+    "lib/migrations/entity-links-conversation-backfill.ts": "9b887fc619b3a615eac2905e4ec343f3e75512215915588b0ddd975daf1e56a7",
     "lib/migrations/workspace-id-on-solution-objective.ts": "43295c27b84b319d6cfcada757c7dab6c598c930e237aa642c8d05fa94a3f8c7",
   },
   // The 098 and 099 postconditions (098: six nullable columns, owner_workspace_id index valid and ready; 099: owner_user_id really nullable).

@@ -5,6 +5,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
 const state = vi.hoisted(() => ({ data: {} as Record<string, unknown>, openPanel: vi.fn() }));
+vi.mock("@/components/links/linked-conversations-section", () => ({ LinkedConversationsSection: () => null }));
 vi.mock("@/components/panels/panel-parts", async (original) => ({
   ...await original<typeof import("@/components/panels/panel-parts")>(),
   useEntityDetail: () => ({ data: state.data, mutate: vi.fn(), refresh: vi.fn() }),

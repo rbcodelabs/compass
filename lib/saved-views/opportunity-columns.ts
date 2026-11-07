@@ -4,18 +4,14 @@
  */
 import { DEFAULT_OPPORTUNITY_COLUMN_ORDER, resolveColumns, type ColumnLayout, type ResolvedColumns } from "@/lib/saved-views/columns"
 import { OPPORTUNITY_BOARD_STATUSES } from "@/lib/saved-views/schema"
+import { OPPORTUNITY_STATUSES, OPPORTUNITY_STATUS_DEFINITIONS } from "@/lib/opportunity-status"
 import type { OpportunityStatus } from "@/lib/types"
 
 export type ColumnAccent = "neutral" | "info" | "warning" | "success"
 
-export const OPPORTUNITY_COLUMN_META: Record<OpportunityStatus, { label: string; accent: ColumnAccent }> = {
-  ACTIVE: { label: "Active", accent: "success" },
-  PRIORITIZED: { label: "Prioritized", accent: "info" },
-  VALIDATING: { label: "Validating", accent: "warning" },
-  EXPLORING: { label: "Exploring", accent: "neutral" },
-  // Not a board column; present so the record is total over OpportunityStatus.
-  ARCHIVED: { label: "Archived", accent: "neutral" },
-}
+export const OPPORTUNITY_COLUMN_META = Object.fromEntries(
+  OPPORTUNITY_STATUSES.map((s) => [s, { label: OPPORTUNITY_STATUS_DEFINITIONS[s].label, accent: OPPORTUNITY_STATUS_DEFINITIONS[s].tone as ColumnAccent }]),
+) as Record<OpportunityStatus, { label: string; accent: ColumnAccent }>
 
 export type OpportunityColumns = {
   /** Every column in render order, hidden ones included (the Columns popover lists these). */

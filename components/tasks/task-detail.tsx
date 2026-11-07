@@ -42,6 +42,7 @@ import { Discussion } from "@/components/comments/discussion";
 import { InlineAssigneeField } from "./inline-assignee-field";
 import { InlineDateField } from "./inline-date-field";
 import { TaskLinksPanel } from "./task-links-panel";
+import { LinkedConversationsSection } from "@/components/links/linked-conversations-section";
 import { AddSubtaskForm } from "./add-subtask-form";
 import { CustomFieldsPanel } from "@/components/custom-fields/custom-fields-panel";
 import { TASK_STATUS_LABELS, TASK_PRIORITY_LABELS } from "@/lib/task-meta";
@@ -349,6 +350,8 @@ export function TaskDetail({ taskId, orgSlug, workspaceSlug, variant }: Props) {
           workspaceSlug={workspaceSlug}
         />
       </Section>
+
+      <LinkedConversationsSection entityType="TASK" entityId={taskId} orgSlug={orgSlug} workspaceSlug={workspaceSlug} />
 
       {data.customFields.length > 0 && (
         <Section label="Details">

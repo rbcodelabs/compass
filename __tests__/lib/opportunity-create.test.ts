@@ -146,7 +146,7 @@ describe("normalizeNewOpportunityInput", () => {
         title: "Onboarding",
         description: null,
         customerSegment: "SMB",
-        status: "EXPLORING",
+        status: "UNREVIEWED",
         squadId: null,
         linkedKeyResultId: null,
         feedbackIds: ["fb-1", "fb-2"],
@@ -234,7 +234,7 @@ describe("createOpportunityWithLinks", () => {
 
   it("is a plain create when nothing is linked", async () => {
     await create({ title: "Solo" })
-    expect(db.state.opportunities[0]).toMatchObject({ linkedKeyResultId: null, squadId: null, status: "EXPLORING" })
+    expect(db.state.opportunities[0]).toMatchObject({ linkedKeyResultId: null, squadId: null, status: "UNREVIEWED" })
     expect(db.state.feedback.every((row) => row.opportunityId !== "opp-1")).toBe(true)
   })
 

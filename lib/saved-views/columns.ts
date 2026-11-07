@@ -21,6 +21,7 @@ export const DEFAULT_OPPORTUNITY_COLUMN_ORDER = [
   "PRIORITIZED",
   "VALIDATING",
   "EXPLORING",
+  "UNREVIEWED",
 ] as const satisfies readonly OpportunityStatus[]
 
 /** Default Solutions board order: work in flight first, finished and abandoned work last. */

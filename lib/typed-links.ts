@@ -37,7 +37,8 @@ const readCompare = () => import("@/lib/links/read-compare")
 const legacyMirror = () => import("@/lib/links/legacy-mirror")
 const entityLinkService = () => import("@/lib/links/service")
 
-export type LinkSource = "UI" | "MCP" | "API"
+/** "AGENT" marks a link the in-app agent made on its own (lib/agent-conversation-links.ts); the others are explicit user or API calls. */
+export type LinkSource = "UI" | "MCP" | "API" | "AGENT"
 export type LinkContext = { source: LinkSource; createdById?: string | null }
 
 export type TypedLinkErrorCode = "NOT_FOUND" | "WORKSPACE_MISMATCH" | "INVALID"
