@@ -1,9 +1,10 @@
 import { test, expect } from "../fixtures/index";
+import { clickNewDoc } from "../fixtures/docs";
 import type { Page } from "@playwright/test";
 
 async function createDoc(page: Page, base: string) {
   await page.goto(`${base}/docs`);
-  await page.getByRole("button", { name: "New", exact: true }).click();
+  await clickNewDoc(page)
   await page.waitForURL(/\/docs\/[0-9a-f-]+$/);
   await expect(page.locator(".ProseMirror")).toBeVisible();
   await expect(page.locator(".ProseMirror")).toBeEmpty();
