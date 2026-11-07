@@ -20,14 +20,22 @@ import { BoardColumnLayoutActions, type BoardColumnLayoutControls } from "./boar
 export * from "./board-pinned";
 
 /**
- * `fadeEnd`: tapers the last 1rem of the scrollport (md and up) so columns fade out instead of being hard-cut where a
- * `BoardPinnedRegion` sits beside the scroller. 1rem matches the track's right padding (`md:px-4`), so at full scroll-end
- * the last column sits wholly inside the unfaded area. Use it only while pinned columns are rendered.
+ * The width of the scroller's tapered right edge, in two literal class strings (Tailwind needs literals) that MUST stay in
+ * step: the mask fades the last 2rem of the scrollport, and the board's inner track takes `md:pr-8` (2rem) of right padding
+ * while docked columns exist, so at full scroll-end the last column sits wholly outside the fade.
+ */
+export const BOARD_FADE_END_CLASS = "md:[mask-image:linear-gradient(to_right,black_calc(100%-2rem),transparent)]";
+export const BOARD_FADE_END_TRACK_CLASS = "md:pr-8";
+
+/**
+ * `fadeEnd`: tapers the last 2rem of the scrollport (md and up) so columns fade out instead of being hard-cut where a
+ * `BoardPinnedRegion` sits beside the scroller. Add `BOARD_FADE_END_TRACK_CLASS` to the board's inner track alongside it.
+ * Use it only while pinned columns are rendered.
  */
 export function Board({ children, label = "Board", className, fadeEnd = false }: { children: ReactNode; label?: string; className?: string; fadeEnd?: boolean }) {
   // Mobile columns size against this scrollport, including nested swimlanes,
   // rather than the viewport (which may also contain panels or lane gutters).
-  return <div role="region" aria-label={label} className={cn("@container flex min-w-0 snap-x gap-4 overflow-x-auto pb-3", fadeEnd && "md:[mask-image:linear-gradient(to_right,black_calc(100%-1rem),transparent)]", className)}>{children}</div>;
+  return <div role="region" aria-label={label} className={cn("@container flex min-w-0 snap-x gap-4 overflow-x-auto pb-3", fadeEnd && BOARD_FADE_END_CLASS, className)}>{children}</div>;
 }
 
 type BoardColumnProps = Omit<ComponentProps<"section">, "title"> & {

@@ -39,7 +39,7 @@ import {
 import { usePanelContext } from "@/components/panels/panel-context";
 import { HORIZON_META, INTERNAL_BOARD_HORIZONS, getInternalBoardHorizons, isLaunchHorizon } from "@/lib/roadmap";
 import type { Horizon, SquadData } from "@/lib/types";
-import { Board, BoardPinnedRegion, CollapsedColumnTab, type BoardColumnLayoutControls } from "@/components/patterns/board";
+import { Board, BOARD_FADE_END_TRACK_CLASS, BoardPinnedRegion, CollapsedColumnTab, type BoardColumnLayoutControls } from "@/components/patterns/board";
 import { moveColumn, canMoveColumn, pinColumn, setColumnCollapsed, togglePinColumn, type BoardLayout, type MoveDirection } from "@/lib/board-layout";
 import { UNSCHEDULED_COLUMN_ID } from "@/lib/roadmap/board-layout";
 import { useRoadmapColumnLayout } from "./column-layout-context";
@@ -723,7 +723,11 @@ export function RoadmapBoard({
         >
           <div
             data-slot="roadmap-board-track"
-            className="flex h-full w-max min-w-full items-stretch gap-3 px-3 pt-3 pb-3 sm:px-4 sm:pt-4 md:px-4 md:pt-3"
+            className={cn(
+              "flex h-full w-max min-w-full items-stretch gap-3 px-3 pt-3 pb-3 sm:px-4 sm:pt-4 md:px-4 md:pt-3",
+              // Room for the scroller's tapered edge, so the last column at full scroll-end is not faded.
+              dockedColumnIds.length > 0 && BOARD_FADE_END_TRACK_CLASS,
+            )}
           >
             {spec && lanes ? (
               <RoadmapSwimlanes

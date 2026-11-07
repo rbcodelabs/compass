@@ -242,7 +242,10 @@ test.describe("Roadmap board pinned columns", () => {
       await page.waitForLoadState("networkidle");
       await expect(pinnedRegion(page)).toBeVisible({ timeout: 30_000 });
       expect(await pinnedRegion(page).evaluate((el) => getComputedStyle(el).borderLeftWidth)).toBe("1px");
-      expect(await scroller(page).evaluate((el) => getComputedStyle(el).maskImage)).toContain("linear-gradient");
+      const mask = await scroller(page).evaluate((el) => getComputedStyle(el).maskImage);
+      expect(mask).toContain("linear-gradient");
+      expect(mask, "the taper is 2rem (32px)").toMatch(/calc\(100% - 32px\)|calc\(-32px \+ 100%\)/);
+      expect(await scroller(page).locator('[data-slot="roadmap-board-track"]').evaluate((el) => getComputedStyle(el).paddingRight), "track padding matches the taper").toBe("32px");
       const midScroll = () => scroller(page).evaluate((el) => { el.scrollLeft = (el.scrollWidth - el.clientWidth) / 2; });
       await midScroll();
       await shot(page, "desktop-spacing-1-not-scheduled-collapsed-mid-scroll");
@@ -252,6 +255,14 @@ test.describe("Roadmap board pinned columns", () => {
       await page.getByRole("button", { name: "Pin Later to the right" }).click();
       await midScroll();
       await shot(page, "desktop-spacing-3-two-pinned-mid-scroll");
+      await scroller(page).evaluate((el) => { el.scrollLeft = el.scrollWidth; });
+      await shot(page, "desktop-spacing-4-scrolled-to-end");
+      // At full scroll-end the last column ends 2rem before the scroller's edge, i.e. wholly outside the fade.
+      const endGap = await scroller(page).evaluate((el) => {
+        const cols = el.querySelectorAll("section");
+        return el.getBoundingClientRect().right - cols[cols.length - 1].getBoundingClientRect().right;
+      });
+      expect(endGap).toBeGreaterThanOrEqual(31);
       await page.evaluate(() => window.localStorage.clear());
 
       // ── 8. Narrow viewport: pinned columns fall back to scroller columns ──────
