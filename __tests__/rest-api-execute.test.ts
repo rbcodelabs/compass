@@ -204,7 +204,7 @@ describe("REST domain execution", () => {
     })
 
     it.each(["OPPORTUNITY", "SOLUTION"])("activates a model through the narrow activation check for %s", async (entityType) => {
-      mocks.actor.current = { userId: "user-1", purpose: "AGENT", agentId: "agent-1" }
+      mocks.actor.current = { userId: "user-1", purpose: "AGENT" }
       await executeRestRoute(route("updateWorkspaceScoringModel"), { params: { workspaceId: UUID, entityType }, query: {}, body: { scoringModelId: MODEL } })
       expect(mocks.assertScoringModelActivation).toHaveBeenCalledWith(mocks.actor.current, UUID, MODEL)
       expect(mocks.assertScoringModelAccess).not.toHaveBeenCalled()
