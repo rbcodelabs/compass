@@ -5,7 +5,8 @@
  * Every surface that lists or explains statuses (board column headers, status
  * dropdowns, card badges, the discovery rail, MCP/REST schemas and tool
  * descriptions, docs) derives from this module so the definitions cannot
- * drift apart. Pure: no React, no Prisma.
+ * drift apart. Pure: no React, no Prisma, so server, client and tests can all
+ * import it.
  *
  * Pipeline: UNREVIEWED -> EXPLORING -> VALIDATING -> PRIORITIZED -> ACTIVE
  * (-> ARCHIVED, which is not a pipeline stage and not a board column).
