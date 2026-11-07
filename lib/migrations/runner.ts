@@ -759,6 +759,11 @@ const MIGRATIONS: readonly MigrationEntry[] = [
     name: "110_artifact_external_share",
     filePath: path.join(process.cwd(), "prisma/migrations/110_artifact_external_share/migration.sql"),
   },
+  {
+    // agent_conversations.archived_at (nullable, no backfill, no index). NULL = active, so code may ship before this applies.
+    name: "112_agent_conversation_archive",
+    filePath: path.join(process.cwd(), "prisma/migrations/112_agent_conversation_archive/migration.sql"),
+  },
 ];
 
 const MIGRATIONS_BY_NAME = new Map(MIGRATIONS.map((migration) => [migration.name, migration]));

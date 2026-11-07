@@ -265,6 +265,25 @@ describe("acquireConversationSandbox", () => {
     expect(sdk.create).not.toHaveBeenCalled()
   })
 
+  it("boots a fresh sandbox when a stopped one cannot resume because its snapshot is gone (410)", async () => {
+    const stopped = fakeSandbox({ status: "stopped" })
+    sdk.get.mockResolvedValueOnce(stopped).mockRejectedValueOnce(new sdk.APIError(410))
+    const created = fakeSandbox()
+    sdk.create.mockResolvedValue(created)
+    const result = await acquireConversationSandbox(acquireOpts())
+    expect(result).toMatchObject({ reused: false, sandbox: created })
+    expect(stopped.delete).toHaveBeenCalledTimes(1)
+    expect(sdk.create).toHaveBeenCalledWith(expect.objectContaining({ name: NAME, persistent: true }))
+  })
+
+  it("still fails the turn, without deleting, when resume fails for any other reason", async () => {
+    const stopped = fakeSandbox({ status: "stopped" })
+    sdk.get.mockResolvedValueOnce(stopped).mockRejectedValueOnce(new sdk.APIError(500))
+    await expect(acquireConversationSandbox(acquireOpts())).rejects.toThrow("status 500")
+    expect(stopped.delete).not.toHaveBeenCalled()
+    expect(sdk.create).not.toHaveBeenCalled()
+  })
+
   it("fails the turn rather than creating under the name when the lookup itself failed", async () => {
     sdk.get.mockRejectedValue(new Error("platform 500"))
     await expect(acquireConversationSandbox(acquireOpts())).rejects.toThrow("Could not look up")

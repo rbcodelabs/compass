@@ -15,4 +15,5 @@ export const panelTitles = (labels: ResolvedLabels): Record<string, string> => (
   "experiment-new": "New experiment",
   task: "Task",
   "discovery-rail": "Discovery",
+  pullRequest: "Pull request",
 })

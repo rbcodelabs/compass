@@ -49,6 +49,8 @@ const LAYER_OWNERS = {
     "components/ui/tooltip.tsx",
     // Transient floating actions beside a text selection; may sit over the detail panel (60) and dialogs (70).
     "components/selection-ask-pill.tsx",
+    // Hover card for entity pills; a transient popup opened from chat, docs and panels (60), so it must clear the detail panel and dialogs (70).
+    "components/patterns/entity-pill.tsx",
   ],
 };
 
