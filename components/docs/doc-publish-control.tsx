@@ -127,7 +127,7 @@ export function DocPublishControl({ docId, orgSlug, workspaceSlug, initialPublis
               <Info className="size-4" aria-hidden />
             </PopoverTrigger>
             <PopoverContent align="end" className="w-72 rounded-lg border border-border-default bg-surface-card p-3 text-sm leading-5 text-text-secondary shadow-md">
-              <p className="font-medium text-text-primary">Visible to anyone with the portal link</p>
+              <p className="font-medium text-text-primary">Publishing to the portal</p>
               <p className="mt-1">{PUBLISH_INFO_COPY}</p>
             </PopoverContent>
           </Popover>
