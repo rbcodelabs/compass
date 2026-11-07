@@ -123,7 +123,7 @@ Linked Feedback and Evidence are separate records. Linking a feedback item does 
 
 ## The Solutions backlog
 
-Discovery is the Opportunity backlog. To see every Solution against each other, open **Solutions** in the sidebar (next to Opportunities). It is a flat board of all the Solutions in the workspace, with one column per status: **Idea**, **Validated**, **In delivery**, **Shipped**, **Killed**.
+Discovery is the Opportunity backlog. To see every Solution against each other, open **Solutions** in the sidebar (next to Opportunities). It is a flat board of all the Solutions in the workspace, with one column per status. By default the columns run **In delivery**, **Validated**, **Idea**, **Shipped**, **Killed** (work in flight first); you can [pin and reorder them](#pin-collapse-and-reorder-columns).
 
 - Each card shows the Solution title, its parent Opportunity (click it to open that Opportunity), a score badge when the workspace has an active Solution scoring model, and its assumption and evidence counts. Click the title to open the Solution panel.
 - Drag a card to another column to change its status. Order within a column is not draggable here, because a column mixes Solutions from many Opportunities; use **Sort by score** (shown when a Solution scoring model is active) to rank them instead.
@@ -132,7 +132,7 @@ Discovery is the Opportunity backlog. To see every Solution against each other, 
 
 ### Board and table views
 
-The **Board / Table** toggle switches between the status board and a flat table (`?view=table`). The table has one row per Solution: title (opens the Solution panel), parent Opportunity (a link), squad, status, score (only with an active Solution scoring model), evidence, and assumptions. Rows run from Idea to Killed in board order; **Sort by score** ranks them by score instead. The table respects the same filters as the board.
+The **Board / Table** toggle switches between the status board and a flat table (`?view=table`). The table has one row per Solution: title (opens the Solution panel), parent Opportunity (a link), squad, status, score (only with an active Solution scoring model), evidence, and assumptions. Rows run in lifecycle order, Idea to Killed (not the board’s column order); **Sort by score** ranks them by score instead. The table respects the same filters as the board.
 
 ### Group by
 
