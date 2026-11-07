@@ -7,6 +7,8 @@ import type { EntitySummary } from "@/lib/entity-summary"
 import { EntityPill, PILL, type EntityPillData } from "@/components/patterns/entity-pill"
 import { useOptionalPanelContext, type PanelType } from "@/components/panels/panel-context"
 import { useWorkItemLinkScope } from "@/components/work-item-link-scope"
+import { PullRequestChip } from "@/components/github/pull-request-chip"
+import { parsePullRequestUrl } from "@/lib/github-pull-request-links"
 import { useLabels } from "@/components/thinking-model/thinking-model-provider"
 import type { ResolvedLabels } from "@/lib/thinking-model/labels"
 import { cn } from "@/lib/utils"
@@ -121,6 +123,13 @@ const subscribeNever = () => () => {}
 const PANEL_ADDRESSED: ReadonlySet<string> = new Set(["solution", "assumption", "feedback", "objective", "keyResult", "roadmapItem"])
 
 export function AgentLink({ href, children }: { href?: string; children?: ReactNode }) {
+  // A GitHub PR link is its own chip (opens the PR sidebar); it never reaches the entity-link path below.
+  const pr = href ? parsePullRequestUrl(href) : null
+  if (href && pr) return <PullRequestChip href={href} pr={pr}>{children}</PullRequestChip>
+  return <EntityAgentLink href={href}>{children}</EntityAgentLink>
+}
+
+function EntityAgentLink({ href, children }: { href?: string; children?: ReactNode }) {
   // Absolute links only count when they point at this same origin, which is only
   // knowable in the browser — resolved after mount so SSR and hydration agree.
   const origin = useSyncExternalStore(subscribeNever, () => window.location.origin, () => null)
