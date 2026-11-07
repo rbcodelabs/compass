@@ -79,7 +79,7 @@ describe("GET /api/agent/conversations", () => {
   it("lists conversations the caller owns or was invited to, behind live workspace membership", async () => {
     await listConversations(listReq({ workspaceId: WORKSPACE_ID }))
     expect(mockPrisma.agentConversation.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: accessibleConversationsWhere(WORKSPACE_ID, "user-1") }),
+      expect.objectContaining({ where: { ...accessibleConversationsWhere(WORKSPACE_ID, "user-1"), archivedAt: null } }),
     )
     expect(accessibleConversationsWhere(WORKSPACE_ID, "user-1")).toMatchObject(MEMBERSHIP)
   })

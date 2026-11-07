@@ -114,7 +114,7 @@ export const OPTIONAL_FIELDS: Readonly<Record<string, readonly string[]>> = {
   Account: ["access_token","expires_at","id_token","refresh_token","scope","session_state","token_type"],
   Agent: ["description","instructions","invokePolicy","kind","maxConcurrentRuns","maxRunsPerDay","model","ownerType","ownerUserId","ownerWorkspaceId","sandboxClass"],
   AgentAuditLog: ["argsSummary","conversationId","packProvenance"],
-  AgentConversation: ["interviewProcessingJson","title"],
+  AgentConversation: ["archivedAt","interviewProcessingJson","title"],
   AgentConversationParticipant: ["removedAt"],
   AgentMessage: ["authorUserId","costUsd","durationMs","inputTokens","model","numTurns","outputTokens","packProvenance"],
   AgentOrgAdminGrant: ["revokedAt","revokedByUserId"],

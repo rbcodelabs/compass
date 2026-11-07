@@ -22,7 +22,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { Loader2, Sparkles, X as XIcon } from "lucide-react"
+import { Archive, ArchiveRestore, Loader2, Sparkles, X as XIcon } from "lucide-react"
+import { fetchArchivedConversations, setConversationArchived, type ArchivedConversation } from "@/lib/agent-archive-client"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
@@ -156,6 +157,22 @@ export function AgentChat({
 }: Props) {
   const isRail = variant === "rail"
   const router = useRouter()
+  // Archive: the page list shows active chats; "Archived" swaps it for the archived ones.
+  const [showArchived, setShowArchived] = useState(false)
+  const [archivedChats, setArchivedChats] = useState<ArchivedConversation[]>([])
+  const toggleArchivedList = useCallback(async () => {
+    if (!showArchived) setArchivedChats(await fetchArchivedConversations(workspaceId))
+    setShowArchived((v) => !v)
+  }, [showArchived, workspaceId])
+  const changeArchived = useCallback(
+    async (id: string, archived: boolean) => {
+      if (!(await setConversationArchived(workspaceId, id, archived))) return
+      if (archived && id === activeConversationId) router.push(`${basePath}/agent`)
+      if (!archived) setArchivedChats((list) => list.filter((c) => c.id !== id))
+      router.refresh()
+    },
+    [workspaceId, activeConversationId, basePath, router],
+  )
   const [messages, setMessages] = useState<Message[]>(initialMessages)
   // Prefilled (editable) composer instruction from a "Send to agent" hand-off
   // — only for a brand-new chat. Lazy initializer so this never overwrites
@@ -587,16 +604,19 @@ export function AgentChat({
       <aside className="hidden w-64 shrink-0 flex-col border-r border-default bg-surface-inset md:flex">
         <ScrollArea className="min-h-0 flex-1 p-2">
           <ul className="flex flex-col gap-1">
-            {conversations.length === 0 && (
-              <li className="px-2 py-6 text-center text-sm text-text-subtle">No conversations yet</li>
+            {(showArchived ? archivedChats : conversations).length === 0 && (
+              <li className="px-2 py-6 text-center text-sm text-text-subtle">
+                {showArchived ? "No archived chats" : "No conversations yet"}
+              </li>
             )}
-            {conversations.map((c) => {
+            {(showArchived ? archivedChats : conversations).map((c) => {
               const active = c.id === activeConversationId
+              const label = showArchived ? "Restore chat" : "Archive chat"
               return (
-                <li key={c.id}>
+                <li key={c.id} className="group relative">
                   <Link
                     href={`${basePath}/agent?c=${c.id}`}
-                    className={`block truncate rounded-lg px-3 py-2 text-sm transition-colors ${
+                    className={`block truncate rounded-lg py-2 pl-3 pr-9 text-sm transition-colors ${
                       active
                         ? "bg-surface-interactive text-text-primary"
                         : "text-text-secondary hover:bg-surface-interactive-hover hover:text-text-primary"
@@ -604,11 +624,26 @@ export function AgentChat({
                   >
                     {c.title || "Untitled chat"}
                   </Link>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
+                    onClick={() => void changeArchived(c.id, !showArchived)}
+                    aria-label={label}
+                    title={label}
+                  >
+                    {showArchived ? <ArchiveRestore aria-hidden="true" /> : <Archive aria-hidden="true" />}
+                  </Button>
                 </li>
               )
             })}
           </ul>
         </ScrollArea>
+        <div className="border-t border-default p-2">
+          <Button variant="ghost" size="sm" className="w-full justify-start" onClick={() => void toggleArchivedList()}>
+            {showArchived ? "Back to chats" : "Archived chats"}
+          </Button>
+        </div>
       </aside>
       )}
 
