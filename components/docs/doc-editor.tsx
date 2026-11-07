@@ -130,6 +130,9 @@ interface RemoteDoc {
 const UPDATED_INDICATOR_MS = 4_000;
 const TYPING_RECHECK_MS = 500;
 
+/** The reading column: ~700px of text plus the 2rem gutters. Title, toolbar and body all share it so they align. */
+const DOC_COLUMN = "mx-auto w-full max-w-[764px]";
+
 const NO_MENTION_OPTIONS: MentionOptions = { people: [], agents: [], outside: [] };
 
 type SaveStatus = "idle" | "saving" | "saved" | "error";
@@ -271,6 +274,7 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingContent = useRef<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const titleRef = useRef<HTMLTextAreaElement>(null);
 
   const saveQueue = useMemo(() => createDocumentSaveQueue<SaveChange>({
     revision: doc.revision,
@@ -686,66 +690,39 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
     setActiveCommentId(commentId);
   }
 
+  // Size the title to its text (before paint, and again when the column width changes).
+  useLayoutEffect(() => {
+    const el = titleRef.current;
+    if (!el) return;
+    const fit = () => { el.style.height = "auto"; el.style.height = `${el.scrollHeight}px`; };
+    fit();
+    window.addEventListener("resize", fit);
+    return () => window.removeEventListener("resize", fit);
+  }, [title, editor]);
+
   if (!editor) return null;
 
   return (
     <div className="flex h-full min-h-0 min-w-0">
       <div data-slot="doc-editor-column" className="flex min-h-0 min-w-0 flex-1 flex-col">
-      {/* Save indicator */}
-      <div data-testid="doc-save-status" data-state={saveStatus} className="mx-auto w-full max-w-4xl flex justify-end px-8 pt-3 min-h-7">
-        {saveStatus === "saving" && <span className="text-xs text-text-subtle">Saving…</span>}
-        {saveStatus === "saved" && <span className="text-xs text-text-subtle">Saved</span>}
-        {justUpdated && !remote && <UpdatedJustNow />}
-        {saveError && !remote && <span role="alert" className="text-xs text-status-danger">{saveError} <button type="button" className="underline" onClick={() => { void saveQueue.retry(); }}>Retry save</button></span>}
+      {/* Library button + save indicator */}
+      <div className={cn(DOC_COLUMN, "flex items-center justify-between gap-2 px-8 pt-3 min-h-10")}>
+        <DocsLibraryButton />
+        <div className="flex min-w-0 items-center justify-end gap-3">
+        <div data-testid="doc-save-status" data-state={saveStatus} className="flex min-h-7 items-center justify-end">
+          {saveStatus === "saving" && <span className="text-xs text-text-subtle">Saving…</span>}
+          {saveStatus === "saved" && <span className="text-xs text-text-subtle">Saved</span>}
+          {justUpdated && !remote && <UpdatedJustNow />}
+          {saveError && !remote && <span role="alert" className="text-xs text-status-danger">{saveError} <button type="button" className="underline" onClick={() => { void saveQueue.retry(); }}>Retry save</button></span>}
+        </div>
+        {(followAction || decisionAction) && <div className="flex shrink-0 items-center gap-1.5">{followAction}{decisionAction}</div>}
+        </div>
       </div>
       {remote && <RemoteUpdateBanner writer={remote.writer} onReload={handleReloadRemote} onKeepMine={handleKeepMine} />}
 
-      {/* Icon + title on a single row */}
-      <div className="mx-auto w-full max-w-4xl flex items-center gap-2 px-8 pb-2">
-        <DocsLibraryButton />
-        {/* Icon picker */}
-        <div className="relative shrink-0">
-          <button
-            disabled={isRestoring}
-            onClick={() => setShowIconInput((v) => !v)}
-            className="text-2xl leading-none hover:opacity-70 transition-opacity"
-            title="Set icon"
-          >
-            {icon || "📄"}
-          </button>
-          {showIconInput && (
-            <div className="absolute z-10 mt-1 p-2 bg-surface-panel border border-border-default rounded-lg shadow-md">
-              <input
-                type="text"
-                autoFocus
-                defaultValue={icon}
-                placeholder="Paste emoji…"
-                className="w-32 text-sm border border-border-default rounded px-2 py-1 outline-none focus:ring-1 focus:ring-ring/50"
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") handleSaveIcon(e.currentTarget.value);
-                  if (e.key === "Escape") setShowIconInput(false);
-                }}
-                onBlur={(e) => handleSaveIcon(e.currentTarget.value)}
-              />
-            </div>
-          )}
-        </div>
-
-        {/* Title */}
-        <input
-          disabled={isRestoring}
-          type="text"
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          onBlur={handleSaveTitle}
-          placeholder="Untitled"
-          className="flex-1 min-w-0 text-2xl font-bold text-text-primary bg-transparent border-none outline-none placeholder:text-text-disabled"
-        />
-      </div>
-
       {/* Toolbar */}
       <div className="sticky top-0 z-10 border-b border-border-default bg-surface-panel/90 backdrop-blur-sm">
-        <div className="mx-auto flex w-full max-w-4xl items-center gap-1 px-4 py-1.5 sm:px-8">
+        <div className={cn(DOC_COLUMN, "flex items-center gap-1 px-4 py-1.5 sm:px-8")}>
         {/* Buttons scroll horizontally on narrow screens instead of wrapping to a
             second row (which used to eat viewport height) or shrinking to the
             point of being unreadable/untappable. */}
@@ -887,7 +864,6 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
             </div>
           )}
         </div>
-        {(followAction || decisionAction) && <div className="flex shrink-0 items-center gap-1.5 pl-1">{followAction}{decisionAction}</div>}
         </div>
       </div>
 
@@ -902,7 +878,56 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
 
       {/* Editor */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto">
-      <div className="mx-auto w-full max-w-4xl px-8 py-4">
+        {/* Icon above a large serif title */}
+        <div className={cn(DOC_COLUMN, "px-8 pt-8 pb-3 sm:pt-14")}>
+          {/* Icon picker */}
+          <div className="relative mb-3 shrink-0">
+            <button
+              disabled={isRestoring}
+              onClick={() => setShowIconInput((v) => !v)}
+              className="text-4xl leading-none hover:opacity-70 transition-opacity"
+              title="Set icon"
+            >
+              {icon || "📄"}
+            </button>
+            {showIconInput && (
+              <div className="absolute z-10 mt-1 p-2 bg-surface-panel border border-border-default rounded-lg shadow-md">
+                <input
+                  type="text"
+                  autoFocus
+                  defaultValue={icon}
+                  placeholder="Paste emoji…"
+                  className="w-32 text-sm border border-border-default rounded px-2 py-1 outline-none focus:ring-1 focus:ring-ring/50"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleSaveIcon(e.currentTarget.value);
+                    if (e.key === "Escape") setShowIconInput(false);
+                  }}
+                  onBlur={(e) => handleSaveIcon(e.currentTarget.value)}
+                />
+              </div>
+            )}
+          </div>
+
+          {/* Title: grows with its text so a long title wraps instead of clipping. */}
+          <textarea
+            ref={titleRef}
+            rows={1}
+            disabled={isRestoring}
+            value={title}
+            onChange={(e) => setTitle(e.target.value.replace(/\n/g, " "))}
+            onBlur={handleSaveTitle}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                editor.commands.focus("start");
+              }
+            }}
+            placeholder="Untitled"
+            aria-label="Title"
+            className="block w-full resize-none overflow-hidden border-none bg-transparent p-0 font-[family-name:var(--font-source-serif)] text-[2.25rem] font-semibold leading-[1.1] tracking-[-0.03em] text-text-primary outline-none placeholder:text-text-disabled sm:text-[3.1rem] [text-wrap:balance]"
+          />
+        </div>
+      <div className={cn(DOC_COLUMN, "px-8 py-6")}>
         {specHeader}
         {/* Properties — scrolls with the content instead of pinning the viewport */}
         <DocProperties
@@ -953,7 +978,7 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
         </div>
 
         <DocEmbedCardsProvider resolve={resolveEmbeds} editing={embedEditing}>
-          <EditorContent editor={editor} className="min-h-[400px] prose-custom" />
+          <EditorContent editor={editor} className="doc-prose prose-custom min-h-[400px]" />
         </DocEmbedCardsProvider>
         {!readOnly ? <CompassLinkPickerMenu editor={editor} controller={linkPickerController} orgSlug={orgSlug} workspaceSlug={workspaceSlug} /> : null}
         {specScopes && !readOnly ? <SpecSlashMenu editor={editor} controller={slashController} scopes={specScopes} creators={creators} /> : null}
