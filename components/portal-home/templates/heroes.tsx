@@ -78,7 +78,7 @@ export function EditorialHero(props: HeroProps) {
 export function BentoHero(props: HeroProps) {
   return (
     <section aria-label="Welcome" className="relative z-0 mx-auto w-full max-w-5xl px-6 pb-36 pt-14 sm:pt-16">
-      <p className="inline-flex items-center gap-2.5 rounded-full border border-primary-foreground/30 bg-primary-foreground/15 px-3.5 py-1.5 text-xs font-semibold uppercase tracking-[0.1em] text-primary-foreground">
+      <p className="inline-flex items-center gap-2.5 rounded-full border border-primary-foreground/30 bg-primary-foreground/15 dark:bg-white/25 px-3.5 py-1.5 text-xs font-semibold uppercase tracking-[0.1em] text-primary-foreground">
         <span className="size-2 rounded-full bg-primary-foreground shadow-[0_0_0_4px_rgba(255,255,255,0.25)]" aria-hidden />
         Customer portal
       </p>
@@ -87,7 +87,7 @@ export function BentoHero(props: HeroProps) {
       <HeroActions
         {...props}
         primaryClass="inline-flex h-11 items-center gap-2 rounded-full bg-primary-foreground px-5 text-sm font-bold text-primary hover:opacity-90"
-        secondaryClass="inline-flex h-11 items-center rounded-full border border-primary-foreground/40 bg-primary-foreground/15 px-5 text-sm font-semibold text-primary-foreground hover:bg-primary-foreground/25"
+        secondaryClass="inline-flex h-11 items-center rounded-full border border-primary-foreground/40 bg-primary-foreground/15 dark:bg-white/25 px-5 text-sm font-semibold text-primary-foreground hover:bg-primary-foreground/25 dark:hover:bg-white/35"
       />
     </section>
   )

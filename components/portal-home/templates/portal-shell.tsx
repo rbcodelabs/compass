@@ -57,7 +57,7 @@ export function PortalShell(props: PortalShellProps) {
   if (template === "bento") {
     return (
       <div className="flex min-h-screen flex-col bg-surface-app" data-testid="portal-shell-bento">
-        <div className="bg-[linear-gradient(135deg,color-mix(in_srgb,var(--primary)_68%,black)_0%,var(--primary)_100%)] text-primary-foreground">
+        <div className="bg-[linear-gradient(135deg,color-mix(in_srgb,var(--primary)_68%,black)_0%,var(--primary)_100%)] text-primary-foreground dark:bg-[linear-gradient(135deg,color-mix(in_srgb,var(--primary)_70%,white)_0%,var(--primary)_100%)]">
           <header className="mx-auto flex w-full max-w-5xl flex-wrap items-center gap-x-6 gap-y-2 px-6 py-3">
             <div className="flex items-center gap-2.5 text-lg font-extrabold tracking-tight">
               <BrandMark name={workspaceName} logoUrl={logoUrl} className="border border-white/35 bg-white/20 text-primary-foreground shadow-none" />

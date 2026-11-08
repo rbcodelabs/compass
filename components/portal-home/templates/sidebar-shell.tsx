@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState, type ReactNode } from "react"
+import { useEffect, useRef, useState, type ReactNode } from "react"
 import { usePathname } from "next/navigation"
 import { Menu, X } from "lucide-react"
 import { PortalNav } from "../portal-nav"
@@ -30,6 +30,16 @@ export function SidebarShell({ orgSlug, workspaceSlug, workspaceName, logoUrl, r
   const base = `/portal/${orgSlug}/${workspaceSlug}`
   const pathname = usePathname()
   const [open, setOpen] = useState(false)
+  const menuButtonRef = useRef<HTMLButtonElement>(null)
+  const closeButtonRef = useRef<HTMLButtonElement>(null)
+  const wasOpen = useRef(false)
+
+  // Drawer focus management: move focus into the drawer on open, hand it back to the menu button on close.
+  useEffect(() => {
+    if (open) closeButtonRef.current?.focus()
+    else if (wasOpen.current) menuButtonRef.current?.focus()
+    wasOpen.current = open
+  }, [open])
 
   useEffect(() => {
     if (!open) return
@@ -59,7 +69,7 @@ export function SidebarShell({ orgSlug, workspaceSlug, workspaceName, logoUrl, r
               <span className="text-xs text-text-secondary">Customer portal</span>
             </span>
           </div>
-          <button type="button" aria-label="Close menu" onClick={() => setOpen(false)} className="rounded-md p-2 text-text-secondary hover:bg-surface-interactive md:hidden">
+          <button ref={closeButtonRef} type="button" aria-label="Close menu" onClick={() => setOpen(false)} className="rounded-md p-2 text-text-secondary hover:bg-surface-interactive md:hidden">
             <X className="size-4" />
           </button>
         </div>
@@ -67,9 +77,11 @@ export function SidebarShell({ orgSlug, workspaceSlug, workspaceName, logoUrl, r
         <p className="mt-auto border-t border-border-default px-2 pt-3 text-xs text-text-subtle">Powered by Compass</p>
       </aside>
 
-      <div className="flex min-w-0 flex-1 flex-col">
+      {/* inert while the drawer is open: keyboard focus stays in the drawer (open is only ever true below md). */}
+      <div className="flex min-w-0 flex-1 flex-col" inert={open}>
         <div className="sticky top-0 z-20 flex h-14 items-center gap-3 border-b border-border-default bg-surface-app px-4 sm:px-6">
           <button
+            ref={menuButtonRef}
             type="button"
             aria-label="Open menu"
             aria-expanded={open}

@@ -20,7 +20,7 @@ const TITLE_BY_TEMPLATE =
 const HERO_BY_TEMPLATE = [
   "group-data-[tpl=editorial]/home:border-border-default group-data-[tpl=editorial]/home:bg-primary/10 group-data-[tpl=editorial]/home:text-text-primary",
   "group-data-[tpl=shell]/home:border-border-default group-data-[tpl=shell]/home:bg-primary/10 group-data-[tpl=shell]/home:text-text-primary",
-  "group-data-[tpl=bento]/home:bg-[linear-gradient(135deg,color-mix(in_srgb,var(--primary)_68%,black),var(--primary))]",
+  "group-data-[tpl=bento]/home:bg-[linear-gradient(135deg,color-mix(in_srgb,var(--primary)_68%,black),var(--primary))] dark:group-data-[tpl=bento]/home:bg-[linear-gradient(135deg,color-mix(in_srgb,var(--primary)_70%,white),var(--primary))]",
   "group-data-[tpl=hub]/home:border-border-default group-data-[tpl=hub]/home:border-l-4 group-data-[tpl=hub]/home:border-l-primary! group-data-[tpl=hub]/home:bg-surface-panel group-data-[tpl=hub]/home:text-text-primary",
 ].join(" ")
 

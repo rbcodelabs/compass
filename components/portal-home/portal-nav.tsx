@@ -21,7 +21,7 @@ interface Props {
 
 const LINK_CLASS: Record<PortalNavVariant, { base: string; active: string; idle: string }> = {
   default: { base: "rounded-md px-3 py-1.5 text-sm font-medium", active: "bg-surface-interactive text-text-primary", idle: "text-text-subtle hover:text-text-primary" },
-  onBrand: { base: "rounded-full px-3.5 py-2 text-sm font-semibold", active: "bg-white/25 text-primary-foreground", idle: "text-primary-foreground/90 hover:bg-white/15" },
+  onBrand: { base: "rounded-full px-3.5 py-2 text-sm font-semibold", active: "bg-black/20 text-primary-foreground dark:bg-white/25", idle: "text-primary-foreground/90 hover:bg-white/15" },
   onDark: { base: "px-3 py-2 text-sm font-medium", active: "text-[#FAF9F6] shadow-[inset_0_-2px_0_#A294FF]", idle: "text-[#B9B3A9] hover:text-[#FAF9F6]" },
   sidebar: { base: "flex min-h-9 items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-sm font-medium", active: "bg-surface-interactive text-text-primary [&_svg]:text-primary", idle: "text-text-secondary hover:bg-surface-interactive hover:text-text-primary" },
 }
