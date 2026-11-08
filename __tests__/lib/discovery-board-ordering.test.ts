@@ -144,6 +144,13 @@ describe("planDragEnd", () => {
   });
 });
 
+describe("dockTabDropStatus is generic over the board's status type", () => {
+  it("returns the tab's status as the caller's type (Tasks uses it too)", () => {
+    const status: "DONE" | null = dockTabDropStatus<"DONE">({ status: "DONE", dockTab: true })
+    expect(status).toBe("DONE")
+  })
+})
+
 describe("dockTabDropStatus (a drag over a dock tab must not move the card optimistically)", () => {
   it("names the tab's status for a dock tab, which the board resolves at drag end", () => {
     expect(dockTabDropStatus({ status: "ACTIVE", dockTab: true })).toBe("ACTIVE");

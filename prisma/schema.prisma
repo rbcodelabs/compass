@@ -3815,7 +3815,7 @@ model SavedView {
   ownerId        String   @map("owner_id") @db.Uuid
   name           String   @db.VarChar(120)
   visibility     String   @default("PERSONAL") @db.VarChar(20)
-  /// OPPORTUNITIES_BOARD | SOLUTIONS_BOARD | ROADMAP_WORKSPACE | ROADMAP_ORG (lib/saved-views/surfaces.ts).
+  /// OPPORTUNITIES_BOARD | SOLUTIONS_BOARD | TASKS_BOARD | ROADMAP_WORKSPACE | ROADMAP_ORG (lib/saved-views/surfaces.ts).
   /// NULL = legacy row, read as ROADMAP_ORG (no workspace) or ROADMAP_WORKSPACE. Writes always set it.
   surface        String?  @db.VarChar(40)
   filters        Json     @default("{}")
