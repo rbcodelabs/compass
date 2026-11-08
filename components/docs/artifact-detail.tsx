@@ -22,6 +22,7 @@ import { isGoogleDriveUrl } from "@/lib/google-drive-links"
 import { ArtifactSharePanel } from "./artifact-share-panel"
 import type { OwnerShareState } from "@/lib/artifact-share"
 import { useLiveRefresh } from "@/hooks/use-live-refresh"
+import { LinkedEntitiesSection } from "@/components/links/linked-entities-section"
 
 type ArtifactDetailProps = {
   artifact: { id: string; title: string; description: string | null; sourceType: string; kind?: "DOCUMENT" | "SLIDE_DECK"; status: string; currentRevision: { externalUrl: string | null; thumbnail: ArtifactThumbnailDto | null } | null; revisions: Array<{ id: string; revisionNumber: number; filename: string | null; byteSize: number | null; externalUrl: string | null; createdAt: string }> }
@@ -114,6 +115,7 @@ export function ArtifactDetail({ artifact, html, slides, initialSlideIndex, work
     <section className="rounded-lg border p-4 space-y-3"><h2 className="font-semibold">{`Linked ${labels.solution.lowerPlural}`}</h2>{linked.length === 0 ? <p className="text-sm text-text-subtle">{`Not linked to ${labels.solution.indefinite}.`}</p> : <ul className="space-y-2">{linked.map((solution) => <li key={solution.id} className="flex items-center justify-between gap-2"><span>{solution.title}</span><Button size="sm" variant="ghost" onClick={() => run(() => unlinkArtifact(workspaceId, artifact.id, solution.id, basePath))}>Unlink</Button></li>)}</ul>}
       {available.length > 0 && <div className="flex gap-2"><select aria-label={`${labels.solution.singular} to link`} className="flex-1 rounded-md border px-3 text-sm" value={selectedSolution} onChange={(event) => setSelectedSolution(event.target.value)}><option value="">{`Select ${labels.solution.indefinite}…`}</option>{available.map((solution) => <option key={solution.id} value={solution.id}>{solution.title}</option>)}</select><Button disabled={!selectedSolution || pending} onClick={() => run(() => linkArtifact(workspaceId, artifact.id, selectedSolution, basePath))}>Link</Button></div>}
     </section>
+    {orgSlug && workspaceSlug && <LinkedEntitiesSection orgSlug={orgSlug} workspaceSlug={workspaceSlug} title="Linked experiments" target={{ linkType: "ARTIFACT_ATTACHED_TO_EXPERIMENT", entityType: "ARTIFACT", entityId: artifact.id }} />}
     <section className="min-w-0 rounded-lg border p-4 space-y-3">
       <h2 className="font-semibold">Linked decisions</h2>
       <p className="text-xs text-muted-foreground">Live supporting material, not frozen approval evidence.</p>

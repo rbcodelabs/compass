@@ -23,7 +23,7 @@ export type LinkedEntitiesTarget = { linkType: string; entityType: string; entit
  * the type does not apply (feature flag off, entity not eligible) and only offers candidates the service
  * would accept.
  */
-export function LinkedEntitiesSection({ orgSlug, workspaceSlug, target }: { orgSlug: string; workspaceSlug: string; target: LinkedEntitiesTarget }) {
+export function LinkedEntitiesSection({ orgSlug, workspaceSlug, target, title }: { orgSlug: string; workspaceSlug: string; target: LinkedEntitiesTarget; /** Overrides the registry label as the heading (e.g. "Linked experiments"). */ title?: string }) {
   const [view, setView] = useState<LinkedEntitiesView | null>(null)
   const [loaded, setLoaded] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -78,10 +78,10 @@ export function LinkedEntitiesSection({ orgSlug, workspaceSlug, target }: { orgS
 
   const noun = view?.otherNoun ?? "item"
   const plural = view?.otherNounPlural ?? "items"
-  const heading = view?.label ?? "Links"
+  const heading = title ?? view?.label ?? "Links"
   const idBase = `linked-entities-${linkType}-${entityId}`
 
-  return <section aria-label={view ? `${heading} ${plural}` : "Links"} data-link-type={linkType} className="flex max-w-3xl flex-col gap-3 rounded-xl border bg-surface-panel p-4">
+  return <section aria-label={title ?? (view ? `${heading} ${plural}` : "Links")} data-link-type={linkType} className="flex max-w-3xl flex-col gap-3 rounded-xl border bg-surface-panel p-4">
     <div>
       <h2 className="text-sm font-semibold">{heading}</h2>
       <p className="text-xs text-muted-foreground">{capitalize(plural)}. Linking never changes either record&apos;s status, settings or results.</p>

@@ -4,6 +4,8 @@ import "@testing-library/jest-dom/vitest"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 const mocks = vi.hoisted(() => ({ unlink: vi.fn(), refresh: vi.fn() }))
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: mocks.refresh }) }))
+// The experiments section loads through a server action; these tests are about other parts of the page.
+vi.mock("@/components/links/linked-entities-section", () => ({ LinkedEntitiesSection: () => null }))
 vi.mock("@/app/[orgSlug]/[workspaceSlug]/docs/actions", () => ({ unlinkArtifactDecision: mocks.unlink }))
 vi.mock("@/components/docs/artifact-preview", () => ({ ArtifactPreview: () => <div>Preview</div> }))
 import { ArtifactDetail } from "@/components/docs/artifact-detail"
