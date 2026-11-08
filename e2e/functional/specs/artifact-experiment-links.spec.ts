@@ -15,6 +15,8 @@ async function chooseExisting(page: Page, noun: "experiment" | "artifact", title
   await dialog.getByRole("combobox").click()
   const search = page.getByPlaceholder(`Search ${noun}s…`, { exact: true })
   await search.fill(title)
+  // Wait for the debounced search to narrow the list to exactly this record before choosing, or Enter picks a stale first row.
+  await expect(page.getByRole("option")).toHaveCount(1)
   await expect(page.getByRole("option").filter({ hasText: title })).toHaveCount(1)
   await search.press("ArrowDown")
   await search.press("Enter")
