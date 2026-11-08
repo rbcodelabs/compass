@@ -24,7 +24,7 @@
  * is accepted only if it is HTTPS, on the Vercel Blob host, and under the prefix
  * this module writes to.
  */
-import { put } from "@vercel/blob"
+import { getPublicFileStore } from "@/lib/storage/public-store"
 import { configuredBlobStoreHostname } from "@/lib/feedback-attachments"
 
 /**
@@ -139,12 +139,12 @@ export async function storeEmbedScreenshot(input: {
   fileType: EmbedScreenshotMimeType
 }): Promise<{ url: string }> {
   const extension = MIME_EXTENSIONS[input.fileType]
-  const blob = await put(
+  const stored = await getPublicFileStore().put(
     `${EMBED_SCREENSHOT_PREFIX}/${input.workspaceId}/${input.feedbackSourceId}/capture.${extension}`,
     input.bytes,
-    { access: "public", addRandomSuffix: true, contentType: input.fileType }
+    { addRandomSuffix: true, contentType: input.fileType }
   )
-  return { url: blob.url }
+  return { url: stored.url }
 }
 
 /**
