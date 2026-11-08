@@ -7,6 +7,7 @@
  * (lib/roadmap-views/schema.ts). The board surfaces are defined here.
  */
 import { z } from "zod"
+import { boardLayoutSchema } from "@/lib/board-layout"
 import {
   DEFAULT_ROADMAP_DISPLAY, DEFAULT_ROADMAP_FILTERS, MAX_VIEW_NAME_LENGTH, ROADMAP_VIEW_VISIBILITIES,
   roadmapViewDisplaySchema, roadmapViewFiltersSchema,
@@ -46,6 +47,14 @@ function boardDisplaySchema(statuses: readonly string[], extraGroupings: readonl
     groupBy: z.union([z.literal("status"), ...extraGroupings.map((g) => z.literal(g)), uuid]).default("status"),
     sort: z.enum(["manual", "score"]).default("manual"),
     columns: columnsByGroupSchema.transform(keepKnownStatuses(statuses)),
+    /**
+     * Pinned/docked columns and column order (lib/board-layout.ts). Absent = the default layout; a layout that fails
+     * validation degrades to absent via `.catch`, so it can never take the rest of the display document down. Not a URL
+     * param: client state the saved-views menu reads (components/solutions/solutions-column-layout.tsx). Solutions (status
+     * grouping) uses it today; on that board it SUPERSEDES `columns.status.order`, which is still read for views saved
+     * before layouts existed. Opportunities accept the field but do not act on it yet.
+     */
+    columnLayout: boardLayoutSchema.optional().catch(undefined),
   })
 }
 

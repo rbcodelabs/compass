@@ -132,7 +132,7 @@ Linked Feedback and Evidence are separate records. Linking a feedback item does 
 
 ## The Solutions backlog
 
-Discovery is the Opportunity backlog. To see every Solution against each other, open **Solutions** in the sidebar (next to Opportunities). It is a flat board of all the Solutions in the workspace, with one column per status: **Idea**, **Validated**, **In delivery**, **Shipped**, **Killed**.
+Discovery is the Opportunity backlog. To see every Solution against each other, open **Solutions** in the sidebar (next to Opportunities). It is a flat board of all the Solutions in the workspace, with one column per status. By default the columns run **In delivery**, **Validated**, **Idea**, **Shipped**, **Killed** (work in flight first); you can [pin and reorder them](#pin-collapse-and-reorder-columns).
 
 - Each card shows the Solution title, its parent Opportunity (click it to open that Opportunity), a score badge when the workspace has an active Solution scoring model, and its assumption and evidence counts. Click the title to open the Solution panel.
 - Drag a card to another column to change its status. Order within a column is not draggable here, because a column mixes Solutions from many Opportunities; use **Sort by score** (shown when a Solution scoring model is active) to rank them instead.
@@ -141,7 +141,7 @@ Discovery is the Opportunity backlog. To see every Solution against each other, 
 
 ### Board and table views
 
-The **Board / Table** toggle switches between the status board and a flat table (`?view=table`). The table has one row per Solution: title (opens the Solution panel), parent Opportunity (a link), squad, status, score (only with an active Solution scoring model), evidence, and assumptions. Rows run from Idea to Killed in board order; **Sort by score** ranks them by score instead. The table respects the same filters as the board.
+The **Board / Table** toggle switches between the status board and a flat table (`?view=table`). The table has one row per Solution: title (opens the Solution panel), parent Opportunity (a link), squad, status, score (only with an active Solution scoring model), evidence, and assumptions. Rows run in lifecycle order, Idea to Killed (not the board’s column order); **Sort by score** ranks them by score instead. The table respects the same filters as the board.
 
 ### Group by
 
@@ -155,6 +155,21 @@ On the board, **Group by** changes what the columns are (`?groupBy=`):
 Squad, Opportunity and custom-field groupings are read-only: cards cannot be dragged between those columns (a Solution’s squad and parent belong to its Opportunity, and Solution field values are edited in the Solution panel). Use a card’s **⋯** menu to change status, or switch back to Status to drag. An unknown or stale `groupBy` value (for example a deleted field) opens the Status board.
 
 Columns keep a minimum width and the board scrolls sideways when the screen is narrower.
+
+### Pin, collapse and reorder columns
+
+On the **Status** board, on a wide screen (the medium breakpoint and up), any column can be **pinned**: it moves into the **dock** on the right, outside the scrolling area, so it stays put while the other columns scroll. **Shipped** and **Killed** are natural candidates, since they sit at the far end of the board and are the places you drop finished or abandoned work. Nothing is pinned until you pin it, so the board looks the same as before.
+
+The dock is **one slot**, however many columns you pin: a panel showing one pinned column, with a narrow rail of **tabs** at its right edge, one per pinned column (its name and card count). Pinning more columns adds tabs; it never makes the dock wider.
+
+- **Pin or unpin.** Use the pin button in a column’s header (it appears when you hover the header) or **Pin to the right** / **Unpin** in the column’s **⋯** menu. A pinned column becomes the active tab and the dock opens on it.
+- **Switch and collapse.** Click a tab to show that column. Click the active tab, or the **Collapse** button in the panel’s header, to close the panel and leave only the tab rail. Arrow keys move between tabs; Enter or Space shows one.
+- **Drag cards onto a tab.** A tab is a drop target even while the dock is closed: drop a card on the **Shipped** tab and its status becomes Shipped. Cards in the open panel can be dragged out to any other column.
+- **Reorder.** **Move left** / **Move right** in a column’s **⋯** menu, or **Move up** / **Move down** in the **Columns** menu in the header. Both change the same column order, and a pinned column’s place in that order is its place among the tabs. **Columns** also still shows and hides columns; a hidden column that holds cards is shown anyway.
+- **Narrow screens.** Below the medium breakpoint nothing is docked: pinned columns appear in the scrolling board in their saved order, and the pin button is hidden. Your layout comes back when the screen is wide again.
+- Only the **Status** grouping docks. The Squad, Opportunity and custom-field groupings are read-only boards and ignore pinning.
+
+Which columns are pinned, which tab is active, whether the dock is open and the column order are part of a saved view (the **Modified** badge appears when they differ from it, and **Reset** puts the saved layout back). With no saved view selected, Compass remembers the layout in this browser for each workspace. Views saved before this existed keep their column order, and a layout that can’t be read falls back to the default order with the rest of the view intact.
 
 ## Solutions
 
