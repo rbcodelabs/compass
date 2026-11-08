@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { groupGalleryItems, loadRoadmapGalleryExtras, MAX_GALLERY_ARTIFACTS_PER_ITEM, type GalleryItemExtras } from "@/lib/roadmap/gallery"
+import { groupGalleryItems, MAX_GALLERY_ARTIFACTS_PER_ITEM, type GalleryItemExtras } from "@/lib/roadmap/gallery"
+import { loadRoadmapGalleryExtras } from "@/lib/roadmap/gallery-server"
 import { parseGroupByParam, resolveRoadmapGroupBy } from "@/lib/roadmap-group-by"
 import { DEFAULT_ROADMAP_DISPLAY } from "@/lib/roadmap-views/schema"
 import { resolveWorkspaceRoadmapState, workspacePageParams, workspaceStateToParams } from "@/lib/roadmap-views/workspace"

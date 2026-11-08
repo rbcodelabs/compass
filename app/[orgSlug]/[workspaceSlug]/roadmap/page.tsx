@@ -18,7 +18,8 @@ import { isModuleEnabled } from "@/lib/modules/server"
 import { getTasksLinkedTo } from "@/lib/task-links-read";
 import { RoadmapBoard } from "@/components/roadmap/roadmap-board";
 import { RoadmapGallery } from "@/components/roadmap/roadmap-gallery";
-import { loadRoadmapGalleryExtras, type GalleryGroupMode } from "@/lib/roadmap/gallery";
+import type { GalleryGroupMode } from "@/lib/roadmap/gallery";
+import { loadRoadmapGalleryExtras } from "@/lib/roadmap/gallery-server";
 import { NativeTimeline } from "@/components/roadmap/native-timeline/native-timeline";
 import { RoadmapHeader } from "@/components/roadmap/roadmap-header";
 import { RoadmapColumnLayoutProvider } from "@/components/roadmap/column-layout-context";
