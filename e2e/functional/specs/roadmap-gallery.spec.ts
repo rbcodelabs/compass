@@ -72,6 +72,7 @@ test("gallery shows previews, filmstrip, placeholders, grouping and stays usable
     const shot = card(titles.shot);
     await expect(shot.locator("img").first()).toBeVisible();
     await expect.poll(() => shot.locator("img").first().evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0)).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath("gallery-hero-desktop-1280.png") });
     // Two artifacts → a filmstrip; focusing the second swaps the hero to its "no preview" state.
     await expect(shot.getByRole("group", { name: "Artifacts" }).getByRole("button")).toHaveCount(2);
     await shot.getByRole("button", { name: `Show Uncaptured second ${suffix}` }).click();
