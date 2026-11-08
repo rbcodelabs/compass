@@ -1,8 +1,12 @@
 import type { Page } from "@playwright/test"
 import { expect, test } from "../fixtures/index"
+import { execFileSync } from "node:child_process"
 import getPrisma from "../../../lib/db"
-import { deleteArtifact, getExperimentArtifactIds } from "../../../lib/artifacts"
-import { getArtifactStorage } from "../../../lib/artifact-storage"
+
+// lib/artifacts.ts (and the entity_links reads behind it) load only under tsx, which resolves the repo's "@/" aliases.
+const cli = (command: "read" | "delete" | "leftover", workspaceId: string, id: string): unknown =>
+  JSON.parse(execFileSync("pnpm", ["exec", "tsx", "e2e/functional/fixtures/artifact-experiment-cli.ts", command, workspaceId, id], { encoding: "utf8", env: process.env }).trim().split("\n").at(-1)!)
+const attachedArtifacts = (workspaceId: string, experimentId: string) => cli("read", workspaceId, experimentId)
 
 /**
  * Artifacts <-> Experiments (native ARTIFACT_ATTACHED_TO_EXPERIMENT link). The whole flow goes through the real UI: link from the artifact
@@ -48,7 +52,7 @@ test("an artifact links to an experiment, shows on both pages, unlinks, and its 
   await expect(experimentsSection.getByText("No experiments linked yet.")).toBeVisible()
   await chooseExisting(page, "experiment", experimentTitle)
   await expect(experimentsSection.getByRole("link", { name: experimentTitle, exact: true })).toBeVisible()
-  expect(await getExperimentArtifactIds(prisma, workspace.id, experiment.id)).toEqual([artifactId])
+  expect(attachedArtifacts(workspace.id, experiment.id)).toEqual([artifactId])
 
   for (const viewport of [{ width: 1280, height: 800, label: "desktop" }, { width: 390, height: 844, label: "mobile" }]) {
     await page.setViewportSize(viewport)
@@ -74,7 +78,7 @@ test("an artifact links to an experiment, shows on both pages, unlinks, and its 
   // Unlink from the experiment side; both records survive.
   await artifactsSection.getByRole("button", { name: `Unlink ${artifactTitle}`, exact: true }).click()
   await expect(artifactsSection.getByText("No artifacts linked yet.")).toBeVisible()
-  expect(await getExperimentArtifactIds(prisma, workspace.id, experiment.id)).toEqual([])
+  expect(attachedArtifacts(workspace.id, experiment.id)).toEqual([])
   expect(await prisma.artifact.count({ where: { id: artifactId } })).toBe(1)
   expect(await prisma.experiment.count({ where: { id: experiment.id } })).toBe(1)
 
@@ -85,8 +89,10 @@ test("an artifact links to an experiment, shows on both pages, unlinks, and its 
   await expect(page.getByRole("region", { name: "Linked experiments" }).getByRole("link", { name: experimentTitle, exact: true })).toBeVisible()
 
   // Deleting the artifact removes the link and leaves the experiment.
-  await deleteArtifact({ artifactId, workspaceId: workspace.id }, getArtifactStorage())
-  expect(await getExperimentArtifactIds(prisma, workspace.id, experiment.id)).toEqual([])
+  cli("delete", workspace.id, artifactId)
+  // Nothing may still name the deleted artifact: deleteArtifact swept its link, so a second sweep finds zero rows.
+  expect(cli("leftover", workspace.id, artifactId)).toBe(0)
+  expect(attachedArtifacts(workspace.id, experiment.id)).toEqual([])
   await page.goto(`${base}/experiments/${experiment.id}`)
   await expect(page.getByRole("region", { name: "Linked artifacts" }).getByText("No artifacts linked yet.")).toBeVisible()
   await expect(page.getByRole("link", { name: artifactTitle, exact: true })).toHaveCount(0)
