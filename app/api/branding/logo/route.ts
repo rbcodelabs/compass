@@ -1,4 +1,4 @@
-import { put } from "@vercel/blob";
+import { getPublicFileStore } from "@/lib/storage/public-store";
 import { auth } from "@/auth";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -22,8 +22,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Max 10MB" }, { status: 400 });
   }
 
-  const blob = await put(`branding/${Date.now()}-${file.name}`, file, {
-    access: "public",
-  });
-  return NextResponse.json({ url: blob.url });
+  const stored = await getPublicFileStore().put(`branding/${Date.now()}-${file.name}`, file);
+  return NextResponse.json({ url: stored.url });
 }

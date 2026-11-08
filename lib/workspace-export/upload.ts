@@ -1,6 +1,6 @@
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto"
-import { generateClientTokenFromReadWriteToken } from "@vercel/blob/client"
 import { shouldUseLocalStorage, type ArtifactStorage } from "@/lib/artifact-storage"
+import { createDirectUploadToken, privateDirectUploadConfigured } from "@/lib/storage/direct-upload"
 
 /**
  * Direct-to-Blob staging for workspace bundles. A bundle can be far larger than a serverless request body
@@ -25,20 +25,18 @@ const sign = (encoded: string) => createHmac("sha256", secret()).update(`workspa
 const stagingPath = (organizationId: string, uploadId: string) => `workspace-import-staging/${organizationId}/${uploadId}.zip`
 
 export function directUploadAvailable(): boolean {
-  return !shouldUseLocalStorage() && Boolean(process.env.ARTIFACT_BLOB_READ_WRITE_TOKEN?.trim())
+  return !shouldUseLocalStorage() && privateDirectUploadConfigured()
 }
 
 export async function prepareBundleUpload(input: { organizationId: string; userId: string; fileSize: number }, now = Date.now()) {
   if (!Number.isInteger(input.fileSize) || input.fileSize < 1) throw new Error("The file is empty")
   if (input.fileSize > MAX_BUNDLE_BYTES) throw new Error("The bundle exceeds the 512 MB limit")
-  const token = process.env.ARTIFACT_BLOB_READ_WRITE_TOKEN?.trim()
-  if (!token) throw new Error("Direct upload is not configured")
   const uploadId = randomUUID()
   const pathname = stagingPath(input.organizationId, uploadId)
   const expiresAt = now + TTL_MS
-  const clientToken = await generateClientTokenFromReadWriteToken({
-    token, pathname, allowedContentTypes: ["application/zip", "application/octet-stream"], maximumSizeInBytes: input.fileSize,
-    validUntil: expiresAt, addRandomSuffix: false, allowOverwrite: false,
+  const clientToken = await createDirectUploadToken({
+    store: "private", pathname, allowedContentTypes: ["application/zip", "application/octet-stream"], maxBytes: input.fileSize,
+    validUntil: expiresAt, allowOverwrite: false, notConfiguredMessage: "Direct upload is not configured",
   })
   const payload: Payload = { v: 1, uploadId, organizationId: input.organizationId, userId: input.userId, pathname, fileSize: input.fileSize, expiresAt }
   const encoded = Buffer.from(JSON.stringify(payload)).toString("base64url")

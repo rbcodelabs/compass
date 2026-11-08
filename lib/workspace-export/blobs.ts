@@ -1,9 +1,9 @@
-import { put } from "@vercel/blob"
 import {
   getArtifactStorage,
   getResearchArtifactStorage,
   type ArtifactStorage,
 } from "@/lib/artifact-storage"
+import { getPublicFileStore } from "@/lib/storage/public-store"
 
 /**
  * Storage the bundle reads from on export and writes to on import. Injected so
@@ -28,25 +28,12 @@ export function defaultBlobAdapters(): BlobAdapters {
     get research() {
       return getResearchArtifactStorage()
     },
-    async fetchPublic(url) {
-      const res = await fetch(url)
-      if (!res.ok) return null
-      return {
-        bytes: new Uint8Array(await res.arrayBuffer()),
-        contentType: res.headers.get("content-type") ?? "application/octet-stream",
-      }
-    },
+    fetchPublic: (url) => getPublicFileStore().fetch(url),
     async putPublic(pathname, bytes, contentType) {
-      const blob = await put(pathname, Buffer.from(bytes), {
-        access: "public",
-        contentType,
-        addRandomSuffix: false,
-      })
-      return blob.url
+      return (await getPublicFileStore().put(pathname, bytes, { contentType, addRandomSuffix: false })).url
     },
     async delPublic(url) {
-      const { del } = await import("@vercel/blob")
-      await del(url).catch(() => undefined)
+      await getPublicFileStore().delete([url]).catch(() => undefined)
     },
   }
 }
