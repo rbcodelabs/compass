@@ -22,9 +22,15 @@ export function publishedDocWhere(workspaceId: string) {
 export function publishableDocWhere(workspaceId: string) {
   return {
     workspaceId,
-    // A canvas doc's content is canvas JSON, not markdown: never publishable.
-    docType: { not: "CANVAS" },
-    OR: [{ storageProvider: null }, { storageProvider: { not: "GEODE" } }],
+    // A canvas doc's content is canvas JSON, not markdown: never publishable. docs.doc_type is NULLABLE in the
+    // database (migration 025 added it with no default; raw-SQL inserts such as the preview sample seed leave it
+    // NULL), and `doc_type <> 'CANVAS'` is NULL, not true, for those rows. Match NULL explicitly so "not a canvas"
+    // is the same set getDocPublishState/setDocPublished accept; a bare `docType: { not: "CANVAS" }` made a
+    // publish return 200 while the customer URL 404'd.
+    AND: [
+      { OR: [{ docType: { not: "CANVAS" } }, { docType: null }] },
+      { OR: [{ storageProvider: null }, { storageProvider: { not: "GEODE" } }] },
+    ],
   }
 }
 

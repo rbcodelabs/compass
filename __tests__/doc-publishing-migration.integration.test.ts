@@ -5,7 +5,7 @@ import { PrismaClient } from "@prisma/client"
 import { PrismaPg } from "@prisma/adapter-pg"
 import type { AppPrismaClient } from "@/lib/db"
 import { applyMigrations } from "@/lib/migrations/runner"
-import { getPublishedDoc, listPublishedDocs } from "@/lib/portal-docs/service"
+import { getDocPublishState, getPublishedDoc, listPublishedDocs, publishableDocWhere, setDocPublished } from "@/lib/portal-docs/service"
 import { createWidget } from "@/lib/portal-home/schema"
 import { loadHomeLayout, loadPublishedHome, publishDraft, saveDraft } from "@/lib/portal-home/service"
 
@@ -132,5 +132,85 @@ describe.skipIf(!databaseUrl)("portal home template round trip after migration 1
     await saveDraft(app, workspaceId, [widget], "docs_hub")
     expect((await loadPublishedHome(app, workspaceId)).template).toBe("bento")
     await expect(saveDraft(app, workspaceId, [widget], "magazine")).rejects.toThrow()
+  })
+})
+
+// Regression: docs.doc_type is NULLABLE with no default in the real database (migration 025 added it as bare
+// VARCHAR(50) and backfilled only the rows that existed then), even though Prisma types it as a non-null String.
+// Rows inserted by raw SQL that omits doc_type (seed-screenshots.ts, which seeds the preview sample workspace's
+// "PRD: AI-Powered Opportunity Clustering") therefore carry NULL. `doc_type <> 'CANVAS'` is NULL (not true) for
+// them, so a predicate of `docType: { not: "CANVAS" }` silently hid a doc that getDocPublishState/setDocPublished
+// happily accepted: publish returned 200 and the customer URL 404'd.
+describe.skipIf(!databaseUrl)("publishing a doc whose doc_type is NULL (raw-SQL seeded rows)", () => {
+  const schema = `dnull_${randomUUID().replaceAll("-", "")}`
+  const pool = new Pool({ connectionString: databaseUrl, max: 2 })
+  let prisma: PrismaClient
+  const workspaceId = randomUUID()
+  const userId = randomUUID()
+  const insertDoc = async (title: string, columns: { doc_type?: string | null; storage_provider?: string | null } = {}) => {
+    const id = randomUUID()
+    await pool.query(
+      `INSERT INTO "${schema}".docs (id, workspace_id, title, content, doc_type, storage_provider) VALUES ($1,$2,$3,'## Problem\n\nBody',$4,$5)`,
+      [id, workspaceId, title, columns.doc_type ?? null, columns.storage_provider ?? null],
+    )
+    return id
+  }
+  beforeAll(async () => {
+    await pool.query(`CREATE SCHEMA "${schema}"`)
+    await pool.query(`CREATE TABLE "${schema}".workspaces (id UUID PRIMARY KEY, organization_id UUID NOT NULL DEFAULT gen_random_uuid(), slug VARCHAR(255) NOT NULL DEFAULT 's', name VARCHAR(255) NOT NULL DEFAULT 'n')`)
+    await pool.query(`CREATE TABLE "${schema}".workspace_members (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), workspace_id UUID NOT NULL, user_id UUID NOT NULL, role VARCHAR(50) NOT NULL DEFAULT 'MEMBER', created_at TIMESTAMP(3) NOT NULL DEFAULT now())`)
+    // doc_type deliberately nullable with NO default, exactly as migration 025 leaves it.
+    await pool.query(`CREATE TABLE "${schema}".docs (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), workspace_id UUID NOT NULL, title VARCHAR(255) NOT NULL, content TEXT, parent_id UUID, storage_provider VARCHAR(20), doc_type VARCHAR(50), updated_at TIMESTAMP(3) NOT NULL DEFAULT now(), published_at TIMESTAMP(3), published_by_id UUID)`)
+    await pool.query(`INSERT INTO "${schema}".workspaces (id) VALUES ($1)`, [workspaceId])
+    await pool.query(`INSERT INTO "${schema}".workspace_members (workspace_id, user_id) VALUES ($1,$2)`, [workspaceId, userId])
+    prisma = new PrismaClient({ adapter: new PrismaPg(pool, { schema }) })
+  })
+  afterAll(async () => {
+    try {
+      await prisma?.$disconnect()
+      await pool.query(`DROP SCHEMA "${schema}" CASCADE`)
+    } finally {
+      await pool.end()
+    }
+  })
+
+  it("is publicly readable and listed after publish, exactly as getDocPublishState promised", async () => {
+    const app = prisma as unknown as AppPrismaClient
+    const docId = await insertDoc("PRD: AI-Powered Opportunity Clustering", { doc_type: null })
+    const standardId = await insertDoc("created through the app", { doc_type: "STANDARD" })
+
+    expect((await pool.query(`SELECT doc_type FROM "${schema}".docs WHERE id=$1`, [docId])).rows[0].doc_type).toBeNull()
+    expect(await getDocPublishState(app, workspaceId, docId)).toMatchObject({ publishable: true })
+
+    for (const id of [docId, standardId]) expect((await setDocPublished(app, { userId, docId: id, published: true })).published).toBe(true)
+
+    expect((await getPublishedDoc(app, workspaceId, docId))?.id).toBe(docId)
+    expect((await getPublishedDoc(app, workspaceId, standardId))?.id).toBe(standardId)
+    const listed = (await listPublishedDocs(app, workspaceId)).map((d) => d.id)
+    expect(listed).toEqual(expect.arrayContaining([docId, standardId]))
+    expect((await listPublishedDocs(app, workspaceId, { ids: [docId] })).map((d) => d.id)).toEqual([docId])
+  })
+
+  it("keeps canvas and externally-stored docs out, and getDocPublishState agrees with the public read for every combination", async () => {
+    const app = prisma as unknown as AppPrismaClient
+    const cases: [string, { doc_type: string | null; storage_provider: string | null }, boolean][] = [
+      ["null/null", { doc_type: null, storage_provider: null }, true],
+      ["null/DB", { doc_type: null, storage_provider: "DB" }, true],
+      ["standard", { doc_type: "STANDARD", storage_provider: null }, true],
+      ["gtm brief", { doc_type: "GTM_POSITIONING_BRIEF", storage_provider: null }, true],
+      ["canvas", { doc_type: "CANVAS", storage_provider: null }, false],
+      ["geode", { doc_type: "STANDARD", storage_provider: "GEODE" }, false],
+      ["null/geode", { doc_type: null, storage_provider: "GEODE" }, false],
+    ]
+    for (const [label, columns, expected] of cases) {
+      const id = await insertDoc(label, columns)
+      expect((await getDocPublishState(app, workspaceId, id)).publishable, `${label}: publish state`).toBe(expected)
+      // Force published_at directly so the public read is judged independent of setDocPublished's own gate.
+      await pool.query(`UPDATE "${schema}".docs SET published_at = now() WHERE id=$1`, [id])
+      expect((await getPublishedDoc(app, workspaceId, id)) !== null, `${label}: public read`).toBe(expected)
+      expect((await listPublishedDocs(app, workspaceId, { ids: [id] })).length === 1, `${label}: public list`).toBe(expected)
+      // The admin picker predicate must agree too.
+      expect(!!(await app.doc.findFirst({ where: { ...publishableDocWhere(workspaceId), id }, select: { id: true } })), `${label}: picker`).toBe(expected)
+    }
   })
 })

@@ -14,14 +14,14 @@ export function buildDocTree(
     icon: string | null;
     parentId: string | null;
     sortOrder: number;
-    docType?: string;
+    docType?: string | null;
   }>,
 ): DocTreeItem[] {
   const sorted = [...docs].sort((a, b) => a.sortOrder - b.sortOrder);
   const map = new Map<string, DocTreeItem>();
 
   for (const doc of sorted) {
-    map.set(doc.id, { ...doc, children: [] });
+    map.set(doc.id, { ...doc, docType: doc.docType ?? undefined, children: [] });
   }
 
   const roots: DocTreeItem[] = [];

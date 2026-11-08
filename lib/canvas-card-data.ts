@@ -275,7 +275,7 @@ export async function searchCanvasCardTargets(input: { workspaceId: string; quer
     ...opps.map((r) => ({ kind: "opportunity" as const, id: r.id, title: r.title, context: r.status })),
     ...sols.map((r) => ({ kind: "solution" as const, id: r.id, title: r.title, context: r.status })),
     ...metrics.filter((m) => currentIds.has(m.id)).slice(0, take).map((r) => ({ kind: "metric" as const, id: r.metricId, title: r.name })),
-    ...docs.map((r) => ({ kind: "doc" as const, id: r.id, title: r.title || "Untitled", context: r.docType === "STANDARD" ? undefined : r.docType })),
+    ...docs.map((r) => ({ kind: "doc" as const, id: r.id, title: r.title || "Untitled", context: r.docType === "STANDARD" || !r.docType ? undefined : r.docType })),
     ...tasks.map((r) => ({ kind: "task" as const, id: r.id, title: r.title, context: r.status })),
     ...exps.map((r) => ({ kind: "experiment" as const, id: r.id, title: r.title, context: r.status })),
     ...objs.map((r) => ({ kind: "objective" as const, id: r.id, title: r.title, context: r.status })),

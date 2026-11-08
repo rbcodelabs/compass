@@ -47,11 +47,13 @@ const ITEMS: Item[] = [
 function matches(row: Item, where: Record<string, unknown>): boolean {
   return Object.entries(where).every(([key, cond]) => {
     if (key === "OR") return (cond as Record<string, unknown>[]).some((alternative) => matches(row, alternative))
-    const value = (row as unknown as Record<string, unknown>)[key]
+    if (key === "AND") return (cond as Record<string, unknown>[]).every((alternative) => matches(row, alternative))
+    // A missing column is SQL NULL: `col <> x` is then NULL (excluded), only an explicit null/IS NULL branch keeps it.
+    const value = (row as unknown as Record<string, unknown>)[key] ?? null
     if (cond && typeof cond === "object" && !(cond instanceof Date)) {
       const c = cond as { in?: unknown[]; not?: unknown }
       if (c.in) return c.in.includes(value)
-      if ("not" in c) return value !== c.not
+      if ("not" in c) return value !== null && value !== c.not
     }
     return value === cond
   })

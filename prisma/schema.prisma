@@ -2301,7 +2301,7 @@ model Doc {
   /// One of: STANDARD | GTM_POSITIONING_BRIEF. Drives whether create_doc
   /// auto-fills GTM_POSITIONING_BRIEF_TEMPLATE and whether roadmapItemId is
   /// meaningful.
-  docType       String       @default("STANDARD") @map("doc_type") @db.VarChar(50)
+  docType       String?      @default("STANDARD") @map("doc_type") @db.VarChar(50)
   createdAt     DateTime     @default(now()) @map("created_at")
   updatedAt     DateTime     @default(now()) @map("updated_at")
   workspace     Workspace    @relation(fields: [workspaceId], references: [id])
