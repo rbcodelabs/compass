@@ -36,7 +36,7 @@ import {
   type BoardColumnLayoutControls,
   type BoardDockTab,
 } from "@/components/patterns";
-import { DroppableDockTab, dockAwareCollisionDetection } from "@/components/patterns/board-dock-dnd";
+import { DroppableDockTab, useStableBoardCollision } from "@/components/patterns/board-dock-dnd";
 import { useOpportunitiesColumnLayout } from "@/components/discovery/discovery-column-layout";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { cn } from "@/lib/utils";
@@ -285,6 +285,7 @@ export function OpportunityBoard({
   // Stable across server and client; without it @dnd-kit numbers its
   // aria-describedby ids from a global counter and hydration mismatches.
   const dndId = useId();
+  const { collisionDetection, noteMoved, reset: resetCollision } = useStableBoardCollision();
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
@@ -326,6 +327,7 @@ export function OpportunityBoard({
 
     if (sourceStatus === destStatus) return;
 
+    noteMoved();
     setColumns((prev) => {
       const item = prev[sourceStatus].find((i) => i.id === activeId);
       if (!item) return prev;
@@ -358,6 +360,7 @@ export function OpportunityBoard({
   function handleDragEnd(event: DragEndEvent) {
     const { active, over } = event;
     setActiveItem(null);
+    resetCollision();
 
     const activeId = active.id as string;
     const overId = (over?.id as string | undefined) ?? null;
@@ -408,6 +411,7 @@ export function OpportunityBoard({
 
   /** Escape (or anything else that cancels the drag) puts the card back where the drag began, in its manual order. */
   function handleDragCancel(event: DragCancelEvent) {
+    resetCollision();
     const activeId = event.active.id as string;
     const found = findStatus(columns, activeId);
     if (dragSourceStatus && found && found !== dragSourceStatus) {
@@ -457,7 +461,7 @@ export function OpportunityBoard({
       <DndContext
         id={dndId}
         sensors={sensors}
-        collisionDetection={dockAwareCollisionDetection}
+        collisionDetection={collisionDetection}
         onDragStart={handleDragStart}
         onDragOver={handleDragOver}
         onDragEnd={handleDragEnd}

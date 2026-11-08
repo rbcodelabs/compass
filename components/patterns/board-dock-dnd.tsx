@@ -1,7 +1,7 @@
 "use client";
 
-import type { ReactNode } from "react";
-import { closestCenter, pointerWithin, useDroppable, type CollisionDetection } from "@dnd-kit/core";
+import { useCallback, useRef, type ReactNode } from "react";
+import { closestCenter, pointerWithin, useDroppable, type CollisionDetection, type UniqueIdentifier } from "@dnd-kit/core";
 import { cn } from "@/lib/utils";
 
 /**
@@ -50,4 +50,43 @@ export function DroppableDockTab({
       {children}
     </div>
   );
+}
+
+/**
+ * Collision detection that cannot ping-pong. A board that moves the dragged card into the column it is over (an optimistic
+ * cross-column move) REMOUNTS the card in a different parent; dnd-kit then re-measures the dragged node at its new
+ * position, which can make the next collision pass pick the column it just left, which moves the card back, and so on.
+ * With nothing but React state in the loop that cycle runs synchronously (effect, state, render, effect...) until React
+ * gives up with "Maximum update depth exceeded". It is geometry dependent, hence intermittent: it showed up when a pinned
+ * dock had scrolled the board so a target column was partly off screen.
+ *
+ * dnd-kit's own multiple-containers recipe breaks the cycle and so does this: after the board reports that it moved the card
+ * (`noteMoved`), collisions return the last result unchanged for the next couple of animation frames, so the new geometry is
+ * measured before the next decision and a flip back needs a real pointer movement. Call `reset` when a drag ends.
+ */
+export function useStableBoardCollision(base: CollisionDetection = dockAwareCollisionDetection) {
+  const lastOverId = useRef<UniqueIdentifier | null>(null);
+  const frozen = useRef(false);
+  const collisionDetection = useCallback<CollisionDetection>(
+    (args) => {
+      if (frozen.current && lastOverId.current !== null) return [{ id: lastOverId.current }];
+      const hits = base(args);
+      if (hits.length > 0) lastOverId.current = hits[0].id;
+      return hits;
+    },
+    [base],
+  );
+  const noteMoved = useCallback(() => {
+    frozen.current = true;
+    if (typeof requestAnimationFrame !== "function") {
+      frozen.current = false;
+      return;
+    }
+    requestAnimationFrame(() => requestAnimationFrame(() => { frozen.current = false; }));
+  }, []);
+  const reset = useCallback(() => {
+    frozen.current = false;
+    lastOverId.current = null;
+  }, []);
+  return { collisionDetection, noteMoved, reset };
 }

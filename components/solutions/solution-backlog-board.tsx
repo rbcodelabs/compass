@@ -31,7 +31,7 @@ import {
   type BoardColumnLayoutControls,
   type BoardDockTab,
 } from "@/components/patterns";
-import { DroppableDockTab, dockAwareCollisionDetection } from "@/components/patterns/board-dock-dnd";
+import { DroppableDockTab, useStableBoardCollision } from "@/components/patterns/board-dock-dnd";
 import { useSolutionsColumnLayout } from "@/components/solutions/solutions-column-layout";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { cn } from "@/lib/utils";
@@ -312,6 +312,7 @@ function StatusBacklogBoard({
 
   // Stable across server and client, or dnd-kit's counter-based ids mismatch on hydration.
   const dndId = useId();
+  const { collisionDetection, noteMoved, reset: resetCollision } = useStableBoardCollision();
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
@@ -390,6 +391,7 @@ function StatusBacklogBoard({
     const dest = parseSolutionBacklogColumnId(overId) ?? findStatus(columns, overId) ?? source;
     if (source === dest) return;
 
+    noteMoved();
     setColumns((prev) => {
       const item = prev[source].find((i) => i.id === activeId);
       if (!item) return prev;
@@ -405,6 +407,7 @@ function StatusBacklogBoard({
   }
 
   function handleDragEnd(event: DragEndEvent) {
+    resetCollision();
     const activeId = event.active.id as string;
     const found = findStatus(columns, activeId);
     // Dropped on a dock tab: that tab's status is the destination (the card has not been moved there during the drag).
@@ -444,6 +447,7 @@ function StatusBacklogBoard({
 
   /** Escape (or anything else that cancels the drag) puts the card back where the drag began. */
   function handleDragCancel(event: DragCancelEvent) {
+    resetCollision();
     const activeId = event.active.id as string;
     const found = findStatus(columns, activeId);
     if (dragSourceStatus && found && found !== dragSourceStatus) {
@@ -494,7 +498,7 @@ function StatusBacklogBoard({
       <DndContext
         id={dndId}
         sensors={sensors}
-        collisionDetection={dockAwareCollisionDetection}
+        collisionDetection={collisionDetection}
         onDragStart={handleDragStart}
         onDragOver={handleDragOver}
         onDragEnd={handleDragEnd}
