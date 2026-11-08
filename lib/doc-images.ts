@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto"
 import type { ArtifactStorage } from "@/lib/artifact-storage"
-import { createDirectUploadToken } from "@/lib/storage/direct-upload"
+import { createDirectUpload } from "@/lib/storage/direct-upload"
 
 export const DOC_IMAGE_MAX_BYTES = 10 * 1024 * 1024
 export const DOC_IMAGE_ALLOWED_MIME_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"] as const
@@ -49,6 +49,6 @@ export async function prepareDocImageUpload(input: { workspaceId: string; filena
   const fileType = validateImageInput(input)
   const identity = createIdentity(input.workspaceId, fileType)
   const expiresAt = now + DIRECT_UPLOAD_TTL_MS
-  const clientToken = await createDirectUploadToken({ store: "private", pathname: identity.pathname, allowedContentTypes: [fileType], maxBytes: input.fileSize, validUntil: expiresAt, allowOverwrite: false })
-  return { ...identity, filename: input.filename, fileType, fileSize: input.fileSize, clientToken, expiresAt, access: "private" as const, markdown: `![${input.filename}](${identity.url})` }
+  const credential = await createDirectUpload({ store: "private", pathname: identity.pathname, allowedContentTypes: [fileType], maxBytes: input.fileSize, validUntil: expiresAt, ttlSeconds: DIRECT_UPLOAD_TTL_MS / 1000, allowOverwrite: false })
+  return { ...identity, filename: input.filename, fileType, fileSize: input.fileSize, ...credential, expiresAt, access: "private" as const, markdown: `![${input.filename}](${identity.url})` }
 }

@@ -1,6 +1,6 @@
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto"
 import { shouldUseLocalStorage, type ArtifactStorage } from "@/lib/artifact-storage"
-import { createDirectUploadToken, privateDirectUploadConfigured } from "@/lib/storage/direct-upload"
+import { createDirectUpload, privateDirectUploadConfigured } from "@/lib/storage/direct-upload"
 
 /**
  * Direct-to-Blob staging for workspace bundles. A bundle can be far larger than a serverless request body
@@ -34,13 +34,13 @@ export async function prepareBundleUpload(input: { organizationId: string; userI
   const uploadId = randomUUID()
   const pathname = stagingPath(input.organizationId, uploadId)
   const expiresAt = now + TTL_MS
-  const clientToken = await createDirectUploadToken({
+  const credential = await createDirectUpload({
     store: "private", pathname, allowedContentTypes: ["application/zip", "application/octet-stream"], maxBytes: input.fileSize,
-    validUntil: expiresAt, allowOverwrite: false, notConfiguredMessage: "Direct upload is not configured",
+    validUntil: expiresAt, ttlSeconds: TTL_MS / 1000, allowOverwrite: false, notConfiguredMessage: "Direct upload is not configured",
   })
   const payload: Payload = { v: 1, uploadId, organizationId: input.organizationId, userId: input.userId, pathname, fileSize: input.fileSize, expiresAt }
   const encoded = Buffer.from(JSON.stringify(payload)).toString("base64url")
-  return { uploadId, pathname, clientToken, receipt: `${encoded}.${sign(encoded)}`, expiresAt, access: "private" as const }
+  return { uploadId, pathname, ...credential, receipt: `${encoded}.${sign(encoded)}`, expiresAt, access: "private" as const }
 }
 
 export function verifyBundleReceipt(receipt: string, organizationId: string, userId: string, now = Date.now()): Payload {
