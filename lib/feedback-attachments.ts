@@ -1,6 +1,7 @@
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto"
-import { del, head, put } from "@vercel/blob"
+import { head } from "@vercel/blob"
 import { generateClientTokenFromReadWriteToken } from "@vercel/blob/client"
+import { getPublicFileStore } from "@/lib/storage/public-store"
 
 import {
   FEEDBACK_ATTACHMENT_ALLOWED_MIME_TYPES,
@@ -123,7 +124,7 @@ export function decodeInlineFeedbackAttachments(
 export async function deleteFeedbackBlobs(urls: string[]): Promise<void> {
   if (!urls.length) return
   try {
-    await del(urls)
+    await getPublicFileStore().delete(urls)
   } catch {
     // Cleanup is best-effort; the original upload/database failure is the useful error.
   }
@@ -138,13 +139,13 @@ export async function uploadInlineFeedbackAttachments(
   try {
     for (const attachment of prepared) {
       const safeName = sanitizeFeedbackAttachmentFilename(attachment.filename)
-      const blob = await put(
+      const stored = await getPublicFileStore().put(
         `feedback/${workspaceId}/${randomUUID()}-${safeName}`,
         attachment.bytes,
-        { access: "public", contentType: attachment.fileType, addRandomSuffix: false },
+        { contentType: attachment.fileType, addRandomSuffix: false },
       )
       uploaded.push({
-        url: blob.url,
+        url: stored.url,
         filename: attachment.filename,
         fileType: attachment.fileType,
         fileSize: attachment.fileSize,
