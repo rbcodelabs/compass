@@ -15,7 +15,9 @@ const formatScore = (value: number) => value.toLocaleString("en-US", { maximumFr
 /**
  * The read-only "Linked opportunities" list on the Objective panel. Rows are opportunities linked directly to the objective or through
  * one of its key results, already sorted by the server (raw score descending, unscored last). The score column appears only when the
- * workspace has an active Opportunity scoring model. Column order is Opportunity | Score | Status so the headline number stays on screen in a narrow panel; the column minimums (12 + 5 + 7 rem) sum to the 24rem table minimum. The table keeps a minimum width and scrolls horizontally inside a height-bounded
+ * workspace has an active (status ACTIVE) Opportunity scoring model; an assigned-but-archived model hides it. Column order is
+ * Opportunity | Score | Status so the headline number stays on screen in a narrow panel; the column minimums (12 + 5 + 7 rem) sum to the
+ * 24rem table minimum. The table keeps a minimum width and scrolls horizontally inside a height-bounded
  * container (never squashes), so a long list and a narrow panel both stay readable. Entity names come from useLabels(); the generic
  * "Status" / "Score" column headers are plain words (there are no label keys for them). Both link kinds are always listed; the preset's
  * link emphasis only decides which provenance note ("Direct" / "via Key Result") is shown.
