@@ -104,7 +104,7 @@ function Hero({ item, extras, workspaceId, orgSlug, workspaceSlug }: { item: Roa
               onMouseEnter={() => setActive(index)}
               onFocus={() => setActive(index)}
               className={cn(
-                "relative h-8 w-12 overflow-hidden rounded-md border-2 bg-surface-panel shadow",
+                "relative h-8 w-12 overflow-hidden rounded-md border-2 bg-surface-panel shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-black/70",
                 index === active ? "border-primary" : "border-white/80 opacity-85",
               )}
             >
