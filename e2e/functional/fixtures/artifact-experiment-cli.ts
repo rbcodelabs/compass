@@ -10,13 +10,17 @@ import { deleteArtifact, getExperimentArtifactIds } from "../../../lib/artifacts
 import { getArtifactStorage } from "../../../lib/artifact-storage"
 import { deleteLinksForEntity } from "../../../lib/links/service"
 
-const [command, workspaceId, id] = process.argv.slice(2)
-const prisma = getPrisma()
-try {
-  if (command === "read") console.log(JSON.stringify(await getExperimentArtifactIds(prisma, workspaceId, id)))
-  else if (command === "leftover") console.log(JSON.stringify(await deleteLinksForEntity(prisma, "ARTIFACT", [id])))
-  else if (command === "delete") { await deleteArtifact({ artifactId: id, workspaceId }, getArtifactStorage()); console.log(JSON.stringify({ deleted: true })) }
-  else throw new Error(`Unknown command ${command}`)
-} finally {
-  await prisma.$disconnect?.()
+async function main() {
+  const [command, workspaceId, id] = process.argv.slice(2)
+  const prisma = getPrisma()
+  try {
+    if (command === "read") console.log(JSON.stringify(await getExperimentArtifactIds(prisma, workspaceId, id)))
+    else if (command === "leftover") console.log(JSON.stringify(await deleteLinksForEntity(prisma, "ARTIFACT", [id])))
+    else if (command === "delete") { await deleteArtifact({ artifactId: id, workspaceId }, getArtifactStorage()); console.log(JSON.stringify({ deleted: true })) }
+    else throw new Error(`Unknown command ${command}`)
+  } finally {
+    await prisma.$disconnect?.()
+  }
 }
+
+main().catch((error) => { console.error(error); process.exit(1) })
