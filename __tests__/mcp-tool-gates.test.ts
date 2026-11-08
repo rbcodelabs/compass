@@ -295,14 +295,15 @@ describe("ADR 0020: AgentOrgAdminGrant for delegated scoring-model admin", () =>
     await expect(applyToolGate(tool, AGENT, argsFor(tool))).rejects.toThrow("Human administrator required.")
   })
 
-  // Proves the grant doesn't leak scope: release authorization stays
-  // unconditionally human-only per ADR 0020, even for an agent holding a live
-  // grant. (create_workspace left this list when agents began inheriting their
-  // owner's org admin rights; see the next describe block.)
-  it("request_release_authorization remains denied for an agent identity holding a valid SCORING_MODEL_ADMIN grant", async () => {
-    mockPrisma.agentOrgAdminGrant.findFirst.mockResolvedValue({ id: "grant-1", grantedByUserId: "grantor-1" })
-    mockPrisma.organizationMember.findFirst.mockResolvedValue({ role: "ADMIN" })
-    await expect(applyToolGate("request_release_authorization", AGENT, { workspaceId: "ws-1" })).rejects.toThrow(/human identity/)
+  // Raising a release-authorization request is an agent WRITE gated by workspace membership; the approval
+  // itself stays human-only (admin on the review revision). (create_workspace left the human-only list when
+  // agents began inheriting their owner's org admin rights; see the next describe block.)
+  it("request_release_authorization is an agent WRITE gated by workspace membership, not org admin", async () => {
+    expect(AGENT_TOOL_POLICY.request_release_authorization).toBe("WRITE")
+    mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
+    await expect(applyToolGate("request_release_authorization", AGENT, { workspaceId: "ws-1" })).resolves.toBeUndefined()
+    mockPrisma.workspace.findFirst.mockResolvedValue(null)
+    await expect(applyToolGate("request_release_authorization", AGENT, { workspaceId: "ws-1" })).rejects.toThrow(/access denied/)
   })
 })
 
@@ -379,7 +380,7 @@ describe("agents inherit their owner's live org admin rights (create_workspace)"
   // Attestation-like tools would be recorded as the human's own act.
   it.each([
     "update_comment", "update_solution_comment",
-    "approve_solution_plan", "reject_solution_plan", "request_release_authorization",
+    "approve_solution_plan", "reject_solution_plan",
   ])("%s stays human-only even for an agent whose owner is an org owner", async (tool) => {
     mockPrisma.organizationMember.findFirst.mockResolvedValue({ role: "OWNER" })
     expect(AGENT_TOOL_POLICY[tool]).toBe("DENY")
@@ -733,6 +734,13 @@ describe("applyToolGate", () => {
         expect(mockPrisma.task.findUnique).not.toHaveBeenCalled()
       }
     )
+
+    it.each(["set_custom_field_values", "group_by_custom_field"])("%s is workspace-member gated", async (tool) => {
+      mockPrisma.workspace.findFirst.mockResolvedValue(null)
+      await expect(applyToolGate(tool, MEMBER, { workspaceId: "ws-1" })).rejects.toThrow(/not found or access denied/)
+      mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
+      await expect(applyToolGate(tool, MEMBER, { workspaceId: "ws-1" })).resolves.toBeUndefined()
+    })
 
     it("set_custom_field_value allows a member and reaches the handler's own field-level checks", async () => {
       mockPrisma.task.findUnique.mockResolvedValue({ workspaceId: "ws-1" })

@@ -10,7 +10,7 @@
  *   3. A hidden column that still has cards is shown anyway ("forced visible").
  */
 import { z } from "zod"
-import type { OpportunityStatus } from "@/lib/types"
+import type { OpportunityStatus, SolutionStatus } from "@/lib/types"
 
 /** Upper bound on either list; bounds the stored document and any URL built from it. */
 export const MAX_COLUMN_KEYS = 50
@@ -21,7 +21,17 @@ export const DEFAULT_OPPORTUNITY_COLUMN_ORDER = [
   "PRIORITIZED",
   "VALIDATING",
   "EXPLORING",
+  "UNREVIEWED",
 ] as const satisfies readonly OpportunityStatus[]
+
+/** Default Solutions board order: work in flight first, finished and abandoned work last. */
+export const DEFAULT_SOLUTION_COLUMN_ORDER = [
+  "IN_DELIVERY",
+  "VALIDATED",
+  "IDEA",
+  "SHIPPED",
+  "KILLED",
+] as const satisfies readonly SolutionStatus[]
 
 const columnKeyList = z.array(z.string().min(1).max(100)).max(MAX_COLUMN_KEYS)
 

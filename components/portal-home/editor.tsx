@@ -19,7 +19,10 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import { StatusBadge } from "@/components/patterns/status-badge"
 import { cn } from "@/lib/utils"
 import { renderWidgetBody, renderWidgetForm } from "./registry"
-import { BOARD_CLASS, EmptyHome, PortalHomeBoard, SIZE_CLASS } from "./board"
+import { type PortalTemplate } from "@/lib/portal-home/templates"
+import { EmptyHome, PortalHomeBoard, TemplateScope } from "./board"
+import { TEMPLATE_GRID, TEMPLATE_SPAN } from "./templates/arrange"
+import { TemplatePicker } from "./templates/template-picker"
 import type { HomeOptions } from "./types"
 
 type Mode = "view" | "edit" | "preview"
@@ -33,6 +36,10 @@ interface Props {
   initialDraft: PortalHomeWidget[]
   /** What customers see right now (the published layout, or the default home). */
   initialBaseline: PortalHomeWidget[]
+  /** The template being edited (the draft's). */
+  initialTemplate: PortalTemplate
+  /** The template customers see right now. */
+  initialBaselineTemplate: PortalTemplate
   publishedAt: string | null
   initialResolved: Record<string, WidgetResolution>
   /** Separate from initialResolved (team data): would each draft widget reach customers? */
@@ -48,14 +55,37 @@ async function api<T>(url: string, init?: RequestInit): Promise<T> {
   return body
 }
 
-export function PortalHomeEditor({ orgSlug, workspaceSlug, children, initialDraft, initialBaseline, publishedAt: initialPublishedAt, initialResolved, initialCustomerAvailability }: Props) {
+export function PortalHomeEditor({ orgSlug, workspaceSlug, children, initialDraft, initialBaseline, initialTemplate, initialBaselineTemplate, publishedAt: initialPublishedAt, initialResolved, initialCustomerAvailability }: Props) {
   const router = useRouter()
   const dndId = useId()
   const endpoint = `/api/portal-home/${orgSlug}/${workspaceSlug}`
 
-  const [mode, setMode] = useState<Mode>("view")
+  const [mode, setModeState] = useState<Mode>("view")
+  // Publishing a different template swaps the whole portal shell, which remounts this editor. Remember that
+  // the admin was editing (per tab) so the swap does not drop them out of edit mode.
+  const editingKey = `portal-home-editing:${endpoint}`
+  const setMode = useCallback((next: Mode) => {
+    setModeState(next)
+    try {
+      if (next === "view") sessionStorage.removeItem(editingKey)
+      else sessionStorage.setItem(editingKey, "1")
+    } catch {
+      // Storage unavailable (private mode): the editor simply starts in view mode after a remount.
+    }
+  }, [editingKey])
+  useEffect(() => {
+    try {
+      // Reading browser storage can only happen after hydration, so this one-time restore is an effect.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      if (sessionStorage.getItem(editingKey) === "1") setModeState("edit")
+    } catch {
+      // ignore
+    }
+  }, [editingKey])
   const [widgets, setWidgets] = useState<PortalHomeWidget[]>(initialDraft)
   const [baseline, setBaseline] = useState<PortalHomeWidget[]>(initialBaseline)
+  const [template, setTemplate] = useState<PortalTemplate>(initialTemplate)
+  const [baselineTemplate, setBaselineTemplate] = useState<PortalTemplate>(initialBaselineTemplate)
   const [publishedAt, setPublishedAt] = useState<string | null>(initialPublishedAt)
   const [resolved, setResolved] = useState<Record<string, WidgetResolution>>(initialResolved)
   const [customerAvailability, setCustomerAvailability] = useState<Record<string, CustomerAvailability>>(initialCustomerAvailability)
@@ -68,11 +98,12 @@ export function PortalHomeEditor({ orgSlug, workspaceSlug, children, initialDraf
   const [preview, setPreview] = useState<{ widgets: PortalHomeWidget[]; resolved: Record<string, WidgetResolution> } | null>(null)
 
   const widgetsRef = useRef(widgets)
+  const templateRef = useRef(template)
   const dirtySinceSave = useRef(false)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const inFlightSave = useRef<Promise<unknown> | null>(null)
 
-  const unpublished = hasUnpublishedChanges(widgets, baseline)
+  const unpublished = hasUnpublishedChanges(widgets, baseline, { draft: template, published: baselineTemplate })
   const selected = widgets.find((widget) => widget.id === selectedId) ?? null
 
   const sensors = useSensors(
@@ -84,6 +115,14 @@ export function PortalHomeEditor({ orgSlug, workspaceSlug, children, initialDraf
     const ordered = normalizeOrder(next)
     setWidgets(ordered)
     setSaveState(layoutSchema.safeParse(ordered).success ? "dirty" : "invalid")
+  }, [])
+
+  const chooseTemplate = useCallback((next: PortalTemplate) => {
+    if (next === templateRef.current) return
+    templateRef.current = next
+    setTemplate(next)
+    dirtySinceSave.current = true
+    setSaveState(layoutSchema.safeParse(widgetsRef.current).success ? "dirty" : "invalid")
   }, [])
 
   // Mirror the latest draft into a ref for the async save/publish paths, and mark
@@ -99,16 +138,17 @@ export function PortalHomeEditor({ orgSlug, workspaceSlug, children, initialDraf
     if (inFlightSave.current) await inFlightSave.current.catch(() => undefined)
     if (!dirtySinceSave.current) return true
     const snapshot = widgetsRef.current
+    const templateSnapshot = templateRef.current
     if (!layoutSchema.safeParse(snapshot).success) {
       setSaveState("invalid")
       return false
     }
     setSaveState("saving")
     try {
-      const request = api(endpoint, { method: "PUT", body: JSON.stringify({ widgets: snapshot }) })
+      const request = api(endpoint, { method: "PUT", body: JSON.stringify({ widgets: snapshot, template: templateSnapshot }) })
       inFlightSave.current = request
       await request
-      if (widgetsRef.current === snapshot) {
+      if (widgetsRef.current === snapshot && templateRef.current === templateSnapshot) {
         dirtySinceSave.current = false
         setSaveState("saved")
       } else {
@@ -129,7 +169,7 @@ export function PortalHomeEditor({ orgSlug, workspaceSlug, children, initialDraf
     return () => {
       if (saveTimer.current) clearTimeout(saveTimer.current)
     }
-  }, [widgets, saveState, saveNow])
+  }, [widgets, template, saveState, saveNow])
 
   // Re-resolve data for the canvas when the draft changes (pins, links, flags).
   useEffect(() => {
@@ -185,8 +225,9 @@ export function PortalHomeEditor({ orgSlug, workspaceSlug, children, initialDraf
         setMessage((current) => current ?? "Fix the highlighted problems before publishing.")
         return
       }
-      const result = await api<{ published: PortalHomeWidget[]; publishedAt: string }>(`${endpoint}/publish`, { method: "POST" })
+      const result = await api<{ published: PortalHomeWidget[]; publishedTemplate?: PortalTemplate; publishedAt: string }>(`${endpoint}/publish`, { method: "POST" })
       setBaseline(result.published)
+      setBaselineTemplate(result.publishedTemplate ?? templateRef.current)
       setPublishedAt(result.publishedAt)
       setMessage("Published. Customers now see this version.")
       router.refresh()
@@ -278,19 +319,20 @@ export function PortalHomeEditor({ orgSlug, workspaceSlug, children, initialDraf
           <p role="status" className="rounded-lg bg-status-info-surface px-3 py-2 text-sm text-status-info">
             Previewing as a signed-out customer. Widgets limited to signed-in customers, the team or segments, and anything not public, are hidden here exactly as they will be live.
           </p>
-          {preview ? (preview.widgets.length > 0 ? <PortalHomeBoard widgets={preview.widgets} resolved={preview.resolved} /> : <EmptyHome>Customers would see an empty home.</EmptyHome>) : <EmptyHome>Building preview…</EmptyHome>}
+          {preview ? (preview.widgets.length > 0 ? <PortalHomeBoard widgets={preview.widgets} resolved={preview.resolved} template={template} /> : <EmptyHome>Customers would see an empty home.</EmptyHome>) : <EmptyHome>Building preview…</EmptyHome>}
         </div>
       ) : null}
 
       {mode === "edit" ? (
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_20rem]">
           <div className="flex min-w-0 flex-col gap-4">
+            <TemplatePicker value={template} onChange={chooseTemplate} />
             <p className="text-sm text-text-secondary">
               <strong className="text-text-primary">Editing home.</strong> Drag the handle to reorder, pick a size, or select a widget to configure it. Customers see the published version until you publish.
             </p>
             <DndContext id={dndId} sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
               <SortableContext items={widgets.map((w) => w.id)} strategy={rectSortingStrategy}>
-                <div className={BOARD_CLASS} data-testid="portal-home-edit-board">
+                <TemplateScope template={template} className={TEMPLATE_GRID[template]} data-testid="portal-home-edit-board">
                   {widgets.map((widget) => (
                     <EditableWidget
                       key={widget.id}
@@ -300,16 +342,17 @@ export function PortalHomeEditor({ orgSlug, workspaceSlug, children, initialDraf
                       selected={widget.id === selectedId}
                       onSelect={() => setSelectedId(widget.id)}
                       onSize={(size) => updateWidget({ ...widget, size })}
+                      template={template}
                     />
                   ))}
                   <button
                     type="button"
                     onClick={() => setDrawerOpen(true)}
-                    className="flex min-h-24 items-center justify-center gap-2 rounded-xl border border-dashed border-border-strong text-sm font-medium text-text-subtle hover:bg-surface-inset md:col-span-6"
+                    className="flex min-h-24 items-center justify-center gap-2 rounded-xl border border-dashed border-border-strong text-sm font-medium text-text-subtle hover:bg-surface-inset md:col-span-full"
                   >
                     <Plus className="size-4" /> Add widget
                   </button>
-                </div>
+                </TemplateScope>
               </SortableContext>
             </DndContext>
           </div>
@@ -387,8 +430,8 @@ export function PortalHomeEditor({ orgSlug, workspaceSlug, children, initialDraf
 }
 
 function EditableWidget({
-  widget, resolution, customerAvailability, selected, onSelect, onSize,
-}: { widget: PortalHomeWidget; resolution: WidgetResolution | undefined; customerAvailability: CustomerAvailability | undefined; selected: boolean; onSelect: () => void; onSize: (size: WidgetSize) => void }) {
+  widget, resolution, customerAvailability, selected, onSelect, onSize, template,
+}: { template: PortalTemplate; widget: PortalHomeWidget; resolution: WidgetResolution | undefined; customerAvailability: CustomerAvailability | undefined; selected: boolean; onSelect: () => void; onSize: (size: WidgetSize) => void }) {
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({ id: widget.id })
   const body = resolution?.available ? renderWidgetBody(widget, resolution) : null
   return (
@@ -397,7 +440,7 @@ function EditableWidget({
       style={{ transform: CSS.Transform.toString(transform), transition }}
       aria-label={`${WIDGET_DEFINITIONS[widget.type].label} widget`}
       data-widget-type={widget.type}
-      className={cn("min-w-0 rounded-xl", SIZE_CLASS[widget.size], isDragging && "z-10 opacity-80", selected && "ring-2 ring-ring")}
+      className={cn("min-w-0 rounded-xl", TEMPLATE_SPAN[template][widget.size], isDragging && "z-10 opacity-80", selected && "ring-2 ring-ring")}
     >
       <div className="flex flex-wrap items-center gap-2 rounded-t-xl border border-b-0 border-border-default bg-surface-inset px-2 py-1.5">
         <button

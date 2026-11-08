@@ -16,7 +16,7 @@
  */
 
 import { createHash } from "node:crypto"
-import { Sandbox } from "@vercel/sandbox"
+import type { SandboxHandle } from "@/lib/sandbox-provider"
 import { bootSandboxFromSnapshot, computeDepsFingerprint, runStep } from "@/lib/agent-sandbox"
 
 const BUILD_TIMEOUT_MS = 15 * 60_000
@@ -134,7 +134,7 @@ export async function buildDeveloperSnapshot(opts: {
 }): Promise<BuildDeveloperSnapshotResult> {
   const emit = opts.onProgress ?? (() => {})
   const startedAt = Date.now()
-  let sandbox: Sandbox | undefined
+  let sandbox: SandboxHandle | undefined
   let snapshotted = false
   try {
     const createStart = Date.now()
@@ -157,18 +157,18 @@ export async function buildDeveloperSnapshot(opts: {
     emit(`developer layer works: PostgreSQL ${postgresVersion} (${smokeMs}ms)`)
 
     const snapStart = Date.now()
-    const snap = await sandbox.currentSession().snapshot()
+    const snap = await sandbox.snapshot()
     const snapshotMs = Date.now() - snapStart
     snapshotted = true // snapshot() stops the session; do not stop() again
-    emit(`snapshot created: ${snap.snapshotId} (${snapshotMs}ms, ${snap.sizeBytes} bytes)`)
+    emit(`snapshot created: ${snap.imageId} (${snapshotMs}ms, ${snap.sizeBytes} bytes)`)
 
     const verifyStart = Date.now()
-    await verifyDeveloperSnapshot(snap.snapshotId, emit)
+    await verifyDeveloperSnapshot(snap.imageId, emit)
     const verifyMs = Date.now() - verifyStart
     emit(`snapshot verified after warm boot (${verifyMs}ms)`)
 
     return {
-      snapshotId: snap.snapshotId,
+      snapshotId: snap.imageId,
       depsFingerprint: computeDeveloperFingerprint(),
       baseSnapshotId: opts.baseSnapshotId,
       sizeBytes: snap.sizeBytes,

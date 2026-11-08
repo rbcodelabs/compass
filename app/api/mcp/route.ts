@@ -13,7 +13,7 @@ import { safeEntityUrl, withUrlLine } from "@/lib/compass-url"
 import type { EntityLinkType } from "@/lib/entity-links"
 import { validateMcpAuth } from "@/lib/mcp-auth"
 import { TOOL_OUTPUT_SCHEMA, ok, fail } from "@/lib/mcp-output"
-import { recencyOrderBy, recencySortSchema } from "@/lib/mcp-recency"
+import { recencyOrderBy, recencySortSchema, type RecencySort } from "@/lib/mcp-recency"
 import {
   KEYSET_PAGE_DEFAULT,
   decodeKeysetCursor,
@@ -27,6 +27,8 @@ import {
 } from "@/lib/mcp-keyset"
 import { widenRefSchemas, resolveToolRefs } from "@/lib/mcp-work-item-refs"
 import { runWithMcpActor, getMcpActor, peekMcpActor, isResearchActor, assertWorkspaceMember, McpAuthzError } from "@/lib/mcp-authz"
+import { registerArtifactResources } from "@/lib/artifact-resource"
+import { linkAgentToolCall } from "@/lib/links/conversation-links"
 import { applyToolGate, AGENT_TOOL_POLICY, scopesSatisfy, type ToolScope } from "@/lib/mcp-tool-gates"
 import { bearerChallenge, requiredScopeForPayload } from "@/lib/mcp-oauth-challenge"
 import { SCOPE_MCP_READ } from "@/lib/oauth/constants"
@@ -114,6 +116,7 @@ import {
 } from "@/lib/solution-comment-tool-handlers"
 import { updateSolutionStatus } from "@/lib/solution-status-tool-handlers"
 import { createOpportunities, createOpportunity, updateOpportunity, updateOpportunityKeyResult, updateOpportunityStatus } from "@/lib/opportunity-tool-handlers"
+import { DEFAULT_OPPORTUNITY_STATUS, OPPORTUNITY_PIPELINE_STATUSES, OPPORTUNITY_PIPELINE_TEXT, OPPORTUNITY_STATUSES, OPPORTUNITY_STATUS_GUIDE } from "@/lib/opportunity-status"
 import { listAssumptions, listSolutions } from "@/lib/discovery-query-tool-handlers"
 import {
   listScoringModels,
@@ -183,7 +186,7 @@ import {
   unlinkSolutionFromKeyResultTool,
 } from "@/lib/typed-link-tool-handlers"
 import { linkEntitiesTool, linkSummariesForCaller, listLinksTool, unlinkEntitiesTool } from "@/lib/link-tool-handlers"
-import { ENTITY_TYPE_VOCABULARY } from "@/lib/entity-types"
+import { PUBLIC_LINK_ENTITY_TYPES } from "@/lib/entity-types"
 import { decisionOptionsInputSchema, decisionQuestionsInputSchema } from "@/lib/decision-option-schema"
 import { applyRecordedDecision, closeDecisionNoAction, getDecision, getReviewRequest, listDecisions, listReviewRequests, requestDecision, requestReleaseAuthorization } from "@/lib/decision-tool-handlers"
 import { uiGetState, uiNavigate, uiScreenshot } from "@/lib/ui-control-tool-handlers"
@@ -199,6 +202,17 @@ import {
   getCustomFieldValues,
   setCustomFieldValue,
 } from "@/lib/custom-field-tool-handlers"
+import {
+  buildCustomFieldFilterConditions,
+  customFieldFilterSchema,
+  describeColumns,
+  formatFieldValues,
+  groupByCustomField,
+  loadCustomFieldValuesFor,
+  resolveCustomFieldColumns,
+  setCustomFieldValues,
+  type CustomFieldFilter,
+} from "@/lib/custom-field-bulk"
 import {
   listCardSortFactorsTool,
   createCardSortRoundTool,
@@ -289,7 +303,12 @@ const _handler = createMcpHandler(
         await applyToolGate(name, actor, args, resolveOnce)
         // A service actor returns from the gate early; its handler still needs UUIDs.
         await resolveOnce()
-      }, () => withAnalyticsTool(name, () => withInterviewMutation(name, args, () => handler(args, extra)))))
+      }, () => withAnalyticsTool(name, () => withInterviewMutation(name, args, async () => {
+        const result = await handler(args, extra)
+        // RM-19: an agent turn's create/read/update of an opportunity, solution or task links the conversation to it. Never throws.
+        await linkAgentToolCall(name, args, result)
+        return result
+      }))))
     })
 
     register("get_current_identity", { title: "Current Identity", description: "Returns the authenticated caller and currently accessible workspaces.", inputSchema: {}, outputSchema: TOOL_OUTPUT_SCHEMA }, async () => {
@@ -1089,10 +1108,13 @@ const _handler = createMcpHandler(
         description:
           "Lists opportunities in a workspace, with optional filters by status, squad and last-updated window. " +
           "Paginated: returns at most `limit` items (default 50) plus the total and a `nextCursor` when more remain. " +
-          "To walk a whole workspace, keep calling with the returned cursor until `hasMore` is false.",
+          "To walk a whole workspace, keep calling with the returned cursor until `hasMore` is false. " +
+          "`includeCustomFields` (or `customFieldIds`, which also narrows the columns) adds each opportunity's OPPORTUNITY custom field values as `customFields`, keyed by field name.",
         inputSchema: {
           workspaceId: z.string().uuid().describe("UUID of the workspace"),
-          status: z.enum(["EXPLORING", "VALIDATING", "PRIORITIZED", "ACTIVE", "ARCHIVED"]).optional().describe("Filter by status"),
+          includeCustomFields: z.boolean().optional().describe("Include each opportunity's custom field values (default false)"),
+          customFieldIds: z.array(z.string().uuid()).min(1).max(30).optional().describe("Only these OPPORTUNITY custom fields in the output (implies includeCustomFields)"),
+          status: z.enum(OPPORTUNITY_STATUSES).optional().describe("Filter by status"),
           squadId: z.string().uuid().optional().describe("Filter by squad"),
           updatedSince: z.string().datetime().optional().describe("Filter to opportunities updated at or after this ISO timestamp"),
           updatedBefore: z.string().datetime().optional().describe("Filter to opportunities updated before this ISO timestamp (useful for stale-work scans)"),
@@ -1102,8 +1124,13 @@ const _handler = createMcpHandler(
         },
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
-      async ({ workspaceId, status, squadId, updatedSince, updatedBefore, sort, limit, cursor }) => {
+      async ({ workspaceId, status, squadId, updatedSince, updatedBefore, sort, limit, cursor, includeCustomFields, customFieldIds }) => {
         const prisma = getPrisma()
+        const columnResult = includeCustomFields || customFieldIds?.length
+          ? await resolveCustomFieldColumns(prisma, { workspaceId, objectType: "OPPORTUNITY", fieldIds: customFieldIds })
+          : null
+        if (columnResult && !columnResult.ok) return fail(columnResult.error)
+        const columns = columnResult?.ok ? columnResult.columns : null
         // The cursor is only meaningful under the ordering and filters that
         // produced it, so both are pinned into it and rechecked here.
         const fingerprint = filterFingerprint({ status, squadId, updatedSince, updatedBefore, sort })
@@ -1190,13 +1217,16 @@ const _handler = createMcpHandler(
         // Additive: the typed Opportunity<->Objective links, one workspace-filtered batch for the page.
         // `linkedKeyResult` above stays derived from the legacy column only and is never inferred from these.
         const linkedObjectives = await getLinkedObjectivesByOpportunity(prisma, workspaceId, opportunities.map(o => o.id), { preverified: true })
+        const fieldValues = columns ? await loadCustomFieldValuesFor(prisma, columns, opportunities.map(o => o.id)) : null
         const lines = opportunities.map(o => {
           const description = o.description?.trim().replace(/\r\n?/g, "\n")
+          const fieldsText = formatFieldValues(fieldValues?.get(o.id))
           const objectives = linkedObjectives.get(o.id) ?? []
           return (
             `• **${o.title}** [${o.status}]${o.squad ? ` (${o.squad.name})` : ""} — ${o._count.solutions} solutions` +
             (o.linkedKeyResult ? ` — KR: ${o.linkedKeyResult.objective.title} / ${o.linkedKeyResult.title}` : "") +
             (objectives.length ? ` — Objectives: ${objectives.map(obj => obj.title).join(", ")}` : "") +
+            (fieldsText ? ` — Fields: ${fieldsText}` : "") +
             (description ? `\n  Description: ${description.replace(/\n/g, "\n    ")}` : "") +
             `\n  ID: ${o.id}`
           )
@@ -1225,7 +1255,9 @@ const _handler = createMcpHandler(
               ? { title: o.linkedKeyResult.title, objective: o.linkedKeyResult.objective.title }
               : null,
             linkedObjectives: linkedObjectives.get(o.id) ?? [],
+            ...(fieldValues ? { customFields: fieldValues.get(o.id) } : {}),
           })),
+          ...(columns ? { fields: describeColumns(columns) } : {}),
           count: opportunities.length,
           total,
           hasMore,
@@ -1324,7 +1356,7 @@ const _handler = createMcpHandler(
         inputSchema: {
           workspaceId: z.string().uuid().describe("UUID of the workspace"),
           status: z.enum(["IDEA", "VALIDATED", "IN_DELIVERY", "SHIPPED", "KILLED"]).optional().describe("Filter by solution lifecycle status"),
-          opportunityStatus: z.enum(["EXPLORING", "VALIDATING", "PRIORITIZED", "ACTIVE", "ARCHIVED"]).optional().describe("Filter by parent opportunity status"),
+          opportunityStatus: z.enum(OPPORTUNITY_STATUSES).optional().describe("Filter by parent opportunity status"),
           squadId: z.string().uuid().optional().describe("Filter by the parent opportunity's squad"),
           hasRoadmapItem: z.boolean().optional().describe("Filter by whether the solution is linked to any roadmap item"),
           updatedSince: z.string().datetime().optional().describe("Filter to solutions updated at or after this ISO timestamp"),
@@ -1348,7 +1380,7 @@ const _handler = createMcpHandler(
           status: z.enum(["UNTESTED", "TESTING", "VALIDATED", "INVALIDATED"]).optional().describe("Filter by assumption status"),
           riskLevel: z.enum(["HIGH", "MEDIUM", "LOW"]).optional().describe("Filter by recorded risk level"),
           solutionStatus: z.enum(["IDEA", "VALIDATED", "IN_DELIVERY", "SHIPPED", "KILLED"]).optional().describe("Filter by parent solution status"),
-          opportunityStatus: z.enum(["EXPLORING", "VALIDATING", "PRIORITIZED", "ACTIVE", "ARCHIVED"]).optional().describe("Filter by ancestor opportunity status"),
+          opportunityStatus: z.enum(OPPORTUNITY_STATUSES).optional().describe("Filter by ancestor opportunity status"),
           squadId: z.string().uuid().optional().describe("Filter by the ancestor opportunity's squad"),
           updatedSince: z.string().datetime().optional().describe("Filter to assumptions updated at or after this ISO timestamp"),
           updatedBefore: z.string().datetime().optional().describe("Filter to assumptions updated before this ISO timestamp (useful for stale-work scans)"),
@@ -1363,13 +1395,13 @@ const _handler = createMcpHandler(
       "create_opportunity",
       {
         title: "Create Opportunity",
-        description: "Creates a new customer or product Opportunity. Optionally link to a Key Result and assign to a squad.",
+        description: `Creates a new customer or product Opportunity. Optionally link to a Key Result and assign to a squad. New opportunities start as ${DEFAULT_OPPORTUNITY_STATUS} (the triage inbox) unless you pass a status.`,
         inputSchema: {
           workspaceId: z.string().uuid().describe("UUID of the workspace"),
           title: z.string().min(1).describe("Short title for the opportunity"),
           description: z.string().optional().describe("What problem or need this represents"),
           customerSegment: z.string().optional().describe("The customer segment affected"),
-          status: z.enum(["EXPLORING", "VALIDATING", "PRIORITIZED", "ACTIVE"]).optional().default("EXPLORING"),
+          status: z.enum(OPPORTUNITY_PIPELINE_STATUSES).optional().default(DEFAULT_OPPORTUNITY_STATUS),
           keyResultId: z.string().uuid().optional().describe("UUID of a Key Result this opportunity is driving"),
           squadId: z.string().uuid().optional().describe("UUID of the owning squad"),
         },
@@ -1385,7 +1417,7 @@ const _handler = createMcpHandler(
         description:
           "Creates several Opportunities in one call: up to 25 items for agent callers (100 for human API keys). Each item is created in its own transaction and reported separately, so one invalid item never blocks the others; the call succeeds even when some items fail, so read data.results. " +
           "Pass your own `clientId` (a UUID) per item to make retries safe: resending an item that was already created returns { ok: true, deduped: true } instead of a duplicate, and an id that is taken by different content returns CONFLICT. Omit it only if you will not retry. " +
-          "Items take title, description, customerSegment, status (EXPLORING, VALIDATING, PRIORITIZED or ACTIVE) and squadId; use create_opportunity to link a Key Result.",
+          "Items take title, description, customerSegment, status (UNREVIEWED, EXPLORING, VALIDATING, PRIORITIZED or ACTIVE; defaults to UNREVIEWED) and squadId; use create_opportunity to link a Key Result.",
         inputSchema: {
           workspaceId: z.string().uuid().describe("UUID of the workspace"),
           items: z.array(z.object({
@@ -1393,7 +1425,7 @@ const _handler = createMcpHandler(
             title: z.string().describe("Short title (at most 255 characters)"),
             description: z.string().nullable().optional(),
             customerSegment: z.string().nullable().optional(),
-            status: z.string().optional().describe("EXPLORING (default), VALIDATING, PRIORITIZED or ACTIVE"),
+            status: z.string().optional().describe("UNREVIEWED (default), EXPLORING, VALIDATING, PRIORITIZED or ACTIVE"),
             squadId: z.string().uuid().nullable().optional(),
           }).strict()).min(1).max(100),
         },
@@ -1449,10 +1481,10 @@ const _handler = createMcpHandler(
       "update_opportunity_status",
       {
         title: "Update Opportunity Status",
-        description: "Moves an opportunity through its discovery pipeline: EXPLORING → VALIDATING → PRIORITIZED → ACTIVE → ARCHIVED.",
+        description: `Moves an opportunity through its discovery pipeline: ${OPPORTUNITY_PIPELINE_TEXT}. ${OPPORTUNITY_STATUS_GUIDE}`,
         inputSchema: {
           opportunityId: z.string().uuid().describe("UUID of the opportunity"),
-          status: z.enum(["EXPLORING", "VALIDATING", "PRIORITIZED", "ACTIVE", "ARCHIVED"]).describe("New status"),
+          status: z.enum(OPPORTUNITY_STATUSES).describe("New status"),
         },
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
@@ -1532,7 +1564,7 @@ const _handler = createMcpHandler(
           objectiveId: z.string().uuid().optional().describe("UUID of an objective"),
           solutionId: z.string().uuid().optional().describe("UUID of a solution"),
           keyResultId: z.string().uuid().optional().describe("UUID of a Key Result"),
-          entityType: z.enum(ENTITY_TYPE_VOCABULARY).optional().describe("Generic mode: the type of the entity to list links for (use with entityId)"),
+          entityType: z.enum(PUBLIC_LINK_ENTITY_TYPES).optional().describe("Generic mode: the type of the entity to list links for (use with entityId)"),
           entityId: z.string().uuid().optional().describe("Generic mode: UUID of the entity (use with entityType)"),
           linkType: z.string().max(60).optional().describe("Generic mode: restrict to one link type, e.g. EXPERIMENT_INFORMED_BY_STUDY"),
           limit: z.number().int().min(1).max(100).optional().default(50).describe("Page size (default 50)"),
@@ -1563,7 +1595,7 @@ const _handler = createMcpHandler(
           linkType: z.string().min(1).max(60).describe("A registered link type key, e.g. EXPERIMENT_INFORMED_BY_STUDY"),
           fromId: z.string().uuid().describe("UUID of the entity on the `from` end of the link type"),
           toId: z.string().uuid().describe("UUID of the entity on the `to` end of the link type"),
-          toType: z.enum(ENTITY_TYPE_VOCABULARY).optional().describe("Only for link types that allow several `to` types"),
+          toType: z.enum(PUBLIC_LINK_ENTITY_TYPES).optional().describe("Only for link types that allow several `to` types"),
         },
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
@@ -2274,7 +2306,13 @@ const _handler = createMcpHandler(
         title: "List Roadmap Items",
         description:
           "Lists all active roadmap items for a workspace grouped by horizon (NOW / NEXT / LATER / LAUNCHING / LAUNCHED / SHIPPED). " +
-          "Includes linked opportunity and solution titles, squad, and IDs.",
+          "Includes linked opportunity and solution titles, squad, and IDs. " +
+          "Custom fields: `customFieldFilters` narrows to items whose ROADMAP_ITEM custom field values match (several filters are ANDed; " +
+          "each filter takes exactly one of `value`, `anyOf` or `isSet`). SELECT matches the exact option value; MULTI_SELECT matches when the item has " +
+          "that option (or any of `anyOf`); TEXT/URL is a case-insensitive substring; NUMBER/BOOLEAN/DATE is exact equality; `isSet` tests presence for any type. " +
+          "`includeCustomFields` (or `customFieldIds`, which also narrows the columns) adds each item's values as `customFields`, keyed by field name; " +
+          "`opportunityCustomFieldIds` adds the linked opportunity's values (e.g. Customer) as `opportunityCustomFields`. " +
+          "`compact: true` returns one short line per item (ID, title, horizon, squad, field values; no descriptions or linked titles) so a whole roadmap fits in one response.",
         inputSchema: {
           workspaceId: z.string().uuid().describe("UUID of the workspace"),
           horizon: z.enum(["NOW", "NEXT", "LATER", "LAUNCHING", "LAUNCHED", "SHIPPED"]).optional().describe("Filter to a specific horizon (omit for all)"),
@@ -2284,43 +2322,116 @@ const _handler = createMcpHandler(
           // Results stay grouped into horizon sections either way; sort reorders
           // items within each section.
           sort: recencySortSchema,
+          customFieldFilters: z.array(customFieldFilterSchema).min(1).max(10).optional().describe("Filter by ROADMAP_ITEM custom field values; all filters must match (AND)"),
+          includeCustomFields: z.boolean().optional().describe("Include each item's custom field values (default false; implied by compact)"),
+          customFieldIds: z.array(z.string().uuid()).min(1).max(30).optional().describe("Only these ROADMAP_ITEM custom fields in the output (implies includeCustomFields)"),
+          opportunityCustomFieldIds: z.array(z.string().uuid()).min(1).max(10).optional().describe("OPPORTUNITY custom fields to read from each item's linked opportunity"),
+          compact: z.boolean().optional().describe("One short line per item: ID, title, horizon, squad and custom field values only"),
         },
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
-      async ({ workspaceId, horizon, squadId, updatedSince, updatedBefore, sort }) => {
+      async ({ workspaceId, horizon, squadId, updatedSince, updatedBefore, sort, customFieldFilters, includeCustomFields, customFieldIds, opportunityCustomFieldIds, compact }: {
+        workspaceId: string; horizon?: "NOW" | "NEXT" | "LATER" | "LAUNCHING" | "LAUNCHED" | "SHIPPED"; squadId?: string; updatedSince?: string; updatedBefore?: string
+        sort?: RecencySort; customFieldFilters?: CustomFieldFilter[]; includeCustomFields?: boolean; customFieldIds?: string[]; opportunityCustomFieldIds?: string[]; compact?: boolean
+      }) => {
         const prisma = getPrisma()
-        const items = await prisma.roadmapItem.findMany({
-          where: {
-            workspaceId,
-            status: "ACTIVE",
-            ...(horizon ? { horizon } : {}),
-            ...(squadId ? { squadId } : {}),
-            ...(updatedSince || updatedBefore
-              ? {
-                  updatedAt: {
-                    ...(updatedSince ? { gte: new Date(updatedSince) } : {}),
-                    ...(updatedBefore ? { lt: new Date(updatedBefore) } : {}),
-                  },
-                }
-              : {}),
-          },
-          include: {
-            opportunity: { select: { title: true } },
-            solution: { select: { title: true } },
-            squad: { select: { name: true } },
-            experiment: { select: { title: true } },
-          },
-          orderBy: recencyOrderBy(sort) ?? [{ horizon: "asc" }, { sortOrder: "asc" }, { id: "asc" }],
-        })
+        // Field filters and columns are resolved against this workspace before any roadmap row is read.
+        const filterResult = customFieldFilters?.length
+          ? await buildCustomFieldFilterConditions(prisma, { workspaceId, objectType: "ROADMAP_ITEM", filters: customFieldFilters })
+          : null
+        if (filterResult && !filterResult.ok) return fail(filterResult.error)
+        const filterConditions = filterResult?.ok ? filterResult.conditions : []
+        const wantColumns = Boolean(compact || includeCustomFields || customFieldIds?.length)
+        const columnResult = wantColumns ? await resolveCustomFieldColumns(prisma, { workspaceId, objectType: "ROADMAP_ITEM", fieldIds: customFieldIds }) : null
+        if (columnResult && !columnResult.ok) return fail(columnResult.error)
+        const columns = columnResult?.ok ? columnResult.columns : null
+        const opportunityColumnResult = opportunityCustomFieldIds?.length
+          ? await resolveCustomFieldColumns(prisma, { workspaceId, objectType: "OPPORTUNITY", fieldIds: opportunityCustomFieldIds })
+          : null
+        if (opportunityColumnResult && !opportunityColumnResult.ok) return fail(opportunityColumnResult.error)
+        const opportunityColumns = opportunityColumnResult?.ok ? opportunityColumnResult.columns : null
+
+        const where = {
+          workspaceId,
+          status: "ACTIVE" as const,
+          ...(horizon ? { horizon } : {}),
+          ...(squadId ? { squadId } : {}),
+          ...(updatedSince || updatedBefore
+            ? {
+                updatedAt: {
+                  ...(updatedSince ? { gte: new Date(updatedSince) } : {}),
+                  ...(updatedBefore ? { lt: new Date(updatedBefore) } : {}),
+                },
+              }
+            : {}),
+          ...(filterConditions.length ? { AND: filterConditions } : {}),
+        }
+        const orderBy = recencyOrderBy(sort) ?? [{ horizon: "asc" as const }, { sortOrder: "asc" as const }, { id: "asc" as const }]
+        const rows = compact
+          ? await prisma.roadmapItem.findMany({
+              where,
+              select: { id: true, title: true, horizon: true, squad: { select: { name: true } }, ...(opportunityColumns ? { opportunityId: true } : {}) },
+              orderBy,
+            })
+          : await prisma.roadmapItem.findMany({
+              where,
+              include: {
+                opportunity: { select: { title: true } },
+                solution: { select: { title: true } },
+                squad: { select: { name: true } },
+                experiment: { select: { title: true } },
+              },
+              orderBy,
+            })
+        // The compact projection is a subset of the full row, so one shape serves both paths below.
+        const items = rows as Array<(typeof rows)[number] & Partial<{
+          description: string | null; status: string; sortOrder: number; isPrivate: boolean; opportunityId: string | null
+          opportunity: { title: string } | null; solution: { title: string } | null; experiment: { title: string } | null
+          solutionId: string | null; experimentId: string | null; keyResultId: string | null; feedbackId: string | null; squadId: string | null
+          startDate: Date | null; endDate: Date | null; nowCommitmentProvenance: string | null; nowDecisionRecordId: string | null
+          createdAt: Date; updatedAt: Date
+        }>>
         if (!items.length) {
-          // An empty *recency window* is a successful answer, not a failure —
-          // the same convention used throughout this file's list_* tools. An
-          // empty *unfiltered* roadmap keeps its original fail() so existing
-          // callers see no change.
-          if (updatedSince || updatedBefore) {
-            return ok("No active roadmap items updated in the requested window.", { items: [], count: 0 })
+          // An empty *recency window* (or a field-filtered query) is a successful
+          // answer, not a failure — the same convention used throughout this
+          // file's list_* tools. An empty *unfiltered* roadmap keeps its
+          // original fail() so existing callers see no change.
+          if (updatedSince || updatedBefore || filterConditions.length) {
+            return ok("No active roadmap items matched the requested filters.", { items: [], count: 0 })
           }
           return fail("No active roadmap items found.")
+        }
+        const fieldValues = columns ? await loadCustomFieldValuesFor(prisma, columns, items.map((i) => i.id)) : null
+        const opportunityIds = opportunityColumns ? [...new Set(items.map((i) => i.opportunityId).filter((id): id is string => Boolean(id)))] : []
+        const opportunityValues = opportunityColumns ? await loadCustomFieldValuesFor(prisma, opportunityColumns, opportunityIds) : null
+        const blankOpportunity = opportunityColumns ? Object.fromEntries(opportunityColumns.map((c) => [c.key, null])) : null
+        const opportunityFieldsOf = (i: { opportunityId?: string | null }) =>
+          opportunityValues ? (i.opportunityId ? opportunityValues.get(i.opportunityId) : undefined) ?? blankOpportunity : undefined
+        const fieldEnvelope = {
+          ...(columns ? { fields: describeColumns(columns) } : {}),
+          ...(opportunityColumns ? { opportunityFields: describeColumns(opportunityColumns) } : {}),
+        }
+        if (compact) {
+          const order = ["NOW", "NEXT", "LATER", "LAUNCHING", "LAUNCHED", "SHIPPED"] as const
+          const sections = order
+            .filter(h => items.some(i => i.horizon === h))
+            .map(h => `**${h}**\n` + items.filter(i => i.horizon === h).map(i => {
+              const fields = formatFieldValues(fieldValues?.get(i.id))
+              const linked = formatFieldValues(opportunityFieldsOf(i) ?? undefined)
+              return `  • ${i.title} [${i.id}]${i.squad ? ` (${i.squad.name})` : ""}${fields ? ` — ${fields}` : ""}${linked ? ` — Opportunity: ${linked}` : ""}`
+            }).join("\n"))
+          return ok(sections.join("\n\n"), {
+            items: items.map((i) => ({
+              id: i.id,
+              title: i.title,
+              horizon: i.horizon,
+              squad: i.squad?.name ?? null,
+              ...(fieldValues ? { customFields: fieldValues.get(i.id) } : {}),
+              ...(opportunityValues ? { opportunityCustomFields: opportunityFieldsOf(i) } : {}),
+            })),
+            count: items.length,
+            ...fieldEnvelope,
+          })
         }
         const groups: Record<string, typeof items> = { NOW: [], NEXT: [], LATER: [], LAUNCHING: [], LAUNCHED: [] }
         for (const item of items) {
@@ -2338,7 +2449,9 @@ const _handler = createMcpHandler(
               (item.squad ? `\n    Squad: ${item.squad.name}` : "") +
               (item.startDate || item.endDate
                 ? `\n    Dates: ${item.startDate ? formatUtcDate(item.startDate) : "?"} – ${item.endDate ? formatUtcDate(item.endDate) : "?"}`
-                : "")
+                : "") +
+              (formatFieldValues(fieldValues?.get(item.id)) ? `\n    Fields: ${formatFieldValues(fieldValues?.get(item.id))}` : "") +
+              (formatFieldValues(opportunityFieldsOf(item) ?? undefined) ? `\n    Opportunity fields: ${formatFieldValues(opportunityFieldsOf(item) ?? undefined)}` : "")
             )
             return `**${h}**\n${lines.join("\n")}`
           })
@@ -2367,8 +2480,11 @@ const _handler = createMcpHandler(
             nowDecisionRecordId: i.nowDecisionRecordId,
             createdAt: i.createdAt,
             updatedAt: i.updatedAt,
+            ...(fieldValues ? { customFields: fieldValues.get(i.id) } : {}),
+            ...(opportunityValues ? { opportunityCustomFields: opportunityFieldsOf(i) } : {}),
           })),
           count: items.length,
+          ...fieldEnvelope,
         })
       }
     )
@@ -2688,6 +2804,49 @@ const _handler = createMcpHandler(
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       setCustomFieldValue
+    )
+
+    register(
+      "set_custom_field_values",
+      {
+        title: "Set Custom Field Value (bulk)",
+        description:
+          "Sets or clears ONE custom field to ONE value on many objects of the same type in one call: up to 25 objects for agent callers (100 for human API keys). " +
+          "The field and value are validated once, exactly as set_custom_field_value does (type, defined options, same workspace and object type); an invalid value changes nothing. " +
+          "Each object is then reported separately in data.results: ok, or NOT_FOUND when it is missing or in another workspace. " +
+          "Setting a value is naturally idempotent, so a retry is safe. Pass value: null (or an empty string or array) to clear.",
+        inputSchema: {
+          workspaceId: z.string().uuid().describe("UUID of the workspace the field and objects belong to"),
+          objectType: customFieldObjectTypeSchema.describe("The objects' entity type"),
+          fieldId: z.string().uuid().describe("UUID of the custom field definition"),
+          objectIds: z.array(z.string().uuid()).min(1).max(100).describe("UUIDs of the objects to update (duplicates are ignored)"),
+          value: z
+            .union([z.string(), z.number(), z.boolean(), z.array(z.string()), z.null()])
+            .describe("New value, matching the field's type; null (or empty string/array) clears it"),
+        },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      setCustomFieldValues
+    )
+
+    register(
+      "group_by_custom_field",
+      {
+        title: "Group by Custom Field",
+        description:
+          "Read-only grouped view: groups a workspace's active roadmap items (default) or non-archived opportunities by one custom field of that object type. " +
+          "Returns each value with its count and the items' IDs and titles (set includeItems: false for counts only), plus an unset group. " +
+          "SELECT/MULTI_SELECT groups follow option order, and a MULTI_SELECT item appears in every group it carries.",
+        inputSchema: {
+          workspaceId: z.string().uuid().describe("UUID of the workspace"),
+          fieldId: z.string().uuid().describe("UUID of the custom field definition (must match objectType)"),
+          objectType: z.enum(["ROADMAP_ITEM", "OPPORTUNITY"]).optional().describe("What to group (default ROADMAP_ITEM)"),
+          horizon: z.enum(["NOW", "NEXT", "LATER", "LAUNCHING", "LAUNCHED", "SHIPPED"]).optional().describe("Roadmap items only: restrict to one horizon"),
+          includeItems: z.boolean().optional().describe("Include each group's item IDs and titles (default true)"),
+        },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      groupByCustomField
     )
 
     // ════════════════════════════════════════════════════════════════
@@ -3617,12 +3776,18 @@ const _handler = createMcpHandler(
       buildCanvasTree
     )
 
+    // ── artifact:// resource — read side of Artifact content ──
+    // Two templates, not one with an optional `{/revisionId}`: the SDK's
+    // UriTemplate does not match an optional trailing segment. Only the
+    // latest-revision template lists. Logic lives in lib/artifact-resource.ts.
+    registerArtifactResources(server, getMcpActor)
+
     register("list_artifacts", {
       title: "List Artifacts", description: "Lists HTML prototypes and external artifacts in a workspace.",
       inputSchema: { workspaceId: z.string().uuid(), includeArchived: z.boolean().optional() }, outputSchema: TOOL_OUTPUT_SCHEMA,
     }, listArtifacts)
     register("get_artifact", {
-      title: "Get Artifact", description: "Returns artifact metadata (including kind), immutable revision history, linked Solutions and Decisions without exposing private storage keys or HTML content. A SLIDE_DECK also returns its slides as { index, title, description } — index is the zero-based slideIndex add_comment accepts.",
+      title: "Get Artifact", description: "Returns artifact metadata (including kind), immutable revision history, linked Solutions and Decisions without exposing private storage keys or HTML content. A SLIDE_DECK also returns its slides as { index, title, description } — index is the zero-based slideIndex add_comment accepts. To read the content itself, read the MCP resource artifact://{workspaceId}/{artifactId} (latest revision) or artifact://{workspaceId}/{artifactId}/{revisionId}. Content is paged: append ?offset=N&length=M (text: characters, max 90,000 per read; binary: bytes, offset a multiple of 3, max 60,000). A read without a range returns the first page; _meta.nextOffset (null when done) and _meta.hint say where to continue, so loop until nextOffset is null.",
       inputSchema: { artifactId: z.string().uuid() }, outputSchema: TOOL_OUTPUT_SCHEMA,
     }, getArtifact)
     const artifactUploadReceipt = z.string().min(1).optional().describe("Signed receipt from prepare_artifact_upload after the file was uploaded. Use instead of html so the document never passes through the conversation.")

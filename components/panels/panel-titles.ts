@@ -10,9 +10,11 @@ export const panelTitles = (labels: ResolvedLabels): Record<string, string> => (
   experiment: "Experiment",
   roadmapItem: "Roadmap Item",
   feedback: "Feedback",
+  review: "Decision",
   "feedback-new": "New feedback",
   "opportunity-new": `New ${labels.opportunity.lower}`,
   "experiment-new": "New experiment",
   task: "Task",
   "discovery-rail": "Discovery",
+  pullRequest: "Pull request",
 })

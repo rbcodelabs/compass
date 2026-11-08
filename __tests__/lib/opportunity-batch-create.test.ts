@@ -121,7 +121,7 @@ describe("createOpportunityBatch", () => {
     expect(results.map((r) => r.clientId)).toEqual(opportunities(100).map((o) => o.clientId))
     const rows = ownRows(db.state.opportunities)
     expect(rows).toHaveLength(100)
-    expect(rows.map((r) => r.sortOrder)).toEqual(Array.from({ length: 100 }, (_, i) => i + 1)) // the seeded parent holds 0 in EXPLORING
+    expect(rows.map((r) => r.sortOrder)).toEqual(Array.from({ length: 100 }, (_, i) => i)) // new items land in UNREVIEWED; the seeded parent sits in EXPLORING
     expect(rows.every((r) => r.workspaceId === WS && r.source === "UI")).toBe(true)
     expect(db.$transaction).toHaveBeenCalledTimes(100) // one transaction per item
   })

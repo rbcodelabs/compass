@@ -9,6 +9,7 @@ import { ArtifactDetail } from "@/components/docs/artifact-detail"
 import { getArtifactStorage } from "@/lib/artifact-storage"
 import { getArtifactDecisions, getArtifactSolutionIds, toArtifactDetailDto } from "@/lib/artifacts"
 import { buildArtifactPresentation, type ArtifactSlideDto } from "@/lib/artifact-slides"
+import { getOwnerShareState } from "@/lib/artifact-share"
 import { livePreviewSrcFor } from "@/lib/v0-preview-frame"
 
 /** `?slide=N` is one-based, as shown in the UI; the viewer wants zero-based. */
@@ -44,5 +45,6 @@ export default async function ArtifactPage({ params, searchParams }: { params: P
   // A v0 chat shows v0's running app, fetched with the viewer's own grant on every view
   // (the preview token is short-lived, so it is never stored). Null falls back to the link card.
   const livePreviewSrc = artifact.sourceType === "V0_CHAT" && artifact.status === "ACTIVE" && artifact.v0ChatId ? await livePreviewSrcFor(session.user.id, artifact.v0ChatId) : null
-  return <ArtifactDetail artifact={toArtifactDetailDto(artifact)} livePreviewSrc={livePreviewSrc} html={html} slides={slides} initialSlideIndex={initialSlideIndex} initialCommentsPin={initialCommentsPin} workspaceId={workspace.id} basePath={`/${orgSlug}/${workspaceSlug}/docs`} decisions={decisions} solutions={rawSolutions.map((solution) => ({ ...solution, linked: linkedIds.has(solution.id) }))} />
+  const shareState = artifact.sourceType === "HTML_UPLOAD" ? await getOwnerShareState({ workspaceId: workspace.id, artifactId }) : undefined
+  return <ArtifactDetail shareState={shareState} artifact={toArtifactDetailDto(artifact)} livePreviewSrc={livePreviewSrc} html={html} slides={slides} initialSlideIndex={initialSlideIndex} initialCommentsPin={initialCommentsPin} workspaceId={workspace.id} basePath={`/${orgSlug}/${workspaceSlug}/docs`} decisions={decisions} solutions={rawSolutions.map((solution) => ({ ...solution, linked: linkedIds.has(solution.id) }))} />
 }

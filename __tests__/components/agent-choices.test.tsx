@@ -96,12 +96,16 @@ describe("AgentChat agent selector", () => {
 })
 
 describe("AgentChat composer layout", () => {
-  it("has no context strip until there is a status or a chip to show, and no footer without choices", async () => {
+  it("has no context strip until there is a status or a chip to show, and no choice chips in the footer without choices", async () => {
     stubFetch({ agents: [], defaultAgentId: null })
     const { container } = render(<AgentChat {...chatProps()} />)
     await act(async () => {})
     expect(container.querySelector('[data-slot="composer-strip"]')).toBeNull()
-    expect(container.querySelector('[data-slot="composer-footer"]')).toBeNull()
+    // The footer now always carries the attach control, so it exists; what must be absent is any Agent choice chip.
+    const footer = container.querySelector('[data-slot="composer-footer"]')
+    expect(footer).not.toBeNull()
+    expect(footer).toContainElement(screen.getByRole("button", { name: "Attach a file" }))
+    expect(queryChipButton("Agent")).toBeNull()
   })
 
   it("shows the Agent chip in the footer once there are agents to pick", async () => {
@@ -167,8 +171,9 @@ describe("SendToAgentPicker with cloud agents", () => {
   it("becomes a menu naming the default first and offering every other agent and the built-in one", async () => {
     stubFetch(CHOICES)
     render(picker())
-    fireEvent.click(await screen.findByRole("button", { name: /send to agent/i }))
-    const defaultLink = await screen.findByRole("link", { name: "Triage (default)" })
+    // Generous timeouts: the menu renders after an async fetch, and the default 1s is too tight on a loaded CI runner.
+    fireEvent.click(await screen.findByRole("button", { name: /send to agent/i }, { timeout: 5000 }))
+    const defaultLink = await screen.findByRole("link", { name: "Triage (default)" }, { timeout: 5000 })
     expect(defaultLink).toHaveAttribute("href", "/acme/product/agent?entityType=solutionPlan&entityId=plan-1")
     expect(screen.getByRole("link", { name: "Mine" })).toHaveAttribute("href", "/acme/product/agent?entityType=solutionPlan&entityId=plan-1&agentId=a-mine")
     expect(screen.getByRole("link", { name: "Built-in cloud agent" })).toHaveAttribute("href", "/acme/product/agent?entityType=solutionPlan&entityId=plan-1&agentId=builtin")
@@ -178,7 +183,7 @@ describe("SendToAgentPicker with cloud agents", () => {
   it("keeps Built-in cloud agent as the first plain link when agents exist but none is the default", async () => {
     stubFetch({ ...CHOICES, defaultAgentId: null })
     render(picker())
-    fireEvent.click(await screen.findByRole("button", { name: /send to agent/i }))
+    fireEvent.click(await screen.findByRole("button", { name: /send to agent/i }, { timeout: 5000 }))
     // Generous timeout: the menu renders after an async fetch, and the default 1s is too tight on a loaded CI runner.
     expect(await screen.findByRole("link", { name: "Built-in cloud agent" }, { timeout: 5000 })).toHaveAttribute("href", "/acme/product/agent?entityType=solutionPlan&entityId=plan-1")
     expect(screen.getByRole("link", { name: "Triage" })).toBeInTheDocument()

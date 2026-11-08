@@ -4,7 +4,8 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DndContext } from "@dnd-kit/core";
 import "@testing-library/jest-dom/vitest";
-import { UnscheduledItemsColumn, UnscheduledItemsSidebar } from "@/components/roadmap/unscheduled-items-panel";
+import { UnscheduledItemsColumn } from "@/components/roadmap/unscheduled-items-panel";
+import type { BoardColumnLayoutControls } from "@/components/patterns/board-pinned";
 
 const openPanel = vi.fn();
 vi.mock("@/components/panels/panel-context", () => ({
@@ -70,23 +71,47 @@ describe("UnscheduledItemsColumn", () => {
   });
 });
 
-describe("UnscheduledItemsSidebar", () => {
+describe("UnscheduledItemsColumn as a pinnable column", () => {
   const items = [{ kind: "feedback" as const, id: "feedback-1", title: "Fix the broken export" }];
+  const controls = (over: Partial<BoardColumnLayoutControls> = {}): BoardColumnLayoutControls => ({
+    columnId: "unscheduled",
+    label: "Not scheduled",
+    pinned: true,
+    pinnable: true,
+    onTogglePin: vi.fn(),
+    canMoveLeft: false,
+    canMoveRight: false,
+    onMove: vi.fn(),
+    onCollapse: vi.fn(),
+    ...over,
+  });
 
-  it("docks the Not scheduled pane and collapses to a rail that shows the count", () => {
+  it("renders the same column in the pinned placement (fixed width, own scroll) and carries its header controls", () => {
+    const layoutControls = controls();
     render(
       <DndContext>
-        <UnscheduledItemsSidebar items={items} onQuickAdd={vi.fn()} />
+        <UnscheduledItemsColumn items={items} onQuickAdd={vi.fn()} placement="pinned" layoutControls={layoutControls} />
       </DndContext>
     );
+    const column = screen.getByTestId("roadmap-unscheduled-column");
+    expect(column).toHaveClass("h-full", "w-72", "flex-none");
+    expect(within(column).getByText("Fix the broken export")).toBeInTheDocument();
 
-    const sidebar = screen.getByTestId("roadmap-unscheduled-sidebar");
-    expect(within(sidebar).getByTestId("roadmap-unscheduled-column")).toBeInTheDocument();
-    expect(within(sidebar).getByText("Fix the broken export")).toBeInTheDocument();
+    fireEvent.click(within(column).getByRole("button", { name: "Collapse Not scheduled" }));
+    expect(layoutControls.onCollapse).toHaveBeenCalledTimes(1);
+    fireEvent.click(within(column).getByRole("button", { name: "Unpin Not scheduled" }));
+    expect(layoutControls.onTogglePin).toHaveBeenCalledTimes(1);
+  });
 
-    fireEvent.click(screen.getByRole("button", { name: "Collapse Not scheduled" }));
-    expect(screen.queryByTestId("roadmap-unscheduled-column")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Expand Not scheduled (1)" }));
-    expect(screen.getByText("Fix the broken export")).toBeInTheDocument();
+  it("in the scroller placement keeps the swipe-column sizing and shows no collapse control when it is not docked", () => {
+    render(
+      <DndContext>
+        <UnscheduledItemsColumn items={items} onQuickAdd={vi.fn()} layoutControls={controls({ pinned: false, pinnable: false, onCollapse: undefined })} />
+      </DndContext>
+    );
+    const column = screen.getByTestId("roadmap-unscheduled-column");
+    expect(column.className).toContain("md:min-w-[280px]");
+    expect(within(column).queryByRole("button", { name: "Collapse Not scheduled" })).not.toBeInTheDocument();
+    expect(within(column).queryByRole("button", { name: /^(Pin|Unpin) Not scheduled/ })).not.toBeInTheDocument();
   });
 });

@@ -3,10 +3,23 @@ import { notFound, redirect } from "next/navigation";
 import { auth } from "@/auth";
 import getPrisma from "@/lib/db";
 import { DiscoveryFilters } from "@/components/discovery/discovery-filters";
-import { DiscoverySortToggle, type DiscoverySort } from "@/components/discovery/discovery-sort-toggle";
-import { DiscoveryViewToggle, type DiscoveryView } from "@/components/discovery/discovery-view-toggle";
+import { DiscoverySortToggle } from "@/components/discovery/discovery-sort-toggle";
+import { DiscoveryViewToggle } from "@/components/discovery/discovery-view-toggle";
 import { SolutionBacklogBoard, type SolutionBacklogItem } from "@/components/solutions/solution-backlog-board";
 import { SolutionTableView } from "@/components/solutions/solution-table-view";
+import { SolutionSavedViewsMenu } from "@/components/solutions/solution-saved-views";
+import { SolutionColumnsPopover } from "@/components/solutions/solution-columns-popover";
+import { SolutionsColumnLayoutProvider } from "@/components/solutions/solutions-column-layout";
+import { legacyOrderToLayout } from "@/lib/solutions/board-layout";
+import { resolveSolutionColumns } from "@/lib/saved-views/solution-columns";
+import {
+  needsSolutionsViewExpansion,
+  resolveSolutionsState,
+  solutionsHref,
+  solutionsPageParams,
+  type SolutionsState,
+} from "@/lib/saved-views/solutions-state";
+import { listSavedViews, resolveSavedViewActor } from "@/lib/saved-views/service";
 import { SolutionGroupByToggle } from "@/components/solutions/solution-group-by-toggle";
 import { NewSolutionDialog } from "@/components/solutions/new-solution-dialog";
 import { WorkspacePage } from "@/components/patterns/workspace-page";
@@ -29,7 +42,10 @@ import { columnValueFor } from "@/lib/opportunity-field-board";
 import { loadCustomFieldValuesForObjects } from "@/lib/custom-field-values-batch";
 import { objectTypeLabels } from "@/components/custom-fields/object-type-labels";
 import { getThinkingModelForSlugs } from "@/lib/thinking-model/server";
+import { SOLUTION_BOARD_STATUSES } from "@/lib/saved-views/schema";
 import type { SolutionStatus, SquadData } from "@/lib/types";
+
+const boardColumnStatuses: readonly string[] = SOLUTION_BOARD_STATUSES;
 
 export async function generateMetadata({ params }: Pick<Props, "params">) {
   const { orgSlug, workspaceSlug } = await params;
@@ -46,6 +62,10 @@ type Props = {
     groupBy?: string;
     field?: string;
     fieldValue?: string;
+    saved?: string;
+    edited?: string;
+    order?: string;
+    hide?: string;
   }>;
 };
 
@@ -54,16 +74,7 @@ export default async function SolutionsPage({ params, searchParams }: Props) {
   if (!session) redirect("/login");
 
   const { orgSlug, workspaceSlug } = await params;
-  const {
-    squad: squadFilter,
-    sort: requestedSort,
-    view: requestedView,
-    groupBy: requestedGroupBy,
-    field: fieldParam,
-    fieldValue: fieldValueParam,
-  } = await searchParams;
-  const view: DiscoveryView = requestedView === "table" ? "table" : "board";
-  const sort: DiscoverySort = requestedSort === "score" ? "score" : "manual";
+  const search = await searchParams;
   const prisma = getPrisma();
 
   const workspace = await prisma.workspace.findFirst({
@@ -72,6 +83,28 @@ export default async function SolutionsPage({ params, searchParams }: Props) {
   });
   if (!workspace) notFound();
   const workspaceAccess = session.user?.id ? await resolveWorkspaceAccess(orgSlug, workspaceSlug, session.user.id) : null;
+
+  // Saved views (personal). A stale, foreign or invisible ?saved= id falls through to the defaults.
+  const savedActor = session.user?.id ? await resolveSavedViewActor(session.user.id, orgSlug) : null;
+  const savedViews = savedActor ? await listSavedViews(savedActor, "SOLUTIONS_BOARD", workspace.id) : [];
+  const savedParam = Array.isArray(search.saved) ? search.saved[0] : search.saved;
+  const selectedView = savedParam ? (savedViews.find((v) => v.id === savedParam) ?? null) : null;
+  const selectedState: SolutionsState | null = selectedView
+    ? { filters: selectedView.filters as SolutionsState["filters"], display: selectedView.display as SolutionsState["display"] }
+    : null;
+  const boardState = resolveSolutionsState(search, selectedState);
+  // A bare ?saved=id becomes the full (edited=1) form, so every control keeps editing single params.
+  if (selectedView && needsSolutionsViewExpansion(search)) {
+    redirect(solutionsHref(`/${orgSlug}/${workspaceSlug}/solutions`, boardState, selectedView.id));
+  }
+  const {
+    squad: squadFilter,
+    sort,
+    view,
+    groupBy: requestedGroupBy,
+    field: fieldParam,
+    fieldValue: fieldValueParam,
+  } = solutionsPageParams(boardState);
 
   const thinkingModel = await getThinkingModelForSlugs(orgSlug, workspaceSlug);
 
@@ -150,14 +183,44 @@ export default async function SolutionsPage({ params, searchParams }: Props) {
       : {}),
   }));
   const scoreSort = hasActiveScoringModel && sort === "score";
+  const columnCounts = Object.fromEntries(
+    boardColumnStatuses.map((status) => [status, solutions.filter((solution) => solution.status === status).length]),
+  );
+  const boardColumns = resolveSolutionColumns(boardState.display.columns.status, columnCounts);
+
+  // Where the board's column layout starts. The layout is client state (see solutions-column-layout.tsx); it supersedes
+  // the older columns.status.order, which is still read: a selected view's own layout, else the layout its legacy order
+  // describes, and an explicit legacy ?order= link wins over a view that has no layout of its own. A legacy ?order= with
+  // no view starts the layout too (as a source of its own, so it is not mirrored to this browser's storage).
+  const urlOrder = typeof search.order === "string" ? boardState.display.columns.status?.order : undefined;
+  const layoutSource = selectedView && selectedState
+    ? {
+        id: selectedView.id,
+        version: selectedView.updatedAt,
+        columnLayout: selectedState.display.columnLayout ?? legacyOrderToLayout(urlOrder ?? selectedState.display.columns.status?.order),
+      }
+    : urlOrder && urlOrder.length > 0
+      ? { id: "url-order", version: urlOrder.join(","), columnLayout: legacyOrderToLayout(urlOrder) }
+      : null;
 
   return (
+    // The header (saved-views menu, Columns popover) and the board are siblings; they share the column layout through this provider.
+    <SolutionsColumnLayoutProvider workspaceId={workspace.id} savedView={layoutSource}>
     <WorkspacePage
       title={thinkingModel.labels.solution.plural}
       contentClassName={view === "board" ? "p-0 sm:p-0 md:p-0" : undefined}
       actions={(
         <Suspense>
           <div className="flex items-center gap-2">
+            <SolutionSavedViewsMenu
+              savedViews={{
+                orgSlug,
+                workspaceId: workspace.id,
+                views: savedViews,
+                savedViewId: selectedView?.id ?? null,
+                canSave: !(workspaceAccess?.isReadOnly ?? true),
+              }}
+            />
             <DiscoveryViewToggle view={view} />
             {view === "board" && (
               <SolutionGroupByToggle
@@ -166,6 +229,14 @@ export default async function SolutionsPage({ params, searchParams }: Props) {
               />
             )}
             {hasActiveScoringModel && <DiscoverySortToggle sort={sort} />}
+            {view === "board" && groupBy === "status" && (
+              <SolutionColumnsPopover
+                workspaceId={workspace.id}
+                savedViews={{ views: savedViews, savedViewId: selectedView?.id ?? null }}
+                columns={boardColumns}
+                countsByStatus={columnCounts}
+              />
+            )}
             <DiscoveryFilters
               squads={squads}
               customFieldGroups={customFieldGroups}
@@ -196,9 +267,12 @@ export default async function SolutionsPage({ params, searchParams }: Props) {
           sortByScore={sort === "score"}
           groupBy={groupBy}
           squads={squads}
+          columnOrder={boardColumns.visible}
+          forcedVisibleColumns={boardColumns.forcedVisible}
           groupField={groupField ? { id: groupField.id, name: groupField.name, options: groupField.options ?? [] } : null}
         />
       )}
     </WorkspacePage>
+    </SolutionsColumnLayoutProvider>
   );
 }

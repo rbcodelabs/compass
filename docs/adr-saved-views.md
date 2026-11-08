@@ -62,6 +62,7 @@ model SavedView {            // @@map("roadmap_views")  -- table name unchanged 
 
 - `OPPORTUNITIES_BOARD`
 - `SOLUTIONS_BOARD`
+- `TASKS_BOARD`
 - `ROADMAP_WORKSPACE`
 - `ROADMAP_ORG`
 
@@ -106,6 +107,11 @@ Layouts are keyed by grouping because the board can be grouped by status or by a
 
 ### Solutions board (`SOLUTIONS_BOARD`)
 - Same shape as Opportunities. Column keys are `SolutionStatus`. The squad filter applies via the parent opportunity, as today.
+
+### Tasks board (`TASKS_BOARD`)
+- Added after the surface column existed, so it needed no migration: `surface` is a free `VARCHAR(40)` and the schemas live in `lib/saved-views/schema.ts`. Personal only (`sharing: false`), workspace-scoped, unique names per owner.
+- filters: `squadId?`, `assignee?` (`user:<id>`, `agent:<id>` or `__unassigned__`), `priority?`, `includeAgentTasks` (`?agentTasks=include`), `customField?: {fieldId, value}`. These are exactly the params `tasks-filters.tsx` keeps in the URL; the URL stays the live state and a saved view is a named snapshot (`?saved=<id>`, `edited=1` once a control is touched).
+- display: `view` (`board|list`), `columnLayout?` (pinned columns, active tab, dock open, column order; `lib/board-layout.ts`). "Show cancelled" is transient board state and is not stored.
 
 ### Roadmap (`ROADMAP_WORKSPACE`, `ROADMAP_ORG`)
 - The existing schemas, unchanged.

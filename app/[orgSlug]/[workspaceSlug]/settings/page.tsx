@@ -23,6 +23,7 @@ import { WorkspaceBrandingPanel } from "@/components/settings/workspace-branding
 import { ThinkingModelPanel } from "@/components/settings/thinking-model-panel";
 import { inspectStoredLabels, resolveThinkingModel } from "@/lib/thinking-model/resolve";
 import { DeleteWorkspacePanel } from "@/components/settings/delete-workspace-panel";
+import { ExportWorkspacePanel } from "@/components/settings/export-workspace-panel";
 import { WorkspaceScoringPanel } from "@/components/scoring-models/workspace-scoring-panel";
 import type { ApiKeyRow } from "@/components/settings/manage-api-keys-panel";
 import type {
@@ -511,6 +512,12 @@ export default async function SettingsPage({ params }: Props) {
           initialLogoUrl={workspace.brandingLogoUrl}
         />
       </SettingsSection>
+
+      {canManageCapabilityPacks && (
+        <SettingsSection title="Export" description="Download a portable copy of this workspace — for backup, or to move it to another organization.">
+          <ExportWorkspacePanel orgSlug={orgSlug} workspaceSlug={workspaceSlug} />
+        </SettingsSection>
+      )}
 
       <SettingsSection danger title="Danger Zone" description="Destructive actions that cannot be undone.">
         <DeleteWorkspacePanel

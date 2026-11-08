@@ -90,6 +90,10 @@ export function isPublicPath(pathname: string): boolean {
     // Participant research routes use a hashed, expiring study token. Their
     // API handlers validate the token and session-to-study scope themselves.
     pathname.startsWith("/research/") ||
+    // External artifact share. The page and its server actions authenticate the link
+    // token + shared password themselves (lib/artifact-share.ts); a redirect to /login
+    // would offer outsiders a login they can never complete.
+    pathname.startsWith("/s/") ||
     pathname.startsWith("/api/research/") ||
     // Only these internal callbacks bypass browser login; each requires its bound worker bearer.
     /^\/api\/internal\/research\/voice\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\/(?:heartbeat|events|commands\/(?:claim|result))$/i.test(pathname) ||

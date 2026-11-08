@@ -127,9 +127,12 @@ describe("reusedSandboxCleanupScript", () => {
   })
 })
 
+// Each fake gets its own name: acquireConversationSandbox returns a provider-neutral handle that wraps the
+// SDK object, so tests identify "which sandbox did we get back" by name, not by object identity.
+let fakeSeq = 0
 function fakeSandbox(over: Record<string, unknown> = {}) {
   return {
-    name: NAME,
+    name: `${NAME}-fake-${++fakeSeq}`,
     status: "running",
     tags: { snapshotId: SNAP, profile: PROFILE },
     expiresAt: new Date(Date.now() + 60 * 60_000),
@@ -161,7 +164,8 @@ describe("acquireConversationSandbox", () => {
     const existing = fakeSandbox()
     sdk.get.mockResolvedValue(existing)
     const result = await acquireConversationSandbox(acquireOpts())
-    expect(result).toMatchObject({ reused: true, reason: "hit", sandbox: existing })
+    expect(result).toMatchObject({ reused: true, reason: "hit" })
+    expect(result.sandbox.name).toBe(existing.name)
     expect(sdk.get).toHaveBeenCalledWith({ name: NAME, resume: false })
     expect(sdk.create).not.toHaveBeenCalled()
     expect(existing.stop).not.toHaveBeenCalled()
@@ -196,7 +200,8 @@ describe("acquireConversationSandbox", () => {
     const policy = { allow: ["github.com"] }
     const opts = acquireOpts()
     const result = await acquireConversationSandbox({ ...opts, previous: null, boot: { ...opts.boot, networkPolicy: policy } })
-    expect(result).toMatchObject({ reused: false, reason: "not-found", sandbox: created })
+    expect(result).toMatchObject({ reused: false, reason: "not-found" })
+    expect(result.sandbox.name).toBe(created.name)
     expect(sdk.create).toHaveBeenCalledWith(expect.objectContaining({
       name: NAME,
       source: { type: "snapshot", snapshotId: SNAP },
@@ -216,7 +221,8 @@ describe("acquireConversationSandbox", () => {
     const policy = { allow: ["github.com"] }
     const opts = acquireOpts()
     const result = await acquireConversationSandbox({ ...opts, boot: { ...opts.boot, networkPolicy: policy } })
-    expect(result).toMatchObject({ reused: true, reason: "resumed", sandbox: resumed })
+    expect(result).toMatchObject({ reused: true, reason: "resumed" })
+    expect(result.sandbox.name).toBe(resumed.name)
     expect(sdk.get).toHaveBeenNthCalledWith(1, { name: NAME, resume: false })
     expect(sdk.get).toHaveBeenNthCalledWith(2, { name: NAME })
     expect(sdk.create).not.toHaveBeenCalled()
@@ -243,7 +249,8 @@ describe("acquireConversationSandbox", () => {
       const resumed = fakeSandbox()
       sdk.get.mockResolvedValueOnce(existing).mockResolvedValueOnce(resumed)
       const result = await acquireConversationSandbox({ ...acquireOpts(), ...optsOver })
-      expect(result).toMatchObject({ reused: true, reason, sandbox: resumed })
+      expect(result).toMatchObject({ reused: true, reason })
+      expect(result.sandbox.name).toBe(resumed.name)
       expect(existing.stop).toHaveBeenCalled()
       expect(existing.delete).not.toHaveBeenCalled()
       expect(resumed.delete).not.toHaveBeenCalled()
@@ -262,6 +269,26 @@ describe("acquireConversationSandbox", () => {
     sdk.get.mockResolvedValue(overMax)
     await expect(acquireConversationSandbox(acquireOpts())).rejects.toThrow("over plan max")
     expect(overMax.delete).not.toHaveBeenCalled()
+    expect(sdk.create).not.toHaveBeenCalled()
+  })
+
+  it("boots a fresh sandbox when a stopped one cannot resume because its snapshot is gone (410)", async () => {
+    const stopped = fakeSandbox({ status: "stopped" })
+    sdk.get.mockResolvedValueOnce(stopped).mockRejectedValueOnce(new sdk.APIError(410))
+    const created = fakeSandbox()
+    sdk.create.mockResolvedValue(created)
+    const result = await acquireConversationSandbox(acquireOpts())
+    expect(result).toMatchObject({ reused: false })
+    expect(result.sandbox.name).toBe(created.name)
+    expect(stopped.delete).toHaveBeenCalledTimes(1)
+    expect(sdk.create).toHaveBeenCalledWith(expect.objectContaining({ name: NAME, persistent: true }))
+  })
+
+  it("still fails the turn, without deleting, when resume fails for any other reason", async () => {
+    const stopped = fakeSandbox({ status: "stopped" })
+    sdk.get.mockResolvedValueOnce(stopped).mockRejectedValueOnce(new sdk.APIError(500))
+    await expect(acquireConversationSandbox(acquireOpts())).rejects.toThrow("status 500")
+    expect(stopped.delete).not.toHaveBeenCalled()
     expect(sdk.create).not.toHaveBeenCalled()
   })
 

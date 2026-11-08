@@ -247,6 +247,16 @@ and its access ends as soon as the run does.
 Activity is scoped to the viewer's current workspace access. Raw tool arguments
 and API key secrets are not included.
 
+## Conversations linked to your work
+
+When the in-app agent creates an opportunity, solution or task in a chat, Compass links that conversation to it automatically. If the agent only reads or updates an existing opportunity, solution or task, the link is recorded as "Mentioned". A later read or update never downgrades a "Created here" link.
+
+- **In the chat**, a "Linked objects" card lists each linked item with its title, whether the conversation created or mentioned it, and a link to open it.
+- **On an opportunity, solution or task**, a "Conversations" section lists the conversations that created or mentioned it. You see a conversation there only if you can open it. A private conversation of a teammate never appears, and its title is never sent to your browser.
+- **To remove an automatic link**, use the X on its row. The agent adds it again only if it touches that item again. Removing a link never deletes the conversation or the item.
+
+Conversations are linked only by what the agent's tools actually did; Compass does not read chat text to guess at links.
+
 ## MCP discovery
 
 Use `get_current_identity` to inspect the authenticated identity and accessible

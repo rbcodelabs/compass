@@ -7,11 +7,14 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useDiscoveryViewState, type DiscoverySavedViews } from "@/components/discovery/discovery-saved-views";
+import { useOpportunitiesColumnLayout } from "@/components/discovery/discovery-column-layout";
+import { canMoveColumn, moveColumn } from "@/lib/board-layout";
 import { opportunitiesHref } from "@/lib/saved-views/opportunities-state";
 import { OPPORTUNITY_COLUMN_META, type OpportunityColumns } from "@/lib/saved-views/opportunity-columns";
 import type { OpportunityStatus } from "@/lib/types";
 
 type Props = {
+  workspaceId: string;
   savedViews: Pick<DiscoverySavedViews, "views" | "savedViewId">;
   columns: OpportunityColumns;
   /** Live card count per status; a column with cards cannot be hidden. */
@@ -20,14 +23,18 @@ type Props = {
 
 /**
  * Show/hide and reorder the status columns without dragging, which also covers keyboard
- * users and the stacked mobile layout. Edits are view state, not data: they go to the URL
- * (`order`, `hide`) and mark a selected saved view modified. Nothing is saved until Save.
+ * users and the stacked mobile layout. Edits are view state, not data, and mark a selected saved view modified.
+ * Nothing is saved until Save. Hide/show goes to the URL (`hide`). ORDER is the board's column layout (the same order the
+ * dock tabs and the per-column Move left/right use), so reordering here writes the layout store, not the URL.
  */
-export function ColumnsPopover({ savedViews, columns, countsByStatus }: Props) {
+export function ColumnsPopover({ workspaceId, savedViews, columns: resolved, countsByStatus }: Props) {
   const router = useRouter();
   const pathname = usePathname();
   const [, startTransition] = useTransition();
-  const { state } = useDiscoveryViewState(savedViews);
+  const { urlState: state } = useDiscoveryViewState(savedViews);
+  const { layout, update: updateLayout } = useOpportunitiesColumnLayout(workspaceId);
+  // The server resolves what is hidden; the layout decides the order.
+  const columns: OpportunityColumns = { ...resolved, order: layout.columnOrder as OpportunityStatus[] };
 
   const forced = new Set<OpportunityStatus>(columns.forcedVisible);
   const shown = new Set<OpportunityStatus>(columns.visible);
@@ -35,7 +42,9 @@ export function ColumnsPopover({ savedViews, columns, countsByStatus }: Props) {
   const hidden = columns.order.filter((status) => !shown.has(status) || forced.has(status));
   const hiddenCount = columns.order.length - columns.visible.length;
 
-  function apply(order: OpportunityStatus[], nextHidden: OpportunityStatus[]) {
+  function apply(nextHidden: OpportunityStatus[]) {
+    // Keep whatever legacy order the URL already carries; the layout, not this, decides the order.
+    const order = state.display.columns.status?.order ?? [];
     const next = {
       ...state,
       display: { ...state.display, columns: { ...state.display.columns, status: { order, hidden: nextHidden } } },
@@ -47,16 +56,13 @@ export function ColumnsPopover({ savedViews, columns, countsByStatus }: Props) {
 
   function toggle(status: OpportunityStatus) {
     const isHidden = hidden.includes(status);
-    apply(columns.order, isHidden ? hidden.filter((s) => s !== status) : [...hidden, status]);
+    apply(isHidden ? hidden.filter((s) => s !== status) : [...hidden, status]);
   }
 
-  function move(status: OpportunityStatus, delta: -1 | 1) {
-    const from = columns.order.indexOf(status);
-    const to = from + delta;
-    if (to < 0 || to >= columns.order.length) return;
-    const order = [...columns.order];
-    [order[from], order[to]] = [order[to], order[from]];
-    apply(order, hidden);
+  // Every column takes part, hidden or not: the popover lists them all.
+  const all = { among: () => true };
+  function move(status: OpportunityStatus, direction: "left" | "right") {
+    updateLayout((current) => moveColumn(current, status, direction, all));
   }
 
   return (
@@ -72,7 +78,7 @@ export function ColumnsPopover({ savedViews, columns, countsByStatus }: Props) {
       </PopoverTrigger>
       <PopoverContent align="end" className="w-72 rounded-lg bg-popover p-2 text-popover-foreground shadow-lg ring-1 ring-foreground/10" aria-label="Columns">
         <ul className="grid gap-0.5">
-          {columns.order.map((status, index) => {
+          {columns.order.map((status) => {
             const count = countsByStatus[status] ?? 0;
             const isForced = forced.has(status);
             const isShown = shown.has(status);
@@ -95,13 +101,13 @@ export function ColumnsPopover({ savedViews, columns, countsByStatus }: Props) {
                 </span>
                 <Button
                   variant="ghost" size="icon-sm" aria-label={`Move ${label} up`}
-                  disabled={index === 0} onClick={() => move(status, -1)}
+                  disabled={!canMoveColumn(layout, status, "left", all)} onClick={() => move(status, "left")}
                 >
                   <ArrowUp />
                 </Button>
                 <Button
                   variant="ghost" size="icon-sm" aria-label={`Move ${label} down`}
-                  disabled={index === columns.order.length - 1} onClick={() => move(status, 1)}
+                  disabled={!canMoveColumn(layout, status, "right", all)} onClick={() => move(status, "right")}
                 >
                   <ArrowDown />
                 </Button>

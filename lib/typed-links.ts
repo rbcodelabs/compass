@@ -37,7 +37,8 @@ const readCompare = () => import("@/lib/links/read-compare")
 const legacyMirror = () => import("@/lib/links/legacy-mirror")
 const entityLinkService = () => import("@/lib/links/service")
 
-export type LinkSource = "UI" | "MCP" | "API"
+/** "AGENT" marks a link the in-app agent made on its own (lib/agent-conversation-links.ts); the others are explicit user or API calls. */
+export type LinkSource = "UI" | "MCP" | "API" | "AGENT"
 export type LinkContext = { source: LinkSource; createdById?: string | null }
 
 export type TypedLinkErrorCode = "NOT_FOUND" | "WORKSPACE_MISMATCH" | "INVALID"
@@ -737,6 +738,77 @@ export async function getLinkedSolutionsByKeyResult(
         const solutionIds = [...new Set(links.map((link) => link.fromId))]
         const solutions = solutionIds.length ? await db.solution.findMany({ where: { id: { in: solutionIds }, workspaceId }, select: { id: true, title: true } }) : []
         const titles = new Map(solutions.map((solution) => [solution.id, solution.title]))
+        for (const id of verified) result.set(id, [])
+        for (const link of links) {
+          const title = titles.get(link.fromId)
+          if (title !== undefined) result.get(link.toId)!.push({ id: link.fromId, title })
+        }
+      }
+      return result
+    },
+  })
+}
+
+export type LinkedOpportunity = { id: string; title: string }
+
+/**
+ * The objective-side batch read (the "Linked opportunities" list on the Objective panel): objectiveIds -> the opportunities
+ * linked directly to each, ordered by link created_at then id. Same contract as the readers above: every objective id that is in
+ * `workspaceId` appears in the map (empty list when it has no links), ids outside it are absent, and a link is included only when its
+ * Opportunity is itself in the workspace. Routed per the OPPORTUNITY read family like the opportunity-side reader.
+ */
+async function legacyLinkedOpportunitiesByObjective(
+  db: Tx,
+  workspaceId: string,
+  objectiveIds: readonly string[],
+  options: LinkReadOptions = {},
+): Promise<Map<string, LinkedOpportunity[]>> {
+  const result = new Map<string, LinkedOpportunity[]>()
+  for (const ids of chunk([...new Set(objectiveIds)], LINK_WRITE_CHUNK)) {
+    const verified = options.preverified
+      ? new Set(ids)
+      : new Set((await db.objective.findMany({ where: { id: { in: ids }, workspaceId }, select: { id: true } })).map((row) => row.id))
+    if (verified.size === 0) continue
+    const links = (await db.opportunityObjectiveLink.findMany({
+      where: { workspaceId, objectiveId: { in: [...verified] } },
+      select: { id: true, opportunityId: true, objectiveId: true, createdAt: true },
+    })) as { id: string; opportunityId: string; objectiveId: string; createdAt: Date }[]
+    const opportunityIds = [...new Set(links.map((link) => link.opportunityId))]
+    const opportunities = opportunityIds.length ? await db.opportunity.findMany({ where: { id: { in: opportunityIds }, workspaceId }, select: { id: true, title: true } }) : []
+    const titles = new Map(opportunities.map((opportunity) => [opportunity.id, opportunity.title]))
+    for (const id of verified) result.set(id, [])
+    for (const link of links.sort(byCreatedThenId)) {
+      const title = titles.get(link.opportunityId)
+      if (title !== undefined) result.get(link.objectiveId)!.push({ id: link.opportunityId, title })
+    }
+  }
+  return result
+}
+
+export async function getLinkedOpportunitiesByObjective(
+  db: Tx,
+  workspaceId: string,
+  objectiveIds: readonly string[],
+  options: LinkReadOptions = {},
+): Promise<Map<string, LinkedOpportunity[]>> {
+  return readByFamilyMode("OPPORTUNITY", {
+    legacy: () => legacyLinkedOpportunitiesByObjective(db, workspaceId, objectiveIds, options),
+    shadowScope: (legacyResult) => ({
+      legacy: flatten(legacyResult, (objectiveId, opportunity) => ({ linkType: "OPPORTUNITY_TARGETS_OBJECTIVE", fromType: "OPPORTUNITY", fromId: opportunity.id, toType: "OBJECTIVE", toId: objectiveId })),
+      readEntityLinks: async () => (await readCompare()).readEntityLinksOpportunityObjective(db, workspaceId, { objectiveIds: [...legacyResult.keys()] }),
+    }),
+    entityLinks: async () => {
+      const { readEntityLinksOpportunityObjective } = await readCompare()
+      const result = new Map<string, LinkedOpportunity[]>()
+      for (const ids of chunk([...new Set(objectiveIds)], LINK_WRITE_CHUNK)) {
+        const verified = options.preverified
+          ? new Set(ids)
+          : new Set((await db.objective.findMany({ where: { id: { in: ids }, workspaceId }, select: { id: true } })).map((row) => row.id))
+        if (verified.size === 0) continue
+        const links = await readEntityLinksOpportunityObjective(db, workspaceId, { objectiveIds: [...verified] })
+        const opportunityIds = [...new Set(links.map((link) => link.fromId))]
+        const opportunities = opportunityIds.length ? await db.opportunity.findMany({ where: { id: { in: opportunityIds }, workspaceId }, select: { id: true, title: true } }) : []
+        const titles = new Map(opportunities.map((opportunity) => [opportunity.id, opportunity.title]))
         for (const id of verified) result.set(id, [])
         for (const link of links) {
           const title = titles.get(link.fromId)

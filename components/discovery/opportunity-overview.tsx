@@ -23,17 +23,14 @@ import { SquadPicker } from "@/components/squads/squad-picker";
 import { EvidenceList, type EvidenceListItem } from "@/components/discovery/evidence-list";
 import { AddEvidenceDialog } from "@/components/discovery/add-evidence-dialog";
 import type { OpportunityStatus, CustomFieldDefinitionData, CustomFieldValue, SquadData } from "@/lib/types";
+import { OPPORTUNITY_STATUSES, OPPORTUNITY_STATUS_DEFINITIONS, opportunityStatusTooltip } from "@/lib/opportunity-status";
 import { MarkdownContent } from "@/components/markdown-content";
 import { useLabels } from "@/components/thinking-model/thinking-model-provider";
 import { linkToPlaceholder } from "@/lib/thinking-model/copy";
 
-const STATUS_LABELS: Record<OpportunityStatus, string> = {
-  EXPLORING: "Exploring",
-  VALIDATING: "Validating",
-  PRIORITIZED: "Prioritized",
-  ACTIVE: "Active",
-  ARCHIVED: "Archived",
-};
+const STATUS_LABELS: Record<OpportunityStatus, string> = Object.fromEntries(
+  OPPORTUNITY_STATUSES.map((s) => [s, OPPORTUNITY_STATUS_DEFINITIONS[s].label]),
+) as Record<OpportunityStatus, string>;
 
 type OpportunityOverviewData = {
   id: string;
@@ -119,12 +116,13 @@ export function OpportunityOverview({
           </SelectTrigger>
           <SelectContent>
             {(Object.keys(STATUS_LABELS) as OpportunityStatus[]).map((s) => (
-              <SelectItem key={s} value={s}>
+              <SelectItem key={s} value={s} title={opportunityStatusTooltip(s)}>
                 {STATUS_LABELS[s]}
               </SelectItem>
             ))}
           </SelectContent>
         </Select>
+        <p className="mt-1.5 text-xs text-text-subtle">{OPPORTUNITY_STATUS_DEFINITIONS[opportunity.status].definition}</p>
       </Field>
 
       {squads.length > 0 && (

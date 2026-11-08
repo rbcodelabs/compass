@@ -6,7 +6,7 @@ import { RoadmapCard, type RoadmapCardData } from "./roadmap-card";
 import { AddItemForm } from "./add-item-form";
 import type { Horizon } from "@/lib/types";
 import { HORIZON_META, isLaunchHorizon } from "@/lib/roadmap";
-import { BoardColumn, EmptyState } from "@/components/patterns";
+import { BoardColumn, EmptyState, PINNED_COLUMN_BODY_CLASS, PINNED_COLUMN_CLASS, type BoardColumnLayoutControls } from "@/components/patterns";
 
 type AvailableKR = { id: string; title: string; objectiveTitle: string };
 type AvailableSolution = { id: string; title: string; opportunityTitle: string };
@@ -31,6 +31,9 @@ type Props = {
   // into any blocking behavior.
   limit?: number | null;
   launchWorkflowEnabled?: boolean;
+  /** "scroller" (default) is a column in the board's horizontal scroller; "pinned" is docked on the right, outside it. */
+  placement?: "scroller" | "pinned";
+  layoutControls?: BoardColumnLayoutControls;
 };
 
 export function RoadmapColumn({
@@ -48,7 +51,10 @@ export function RoadmapColumn({
   availableExperiments,
   limit,
   launchWorkflowEnabled = true,
+  placement = "scroller",
+  layoutControls,
 }: Props) {
+  const pinned = placement === "pinned";
   const { label, emptyText } = HORIZON_META[horizon];
   const accent = ({ NOW: "success", NEXT: "info", LATER: "neutral", LAUNCHING: "warning", LAUNCHED: "success", SHIPPED: "success" } as const)[horizon];
   const itemIds = items.map((i) => i.id);
@@ -64,10 +70,12 @@ export function RoadmapColumn({
       count={items.length}
       limit={limit}
       accent={accent}
-      className="w-[calc(100cqw-1.5rem)] min-w-0 flex-none sm:w-[calc(100cqw-2rem)] md:w-72 md:min-w-[280px] md:flex-1 md:overflow-hidden md:h-full"
+      layoutControls={layoutControls}
+      data-testid={`roadmap-column-${horizon}`}
+      className={pinned ? PINNED_COLUMN_CLASS : "w-[calc(100cqw-1.5rem)] min-w-0 flex-none sm:w-[calc(100cqw-2rem)] md:w-72 md:min-w-[280px] md:flex-1 md:overflow-hidden md:h-full"}
       bodyRef={setNodeRef}
       bodyId={`roadmap-column-${horizon}`}
-      bodyClassName={`min-h-44 md:min-h-0 md:max-h-none md:flex-1 md:overflow-y-auto ${
+      bodyClassName={`${pinned ? PINNED_COLUMN_BODY_CLASS : "min-h-44 md:min-h-0 md:max-h-none md:flex-1 md:overflow-y-auto"} ${
         isOver ? "rounded-lg bg-primary/5 ring-2 ring-inset ring-ring/25" : ""
       }`}
       footer={allowAdd ? <AddItemForm workspaceId={workspaceId} horizon={horizon} revalidatePathStr={revalidatePathStr} onAdd={onItemAdded} availableKRs={availableKRs} availableSolutions={availableSolutions} availableOpportunities={availableOpportunities} availableExperiments={availableExperiments} /> : undefined}

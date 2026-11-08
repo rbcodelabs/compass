@@ -829,6 +829,14 @@
     "textarea { display: block; width: 100%; min-height: 62px; max-height: 180px; padding: 8px;",
     "  border: 1px solid #dfe3ec; border-radius: 8px; background: #ffffff; color: #1f2430; font: inherit;",
     "  font-size: 13px; resize: vertical; }",
+    /* iOS Safari zooms the whole page when a field under 16px is focused, which is what
+       made the host app appear to resize. 16px on touch devices suppresses that. */
+    "@media (pointer: coarse) { textarea { font-size: 16px; } }",
+    /* Soft keyboard open: the layer is pinned to the visual viewport (set from JS) so the
+       panel is laid out in the space that is actually visible. The transform makes the
+       layer the containing block for its fixed children. */
+    ".layer[data-kb='true'] { transform: translateZ(0); top: var(--vv-top, 0px); height: var(--vv-h, 100%); }",
+    ".layer[data-kb='true'] .panel { max-height: calc(var(--vv-h, 100vh) - 24px); }",
     "textarea:focus-visible { outline: 2px solid #4f7cff; outline-offset: -1px; }",
     ".row { display: flex; align-items: center; gap: 8px; margin-top: 8px; }",
     ".count { flex: 1; font-size: 11px; color: #5b6278; }",
@@ -2307,6 +2315,25 @@
     // `passive` so the widget never delays the host page's scrolling.
     window.addEventListener("scroll", scheduleReposition, { passive: true, capture: true });
     window.addEventListener("resize", scheduleReposition, { passive: true });
+
+    // Soft keyboard: on mobile the visual viewport shrinks while the layout viewport does
+    // not, so a bottom-anchored panel ends up under the keyboard. Track it and pin the
+    // layer to what is visible. Only engaged while the panel is open and the viewport is
+    // meaningfully shorter than the window (a keyboard, not a toolbar collapse).
+    var vv = window.visualViewport;
+    if (vv && ui.layer) {
+      var syncKeyboard = function () {
+        var covered = (window.innerHeight || 0) - vv.height - vv.offsetTop;
+        var kb = state.open && (window.innerHeight - vv.height) > 120;
+        if (kb) {
+          ui.layer.style.setProperty("--vv-top", Math.round(vv.offsetTop) + "px");
+          ui.layer.style.setProperty("--vv-h", Math.round(vv.height) + "px");
+        }
+        ui.layer.setAttribute("data-kb", kb && covered > -1 ? "true" : "false");
+      };
+      vv.addEventListener("resize", syncKeyboard, { passive: true });
+      vv.addEventListener("scroll", syncKeyboard, { passive: true });
+    }
   }
 
   /* ------------------------------------------------------------------ *

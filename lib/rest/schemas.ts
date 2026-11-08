@@ -41,7 +41,7 @@ export const opportunitySchema = numberedResourceSchema.extend({
   title: z.string(),
   description: z.string().nullable(),
   customerSegment: z.string().nullable(),
-  status: z.enum(["EXPLORING", "VALIDATING", "PRIORITIZED", "ACTIVE", "ARCHIVED"]),
+  status: z.enum(["UNREVIEWED", "EXPLORING", "VALIDATING", "PRIORITIZED", "ACTIVE", "ARCHIVED"]),
   squadId: uuid.nullable(),
   linkedKeyResultId: uuid.nullable(),
 })

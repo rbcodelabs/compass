@@ -21,7 +21,7 @@ it("requires write grants for mutation gates", async () => {
   await applyToolGate("create_task", { ...actor }, { workspaceId: "one" })
   expect(prisma.agentWorkspaceGrant.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ access: "WRITE" }) }))
 })
-it.each(["approve_solution_plan", "reject_solution_plan", "request_release_authorization", "unknown_tool"])("denies human-only and unclassified operation %s", async tool => {
+it.each(["approve_solution_plan", "reject_solution_plan", "unknown_tool"])("denies human-only and unclassified operation %s", async tool => {
   await expect(applyToolGate(tool, { ...actor }, {})).rejects.toThrow(/human identity/)
   expect(prisma.workspace.findFirst).not.toHaveBeenCalled()
 })

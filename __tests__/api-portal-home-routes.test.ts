@@ -10,18 +10,22 @@ import { createWidget } from "@/lib/portal-home/schema"
 const WS = "11111111-1111-4111-8111-111111111111"
 const resolveWorkspaceAdmin = vi.fn()
 const authMock = vi.fn()
-const layouts = new Map<string, { draftWidgets: unknown; publishedWidgets: unknown; publishedAt: Date | null }>()
+const layouts = new Map<string, { draftWidgets: unknown; publishedWidgets: unknown; publishedAt: Date | null; draftTemplate?: string | null; publishedTemplate?: string | null }>()
 
 const prisma = {
   workspace: { findUnique: vi.fn(async () => ({ id: WS, roadmapPublic: true, feedbackEnabled: true })) },
   portalHomeLayout: {
     findUnique: vi.fn(async () => layouts.get(WS) ?? null),
-    upsert: vi.fn(async ({ create, update }: { create: { draftWidgets: unknown }; update: { draftWidgets: unknown } }) => {
+    upsert: vi.fn(async ({ create, update }: { create: { draftWidgets: unknown; draftTemplate?: string }; update: { draftWidgets: unknown; draftTemplate?: string } }) => {
       const existing = layouts.get(WS)
-      layouts.set(WS, { publishedWidgets: null, publishedAt: null, ...existing, draftWidgets: (existing ? update : create).draftWidgets })
+      const data = existing ? update : create
+      layouts.set(WS, {
+        publishedWidgets: null, publishedAt: null, ...existing, draftWidgets: data.draftWidgets,
+        ...(data.draftTemplate === undefined ? {} : { draftTemplate: data.draftTemplate }),
+      })
     }),
-    update: vi.fn(async ({ data }: { data: { publishedWidgets: unknown; publishedAt: Date } }) => {
-      layouts.set(WS, { ...layouts.get(WS)!, publishedWidgets: data.publishedWidgets, publishedAt: data.publishedAt })
+    update: vi.fn(async ({ data }: { data: { publishedWidgets: unknown; publishedAt: Date; publishedTemplate?: string } }) => {
+      layouts.set(WS, { ...layouts.get(WS)!, publishedWidgets: data.publishedWidgets, publishedAt: data.publishedAt, publishedTemplate: data.publishedTemplate })
     }),
   },
   roadmapItem: { findMany: vi.fn(async () => []) },
@@ -98,6 +102,42 @@ describe("draft and publish", () => {
     expect(published.status).toBe(200)
     expect(layouts.get(WS)?.publishedWidgets).toEqual(layouts.get(WS)?.draftWidgets)
     expect(layouts.get(WS)?.publishedAt).toBeInstanceOf(Date)
+  })
+
+  it("saves the template with the draft and copies it to published only on publish", async () => {
+    const { GET, PUT } = await import("@/app/api/portal-home/[orgSlug]/[workspaceSlug]/route")
+    const { POST } = await import("@/app/api/portal-home/[orgSlug]/[workspaceSlug]/publish/route")
+    const widget = createWidget("rich_text", 0)
+
+    const saved = await PUT(json({ widgets: [widget], template: "bento" }), route)
+    expect(saved.status).toBe(200)
+    expect(await saved.json()).toMatchObject({ draftTemplate: "bento", publishedTemplate: "editorial", hasUnpublishedChanges: true })
+    expect(layouts.get(WS)?.publishedTemplate).toBeUndefined()
+
+    // A widgets-only autosave must not reset the chosen template.
+    await PUT(json({ widgets: [widget] }), route)
+    expect(layouts.get(WS)?.draftTemplate).toBe("bento")
+
+    const published = await POST(json({}), route)
+    expect(await published.json()).toMatchObject({ publishedTemplate: "bento", hasUnpublishedChanges: false })
+    expect(layouts.get(WS)?.publishedTemplate).toBe("bento")
+
+    // Changing only the template afterwards is an unpublished change.
+    await PUT(json({ widgets: [widget], template: "docs_hub" }), route)
+    expect(await (await GET(new Request("http://x"), route)).json()).toMatchObject({ draftTemplate: "docs_hub", publishedTemplate: "bento", hasUnpublishedChanges: true })
+  })
+
+  it("rejects an unknown template with 400 and stores nothing", async () => {
+    const { PUT } = await import("@/app/api/portal-home/[orgSlug]/[workspaceSlug]/route")
+    const response = await PUT(json({ widgets: [], template: "magazine" }), route)
+    expect(response.status).toBe(400)
+    expect(layouts.size).toBe(0)
+  })
+
+  it("publishes a row that predates migration 114 (no template columns) as editorial", async () => {
+    layouts.set(WS, { draftWidgets: [createWidget("rich_text", 0)], publishedWidgets: null, publishedAt: null })
+    const { POST } = await import("@/app/api/portal-home/[orgSlug]/[workspaceSlug]/publish/route")
+    expect(await (await POST(json({}), route)).json()).toMatchObject({ publishedTemplate: "editorial" })
   })
 
   it("returns 409 when publishing with no draft", async () => {

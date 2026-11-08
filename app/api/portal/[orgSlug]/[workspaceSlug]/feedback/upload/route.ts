@@ -1,4 +1,4 @@
-import { put } from "@vercel/blob";
+import { getPublicFileStore } from "@/lib/storage/public-store";
 import { NextRequest, NextResponse } from "next/server";
 import getPrisma from "@/lib/db";
 import { getPortalSession } from "@/lib/portal-auth";
@@ -70,12 +70,10 @@ export async function POST(
 
   const safeName = sanitizeFeedbackAttachmentFilename(file.name);
 
-  const blob = await put(`feedback/${workspace.id}/${Date.now()}-${safeName}`, file, {
-    access: "public",
-  });
+  const stored = await getPublicFileStore().put(`feedback/${workspace.id}/${Date.now()}-${safeName}`, file);
 
   return NextResponse.json({
-    url: blob.url,
+    url: stored.url,
     filename: file.name,
     fileType: file.type,
     fileSize: file.size,

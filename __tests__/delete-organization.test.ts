@@ -9,7 +9,7 @@ const mockOrganizationMember = { findFirst: vi.fn(), deleteMany: vi.fn() };
 const mockWorkspace = { findMany: vi.fn(), delete: vi.fn() };
 const mockObjective = { updateMany: vi.fn(), findMany: vi.fn(), deleteMany: vi.fn() };
 const mockExperiment = { updateMany: vi.fn(), findMany: vi.fn(), deleteMany: vi.fn() };
-const mockTask = { findMany: vi.fn(), deleteMany: vi.fn() };
+const mockTask = { findMany: vi.fn().mockResolvedValue([]), updateMany: vi.fn().mockResolvedValue({ count: 0 }), deleteMany: vi.fn() };
 const mockTaskLink = { deleteMany: vi.fn() };
 const mockRoadmapItem = { findMany: vi.fn(), deleteMany: vi.fn() };
 const mockLaunchChecklist = { findMany: vi.fn(), deleteMany: vi.fn() };
@@ -28,7 +28,8 @@ const mockEmbedAuthHandoff = { deleteMany: vi.fn() };
 const mockCommentExternalAuthor = { updateMany: vi.fn() };
 const mockCustomFieldDefinition = { findMany: vi.fn(), deleteMany: vi.fn() };
 const mockCustomFieldValue = { deleteMany: vi.fn() };
-const mockEvidence = { deleteMany: vi.fn() };
+const mockEvidence = { findMany: vi.fn().mockResolvedValue([]), deleteMany: vi.fn() };
+const mockEvidenceResearchSource = { deleteMany: vi.fn() };
 const mockOpportunity = { findMany: vi.fn(), deleteMany: vi.fn() };
 const mockOpportunityScore = { deleteMany: vi.fn() };
 const mockSolutionScore = { deleteMany: vi.fn() };
@@ -49,7 +50,9 @@ const mockSavedView = { deleteMany: vi.fn() };
 const mockWorkspaceSequence = { deleteMany: vi.fn() };
 const mockWorkspaceMember = { deleteMany: vi.fn() };
 const mockSquad = { deleteMany: vi.fn() };
-const mockDoc = { deleteMany: vi.fn(), findFirst: vi.fn().mockResolvedValue(null), findMany: vi.fn().mockResolvedValue([]) };
+const mockDocVersion = { deleteMany: vi.fn() };
+const mockDocComment = { deleteMany: vi.fn() };
+const mockDoc = { updateMany: vi.fn(), deleteMany: vi.fn(), findFirst: vi.fn().mockResolvedValue(null), findMany: vi.fn().mockResolvedValue([]) };
 const mockArtifact = { findMany: vi.fn(), updateMany: vi.fn(), deleteMany: vi.fn() };
 const mockArtifactRevision = { findMany: vi.fn(), findFirst: vi.fn(), deleteMany: vi.fn() };
 const mockArtifactLink = { deleteMany: vi.fn() };
@@ -126,6 +129,7 @@ const mockPrisma = {
   sharedFieldOptionSet: { deleteMany: vi.fn() },
   customFieldValue: mockCustomFieldValue,
   evidence: mockEvidence,
+  evidenceResearchSource: mockEvidenceResearchSource,
   opportunity: mockOpportunity,
   opportunityScore: mockOpportunityScore,
   solutionScore: mockSolutionScore,
@@ -147,6 +151,12 @@ const mockPrisma = {
   workspaceMember: mockWorkspaceMember,
   squad: mockSquad,
   doc: mockDoc,
+  docVersion: mockDocVersion,
+  docComment: mockDocComment,
+  // Agents the workspace owns itself are deleted with it; none here.
+  agent: { findMany: vi.fn().mockResolvedValue([]), deleteMany: vi.fn() },
+  userDefaultAgent: { deleteMany: vi.fn() },
+  workspaceDefaultAgent: { deleteMany: vi.fn() },
   artifact: mockArtifact,
   artifactRevision: mockArtifactRevision,
   artifactLink: mockArtifactLink,
@@ -186,6 +196,10 @@ vi.mock("@/lib/db", () => ({
 }));
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
+
+// The registry-driven final sweep walks every content model with real paging; this hand-built mock holds neither those delegates nor
+// paging. The sweep is exercised against real Postgres in workspace-export-coverage.integration.test.ts.
+vi.mock("@/lib/workspace-export/sweep", () => ({ sweepWorkspaceOwnedRows: async () => ({}) }));
 
 vi.mock("@/auth", () => ({ auth: vi.fn() }));
 

@@ -26,7 +26,7 @@ export const BOARD_COLUMN_LABELS: Record<BoardColumnId, string> = {
 }
 
 /** Geode's order: in-flight first, then what needs a look, then settled, then failures. */
-const COLUMN_ORDER: BoardColumnId[] = ["working", "new", "done", "failed", "ready"]
+export const BOARD_COLUMN_ORDER: readonly BoardColumnId[] = ["working", "new", "done", "failed", "ready"]
 
 /** Shown even when empty, so the board never reads as broken. Every other empty column is hidden. */
 const ALWAYS_SHOWN: ReadonlySet<BoardColumnId> = new Set(["working", "new"])
@@ -62,10 +62,10 @@ export function classifyBoardCard(card: Pick<AgentBoardCard, "runStatus" | "mess
 }
 
 export function bucketizeBoard(cards: readonly AgentBoardCard[]): AgentBoardColumn[] {
-  const buckets = new Map<BoardColumnId, AgentBoardCard[]>(COLUMN_ORDER.map((id) => [id, []]))
+  const buckets = new Map<BoardColumnId, AgentBoardCard[]>(BOARD_COLUMN_ORDER.map((id) => [id, []]))
   for (const card of cards) buckets.get(classifyBoardCard(card))!.push(card)
 
-  return COLUMN_ORDER.flatMap((id) => {
+  return BOARD_COLUMN_ORDER.flatMap((id) => {
     const bucket = buckets.get(id)!
     if (bucket.length === 0 && !ALWAYS_SHOWN.has(id)) return []
     const sorted = [...bucket].sort((a, b) => time(b.lastActivityAt) - time(a.lastActivityAt))
@@ -80,4 +80,36 @@ export function formatRelativeTime(iso: string, now: number = Date.now()): strin
   if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`
   if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`
   return `${Math.floor(diff / 86_400_000)}d ago`
+}
+
+/** Chat-list row: a conversation plus the optional status fields the board already derives. */
+export type AgentListConversation = {
+  id: string
+  title: string | null
+  messageCount?: number
+  runStatus?: string | null
+  lastActivityAt?: string
+  reviewedAt?: string | null
+}
+
+export type AgentListGroup = { id: BoardColumnId; label: string; items: (AgentListConversation & { lastActivityAt: string })[] }
+
+/**
+ * Groups the chat list by status (same buckets as the board) and sorts each group by last activity, newest
+ * first. Returns null when the rows carry no status data (the rail list), so callers fall back to a flat list.
+ */
+export function groupConversationsByStatus(conversations: readonly AgentListConversation[]): AgentListGroup[] | null {
+  if (conversations.length === 0 || conversations.some((c) => !c.lastActivityAt)) return null
+  const byId = new Map(conversations.map((c) => [c.id, c as AgentListConversation & { lastActivityAt: string }]))
+  const columns = bucketizeBoard(
+    conversations.map((c) => ({
+      id: c.id,
+      title: c.title,
+      messageCount: c.messageCount ?? 1,
+      runStatus: c.runStatus ?? null,
+      lastActivityAt: c.lastActivityAt!,
+      reviewedAt: c.reviewedAt ?? null,
+    }))
+  )
+  return columns.filter((col) => col.cards.length > 0).map((col) => ({ id: col.id, label: col.label, items: col.cards.map((card) => byId.get(card.id)!) }))
 }

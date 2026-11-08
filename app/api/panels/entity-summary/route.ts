@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { getWorkspace } from "@/lib/workspace";
-import type { EntityLinkType } from "@/lib/entity-links";
+import { isEntityId, type EntityLinkType } from "@/lib/entity-links";
 import getPrisma from "@/lib/db";
 import { resolveWorkItem } from "@/lib/work-item-resolve";
 import { getEntitySummary } from "@/lib/entity-summary";
@@ -9,7 +9,7 @@ import { resolveThinkingModel } from "@/lib/thinking-model/resolve";
 
 const SUMMARY_TYPES: ReadonlySet<string> = new Set<EntityLinkType>([
   "objective", "keyResult", "opportunity", "solution", "assumption",
-  "experiment", "roadmapItem", "feedback", "task", "doc", "artifact",
+  "experiment", "roadmapItem", "feedback", "task", "doc", "artifact", "review",
 ]);
 
 /**
@@ -41,7 +41,13 @@ export async function GET(req: Request) {
   if (!workspace) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   // `id` is a UUID or a display ID (`TASK-5`); the type names are the same strings the work item registry uses.
-  const resolved = await resolveWorkItem(getPrisma(), workspace.id, type as EntityLinkType, id);
+  // Decision requests are addressed by UUID only (no display ID), so they skip the work item registry.
+  if (type === "review") {
+    if (!isEntityId(id)) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    const decision = await getEntitySummary("review", id, workspace.id, resolveThinkingModel(workspace).labels);
+    return decision ? NextResponse.json({ ...decision, displayId: null }) : NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+  const resolved = await resolveWorkItem(getPrisma(), workspace.id, type as Exclude<EntityLinkType, "review">, id);
   if (!resolved.ok) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   const summary = await getEntitySummary(type as EntityLinkType, resolved.id, workspace.id, resolveThinkingModel(workspace).labels);

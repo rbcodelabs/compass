@@ -5,7 +5,8 @@ import { auth } from "@/auth"
 import getPrisma from "@/lib/db"
 import { recordDecision } from "@/lib/decision-service"
 import { isOrgAdminRole } from "@/lib/roles"
-import { queueAuthorizedRelease, unconfiguredReleaseSourceRevalidator } from "@/lib/release-authorization"
+import { queueAuthorizedRelease } from "@/lib/release-authorization"
+import { getReleaseSourceRevalidator } from "@/lib/github-release-source-revalidator"
 import { createTrackedDecisionRequest, reviseTrackedDecisionRequest, recordDecisionNoAction, type TrackedDecisionOptionInput, type TrackedDecisionQuestionInput, type TrackedSubjectType } from "@/lib/tracked-decisions"
 import { createDecisionFollowUpTask } from "@/lib/decision-followthrough"
 import type { TrackedDecisionAnswerInput } from "@/lib/tracked-decision-types"
@@ -96,7 +97,7 @@ export async function decideReviewAction(input: {
       revision.request.subjectId,
       decision.id,
       revision.sourceFingerprint,
-      unconfiguredReleaseSourceRevalidator,
+      getReleaseSourceRevalidator(),
     )
     if (dispatch.status === "BLOCKED") throw new Error(`Release dispatch blocked: ${dispatch.code}`)
   }

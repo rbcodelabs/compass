@@ -26,7 +26,7 @@ Every task moves through: **Backlog → To Do → In Progress → Blocked ⇄ In
 
 **Blocked is its own column**, not a flag layered on top of another status — dragging a card into Blocked *is* how a task gets blocked, and dragging it back out resumes whatever stage makes sense. This keeps the board a single-axis kanban that matches the mental model of tools like Jira, rather than asking you to track two independent pieces of state.
 
-Cancelled tasks are collapsed behind a **Show cancelled** toggle above the board so a graveyard of abandoned work doesn't clutter the columns you're actively using.
+Cancelled tasks are collapsed behind a **Show cancelled** toggle above the board so a graveyard of abandoned work doesn't clutter the columns you're actively using. The toggle is a temporary view setting: it isn't part of a saved view, and it resets when you change a filter.
 
 ## Board and List Views
 
@@ -34,6 +34,31 @@ Toggle between **Board** and **List** at the top of the Tasks page — `?view=li
 
 - **Board** — the familiar column-per-status kanban. Drag a card to a new column to change its status; drag within a column to reorder. That priority order is persisted for the whole column, including when you reorder a filtered view, and is visible to every workspace member.
 - **List** — a flat, filterable table with one row per task, indented by hierarchy depth. This is the better view for the "PM tracking a handful of initiatives" use case, where a full kanban is more structure than the work needs.
+
+### Pin, collapse and reorder columns on the Board
+
+The Tasks board uses the same **dock** as the [Opportunity board](/help/02-discovery#pin-collapse-and-reorder-columns-on-the-opportunity-board), the Solutions backlog and the Roadmap board. On a wide screen (the medium breakpoint and up), any status column can be **pinned**: it moves into one dock on the right, outside the scrolling area, so it stays put while the other columns scroll. Nothing is pinned until you pin it, so the board looks the same as before.
+
+The dock is **one slot**, however many columns you pin: a panel showing one pinned column, with a narrow rail of **tabs** at its right edge, one per pinned column (its name and task count). Pinning more columns adds tabs; it never makes the dock wider.
+
+- **Pin or unpin.** Use the pin button in a column's header (it appears when you hover the header) or **Pin to the right** / **Unpin** in the column's **⋯** menu. A pinned column becomes the active tab and the dock opens on it.
+- **Switch and collapse.** Click a tab to show that column. Click the active tab, or the **Collapse** button in the panel's header, to close the panel and leave only the tab rail. Arrow keys move between tabs; Enter or Space shows one.
+- **Drag tasks.** A tab is a drop target even while the dock is closed: drop a card on the **Done** tab and its status becomes Done. Cards in the open panel can be dragged out to any other column, and dragging a card up or down within a column (the open panel included) still sets its order. **Add task** at the bottom of the open panel works as it does in any column.
+- **Reorder columns.** **Move left** / **Move right** in a column's **⋯** menu. A pinned column's place in that order is its place among the tabs. This order replaces the fixed Backlog to Done order.
+- **Show cancelled.** **Cancelled** only has a column while **Show cancelled** is on. If you pinned it, its tab appears and disappears with that toggle; the pin itself is kept.
+- **Narrow screens.** Below the medium breakpoint nothing is docked: pinned columns appear in the scrolling board in their saved order, one swipe column each, and the pin button is hidden. Your layout comes back when the screen is wide again.
+
+With no saved view selected, Compass remembers the layout in this browser for each workspace. To have it follow you to other devices, save it in a [saved view](#saved-views).
+
+### Saved views
+
+Open the **Views** menu in the Tasks header to save how you like to look at Tasks and come back to it with one click. Choose **Save current filters as new view...**, name it, and Compass stores:
+
+- the filters: **Squad**, **Assignee**, **Priority**, **Agent tasks** and any custom-field filter;
+- the **Board** or **List** choice;
+- on the Board, your column layout: which columns are pinned, which tab is active, whether the dock is open and the column order.
+
+Saved views are **personal**: only you see them, and they are kept per workspace. Opening one puts its filters in the page address (so you can still change or clear any of them) and restores the layout, including on another device. The **Modified** badge appears when the page differs from the view (filters or layout); **Save changes** updates the view, and **Reset** puts the saved filters and layout back. Use the pencil to rename a view, and the menu to delete it; deleting a view never deletes tasks. A layout that can't be read falls back to the default layout and the rest of the view still applies. Read-only members can open and use views, but can't save, rename or delete them.
 
 Both views read the same underlying data — there's no separate "lite" data model for the list view.
 

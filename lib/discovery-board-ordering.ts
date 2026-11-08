@@ -89,3 +89,28 @@ export function planDragEnd(params: {
 
   return { kind: "reorder", oldIndex, newIndex }
 }
+
+/**
+ * The status a drop on a dock TAB means, or null when `overData` (dnd-kit's `over.data.current`) is not a tab.
+ *
+ * A tab whose column is not the open panel has no rendered column behind it. Moving the dragged card into that column
+ * while the drag is still in progress would unmount the dragged card (and its menu) mid-drag and make dnd-kit's item
+ * set change again and again, so a tab is never an optimistic drag-over target: the destination is resolved at drag end.
+ */
+export function dockTabDropStatus<S extends string = OpportunityStatus>(overData: { dockTab?: boolean; status?: string } | undefined | null): S | null {
+  return overData?.dockTab && overData.status ? (overData.status as S) : null
+}
+
+/**
+ * The full order of a column after the cards in `reorderedIds` (which may be a filtered subset of it) were put in a new
+ * relative order: the subset keeps the positions it occupied, filled in the new order, and every other card stays where it
+ * was. The result is what gets numbered 0..n-1, so ties and gaps in the stored `sortOrder` can no longer undo a reorder.
+ * Returns null when `reorderedIds` is not made of distinct members of the column.
+ */
+export function applySubsetOrder(columnIds: readonly string[], reorderedIds: readonly string[]): string[] | null {
+  const members = new Set(columnIds)
+  if (new Set(reorderedIds).size !== reorderedIds.length || reorderedIds.some((id) => !members.has(id))) return null
+  const subset = new Set(reorderedIds)
+  let next = 0
+  return columnIds.map((id) => (subset.has(id) ? reorderedIds[next++] : id))
+}

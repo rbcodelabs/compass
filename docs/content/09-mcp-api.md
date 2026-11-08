@@ -255,7 +255,7 @@ link on its own line, immediately after the usual `ID: <uuid>` line:
 **Opportunity created** in "Compass"
 ID: 0f2c…
 Title: Setup is confusing
-Status: EXPLORING
+Status: UNREVIEWED
 URL: https://compass.rbcodelabs.com/rbcodelabs/compass/discovery/0f2c…
 ```
 
@@ -413,10 +413,10 @@ Typed links connect an Opportunity to Objectives and a Solution to Key Results (
 | `get_opportunity` | Return full detail for an opportunity: solutions, assumptions per solution, and experiments linked to those assumptions |
 | `list_solutions` | Discover solutions across a workspace by solution status, parent opportunity status/squad, and roadmap-link presence; returns stable Opportunity and Roadmap Item IDs without making a readiness judgment; filterable by `updatedSince`/`updatedBefore` and orderable with `sort` (`recentlyUpdated` / `leastRecentlyUpdated`) |
 | `list_assumptions` | Discover assumptions across a workspace by status, risk, parent Solution status, and parent Opportunity status/squad; returns stable ancestry IDs and experiment counts; filterable by `updatedSince`/`updatedBefore` and orderable with `sort` (`recentlyUpdated` / `leastRecentlyUpdated`) |
-| `create_opportunity` | Create a new opportunity with title, description, status. An optional `keyResultId` behaves like `link_opportunity_to_kr` (the Key Result must be in this workspace) |
+| `create_opportunity` | Create a new opportunity with title, description, status (defaults to `UNREVIEWED`). An optional `keyResultId` behaves like `link_opportunity_to_kr` (the Key Result must be in this workspace) |
 | `create_opportunities` | Bulk-create up to 25 opportunities (agent callers) per call. Each item runs in its own transaction and is reported in `data.results` as created, an error, or `CONFLICT`; the call succeeds even if some items fail. Give each item a `clientId` (UUID) to make retries safe: a repeat returns `deduped: true`. Takes title, description, customerSegment, status and squadId, not a Key Result |
 | `update_opportunity` | Update an existing opportunity's title and/or description; pass `null` to clear its description |
-| `update_opportunity_status` | Move an opportunity through its discovery pipeline: EXPLORING → VALIDATING → PRIORITIZED → ACTIVE → ARCHIVED |
+| `update_opportunity_status` | Move an opportunity through its discovery pipeline: UNREVIEWED → EXPLORING → VALIDATING → PRIORITIZED → ACTIVE → ARCHIVED |
 | `link_opportunity_to_kr` | Associate an opportunity with a Key Result it is expected to move (pass `keyResultId: null` to clear). An opportunity has at most one linked Key Result. The Key Result must be in the opportunity's workspace: a Key Result from another workspace is rejected, even if you are a member of both. The link is also recorded as a `LEGACY` typed Opportunity–Objective link to that Key Result's Objective (see [Typed links](#typed-links)). The pointer is also mirrored into `entity_links` (`OPPORTUNITY_TARGETS_KEY_RESULT`) while the mirror flag is on |
 | `link_opportunity_to_objective` | Link an Opportunity directly to an Objective in the same workspace. Idempotent: repeating returns `created: false`. A direct link is not removed when the opportunity's Key Result is cleared. The legacy table stays the source of truth; links are also mirrored into `entity_links` (`OPPORTUNITY_TARGETS_OBJECTIVE`, origin `DIRECT` or `LEGACY` preserved) while the mirror flag is on, and `link_entities` refuses that type |
 | `unlink_opportunity_from_objective` | Remove an Opportunity–Objective link; returns `removed: 0` when there is none. A link implied by the opportunity's linked Key Result stays until that Key Result is cleared (`removed: 0, stillLinkedViaKeyResult: true` is a successful no-op, not a failure) |
@@ -565,14 +565,14 @@ Deleting an Objective removes every link that names it, deleting a Key Result re
 
 | Tool | Description |
 |---|---|
-| `list_roadmap_items` | Fetch active roadmap items for a workspace in rank order, grouped by horizon (including LAUNCHING/LAUNCHED), with dates, timestamps, `sortOrder`, commitment provenance, and stable linked-object IDs; filterable by `updatedSince`/`updatedBefore` and orderable with `sort` (`recentlyUpdated` / `leastRecentlyUpdated`) |
+| `list_roadmap_items` | Fetch active roadmap items for a workspace in rank order, grouped by horizon (including LAUNCHING/LAUNCHED), with dates, timestamps, `sortOrder`, commitment provenance, and stable linked-object IDs; filterable by `updatedSince`/`updatedBefore` and orderable with `sort` (`recentlyUpdated` / `leastRecentlyUpdated`); `customFieldFilters` narrows by ROADMAP_ITEM custom field values (several filters are ANDed), `includeCustomFields`/`customFieldIds` add each item's values, `opportunityCustomFieldIds` adds the linked opportunity's values, and `compact: true` returns one short line per item (ID, title, horizon, squad, field values) so a whole roadmap fits in one response — see [Custom Fields](#custom-fields) |
 | `add_to_roadmap` | Create a roadmap item in NOW, NEXT, LATER, or SHIPPED, optionally with dates and an `isPrivate` flag. With a `solutionId` it is idempotent (a Solution already on the roadmap returns its existing item) and unspecified squad, key result and dates are filled from the Solution and the first free slot |
 | `update_roadmap_item` | Update a roadmap item's ordinary horizon, status, title, description, dates, `isPrivate`, or links (`keyResultId`, `opportunityId`, `solutionId`, `squadId`). Omit a link to preserve it; pass a UUID to set it or `null` to clear it. USER/AGENT targets must belong to the item's workspace, even when the caller can access both workspaces. NOW behaves like other ordinary horizons; LAUNCHING/LAUNCHED use the launch workflow (rejected here — see below — and gated by the workspace's Marketing launch setting) |
 | `request_decision` | Request a tracking-only human decision linked to a workspace, Opportunity, Solution, Roadmap Item, Doc, Experiment, or Feedback item, with up to 12 supporting Compass sources and optionally 2–4 single-choice `options`, or 1–4 `questions` each with its own single-choice options |
 | `list_decisions` | List tracking-only decisions newest-first, optionally filtered by state (`PENDING`, `DECIDED`, or `AWAITING_FOLLOW_THROUGH`), linked item type, outcome, reviewer, or search text |
 | `get_decision` | Read one tracking-only decision, its immutable revision history, the resolved requester (the human or Agent who raised it), and any linked follow-up Tasks |
 | `close_decision_no_action` | Explicitly close a DECIDED decision as needing no follow-up work, with a required reason. Refuses if the decision already has a linked follow-up Task or was already closed this way |
-| `request_release_authorization` | Prepare an immutable production-release review for one exact GitHub repository, PR number, base ref, 40-character head SHA, release-policy ID, and non-empty set of same-workspace Task IDs. This operation never takes the human decision or invokes release automation |
+| `request_release_authorization` | Prepare an immutable production-release review for one exact GitHub repository, PR number, base ref, 40-character head SHA, release-policy ID, and non-empty set of same-workspace Task IDs. Agents may call it with workspace write access and are recorded as the requester; a person must be a workspace admin. This operation never takes the human decision (an admin must still approve it in the review UI) or invokes release automation |
 | `list_release_runs` | List recorded release-authorization runs by ledger state, covered Task, or `updatedSince`, including exact repository/PR/head SHA, Task IDs, authorization Decision ID, dispatch state, and a stable GitHub PR URL |
 | `get_review_request` | Read a review request, its current immutable revision, options, and recorded decision |
 | `list_review_requests` | List review requests for a workspace, optionally filtered by state |
@@ -660,10 +660,17 @@ human admin chooses an option, via the review URL above.
   outside the database transaction, then a short transaction binds the
   unchanged snapshot and human decision to a durable dispatch row. Compass
   does not merge, deploy, or otherwise invoke external release automation in
-  this implementation. Provider validation is unconfigured by default and
-  therefore fails closed (`PR_NOT_READY`); a dispatch worker must use a
-  configured provider and repeat the same head/check/policy revalidation at
-  the dispatch-claim boundary before any future external side effect.
+  this implementation. When the GitHub App connector
+  (`COMPASS_GITHUB_CONNECTOR`) is configured, validation reads the live PR and
+  head-commit checks with a read-only installation token: the PR must be open,
+  not draft, not conflicted, on the reviewed base ref and head SHA, with at
+  least one check reported and every check/status passing. The release policy
+  id must exist in `COMPASS_RELEASE_POLICIES` (JSON, for example
+  `{"default":{"requiredChecks":["build","test"]}}`); unknown policies block as
+  `POLICY_CHANGED`, failing checks as `CHECKS_FAILED`. Without the connector it
+  stays unconfigured and fails closed (`PR_NOT_READY`). A dispatch worker must
+  repeat the same head/check/policy revalidation at the dispatch-claim boundary
+  before any future external side effect.
 
 `list_release_runs` reports Compass ledger facts only. A release-run state does
 not prove that GitHub merged the PR, that a deployment reached production, or
@@ -716,8 +723,18 @@ Custom fields let a workspace tag Opportunities, Solutions, Experiments, Objecti
 | `list_custom_field_definitions` | List a workspace's custom field definitions, optionally filtered to one object type; includes each field's type, whether it's required, and its effective options for SELECT/MULTI_SELECT (including options inherited from a shared option set) |
 | `get_custom_field_values` | Read every custom field defined for an object's type, paired with that specific object's current value (or empty) |
 | `set_custom_field_value` | Set or clear one custom field's value on an object |
+| `set_custom_field_values` | Set or clear ONE field to ONE value on many objects of one type: up to 25 objects for agent callers (100 for human API keys), validated once, with a per-object result (`ok` or `NOT_FOUND`) |
+| `group_by_custom_field` | Read-only grouped view of active roadmap items (or non-archived opportunities with `objectType: OPPORTUNITY`) by one custom field: each value with its count and the items' IDs and titles, plus an unset group |
 
 Passing `null` (or an empty string or empty array) to `set_custom_field_value` clears the field, matching the Settings UI's own clearing behavior. The value is validated against the field's type — a SELECT/MULTI_SELECT value must be one of the field's currently defined options. The tool also rejects a `fieldId` that belongs to a different object type, or to a different workspace, than the target object.
+
+**Working with custom fields at scale.** An agent classifying a whole roadmap does not need one call per item:
+
+- **Filter** `list_roadmap_items` with `customFieldFilters`: an array of `{ fieldId, value | anyOf | isSet }` (exactly one matcher per filter); all filters must match. SELECT matches the exact option value (a value that is not a defined option is rejected with the option list). MULTI_SELECT matches when the item carries that option, or any of `anyOf`. TEXT and URL are a case-insensitive substring match. NUMBER, BOOLEAN and DATE are exact equality. `isSet: true|false` tests presence for any type. A field from another workspace or another object type is rejected.
+- **Read values** with `includeCustomFields: true` (every ROADMAP_ITEM field) or `customFieldIds` (only those). Each item gets `customFields`, keyed by field name, with `null` for unset; the response also lists the field catalog as `fields`. Default output is unchanged. `opportunityCustomFieldIds` adds `opportunityCustomFields` read from each item's linked opportunity (for example Customer). `list_opportunities` accepts the same `includeCustomFields`/`customFieldIds` for a bulk read of opportunity fields.
+- **Compact mode** (`compact: true`) drops descriptions and linked titles and returns only `id`, `title`, `horizon`, `squad` and field values, so about 157 items fit in one response.
+- **Write in bulk** with `set_custom_field_values`: one field, one value, a list of object IDs (agent cap 25 per call, 100 for human keys, matching `create_solutions`). The field and value are validated once, exactly like the single-object tool; each object is reported separately and a missing or other-workspace object is `NOT_FOUND`. Re-sending is safe because setting a value is idempotent.
+- **Group** with `group_by_custom_field` for a counts-and-members view without a card sort round.
 
 ### Card sort
 
@@ -1050,7 +1067,7 @@ These tools read Slack through the Compass bot's Vercel Connect credential. They
 accept an ISO `updatedSince` and/or `updatedBefore` window. Most also accept
 `sort`, which takes `recentlyUpdated` (most recently updated first) or
 `leastRecentlyUpdated` — the latter is for finding work that has gone quiet,
-such as opportunities still EXPLORING or experiments parked in DESIGNING.
+such as opportunities still UNREVIEWED or EXPLORING or experiments parked in DESIGNING.
 
 Docs are the one entity here **without** a recency filter: the `docs://`
 resource that replaced `list_docs` (see [Docs](#docs) above) takes no
@@ -1177,7 +1194,7 @@ under a grant is attributed to it in the agent's audit trail. See ADR 0020
 ("Explicit, Auditable Admin Grants for Delegated Agent Identities") in
 Compass Docs → Architecture Decisions.
 
-**Inherited admin rights (`create_workspace`).** An agent acts with the authority of the person who owns it. `create_workspace` therefore works for an agent whose owner is currently an org OWNER/ADMIN of that organization — no per-agent grant is needed. The owner's role is re-checked live on every call, so demoting or removing the owner stops the agent immediately; a suspended agent, a disabled agents rollout, and a workspace-scoped identity are all refused. The agent receives a WRITE workspace grant on the workspace it creates (recorded as granted by its owner) so it can keep working there, and the call appears in its audit trail against the new workspace. This applies only to `create_workspace`: comment edits, plan approval/rejection and release authorization remain human-only, and the scoring-model tools above still need their own delegation. The REST `createWorkspace` route is unchanged and remains human-only.
+**Inherited admin rights (`create_workspace`).** An agent acts with the authority of the person who owns it. `create_workspace` therefore works for an agent whose owner is currently an org OWNER/ADMIN of that organization — no per-agent grant is needed. The owner's role is re-checked live on every call, so demoting or removing the owner stops the agent immediately; a suspended agent, a disabled agents rollout, and a workspace-scoped identity are all refused. The agent receives a WRITE workspace grant on the workspace it creates (recorded as granted by its owner) so it can keep working there, and the call appears in its audit trail against the new workspace. This applies only to `create_workspace`: comment edits and plan approval/rejection remain human-only, and the scoring-model tools above still need their own delegation. The REST `createWorkspace` route is unchanged and remains human-only.
 
 Solution comments and plans created with agent credentials use the authenticated
 agent's name and `AGENT` author type, overriding caller-supplied attribution.

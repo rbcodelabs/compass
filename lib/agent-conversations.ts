@@ -8,7 +8,7 @@
 import getPrisma from "@/lib/db"
 import { agentParticipantsAvailable } from "@/lib/agent-conversation-participants"
 import { sanitizeAuthorLabel } from "@/lib/agent-author-label"
-import { accessibleConversationsWhere, resolveConversationAccess } from "@/lib/agent-conversation-access"
+import { accessibleConversationsWhere, ownedConversationsWhere, resolveConversationAccess } from "@/lib/agent-conversation-access"
 
 export type ConversationSummary = {
   id: string
@@ -30,18 +30,81 @@ export type ChatMessage = {
   authorName: string | null
 }
 
-/** The conversations a user can access in a workspace, most-recently-updated first. */
+/**
+ * The conversations a user can access in a workspace, most-recently-updated first.
+ * Archived chats are excluded unless `archived` is true, in which case ONLY archived
+ * chats are returned.
+ */
 export async function listAgentConversations(
   workspaceId: string,
-  userId: string
+  userId: string,
+  { archived = false }: { archived?: boolean } = {}
 ): Promise<ConversationSummary[]> {
   const prisma = getPrisma()
   return prisma.agentConversation.findMany({
-    where: accessibleConversationsWhere(workspaceId, userId),
+    where: { ...accessibleConversationsWhere(workspaceId, userId), archivedAt: archived ? { not: null } : null },
     orderBy: { updatedAt: "desc" },
     select: { id: true, title: true, updatedAt: true },
     take: 50,
   })
+}
+
+export type ConversationSearchResult = ConversationSummary & {
+  /** Short excerpt around the first matching message, or null for a title-only match. */
+  snippet: string | null
+}
+
+export const CONVERSATION_SEARCH_MAX_QUERY = 100
+export const CONVERSATION_SEARCH_LIMIT = 30
+const SNIPPET_RADIUS = 60
+
+/** A one-line excerpt of `content` centred on the first case-insensitive hit of `q`. */
+export function buildSnippet(content: string, q: string): string {
+  const flat = content.replace(/\s+/g, " ").trim()
+  const at = flat.toLowerCase().indexOf(q.toLowerCase())
+  if (at < 0) return flat.slice(0, SNIPPET_RADIUS * 2)
+  const start = Math.max(0, at - SNIPPET_RADIUS)
+  const end = Math.min(flat.length, at + q.length + SNIPPET_RADIUS)
+  return (start > 0 ? "…" : "") + flat.slice(start, end) + (end < flat.length ? "…" : "")
+}
+
+/**
+ * Whole-conversation search: conversations the user can access whose title or any
+ * message contains `query` (case-insensitive substring; works on both DSQL and plain
+ * Postgres, no extensions). Builds on the shared access predicate so results can never
+ * include a conversation the caller may not see.
+ */
+export async function searchAgentConversations(
+  workspaceId: string,
+  userId: string,
+  query: string
+): Promise<ConversationSearchResult[]> {
+  const q = query.trim().slice(0, CONVERSATION_SEARCH_MAX_QUERY)
+  if (!q) return []
+  const prisma = getPrisma()
+  const match = { contains: q, mode: "insensitive" as const }
+  const access = accessibleConversationsWhere(workspaceId, userId)
+  const rows = await prisma.agentConversation.findMany({
+    where: {
+      AND: [access, { archivedAt: null }, { OR: [{ title: match }, { messages: { some: { content: match } } }] }],
+    },
+    orderBy: { updatedAt: "desc" },
+    select: { id: true, title: true, updatedAt: true },
+    take: CONVERSATION_SEARCH_LIMIT,
+  })
+  if (rows.length === 0) return []
+
+  const hits = await prisma.agentMessage.findMany({
+    where: { conversationId: { in: rows.map((r) => r.id) }, content: match },
+    orderBy: { createdAt: "desc" },
+    select: { conversationId: true, content: true },
+    take: rows.length * 5,
+  })
+  const snippets = new Map<string, string>()
+  for (const hit of hits) {
+    if (!snippets.has(hit.conversationId)) snippets.set(hit.conversationId, buildSnippet(hit.content, q))
+  }
+  return rows.map((r) => ({ ...r, snippet: snippets.get(r.id) ?? null }))
 }
 
 /**
@@ -92,4 +155,23 @@ export async function getAgentConversationMessages(
     authorUserId,
     authorName: authorUserId ? (names.get(authorUserId) ?? null) : null,
   }))
+}
+
+/**
+ * Archive or restore a conversation. Owner-only: a participant who wants a shared chat
+ * out of their way leaves it instead. Returns false when the caller is not the owner (or
+ * has no access), which routes report as 404.
+ */
+export async function setAgentConversationArchived(
+  conversationId: string,
+  workspaceId: string,
+  userId: string,
+  archived: boolean
+): Promise<boolean> {
+  const prisma = getPrisma()
+  const { count } = await prisma.agentConversation.updateMany({
+    where: { id: conversationId, ...ownedConversationsWhere(workspaceId, userId) },
+    data: { archivedAt: archived ? new Date() : null },
+  })
+  return count > 0
 }

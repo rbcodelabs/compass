@@ -190,9 +190,29 @@ A Positioning & Messaging Brief is a Doc linked one-to-one to a Roadmap Item, us
 
 There is no dedicated UI for briefs yet; they appear in the regular Docs tree like any other page, and the doc's frontmatter surfaces the linked roadmap item and doc type so an agent can discover the linkage.
 
+## Publishing a doc to the customer portal
+
+You can publish a Doc so customers can read it on your portal, without a Compass account.
+
+**Publish.** Open the doc. Under the title is the **Publish to portal** row. Turn the switch on: the badge changes to **Published to portal** and **Copy public link** appears. The info button (**About publishing**) explains who can see it: anyone with the portal link, until you unpublish. Any workspace member who can edit the doc can publish or unpublish it. Read-only members see the control disabled.
+
+![The Publish to portal control on a published doc](/screenshots/docs/docs-publish-control.png)
+
+**The public link.** A published doc lives at `/portal/<org>/<workspace>/docs/<doc id>`. **Copy public link** copies the full address. The link works for anyone, signed in or not, including when **Require portal sign-in** is on for the portal.
+
+**Where it appears.** A published doc is listed on the portal's **Docs** page (`/portal/<org>/<workspace>/docs`) and can appear in the **Docs** widget on the [portal home](/help/28-portal-home) and in Key links. The widget appears only when at least one doc is published; the Docs page shows a friendly empty state otherwise.
+
+**What customers see.** The doc's title, a read-only rendering of its content (headings, lists, tables, code, links) with the dates it was published and last updated, and links to your other published docs. They never see the editor, comments, properties, version history, linked tasks, authors, or any unpublished doc. Raw HTML and images in the body are not rendered on the public page, so use text for anything customers must read.
+
+**Unpublish.** Turn the switch off. The doc is removed from the portal immediately: its link returns a not-found page and it disappears from the Docs page, the widget and Key links. Publishing it again keeps its original published date.
+
+**Not publishable.** Diagrams (Canvas docs) and docs whose content is stored outside Compass cannot be published; their switch is disabled with an explanation.
+
+**Heads up when copying a workspace.** Publishing is part of a doc's data, so exporting a workspace and importing it elsewhere carries each doc's published state with it. Review the Docs page of an imported workspace, and unpublish anything that should not be public there.
+
 ## Page Titles
 
-Click the title area at the top of the editor to rename a page. Titles are saved immediately on blur.
+Click the title area at the top of the editor to rename a page. Titles are saved immediately on blur. A long title wraps onto more lines instead of being cut off, including on a phone.
 
 ## Preview: Geode content storage
 

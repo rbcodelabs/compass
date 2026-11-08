@@ -76,3 +76,31 @@ describe("set_custom_field_value route registration metadata", () => {
     expect(schema.safeParse({ objectType: "TASK", objectId: "not-a-uuid", fieldId: validUuid, value: "x" }).success).toBe(false)
   })
 })
+
+describe("set_custom_field_values route registration metadata", () => {
+  it("registers workspaceId, objectType, fieldId, objectIds (1-100) and value", () => {
+    const tool = registeredTools.set_custom_field_values
+    expect(tool).toBeDefined()
+    expect(Object.keys(tool.inputSchema)).toEqual(["workspaceId", "objectType", "fieldId", "objectIds", "value"])
+    const schema = z.object(tool.inputSchema)
+    const base = { workspaceId: validUuid, objectType: "ROADMAP_ITEM", fieldId: validUuid, value: "core" }
+    expect(schema.safeParse({ ...base, objectIds: [validUuid] }).success).toBe(true)
+    expect(schema.safeParse({ ...base, objectIds: [validUuid], value: ["a"] }).success).toBe(true)
+    expect(schema.safeParse({ ...base, objectIds: [validUuid], value: null }).success).toBe(true)
+    expect(schema.safeParse({ ...base, objectIds: [] }).success).toBe(false)
+    expect(schema.safeParse({ ...base, objectIds: Array(101).fill(validUuid) }).success).toBe(false)
+    expect(schema.safeParse({ ...base, objectIds: [validUuid], value: { nested: true } }).success).toBe(false)
+  })
+})
+
+describe("group_by_custom_field route registration metadata", () => {
+  it("requires workspaceId and fieldId; objectType is limited to roadmap items and opportunities", () => {
+    const tool = registeredTools.group_by_custom_field
+    expect(tool).toBeDefined()
+    const schema = z.object(tool.inputSchema)
+    expect(schema.safeParse({ workspaceId: validUuid, fieldId: validUuid }).success).toBe(true)
+    expect(schema.safeParse({ workspaceId: validUuid, fieldId: validUuid, objectType: "OPPORTUNITY", includeItems: false }).success).toBe(true)
+    expect(schema.safeParse({ workspaceId: validUuid, fieldId: validUuid, objectType: "TASK" }).success).toBe(false)
+    expect(schema.safeParse({ workspaceId: validUuid }).success).toBe(false)
+  })
+})

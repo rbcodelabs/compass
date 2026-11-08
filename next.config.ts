@@ -77,6 +77,20 @@ const nextConfig: NextConfig = {
         ],
       },
       {
+        // External artifact share (/s/<token>). The URL itself is the first credential,
+        // so: no Referrer (the token must not ride out in a header to anything the page
+        // loads), no caching of the unlocked page, no indexing, and no framing (the
+        // password form is a phishing/clickjacking target like the consent screen).
+        source: "/s/:path*",
+        headers: [
+          { key: "Referrer-Policy", value: "no-referrer" },
+          { key: "Cache-Control", value: "no-store" },
+          { key: "X-Robots-Tag", value: "noindex, nofollow, noarchive" },
+          { key: "X-Frame-Options", value: "DENY" },
+          { key: "Content-Security-Policy", value: "frame-ancestors 'none'" },
+        ],
+      },
+      {
         // The widget script. Cached, but only briefly, and the short ceiling is the
         // point rather than a compromise: this file is loaded by pages Compass does
         // not deploy and cannot redeploy, so a stale copy cannot be flushed by

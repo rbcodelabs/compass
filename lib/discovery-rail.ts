@@ -7,6 +7,7 @@ export const ACTIVE_OPPORTUNITY_STATUS_ORDER: ActiveOpportunityStatus[] = [
   "VALIDATING",
   "PRIORITIZED",
   "ACTIVE",
+  "UNREVIEWED",
 ];
 
 export type GroupedOpportunities<T> = {

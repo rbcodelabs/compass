@@ -44,6 +44,9 @@ const mayName = (file: string) =>
   posix(file).startsWith("lib/links/") ||
   posix(file).startsWith("lib/migrations/") ||
   posix(file).startsWith("prisma/migrations/") ||
+  // Workspace export/import copies link rows between workspaces generically; it re-points both endpoints through its id map and drops a
+  // link whose endpoint is not part of the import (see lib/workspace-export/import.ts DROP_ON_UNRESOLVED and the guard note in typed-link-access.test.ts).
+  posix(file).startsWith("lib/workspace-export/") ||
   ["prisma/schema.prisma", "lib/typed-links.ts"].includes(posix(file));
 
 describe("findReferences (canary: the guard catches known-bad text)", () => {
@@ -96,6 +99,8 @@ describe("the entity_links table is reached only through lib/links/", () => {
       })
       // E2E teardown deletes by raw SQL (FK-ordered cleanup of test workspaces); it never reads or writes links via the app.
       .filter((line) => line !== "e2e/functional/global-teardown.ts: entity_links model/table name")
+      // The RM-19 spec seeds and checks the links the MCP dispatcher would have written, by raw SQL; it never goes through app code.
+      .filter((line) => line !== "e2e/functional/specs/agent-conversation-links.spec.ts: entity_links model/table name")
       // Files that legitimately use non-literal delegates over a fixed model list that does not include EntityLink.
       .filter((line) => !/^(lib\/entity-mutations\.ts|lib\/workspace-update-mutations\.ts|lib\/prisma-updated-at\.ts|scripts\/verify-geode-document-migration\.ts): dynamic delegate access$/.test(line));
     expect(offenders).toEqual([]);
