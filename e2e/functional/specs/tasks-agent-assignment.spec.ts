@@ -211,6 +211,8 @@ test("task agent assignment persists, filters, replaces a human and survives sus
     if (process.env.COMPASS_CAPTURE_AGENT_DOCS === "1") await page.screenshot({ path: "public/screenshots/docs/tasks-agents-mobile.png", fullPage: true });
 
     await page.goto(`${base}/tasks?view=list&assignee=agent:${agentId}`);
+    // Wait for hydration: a click on a row before the page is interactive is silently lost.
+    await page.waitForLoadState("networkidle");
     await page.getByRole("button", { name: `${title} retained` }).click();
     await expect(panel).toBeVisible({ timeout: 15_000 });
     const mobileBounds = await settledPanelBox();
