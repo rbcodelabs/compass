@@ -3,8 +3,8 @@ import { requiredText, safeLinkUrl, uuidLike } from "../fields"
 
 export const keyLink = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("url"), label: requiredText(80), url: safeLinkUrl }),
-  // Doc links reference a Compass Doc by id. Docs are not public in v1, so the
-  // resolver only returns them to workspace members (see resolvers/key-links.ts).
+  // Doc links reference a Compass Doc by id. Members always resolve them; customers
+  // only when the doc is published to the portal (see resolvers/key-links.ts).
   z.object({ kind: z.literal("doc"), docId: uuidLike, label: z.string().trim().max(80).default("") }),
 ])
 export type KeyLink = z.infer<typeof keyLink>

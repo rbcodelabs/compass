@@ -26,6 +26,8 @@ import { assertGeodeDocumentStorageMigration, getGeodeDocumentStorageHealth } fr
 import { assertWorkspaceUpdatesMigration } from "@/lib/migrations/workspace-updates";
 import { assertFollowsNotificationsMigration } from "@/lib/migrations/follows-notifications";
 import { assertPortalHomeLayoutMigration } from "@/lib/migrations/portal-home-layout";
+import { assertDocPublishingMigration } from "@/lib/migrations/doc-publishing";
+import { assertPortalHomeTemplateMigration } from "@/lib/migrations/portal-home-template";
 import { assertRoadmapViewsMigration } from "@/lib/migrations/roadmap-views";
 import { SAVED_VIEWS_SURFACE_MIGRATION, assertSavedViewsSurfaceMigration, backfillSavedViewsSurface } from "@/lib/migrations/saved-views-surface";
 import { assertAgentSessionsMigration } from "@/lib/migrations/agent-sessions";
@@ -766,11 +768,23 @@ const MIGRATIONS: readonly MigrationEntry[] = [
     filePath: path.join(process.cwd(), "prisma/migrations/112_agent_conversation_archive/migration.sql"),
   },
   {
+    // (RM-19 from main; kept ahead of this branch's 113/114)
     // No DDL, EXPLICIT-ONLY. Backfills entity_links (CONVERSATION_CREATED) from the legacy AGENT_CONVERSATION task links (RM-19). Inconsistent legacy
     // rows are quarantined and reported, never linked or deleted. The hook proves its postconditions before the receipt. POST it by name after the
     // code that writes the conversation link types is live; never untargeted.
     name: "113_entity_links_backfill_conversation",
     filePath: path.join(process.cwd(), "prisma/migrations/113_entity_links_backfill_conversation/migration.sql"),
+  },
+  {
+    // docs.published_at / published_by_id (nullable, no backfill, no index). NULL = private, so code may ship before this applies.
+    // The hook asserts both columns exist, are typed and are nullable before the receipt.
+    name: "113_doc_publishing",
+    filePath: path.join(process.cwd(), "prisma/migrations/113_doc_publishing/migration.sql"),
+  },
+  {
+    // portal_home_layouts.draft_template / published_template (nullable VARCHAR, no default: DSQL; NULL = editorial). Hook asserts both.
+    name: "114_portal_home_template",
+    filePath: path.join(process.cwd(), "prisma/migrations/114_portal_home_template/migration.sql"),
   },
 ];
 
@@ -2289,6 +2303,8 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
       if (migration.name === "062_mcp_connectors") await assertMcpConnectorsMigration(client, schema)
       if (migration.name === "068_follows_notifications") await assertFollowsNotificationsMigration(client, schema)
       if (migration.name === "074_portal_home_layout") await assertPortalHomeLayoutMigration(client, schema)
+      if (migration.name === "113_doc_publishing") await assertDocPublishingMigration(client, schema)
+      if (migration.name === "114_portal_home_template") await assertPortalHomeTemplateMigration(client, schema)
       if (migration.name === "075_roadmap_item_provenance") await assertRoadmapItemProvenanceMigration(client, schema)
       if (migration.name === "079_roadmap_views") await assertRoadmapViewsMigration(client, schema)
       if (migration.name === SAVED_VIEWS_SURFACE_MIGRATION) {

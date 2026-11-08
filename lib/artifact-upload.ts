@@ -1,7 +1,7 @@
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto"
-import { generateClientTokenFromReadWriteToken } from "@vercel/blob/client"
 import type { ArtifactStorage } from "@/lib/artifact-storage"
 import { MAX_ARTIFACT_HTML_BYTES } from "@/lib/artifacts"
+import { createDirectUploadToken } from "@/lib/storage/direct-upload"
 
 /**
  * Direct-upload path for HTML artifacts.
@@ -57,14 +57,12 @@ export function validateArtifactUploadRequest(input: { filename: string; fileSiz
 
 export async function prepareArtifactUpload(input: { workspaceId: string; filename: string; fileSize: number }, now = Date.now()) {
   validateArtifactUploadRequest(input)
-  const token = process.env.ARTIFACT_BLOB_READ_WRITE_TOKEN?.trim()
-  if (!token) throw new Error("Private artifact storage is not configured")
   const uploadId = randomUUID()
   const pathname = stagingPathname(input.workspaceId, uploadId)
   const expiresAt = now + DIRECT_UPLOAD_TTL_MS
-  const clientToken = await generateClientTokenFromReadWriteToken({
-    token, pathname, allowedContentTypes: ["text/html"], maximumSizeInBytes: input.fileSize,
-    validUntil: expiresAt, addRandomSuffix: false, allowOverwrite: false,
+  const clientToken = await createDirectUploadToken({
+    store: "private", pathname, allowedContentTypes: ["text/html"], maxBytes: input.fileSize,
+    validUntil: expiresAt, allowOverwrite: false,
   })
   const payload: ArtifactUploadReceiptPayload = { version: 1, uploadId, workspaceId: input.workspaceId, pathname, filename: input.filename, fileSize: input.fileSize, expiresAt }
   const encoded = Buffer.from(JSON.stringify(payload)).toString("base64url")
