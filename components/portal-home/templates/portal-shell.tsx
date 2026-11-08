@@ -1,3 +1,4 @@
+/** Template shells: one per PortalTemplate; layout only, data visibility is template-independent. */
 import type { ReactNode } from "react"
 import type { PortalTemplate } from "@/lib/portal-home/templates"
 import type { PortalHeroMeta } from "@/lib/portal-home/hero-meta"
