@@ -18,7 +18,7 @@ const attachedArtifacts = (workspaceId: string, experimentId: string) => cli("re
  * Artifacts <-> Experiments (native ARTIFACT_ATTACHED_TO_EXPERIMENT link). The whole flow goes through the real UI: link from the artifact
  * page, see it on the experiment page, unlink from the experiment side, relink, then delete the artifact and confirm the link is gone.
  */
-async function chooseExisting(page: Page, noun: "experiment" | "artifact", title: string) {
+async function chooseExisting(page: Page, noun: "experiment" | "artifact", title: string, onPickerOpen?: () => Promise<void>) {
   await page.getByRole("button", { name: `Link existing ${noun}`, exact: true }).click()
   const dialog = page.getByRole("dialog", { name: `Link existing ${noun}`, exact: true })
   await expect(dialog).toBeVisible()
@@ -28,6 +28,7 @@ async function chooseExisting(page: Page, noun: "experiment" | "artifact", title
   // Wait for the debounced search to narrow the list to exactly this record before choosing, or Enter picks a stale first row.
   await expect(page.getByRole("option")).toHaveCount(1)
   await expect(page.getByRole("option").filter({ hasText: title })).toHaveCount(1)
+  await onPickerOpen?.()
   await search.press("ArrowDown")
   await search.press("Enter")
   await expect(dialog.getByRole("combobox")).toContainText(title)
@@ -91,7 +92,13 @@ test("an artifact links to an experiment, shows on both pages, unlinks, and its 
   expect(await prisma.experiment.count({ where: { id: experiment.id } })).toBe(1)
 
   // Link again from the experiment side, then confirm the artifact page shows it.
-  await chooseExisting(page, "artifact", artifactTitle)
+  // The relink runs on a 390px screen so the picker (dialog + combobox popup) is exercised and captured on mobile too.
+  await page.setViewportSize({ width: 390, height: 844 })
+  await chooseExisting(page, "artifact", artifactTitle, async () => {
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+    await shoot(page, testInfo, "experiment-link-picker-mobile")
+  })
+  await page.setViewportSize({ width: 1280, height: 800 })
   await expect(artifactsSection.getByRole("link", { name: artifactTitle, exact: true })).toBeVisible()
   await page.goto(artifactUrl)
   await expect(page.getByRole("region", { name: "Linked experiments" }).getByRole("link", { name: experimentTitle, exact: true })).toBeVisible()
