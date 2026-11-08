@@ -10,11 +10,15 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 
 const mockPrisma = {
-  workspace: { findFirst: vi.fn() },
+  workspace: { findFirst: vi.fn(), findUnique: vi.fn() },
   workspaceMember: { findFirst: vi.fn() },
   organization: { findUnique: vi.fn() },
   organizationMember: { findFirst: vi.fn() },
   scoringModel: { findUnique: vi.fn() },
+  workspaceScoringConfig: { findFirst: vi.fn() },
+  agent: { findFirst: vi.fn() },
+  agentOrgAdminGrant: { findFirst: vi.fn() },
+  agentWorkspaceGrant: { findMany: vi.fn() },
   opportunity: { findUnique: vi.fn() },
   solution: { findUnique: vi.fn() },
   task: { findUnique: vi.fn() },
@@ -32,6 +36,7 @@ import {
   assertOrgAdminBySlug,
   assertEntityAccess,
   assertScoringModelAccess,
+  assertScoringModelActivation,
 } from "@/lib/mcp-authz"
 
 const SERVICE = { userId: null, purpose: "SERVICE" as const }
@@ -189,5 +194,59 @@ describe("assertScoringModelAccess", () => {
     mockPrisma.scoringModel.findUnique.mockResolvedValueOnce({ organizationId: "org-1" })
     await expect(assertScoringModelAccess(SERVICE, "sm-1", { admin: true })).resolves.toEqual({ organizationId: "org-1" })
     expect(mockPrisma.organizationMember.findFirst).not.toHaveBeenCalled()
+  })
+})
+
+describe("assertScoringModelActivation", () => {
+  const AGENT = { userId: "owner", purpose: "AGENT" as const, agentId: "agent-1" }
+  const grantLive = () => {
+    mockPrisma.agent.findFirst.mockResolvedValue({ id: "agent-1", ownerUserId: "owner", status: "ACTIVE" })
+    mockPrisma.agentOrgAdminGrant.findFirst.mockResolvedValue({ id: "grant-1", grantedByUserId: "grantor" })
+    mockPrisma.organizationMember.findFirst.mockResolvedValue({ role: "ADMIN" })
+  }
+  beforeEach(() => {
+    mockPrisma.workspaceScoringConfig.findFirst.mockResolvedValue(null)
+    mockPrisma.agentWorkspaceGrant.findMany.mockResolvedValue([])
+  })
+
+  it("the non-admin agent branch of assertScoringModelAccess still denies an unattached model", async () => {
+    grantLive()
+    mockPrisma.scoringModel.findUnique.mockResolvedValue({ organizationId: "org-1" })
+    await expect(assertScoringModelAccess(AGENT, "sm-new")).rejects.toThrow("Scoring model not found or access denied.")
+  })
+
+  it("lets a granted agent activate an unattached model in the workspace's own org", async () => {
+    grantLive()
+    mockPrisma.workspace.findUnique.mockResolvedValue({ organizationId: "org-1" })
+    mockPrisma.scoringModel.findUnique.mockResolvedValue({ organizationId: "org-1" })
+    await expect(assertScoringModelActivation(AGENT, "ws-1", "sm-new")).resolves.toEqual({ organizationId: "org-1" })
+  })
+
+  it("denies a model from another org, and a missing workspace or model", async () => {
+    grantLive()
+    mockPrisma.workspace.findUnique.mockResolvedValue({ organizationId: "org-1" })
+    mockPrisma.scoringModel.findUnique.mockResolvedValue({ organizationId: "org-2" })
+    await expect(assertScoringModelActivation(AGENT, "ws-1", "sm-x")).rejects.toThrow("Scoring model not found or access denied.")
+    mockPrisma.scoringModel.findUnique.mockResolvedValue(null)
+    await expect(assertScoringModelActivation(AGENT, "ws-1", "sm-x")).rejects.toThrow("Scoring model not found or access denied.")
+    mockPrisma.workspace.findUnique.mockResolvedValue(null)
+    mockPrisma.scoringModel.findUnique.mockResolvedValue({ organizationId: "org-1" })
+    await expect(assertScoringModelActivation(AGENT, "ws-1", "sm-x")).rejects.toThrow("Scoring model not found or access denied.")
+  })
+
+  it("denies an agent without a live grant", async () => {
+    grantLive()
+    mockPrisma.agentOrgAdminGrant.findFirst.mockResolvedValue(null)
+    mockPrisma.workspace.findUnique.mockResolvedValue({ organizationId: "org-1" })
+    mockPrisma.scoringModel.findUnique.mockResolvedValue({ organizationId: "org-1" })
+    await expect(assertScoringModelActivation(AGENT, "ws-1", "sm-new")).rejects.toThrow("Human administrator required.")
+  })
+
+  it("delegates humans and the service key to assertScoringModelAccess unchanged", async () => {
+    mockPrisma.scoringModel.findUnique.mockResolvedValue({ organizationId: "org-1" })
+    mockPrisma.organizationMember.findFirst.mockResolvedValueOnce({ role: "MEMBER" })
+    await expect(assertScoringModelActivation(USER, "ws-1", "sm-1")).resolves.toEqual({ organizationId: "org-1" })
+    expect(mockPrisma.workspace.findUnique).not.toHaveBeenCalled()
+    await expect(assertScoringModelActivation(SERVICE, "ws-1", "sm-1")).resolves.toEqual({ organizationId: "org-1" })
   })
 })

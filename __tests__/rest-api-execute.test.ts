@@ -22,7 +22,7 @@ const mocks = vi.hoisted(() => ({
     customFieldDefinition: { findFirst: vi.fn(), findMany: vi.fn() },
     customFieldValue: { findMany: vi.fn() },
     workspace: { findFirst: vi.fn() },
-    scoringModel: { findMany: vi.fn() },
+    scoringModel: { findMany: vi.fn(), findFirst: vi.fn() },
     workspaceScoringConfig: { findUnique: vi.fn() },
     doc: { findFirst: vi.fn(), findMany: vi.fn(), findUnique: vi.fn() },
     docVersion: { findFirst: vi.fn(), findMany: vi.fn() },
@@ -53,6 +53,8 @@ const mocks = vi.hoisted(() => ({
   getDoc: vi.fn(),
   updateLaunchChecklistItem: vi.fn(),
   assertWorkspaceAdmin: vi.fn(),
+  assertScoringModelActivation: vi.fn(),
+  assertScoringModelAccess: vi.fn(),
   assertOrgAdminBySlug: vi.fn(),
   assertOrgMemberBySlug: vi.fn(),
   addEvidence: vi.fn(),
@@ -86,6 +88,8 @@ vi.mock("@/lib/mcp-authz", () => ({
   getMcpActor: () => mocks.actor.current,
   assertWorkspaceMember: mocks.assertWorkspaceMember,
   assertWorkspaceAdmin: mocks.assertWorkspaceAdmin,
+  assertScoringModelActivation: mocks.assertScoringModelActivation,
+  assertScoringModelAccess: mocks.assertScoringModelAccess,
   assertOrgAdminBySlug: mocks.assertOrgAdminBySlug,
   assertOrgMemberBySlug: mocks.assertOrgMemberBySlug,
   isServiceActor: () => false,
@@ -188,6 +192,36 @@ describe("REST domain execution", () => {
       params: { workspaceId: UUID, entityType: "OPPORTUNITY" }, query: {}, body: { scoringModelId: null },
     })
     expect(mocks.assertWorkspaceAdmin).toHaveBeenCalledWith(mocks.actor.current, UUID, { agentCapability: "SCORING_MODEL_ADMIN" })
+  })
+
+  describe("updateWorkspaceScoringModel activation", () => {
+    const MODEL = "11111111-1111-4111-8111-111111111111"
+    beforeEach(() => {
+      mocks.setWorkspaceScoringModel.mockResolvedValue(success({}))
+      mocks.prisma.workspace.findFirst.mockResolvedValue({ organizationId: "org-1" })
+      mocks.prisma.scoringModel.findFirst.mockResolvedValue({ organizationId: "org-1" })
+      mocks.assertScoringModelActivation.mockResolvedValue({ organizationId: "org-1" })
+    })
+
+    it.each(["OPPORTUNITY", "SOLUTION"])("activates a model through the narrow activation check for %s", async (entityType) => {
+      mocks.actor.current = { userId: "user-1", purpose: "AGENT" }
+      await executeRestRoute(route("updateWorkspaceScoringModel"), { params: { workspaceId: UUID, entityType }, query: {}, body: { scoringModelId: MODEL } })
+      expect(mocks.assertScoringModelActivation).toHaveBeenCalledWith(mocks.actor.current, UUID, MODEL)
+      expect(mocks.assertScoringModelAccess).not.toHaveBeenCalled()
+      expect(mocks.setWorkspaceScoringModel).toHaveBeenCalledWith({ workspaceId: UUID, entityType, scoringModelId: MODEL })
+    })
+
+    it("still rejects a model from another organization before activating", async () => {
+      mocks.prisma.scoringModel.findFirst.mockResolvedValue({ organizationId: "org-2" })
+      await expect(executeRestRoute(route("updateWorkspaceScoringModel"), { params: { workspaceId: UUID, entityType: "OPPORTUNITY" }, query: {}, body: { scoringModelId: MODEL } })).rejects.toBeInstanceOf(RestNotFoundError)
+      expect(mocks.setWorkspaceScoringModel).not.toHaveBeenCalled()
+    })
+
+    it("clearing with null skips the activation check", async () => {
+      await executeRestRoute(route("updateWorkspaceScoringModel"), { params: { workspaceId: UUID, entityType: "SOLUTION" }, query: {}, body: { scoringModelId: null } })
+      expect(mocks.assertScoringModelActivation).not.toHaveBeenCalled()
+      expect(mocks.setWorkspaceScoringModel).toHaveBeenCalledWith({ workspaceId: UUID, entityType: "SOLUTION", scoringModelId: null })
+    })
   })
 
   describe("generic entity links", () => {
