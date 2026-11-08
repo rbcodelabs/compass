@@ -281,6 +281,10 @@ A workspace administrator can make the in-app agent run on their own Anthropic a
 - If a stored key cannot be decrypted, runs in that workspace are refused rather than silently falling back to the platform key; set the key again in Settings.
 - Requires the database update `110_workspace_anthropic_api_key`.
 
+### Which credential a run used
+
+For operators: every agent run writes one server log line, `agent-run credential source=<label> runId=<id> workspaceId=<id>`, where the label is `platform-api-key`, `workspace-api-key`, `claude-subscription`, `bedrock` or `gateway`. Search the Vercel runtime logs for `agent-run credential source`. The line never contains the key or token, its length or any part of it, and nothing is stored in the database or shown in the app.
+
 ## GitHub access
 
 By default the in-app agent has no shell and cannot reach GitHub. A workspace administrator can change that in **Settings -> Agent GitHub access** by listing the repositories (owner/name, all under one GitHub owner, at most 10) that the Compass GitHub App is installed on.
