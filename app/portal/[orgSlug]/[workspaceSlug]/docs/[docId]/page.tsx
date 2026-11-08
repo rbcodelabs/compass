@@ -4,6 +4,7 @@ import getPrisma from "@/lib/db"
 import { getPublishedDoc, listPublishedDocs } from "@/lib/portal-docs/service"
 import { formatDocDate, portalDocsPath, stripLeadingTitle } from "@/lib/portal-docs/format"
 import { MarkdownContent } from "@/components/markdown-content"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { DocBreadcrumb, DocNavList } from "@/components/portal-docs/doc-nav"
 
 export const dynamic = "force-dynamic"
@@ -75,12 +76,14 @@ export default async function PortalDocPage({ params }: Props) {
               <DocNavList docs={others} base={docsBase} currentId={doc.id} />
             </div>
           </aside>
-          <details className="rounded-lg border border-border-default bg-surface-panel lg:hidden" data-testid="portal-doc-nav-mobile">
-            <summary className="cursor-pointer px-3 py-2.5 text-sm font-medium text-text-primary">More docs ({others.length})</summary>
-            <div className="border-t border-border-default p-2">
-              <DocNavList docs={others} base={docsBase} currentId={doc.id} />
-            </div>
-          </details>
+          <Collapsible className="rounded-lg border border-border-default bg-surface-panel lg:hidden" data-testid="portal-doc-nav-mobile">
+            <CollapsibleTrigger className="w-full cursor-pointer px-3 py-2.5 text-left text-sm font-medium text-text-primary">More docs ({others.length})</CollapsibleTrigger>
+            <CollapsibleContent>
+              <div className="border-t border-border-default p-2">
+                <DocNavList docs={others} base={docsBase} currentId={doc.id} />
+              </div>
+            </CollapsibleContent>
+          </Collapsible>
         </>
       ) : null}
     </div>
