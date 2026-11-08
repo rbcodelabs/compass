@@ -198,7 +198,7 @@ describe("REST API registry", () => {
       "listDocVersions", "createDocVersion", "getDocVersion", "restoreDocVersion",
       "listDocComments", "createDocComment", "getDocComment", "updateDocComment", "deleteDocComment", "resolveDocComment", "reopenDocComment",
       "listArtifacts", "getArtifact", "createArtifact", "updateArtifact", "archiveArtifact",
-      "linkArtifactSolution", "unlinkArtifactSolution", "linkArtifactDecision", "unlinkArtifactDecision",
+      "linkArtifactSolution", "unlinkArtifactSolution", "linkArtifactDecision", "unlinkArtifactDecision", "linkArtifactExperiment", "unlinkArtifactExperiment",
       "requestDecision", "listDecisions", "getDecision", "listReviewRequests", "getReviewRequest",
       "listSolutionPlanEntries", "getSolutionPlanEntry", "createSolutionPlan", "createSolutionPlanComment", "updateSolutionPlanEntry", "deleteSolutionPlanEntry",
       "setLaunchTier", "getLaunchChecklist", "updateLaunchChecklistItem",
