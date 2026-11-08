@@ -529,7 +529,8 @@ export async function assertScoringModelAccess(
  * non-admin agent branch of assertScoringModelAccess can never see it; for an AGENT or
  * AGENT_TURN actor this instead requires the model to belong to the workspace's own
  * organization and a live SCORING_MODEL_ADMIN grant in it (defence in depth). Every
- * other actor goes through assertScoringModelAccess exactly as before.
+ * other actor goes through assertScoringModelAccess exactly as before. The REST route repeats the
+ * workspace-org equality check up front only to answer 404 instead of 403 for a cross-org id.
  */
 export async function assertScoringModelActivation(
   actor: McpActor,
