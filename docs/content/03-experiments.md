@@ -69,6 +69,12 @@ One experiment can link to several studies, and the same study can support sever
 
 A link records relevance, not validation. It does not create a study, change its participant guide, activate it, record an experiment result, or update an assumption. Links remain editable after participant sessions start and at every experiment status. Unlinking removes only the relationship, not the study or its research. The same relationship is available to agents through `link_entities` with link type `EXPERIMENT_INFORMED_BY_STUDY`.
 
+## Linking Artifacts
+
+An experiment can run on a prototype, deck or reference that lives in Docs as an **Artifact**. Open an experiment's detail panel or full page and find **Linked artifacts** below its method. Choose **Link existing artifact** to search for an active Artifact in the same workspace; linked artifacts show their status and let you open the artifact or unlink it. You can also manage the relationship from the other side: an Artifact's page lists **Linked experiments** with the same controls. These sections appear in every workspace, whether or not Research is enabled.
+
+One experiment can link to several artifacts, and one artifact can support several experiments. Archived artifacts cannot receive a new link, but links they already have stay visible and removable. Linking changes nothing else: it does not create or revise the artifact, change the experiment's status, or record a result, and unlinking removes only the relationship. Deleting an artifact (or the workspace) removes its links. Agents use `link_artifact_to_experiment` and `unlink_artifact_from_experiment`; `get_artifact` returns `experiments`, `get_experiment` returns `linkedArtifacts`, and `list_artifacts` accepts an `experimentId` filter.
+
 ## Recording Results
 
 Once an experiment is COMPLETE or KILLED, open the detail panel and click **+ Add Result**. Record what you observed: the actual metrics, any qualitative findings, and unexpected outcomes.
