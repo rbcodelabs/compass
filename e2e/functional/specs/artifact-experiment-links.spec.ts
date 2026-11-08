@@ -64,7 +64,8 @@ test("an artifact links to an experiment, shows on both pages, unlinks, and its 
 
   // It shows on the experiment page (full page), reached through the link.
   await experimentsSection.getByRole("link", { name: experimentTitle, exact: true }).click()
-  await expect(page).toHaveURL(new RegExp(`/experiments/${experiment.id}$`))
+  // The route canonicalises a UUID to the experiment's EXP-n reference, and the first dev compile of this page is slow.
+  await expect(page).toHaveURL(/\/experiments\/[^/?#]+$/, { timeout: 60_000 })
   const artifactsSection = page.getByRole("region", { name: "Linked artifacts" })
   await expect(artifactsSection.getByRole("link", { name: artifactTitle, exact: true })).toBeVisible()
   for (const viewport of [{ width: 1280, height: 800, label: "desktop" }, { width: 390, height: 844, label: "mobile" }]) {

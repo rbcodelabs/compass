@@ -25,6 +25,7 @@ import {
 } from "@/lib/artifacts";
 import { deleteLinksForEntity, linkEntities, listLinks } from "@/lib/links/service";
 import { getLinkType, isLinkTypeEnabled, linkTypesForEntity } from "@/lib/links/registry";
+import { entityPath } from "@/lib/links/entity-routes";
 import { getLinkedEntitiesView, loadLinkSummaries } from "@/lib/links/read-models";
 import { changeEntityLink, readEntityLinks } from "@/app/[orgSlug]/[workspaceSlug]/links/actions";
 import type { AppTransactionClient } from "@/lib/db";
@@ -56,6 +57,13 @@ describe("registry entry", () => {
     expect(typeof def.candidates).toBe("function");
     expect(linkTypesForEntity("ARTIFACT").map((entry) => entry.def.key)).toContain(KEY);
     expect(linkTypesForEntity("EXPERIMENT").map((entry) => entry.def.key)).toContain(KEY);
+  });
+});
+
+describe("routes", () => {
+  it("both ends open their own page, so the linked rows are links", () => {
+    expect(entityPath("ARTIFACT", "art-1")).toBe("docs/artifacts/art-1");
+    expect(entityPath("EXPERIMENT", "exp-1")).toBe("experiments/exp-1");
   });
 });
 
