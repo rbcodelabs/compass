@@ -10,6 +10,8 @@
  * harness, and the Claude harness only serves Claude ids, so the catalog is offered and accepted ONLY when the deployment
  * runs opencode. Validation is server-side against a fresh read of the catalog; the client's list is never trusted.
  *
+ * Failures are cached for about a minute (see FAILURE_TTL_MS) so an outage never stalls renders.
+ *
  * Scope: agent setup only. The chat's per-message Model menu (lib/agent-turn-model.ts) stays on the curated allowlist.
  */
 import { resolveAgentHarness } from "@/lib/agent-harness"
