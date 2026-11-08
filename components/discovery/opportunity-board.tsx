@@ -48,10 +48,12 @@ import {
   reorderOpportunitiesInColumn,
 } from "@/app/[orgSlug]/[workspaceSlug]/discovery/actions";
 import { dockTabDropStatus, orderCards, planDragEnd } from "@/lib/discovery-board-ordering";
+import { OPPORTUNITY_PIPELINE_STATUSES, OPPORTUNITY_STATUS_DEFINITIONS } from "@/lib/opportunity-status";
+import { InfoHint } from "@/components/card-sort/card-sort-info";
 import type { OpportunityStatus } from "@/lib/types";
 import { DEFAULT_VISIBLE_COLUMNS, OPPORTUNITY_COLUMN_META } from "@/lib/saved-views/opportunity-columns";
 
-const ALL_STATUSES: OpportunityStatus[] = ["EXPLORING", "VALIDATING", "PRIORITIZED", "ACTIVE"];
+const ALL_STATUSES: OpportunityStatus[] = [...OPPORTUNITY_PIPELINE_STATUSES];
 
 type ColumnMap = Record<OpportunityStatus, OpportunityCardData[]>;
 
@@ -88,6 +90,24 @@ function findStatus(columns: ColumnMap, itemId: string): OpportunityStatus | nul
 }
 
 // ─── Column drop target ───────────────────────────────────────────────────────
+
+/** Column title with an info hover that states the status definition and entry criterion. */
+function StatusColumnTitle({ status, label }: { status: OpportunityStatus; label: string }) {
+  const def = OPPORTUNITY_STATUS_DEFINITIONS[status];
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      {label}
+      <InfoHint label={`About the ${label} status`} side="bottom">
+        <span data-testid={`status-definition-${status}`}>
+          <strong>{def.label}.</strong> {def.definition}
+        </span>
+        <span>
+          <strong>Enter when:</strong> {def.entryCriterion}
+        </span>
+      </InfoHint>
+    </span>
+  );
+}
 
 function DiscoveryColumn({
   status,
@@ -149,13 +169,13 @@ function DiscoveryColumn({
       title={
         forcedVisible ? (
           <>
-            {label}
+            <StatusColumnTitle status={status} label={label} />
             <span data-testid="forced-visible-marker" className="ml-1.5 text-xs font-normal text-text-subtle">
               hidden in view, has cards
             </span>
           </>
         ) : (
-          label
+          <StatusColumnTitle status={status} label={label} />
         )
       }
       count={items.length}

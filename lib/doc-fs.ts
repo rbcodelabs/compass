@@ -111,7 +111,7 @@ type DocRow = {
   title: string
   parentId: string | null
   roadmapItemId: string | null
-  docType: string
+  docType: string | null
   updatedAt: Date
 }
 

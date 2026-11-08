@@ -1,6 +1,6 @@
 ---
 title: "Portal home"
-description: "Build the customer portal's home page from widgets: announcements, key links, roadmap spotlight, feedback and recent updates"
+description: "Build the customer portal's home page from widgets and a template: announcements, docs, key links, roadmap spotlight, feedback and recent updates"
 icon: "LayoutDashboard"
 order: 28
 section: "Core Features"
@@ -9,6 +9,28 @@ section: "Core Features"
 # Portal home
 
 The **portal home** is the first page customers see at `/portal/[org]/[workspace]`. That page is public: signed-out visitors can open it (unless you require portal sign-in). It is a board of widgets that you arrange and publish yourself. Until you publish a layout, customers see a sensible default: a welcome announcement, the roadmap, recently shipped work, and a feedback prompt, each shown only if the matching portal surface is switched on.
+
+## Templates
+
+A **template** decides how the same widgets are laid out; it never changes which widgets or data customers can see. Choose one under **Edit home**, in the **Template** picker above the board. The editor canvas re-arranges immediately, and, like widget changes, a template change stays a draft until you **Publish**. Customers keep seeing the published template until then.
+
+| Template | Look |
+|---|---|
+| Editorial (default) | A calm, centred page: a large heading, a short tagline, **View the roadmap** and **Share feedback** buttons, and a one-line summary such as "Updated Nov 5, 2026 · 6 items in progress · 4 published docs". Widgets stack in a single readable column. |
+| Bento | A brand-coloured header with the widgets as a grid of tiles that overlap it. Widget size (S, M, L) sets the tile width. |
+| Shell | A sidebar for navigation with the widgets in the main area. On a phone the sidebar becomes a menu drawer. |
+| Docs hub | A dark, search-first header ("How can we help?") with a search box and quick-search chips, then your docs as colour-tinted cards. The announcement comes first, then Docs; link lists and the feedback prompt move to a side rail. |
+
+![The Editorial template with an announcement, Docs, key links, roadmap and recent updates](/screenshots/docs/portal-home-template-editorial.png)
+
+![The Docs hub template](/screenshots/docs/portal-home-template-docs-hub.png)
+
+Details worth knowing:
+
+- Every figure in the Editorial summary line is real and public: the date of the latest change to a public roadmap item or published doc, the number of public roadmap items on **Now**, and the number of published docs. A figure that would be zero, or that comes from a surface the portal does not show (the roadmap when **Public roadmap** is off, docs when the home has no Docs widget), is left out; with nothing to show, the line is omitted.
+- The **Popular** chips in the Docs hub are your most recently published doc titles. Compass has no usage data, so they are not ranked by popularity. Selecting a chip filters the docs on the page. The search box filters the docs shown on the home as you type; it does not search the roadmap.
+- The hero (heading, buttons, search) appears on the home page only. Roadmap and feedback pages keep the template's header and footer.
+- Every template follows the visitor's light or dark setting.
 
 ## The team home
 
@@ -38,6 +60,7 @@ Changes save to a **draft** automatically. Customers keep seeing the published v
 |---|---|
 | Announcement | A hero message with up to two buttons. Links may be `https://` URLs or paths such as `/portal/...`. |
 | Key links | A titled list of links: external URLs, or Compass Docs. |
+| Docs | Docs you have published to the portal, newest first, each with its title, a short excerpt and the date it was last updated, plus a **Browse all docs** link. Choose **All published docs** or **Selected docs** (pick up to 12 and set their order), and a maximum to show. The layout follows the template: rows with the date right-aligned in Editorial, tinted cover cards in the Docs hub. Only published docs are ever shown; a selected doc that is not published is skipped. |
 | Roadmap spotlight | Pinned public roadmap items with their status and planned dates. With nothing pinned it shows the latest public items that are Now. |
 | Feedback | A submit button plus the top-voted ideas. |
 | Recent updates | The latest public roadmap items that are Shipped or Launched. |
@@ -49,7 +72,8 @@ Visibility is enforced on the server, never by hiding things in the page.
 
 - Roadmap widgets only ever return items that are on the public roadmap: not private, not archived, and only when **Public roadmap** is on. Pinning a private item does nothing for customers.
 - The feedback widget follows the same rules as the public feedback page and is hidden when feedback is off.
-- **Compass Docs are not public.** A Doc link is shown only to workspace members; customers do not receive it, even if you added it.
+- **Docs are public only once you publish them.** A Doc link in Key links, and any entry in the Docs widget, reaches customers only if that doc is published to the portal (see [Docs](/help/06-docs)); an unpublished doc is dropped for customers even if you added it. Workspace members still see every Doc link on the team home. Published docs are readable by anyone with the portal link, including when **Require portal sign-in** is on: that setting protects the roadmap and feedback pages, not docs. Unpublish a doc to remove it immediately.
+- **The Docs widget disappears when there is nothing to show.** If no doc is published (or none of the selected docs are), customers see no Docs widget and the Docs hub shows no Popular chips. (The **Docs** navigation link follows the widget being on the home, so it still opens the Docs page, which then says nothing is published yet.) The editor shows a **Not shown to customers** badge explaining why, and the team home explains it too.
 - Each widget has a **Visible to** setting: **Everyone**, **Signed-in customers** or **Team only**. A widget limited to signed-in customers is not sent to a signed-out visitor at all. A **Team only** widget is shown on the team home and is never sent to any customer, signed in or not: it is removed on the server before anything is looked up for it. **Specific segments** is stored but not available yet, so a widget set to it is shown to nobody.
 - A widget whose surface is switched off or has nothing to show is left out for customers. In the editor it carries the **Not shown to customers** badge, with the reason.
 

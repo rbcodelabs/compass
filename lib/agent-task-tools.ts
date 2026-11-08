@@ -8,7 +8,7 @@
  * (AgentRun.apiKeyId), so a model cannot read or touch another conversation's tasks.
  */
 import getPrisma from "@/lib/db"
-import { getMcpActor } from "@/lib/mcp-authz"
+import { currentAgentConversation, type AgentTurnConversation } from "@/lib/agent-turn-conversation"
 import { ok, fail } from "@/lib/mcp-output"
 import { createTaskLink } from "@/lib/task-link-writes"
 import { createTask, moveTaskStatus, updateTask } from "@/lib/task-tool-handlers"
@@ -23,17 +23,9 @@ export function toAgentStatus(status: string): Exclude<AgentTaskStatus, "deleted
   return status === "DONE" ? "completed" : status === "IN_PROGRESS" ? "in_progress" : "pending"
 }
 
-type Conversation = { conversationId: string; workspaceId: string }
+type Conversation = AgentTurnConversation
 
-async function currentConversation(): Promise<Conversation | null> {
-  const actor = getMcpActor()
-  if (actor.purpose !== "AGENT_TURN" || !actor.credentialId) return null
-  const run = await getPrisma().agentRun.findFirst({
-    where: { apiKeyId: actor.credentialId, status: { in: ["QUEUED", "RUNNING"] } },
-    select: { conversationId: true, workspaceId: true },
-  })
-  return run ? { conversationId: run.conversationId, workspaceId: run.workspaceId } : null
-}
+const currentConversation = currentAgentConversation
 
 const NOT_IN_CONVERSATION = "Task tools are only available inside an agent conversation."
 

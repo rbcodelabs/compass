@@ -8,6 +8,8 @@ import { AtSign, Loader2, Paperclip, Search } from "lucide-react"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { useLabels } from "@/components/thinking-model/thinking-model-provider"
 import type { WorkspaceSearchItem, WorkspaceSearchResponse } from "@/lib/workspace-search"
+import type { DriveSearchHit, DriveSearchOutcome } from "@/lib/agent-drive-search"
+import type { GoogleResourceRef } from "@/lib/agent-google-resources"
 
 export const UPLOAD_MAX_BYTES = 4 * 1024 * 1024
 export const MAX_UPLOADS = 5
@@ -55,12 +57,17 @@ type Props = {
   disabled?: boolean
   uploadCount: number
   items: AttachedItem[]
+  /** Google Drive is connected for this user: the search also looks in Drive. */
+  driveConnected?: boolean
+  /** Drive files already chipped, so they are not offered twice. */
+  googleResources?: GoogleResourceRef[]
+  onPickGoogle?: (ref: GoogleResourceRef) => void
   onUploaded: (upload: AttachedUpload) => void
   onPickItem: (item: AttachedItem) => void
   onError: (message: string) => void
 }
 
-export function AttachMenu({ workspaceId, orgSlug, workspaceSlug, disabled, uploadCount, items, onUploaded, onPickItem, onError }: Props) {
+export function AttachMenu({ workspaceId, orgSlug, workspaceSlug, disabled, uploadCount, items, driveConnected, googleResources = [], onPickGoogle, onUploaded, onPickItem, onError }: Props) {
   const labels = useLabels()
   const fileRef = useRef<HTMLInputElement>(null)
   const [uploading, setUploading] = useState(false)
@@ -68,6 +75,9 @@ export function AttachMenu({ workspaceId, orgSlug, workspaceSlug, disabled, uplo
   const [query, setQuery] = useState("")
   const [results, setResults] = useState<WorkspaceSearchItem[]>([])
   const [searching, setSearching] = useState(false)
+  const [driveHits, setDriveHits] = useState<DriveSearchHit[]>([])
+  const [driveSearching, setDriveSearching] = useState(false)
+  const [driveUnavailable, setDriveUnavailable] = useState(false)
 
   const upload = async (files: FileList | File[] | null) => {
     if (!files?.length) return
@@ -100,6 +110,29 @@ export function AttachMenu({ workspaceId, orgSlug, workspaceSlug, disabled, uplo
     return () => { controller.abort(); window.clearTimeout(timer) }
   }, [open, query, orgSlug, workspaceSlug])
 
+  // Google Drive runs on its own request so a slow Drive never holds up the workspace results.
+  useEffect(() => {
+    const q = query.trim()
+    setDriveUnavailable(false)
+    if (!open || !driveConnected || !onPickGoogle || q.length < 2) { setDriveHits([]); setDriveSearching(false); return }
+    const controller = new AbortController()
+    setDriveSearching(true)
+    const timer = window.setTimeout(async () => {
+      try {
+        const res = await fetch("/api/agent/drive-search?" + new URLSearchParams({ workspaceId, q }), { signal: controller.signal })
+        if (!res.ok) throw new Error(String(res.status))
+        const data = await res.json() as DriveSearchOutcome
+        setDriveHits(data.status === "ok" ? data.hits : [])
+        setDriveUnavailable(data.status !== "ok")
+      } catch {
+        if (!controller.signal.aborted) { setDriveHits([]); setDriveUnavailable(true) }
+      } finally {
+        if (!controller.signal.aborted) setDriveSearching(false)
+      }
+    }, 300)
+    return () => { controller.abort(); window.clearTimeout(timer) }
+  }, [open, query, workspaceId, driveConnected, onPickGoogle])
+
   const full = items.length >= MAX_CONTEXT_ITEMS
   return (
     <div className="flex items-center gap-0.5">
@@ -129,7 +162,21 @@ export function AttachMenu({ workspaceId, orgSlug, workspaceSlug, disabled, uplo
                 </li>
               )
             })}
-            {query.trim().length >= 2 && !searching && results.length === 0 && <li className="px-3 py-3 text-sm text-muted-foreground">No matches.</li>}
+            {driveHits.length > 0 && <li className="px-3 pt-2 pb-1 text-xs font-medium text-muted-foreground">Google Drive</li>}
+            {driveHits.map((hit) => {
+              const already = googleResources.some((g) => g.fileId === hit.fileId)
+              return (
+                <li key={"drive:" + hit.fileId}>
+                  <button type="button" disabled={already} onClick={() => { onPickGoogle?.(hit); setOpen(false); setQuery("") }} className="flex w-full min-w-0 flex-col px-3 py-1.5 text-left text-sm hover:bg-muted disabled:opacity-50">
+                    <span className="truncate font-medium">{hit.title}</span>
+                    <span className="truncate text-xs text-muted-foreground">{hit.label}</span>
+                  </button>
+                </li>
+              )
+            })}
+            {driveSearching && <li className="flex items-center gap-2 px-3 py-1.5 text-xs text-muted-foreground"><Loader2 className="size-3 animate-spin" aria-hidden="true" />Searching Google Drive…</li>}
+            {driveUnavailable && <li className="px-3 py-1.5 text-xs text-muted-foreground">Google Drive could not be searched right now. You can still paste a link.</li>}
+            {query.trim().length >= 2 && !searching && !driveSearching && results.length === 0 && driveHits.length === 0 && <li className="px-3 py-3 text-sm text-muted-foreground">No matches.</li>}
             {query.trim().length < 2 && <li className="px-3 py-3 text-sm text-muted-foreground">Type at least 2 characters.</li>}
           </ul>
         </PopoverContent>

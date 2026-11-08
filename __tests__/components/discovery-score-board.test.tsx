@@ -53,6 +53,7 @@ function opp(
 
 function byStatus(items: OpportunityCardData[]): Record<OpportunityStatus, OpportunityCardData[]> {
   return {
+    UNREVIEWED: [],
     EXPLORING: items,
     VALIDATING: [],
     PRIORITIZED: [],

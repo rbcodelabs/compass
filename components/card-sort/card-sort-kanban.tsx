@@ -104,6 +104,7 @@ import { cn } from "@/lib/utils"
 import type { CardSortBoardProposal } from "@/lib/card-sort"
 import type { CardSortCardMeta } from "@/lib/card-sort-cards"
 import type { BoardRound } from "./card-sort-board"
+import { OPPORTUNITY_STATUSES, OPPORTUNITY_STATUS_DEFINITIONS } from "@/lib/opportunity-status"
 import type { CustomFieldObjectType, SelectOption } from "@/lib/types"
 
 type Props = {
@@ -139,13 +140,9 @@ type ColumnDropData = { columnValue: string | null }
 
 // ── Cards ───────────────────────────────────────────────────────────────────
 
-const STATUS_LABEL: Record<string, string> = {
-  EXPLORING: "Exploring",
-  VALIDATING: "Validating",
-  PRIORITIZED: "Prioritized",
-  ACTIVE: "Active",
-  ARCHIVED: "Archived",
-}
+const STATUS_LABEL: Record<string, string> = Object.fromEntries(
+  OPPORTUNITY_STATUSES.map((s) => [s, OPPORTUNITY_STATUS_DEFINITIONS[s].label]),
+)
 
 /**
  * Which detail panel a card opens — the `?detail=<type>:<id>` slot the rest of

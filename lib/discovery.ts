@@ -16,17 +16,17 @@ import type {
   Conclusion,
   Horizon,
 } from "@/lib/types";
+import { OPPORTUNITY_STATUSES, OPPORTUNITY_STATUS_DEFINITIONS } from "@/lib/opportunity-status";
 
 export const OPPORTUNITY_STATUS_BADGE: Record<
   OpportunityStatus,
   { label: string; className: string }
-> = {
-  EXPLORING: { label: "Exploring", className: "bg-violet-100 text-violet-700" },
-  VALIDATING: { label: "Validating", className: "bg-amber-100 text-amber-700" },
-  PRIORITIZED: { label: "Prioritized", className: "bg-blue-100 text-blue-700" },
-  ACTIVE: { label: "Active", className: "bg-green-100 text-green-700" },
-  ARCHIVED: { label: "Archived", className: "bg-slate-100 text-slate-400" },
-};
+> = Object.fromEntries(
+  OPPORTUNITY_STATUSES.map((s) => [
+    s,
+    { label: OPPORTUNITY_STATUS_DEFINITIONS[s].label, className: OPPORTUNITY_STATUS_DEFINITIONS[s].badgeClassName },
+  ]),
+) as Record<OpportunityStatus, { label: string; className: string }>;
 
 export const SOLUTION_STATUS_BADGE: Record<
   SolutionStatus,

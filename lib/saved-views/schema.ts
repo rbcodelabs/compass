@@ -19,7 +19,7 @@ import type { SavedViewSurface } from "@/lib/saved-views/surfaces"
 const uuid = z.string().uuid()
 
 /** Statuses a board column can take. ARCHIVED is not a board column. */
-export const OPPORTUNITY_BOARD_STATUSES = ["EXPLORING", "VALIDATING", "PRIORITIZED", "ACTIVE"] as const
+export const OPPORTUNITY_BOARD_STATUSES = ["EXPLORING", "VALIDATING", "PRIORITIZED", "ACTIVE", "UNREVIEWED"] as const
 export const SOLUTION_BOARD_STATUSES = ["IDEA", "VALIDATED", "IN_DELIVERY", "SHIPPED", "KILLED"] as const
 
 /** `columns.status` may only name real statuses; unknown values are dropped (a removed status must not break a view). */

@@ -44,7 +44,7 @@ import { OpportunityFieldBoard } from "@/components/discovery/opportunity-field-
 import type { OpportunityStatus } from "@/lib/types";
 
 function emptyOpportunitiesByStatus(): Record<OpportunityStatus, never[]> {
-  return { EXPLORING: [], VALIDATING: [], PRIORITIZED: [], ACTIVE: [], ARCHIVED: [] };
+  return { UNREVIEWED: [], EXPLORING: [], VALIDATING: [], PRIORITIZED: [], ACTIVE: [], ARCHIVED: [] };
 }
 
 describe("Experiments and Discovery board layout", () => {

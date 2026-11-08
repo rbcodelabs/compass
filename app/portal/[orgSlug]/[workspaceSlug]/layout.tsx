@@ -1,10 +1,16 @@
 import type { ReactNode } from "react";
 import getPrisma from "@/lib/db";
 import { getPortalSession } from "@/lib/portal-auth";
-import { PortalAuthStatus } from "@/components/portal/portal-auth-status";
 import { WorkspaceThemeStyle } from "@/components/branding/workspace-theme-style";
 import { resolveWorkspaceBranding } from "@/lib/branding";
-import { PortalNav } from "@/components/portal-home/portal-nav";
+import { buildDefaultWidgets } from "@/lib/portal-home/defaults";
+import { loadPublishedHome } from "@/lib/portal-home/service";
+import { loadPortalHeroMeta } from "@/lib/portal-home/hero-meta";
+import { listPublishedDocs } from "@/lib/portal-docs/service";
+import { popularSearchTerms } from "@/lib/portal-docs/format";
+import { ThemeProvider } from "@/components/theme/theme-provider";
+import { workspaceThemeInitScript } from "@/lib/theme";
+import { PortalShell } from "@/components/portal-home/templates/portal-shell";
 
 type Props = {
   children: ReactNode;
@@ -19,6 +25,7 @@ export default async function PortalLayout({ children, params }: Props) {
     prisma.workspace.findFirst({
       where: { slug: workspaceSlug, organization: { slug: orgSlug } },
       select: {
+        id: true,
         name: true,
         roadmapPublic: true,
         feedbackEnabled: true,
@@ -34,48 +41,53 @@ export default async function PortalLayout({ children, params }: Props) {
 
   const workspaceName = workspace?.name ?? workspaceSlug;
   const branding = workspace ? resolveWorkspaceBranding(workspace) : null;
+  const roadmapPublic = workspace?.roadmapPublic === true;
+  const feedbackEnabled = workspace?.feedbackEnabled === true;
 
+  // The PUBLISHED template (customers never see a draft's). An unpublished workspace gets the default
+  // editorial home, so its widget list is the default one.
+  const published = workspace ? await loadPublishedHome(prisma, workspace.id) : { widgets: null, template: "editorial" as const };
+  const widgets =
+    published.widgets ??
+    buildDefaultWidgets({ workspaceName, orgSlug, workspaceSlug, roadmapPublic, feedbackEnabled });
+
+  const showDocs = widgets.some((widget) => widget.type === "docs");
+  // Template extras, derived from data customers may already see. Each is only loaded for the template that
+  // renders it, so the other templates pay no extra queries.
+  const heroMeta =
+    workspace && published.template === "editorial"
+      ? await loadPortalHeroMeta(prisma, { workspaceId: workspace.id, roadmapPublic, showDocs })
+      : undefined;
+  const searchSuggestions =
+    workspace && published.template === "docs_hub" && showDocs
+      ? popularSearchTerms((await listPublishedDocs(prisma, workspace.id, { limit: 6 })).map((doc) => doc.title))
+      : undefined;
+
+  // ThemeProvider is the app's one dark-mode mechanism (the `dark` class on <html>): the visitor's stored
+  // preference, else their system setting. Every template uses semantic tokens, so each follows it.
   return (
-    <div className="flex min-h-screen flex-col bg-surface-app">
+    <>
+      <script dangerouslySetInnerHTML={{ __html: workspaceThemeInitScript }} />
       <WorkspaceThemeStyle branding={branding} />
-      <header className="border-b border-border-default bg-surface-panel px-6 py-4">
-        <div className="max-w-5xl mx-auto flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="w-7 h-7 rounded-lg bg-primary flex items-center justify-center shrink-0 shadow-sm">
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="white"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="w-4 h-4"
-                aria-hidden="true"
-              >
-                <circle cx="12" cy="12" r="10" />
-                <polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76" />
-              </svg>
-            </div>
-            <span className="text-sm font-semibold text-text-primary">{workspaceName}</span>
-          </div>
-          <PortalNav
-            orgSlug={orgSlug}
-            workspaceSlug={workspaceSlug}
-            roadmapPublic={workspace?.roadmapPublic === true}
-            feedbackEnabled={workspace?.feedbackEnabled === true}
-          />
-          {portalSession && <PortalAuthStatus email={portalSession.email} />}
+      <ThemeProvider>
+        <div className="workspace-theme-scope contents">
+        <PortalShell
+          template={published.template}
+          orgSlug={orgSlug}
+          workspaceSlug={workspaceSlug}
+          workspaceName={workspaceName}
+          logoUrl={branding?.logoUrl ?? null}
+          roadmapPublic={roadmapPublic}
+          feedbackEnabled={feedbackEnabled}
+          email={portalSession?.email ?? null}
+          showDocs={showDocs}
+          heroMeta={heroMeta}
+          searchSuggestions={searchSuggestions}
+        >
+          {children}
+        </PortalShell>
         </div>
-      </header>
-
-      <main className="flex-1 max-w-5xl mx-auto w-full px-6 py-8">
-        {children}
-      </main>
-
-      <footer className="border-t border-border-default bg-surface-panel px-6 py-4 text-center">
-        <p className="text-xs text-text-subtle">Powered by Compass</p>
-      </footer>
-    </div>
+      </ThemeProvider>
+    </>
   );
 }

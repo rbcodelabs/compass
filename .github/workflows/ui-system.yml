@@ -2,31 +2,56 @@ name: UI system
 
 on:
   pull_request:
+  push:
+    branches: [main]
   workflow_dispatch:
 
 jobs:
-  checks:
+  lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10.34.5
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: .node-version
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
+      - uses: ./.github/actions/setup
       - run: pnpm lint
-      - run: pnpm typecheck
-      - run: pnpm test
-      - run: pnpm build
       - run: pnpm ui:colors
       - run: pnpm ui:primitives
       - run: pnpm ui:layers
 
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      - run: pnpm typecheck
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      - run: pnpm build
+
+  unit:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      - run: pnpm test --shard=${{ matrix.shard }}/4
+
+  # Single stable check name for the whole fast-feedback group.
+  checks:
+    if: always()
+    needs: [lint, typecheck, build, unit]
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          [ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" = "false" ]
+
   authenticated-roadmap:
-    needs: checks
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -48,15 +73,8 @@ jobs:
       E2E_ISOLATED_DATABASE: "1"
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10.34.5
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: .node-version
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm exec playwright install --with-deps chromium
+      - uses: ./.github/actions/setup
+      - uses: ./.github/actions/playwright
       - run: pnpm test:e2e:roadmap
       - run: pnpm e2e:db:verify-clean
         if: always()
@@ -69,7 +87,6 @@ jobs:
             public/screenshots/docs/native-timeline-*.png
 
   authenticated-capture:
-    needs: checks
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -91,15 +108,8 @@ jobs:
       E2E_ISOLATED_DATABASE: "1"
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10.34.5
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: .node-version
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm exec playwright install --with-deps chromium
+      - uses: ./.github/actions/setup
+      - uses: ./.github/actions/playwright
       - run: pnpm test:e2e:functional -- e2e/functional/specs/capture-research.spec.ts e2e/functional/specs/research-browser-voice.spec.ts e2e/functional/specs/capture-results.spec.ts e2e/functional/specs/research-mcp.spec.ts e2e/functional/specs/capture-attachment-formats.spec.ts e2e/functional/specs/pm-interview.spec.ts e2e/functional/specs/card-sort.spec.ts
       - run: pnpm e2e:db:verify-clean
         if: always()
@@ -116,15 +126,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10.34.5
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: .node-version
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm exec playwright install --with-deps chromium
+      - uses: ./.github/actions/setup
+      - uses: ./.github/actions/playwright
       - name: Restore screenshot session
         run: mkdir -p e2e/functional/.auth && printf '%s' "$SCREENSHOT_SESSION_BASE64" | base64 --decode > e2e/functional/.auth/screenshots.json
         env:

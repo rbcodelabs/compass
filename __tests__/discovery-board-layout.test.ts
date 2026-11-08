@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import { OPPORTUNITY_PIPELINE_STATUSES } from "@/lib/opportunity-status"
 import { pinColumn, moveColumn, resolveBoardLayout } from "@/lib/board-layout"
 import {
   OPPORTUNITY_BOARD_COLUMN_IDS,
@@ -12,14 +13,14 @@ import {
 } from "@/lib/discovery/board-layout"
 
 describe("Opportunities board layout binding", () => {
-  it("knows every status column, Active first, and ARCHIVED is not a column", () => {
-    expect([...OPPORTUNITY_BOARD_COLUMN_IDS]).toEqual(["ACTIVE", "PRIORITIZED", "VALIDATING", "EXPLORING"])
+  it("knows every status column, Active first and the Unreviewed inbox last, and ARCHIVED is not a column", () => {
+    expect([...OPPORTUNITY_BOARD_COLUMN_IDS]).toEqual(["ACTIVE", "PRIORITIZED", "VALIDATING", "EXPLORING", "UNREVIEWED"])
     expect(OPPORTUNITY_BOARD_COLUMN_IDS).not.toContain("ARCHIVED")
   })
 
   it("starts with nothing pinned, no active tab and the dock collapsed", () => {
     expect(resolveOpportunityBoardLayout(undefined)).toEqual({
-      columnOrder: ["ACTIVE", "PRIORITIZED", "VALIDATING", "EXPLORING"],
+      columnOrder: ["ACTIVE", "PRIORITIZED", "VALIDATING", "EXPLORING", "UNREVIEWED"],
       pinnedColumnIds: [],
       activePinnedId: null,
       dockCollapsed: true,
@@ -35,7 +36,7 @@ describe("Opportunities board layout binding", () => {
     const pinned = pinColumn(resolveOpportunityBoardLayout(undefined), "EXPLORING")
     const stored = serializeOpportunityBoardLayout(pinned)
     expect(stored).toEqual({
-      columnOrder: ["ACTIVE", "PRIORITIZED", "VALIDATING", "EXPLORING"],
+      columnOrder: ["ACTIVE", "PRIORITIZED", "VALIDATING", "EXPLORING", "UNREVIEWED"],
       pinnedColumnIds: ["EXPLORING"],
       activePinnedId: "EXPLORING",
       dockCollapsed: false,
@@ -51,7 +52,7 @@ describe("Opportunities board layout binding", () => {
 
   it("drops stale ids (including ARCHIVED) and appends statuses a stored layout never mentioned", () => {
     const layout = parseOpportunityBoardLayout({ columnOrder: ["EXPLORING", "ARCHIVED", "ACTIVE"], pinnedColumnIds: ["ARCHIVED", "EXPLORING"], activePinnedId: "ARCHIVED" })
-    expect(layout.columnOrder).toEqual(["EXPLORING", "ACTIVE", "PRIORITIZED", "VALIDATING"])
+    expect(layout.columnOrder).toEqual(["EXPLORING", "ACTIVE", "PRIORITIZED", "VALIDATING", "UNREVIEWED"])
     expect(layout.pinnedColumnIds).toEqual(["EXPLORING"])
     expect(layout.activePinnedId).toBe("EXPLORING")
   })
@@ -65,7 +66,34 @@ describe("Opportunities board layout binding", () => {
     const two = pinColumn(pinColumn(resolveOpportunityBoardLayout(undefined), "EXPLORING"), "VALIDATING")
     expect(two.columnOrder.filter((id) => two.pinnedColumnIds.includes(id))).toEqual(["VALIDATING", "EXPLORING"])
     const swapped = moveColumn(two, "EXPLORING", "left")
-    expect(swapped.columnOrder.slice(-2)).toEqual(["EXPLORING", "VALIDATING"])
+    expect(swapped.columnOrder).toEqual(["ACTIVE", "PRIORITIZED", "EXPLORING", "VALIDATING", "UNREVIEWED"])
+  })
+})
+
+describe("the shared status definitions drive the columns (lib/opportunity-status.ts)", () => {
+  it("has exactly the pipeline statuses as columns, so a status added there becomes a column", () => {
+    expect([...OPPORTUNITY_BOARD_COLUMN_IDS].sort()).toEqual([...OPPORTUNITY_PIPELINE_STATUSES].sort())
+  })
+
+  it("keeps the Unreviewed inbox where the default order puts it (last) and every status unpinned", () => {
+    expect(resolveOpportunityBoardLayout(undefined).columnOrder.at(-1)).toBe("UNREVIEWED")
+    expect(resolveOpportunityBoardLayout(undefined).pinnedColumnIds).toEqual([])
+  })
+
+  it("a layout stored before UNREVIEWED existed resolves with it appended and keeps everything else", () => {
+    const old = { columnOrder: ["EXPLORING", "ACTIVE", "PRIORITIZED", "VALIDATING"], pinnedColumnIds: ["ACTIVE"], activePinnedId: "ACTIVE", dockCollapsed: false }
+    const layout = parseOpportunityBoardLayout(old)
+    expect(layout.columnOrder).toEqual(["EXPLORING", "ACTIVE", "PRIORITIZED", "VALIDATING", "UNREVIEWED"])
+    expect(layout.pinnedColumnIds).toEqual(["ACTIVE"])
+    expect(layout.dockCollapsed).toBe(false)
+  })
+
+  it("UNREVIEWED can be pinned and moved like any other column", () => {
+    const start = resolveOpportunityBoardLayout(undefined)
+    expect(moveColumn(start, "UNREVIEWED", "left").columnOrder).toEqual(["ACTIVE", "PRIORITIZED", "VALIDATING", "UNREVIEWED", "EXPLORING"])
+    const pinned = pinColumn(start, "UNREVIEWED")
+    expect(pinned.pinnedColumnIds).toEqual(["UNREVIEWED"])
+    expect(pinned.activePinnedId).toBe("UNREVIEWED")
   })
 })
 
@@ -77,7 +105,7 @@ describe("legacy columns.status.order compatibility (read time, no migration)", 
 
   it("turns a legacy order into that column order with nothing pinned; omitted statuses follow in default order", () => {
     const layout = legacyOrderToLayout(["EXPLORING", "VALIDATING"])!
-    expect(layout.columnOrder).toEqual(["EXPLORING", "VALIDATING", "ACTIVE", "PRIORITIZED"])
+    expect(layout.columnOrder).toEqual(["EXPLORING", "VALIDATING", "ACTIVE", "PRIORITIZED", "UNREVIEWED"])
     expect(layout.pinnedColumnIds).toEqual([])
     expect(layout.dockCollapsed).toBe(true)
   })

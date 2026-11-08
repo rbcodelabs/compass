@@ -22,7 +22,7 @@
  */
 
 import { auth } from "@/auth"
-import { listAgentConversations } from "@/lib/agent-conversations"
+import { listAgentConversations, searchAgentConversations } from "@/lib/agent-conversations"
 
 export async function GET(request: Request) {
   const session = await auth()
@@ -31,7 +31,14 @@ export async function GET(request: Request) {
   const workspaceId = new URL(request.url).searchParams.get("workspaceId")
   if (!workspaceId) return new Response("Workspace required", { status: 400 })
 
-  const archived = new URL(request.url).searchParams.get("archived") === "1"
+  const params = new URL(request.url).searchParams
+  const archived = params.get("archived") === "1"
+  // `?q=` switches to whole-conversation search (title or any message) over active chats.
+  const q = params.get("q")?.trim()
+  if (q && !archived) {
+    return Response.json({ conversations: await searchAgentConversations(workspaceId, session.user.id, q) })
+  }
+
   const conversations = await listAgentConversations(workspaceId, session.user.id, { archived })
 
   return Response.json({ conversations })

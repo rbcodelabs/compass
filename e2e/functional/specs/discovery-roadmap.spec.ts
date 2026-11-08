@@ -1,7 +1,7 @@
 /**
  * Discovery → Roadmap functional spec.
  *
- * Journey: Create opportunity (in EXPLORING column) → open detail panel →
+ * Journey: Create opportunity (in the first column) → open detail panel →
  *          add solution → open the solution's sidebar panel → change status
  *          to IN_DELIVERY → promote to roadmap (NEXT horizon).
  *
@@ -24,8 +24,8 @@ test.describe("Discovery → Roadmap", () => {
       await page.goto(`${base}/discovery`);
       await page.waitForLoadState("networkidle");
 
-      // ── 2. Create an opportunity in the EXPLORING column ──────────────────
-      // The first column's "Add opportunity" opens the composer with EXPLORING preset.
+      // ── 2. Create an opportunity in the first column ──────────────────
+      // The first column's "Add opportunity" opens the composer with that column's status preset.
       await createOpportunityFromBoard(page, oppTitle);
 
       // Opportunity card appears in the board

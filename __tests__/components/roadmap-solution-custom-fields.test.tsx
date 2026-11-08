@@ -17,6 +17,7 @@ const { detail, upsertFieldValue, refresh } = vi.hoisted(() => ({
   refresh: vi.fn(),
 }));
 
+vi.mock("@/components/links/linked-conversations-section", () => ({ LinkedConversationsSection: () => null }));
 vi.mock("@/components/panels/panel-context", () => ({
   usePanelContext: () => ({ openPanel: vi.fn(), notifyEntityMutated: vi.fn() }),
 }));

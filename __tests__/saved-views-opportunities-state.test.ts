@@ -81,19 +81,19 @@ describe("resolveSurfaceState precedence", () => {
 describe("column layout normalization", () => {
   it("omits a layout equal to the default", () => {
     expect(normalizeStatusLayout(undefined)).toBeUndefined()
-    expect(normalizeStatusLayout({ order: ["ACTIVE", "PRIORITIZED", "VALIDATING", "EXPLORING"], hidden: [] })).toBeUndefined()
+    expect(normalizeStatusLayout({ order: ["ACTIVE", "PRIORITIZED", "VALIDATING", "EXPLORING", "UNREVIEWED"], hidden: [] })).toBeUndefined()
   })
 
   it("appends statuses a saved order omits, so it is not 'modified' on load", () => {
     const saved = savedState({}, { columns: { status: { order: ["EXPLORING", "VALIDATING"], hidden: [] } } })
-    expect(normalizeOpportunitiesState(saved).display.columns.status?.order).toEqual(["EXPLORING", "VALIDATING", "ACTIVE", "PRIORITIZED"])
+    expect(normalizeOpportunitiesState(saved).display.columns.status?.order).toEqual(["EXPLORING", "VALIDATING", "ACTIVE", "PRIORITIZED", "UNREVIEWED"])
     const live = resolve({ saved: "v1" }, saved)
     expect(isOpportunitiesStateModified(live, saved)).toBe(false)
   })
 
   it("is order-sensitive for the layout and drops unknown or duplicate keys", () => {
     const a = normalizeStatusLayout({ order: ["EXPLORING", "EXPLORING", "GONE"], hidden: ["GONE", "ACTIVE"] })
-    expect(a).toEqual({ order: ["EXPLORING", "ACTIVE", "PRIORITIZED", "VALIDATING"], hidden: ["ACTIVE"] })
+    expect(a).toEqual({ order: ["EXPLORING", "ACTIVE", "PRIORITIZED", "VALIDATING", "UNREVIEWED"], hidden: ["ACTIVE"] })
     const k = (order: string[]) => opportunitiesStateKey({ ...DEFAULT_OPPORTUNITIES_STATE, display: { ...DEFAULT_OPPORTUNITIES_STATE.display, columns: { status: { order, hidden: [] } } } })
     expect(k(["EXPLORING"])).not.toBe(k(["VALIDATING"]))
   })
@@ -107,7 +107,7 @@ describe("column layout normalization", () => {
 describe("URL round trip", () => {
   const rich: OpportunitiesState = {
     filters: { squadIds: [SQUAD], customField: { fieldId: FIELD, value: "must" } },
-    display: { view: "table", groupBy: FIELD, sort: "score", columns: { status: { order: ["EXPLORING", "ACTIVE", "PRIORITIZED", "VALIDATING"], hidden: ["VALIDATING"] } } },
+    display: { view: "table", groupBy: FIELD, sort: "score", columns: { status: { order: ["EXPLORING", "ACTIVE", "PRIORITIZED", "VALIDATING", "UNREVIEWED"], hidden: ["VALIDATING"] } } },
   }
 
   it("stateToParams then resolve is the identity", () => {
@@ -121,7 +121,7 @@ describe("URL round trip", () => {
 
   it("writes order and hide only when they differ from the default", () => {
     const params = opportunitiesStateToParams(rich)
-    expect(params.get("order")).toBe("EXPLORING,ACTIVE,PRIORITIZED,VALIDATING")
+    expect(params.get("order")).toBe("EXPLORING,ACTIVE,PRIORITIZED,VALIDATING,UNREVIEWED")
     expect(params.get("hide")).toBe("VALIDATING")
     const hideOnly = opportunitiesStateToParams(resolve({ hide: "EXPLORING" }))
     expect(hideOnly.has("order")).toBe(false)
@@ -179,14 +179,14 @@ describe("stored document compatibility", () => {
 })
 
 describe("resolveOpportunityColumns", () => {
-  it("defaults to Active first", () => {
-    expect(resolveOpportunityColumns(undefined, {}).visible).toEqual(["ACTIVE", "PRIORITIZED", "VALIDATING", "EXPLORING"])
+  it("keeps Unreviewed as the last default column", () => {
+    expect(resolveOpportunityColumns(undefined, {}).visible).toEqual(["ACTIVE", "PRIORITIZED", "VALIDATING", "EXPLORING", "UNREVIEWED"])
   })
 
   it("applies a saved order and hides empty hidden columns", () => {
     const r = resolveOpportunityColumns({ order: ["EXPLORING"], hidden: ["VALIDATING"] }, {})
-    expect(r.order).toEqual(["EXPLORING", "ACTIVE", "PRIORITIZED", "VALIDATING"])
-    expect(r.visible).toEqual(["EXPLORING", "ACTIVE", "PRIORITIZED"])
+    expect(r.order).toEqual(["EXPLORING", "ACTIVE", "PRIORITIZED", "VALIDATING", "UNREVIEWED"])
+    expect(r.visible).toEqual(["EXPLORING", "ACTIVE", "PRIORITIZED", "UNREVIEWED"])
   })
 
   it("forces a hidden column with cards visible", () => {
@@ -295,7 +295,7 @@ describe("legacy columns.status.order views keep working with no migration", () 
   const legacyLayout = legacyOrderToLayout(["EXPLORING", "VALIDATING"])!
 
   it("reads the legacy order as the starting layout", () => {
-    expect(legacyLayout.columnOrder).toEqual(["EXPLORING", "VALIDATING", "ACTIVE", "PRIORITIZED"])
+    expect(legacyLayout.columnOrder).toEqual(["EXPLORING", "VALIDATING", "ACTIVE", "PRIORITIZED", "UNREVIEWED"])
   })
 
   it("an untouched legacy view is not modified once the board starts from the layout that order describes", () => {
@@ -322,7 +322,7 @@ describe("legacy columns.status.order views keep working with no migration", () 
 
   it("saving a legacy view writes the layout, not a second order", () => {
     const live = withLiveColumnLayout(resolve({ saved: "v1" }, legacy), legacyLayout)
-    expect(live.display.columnLayout?.columnOrder).toEqual(["EXPLORING", "VALIDATING", "ACTIVE", "PRIORITIZED"])
+    expect(live.display.columnLayout?.columnOrder).toEqual(["EXPLORING", "VALIDATING", "ACTIVE", "PRIORITIZED", "UNREVIEWED"])
     expect(live.display.columns.status?.order).toEqual([...DEFAULT_OPPORTUNITY_COLUMN_ORDER])
     expect(live.display.columns.status?.hidden).toEqual(["PRIORITIZED"])
   })

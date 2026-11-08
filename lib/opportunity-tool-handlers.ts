@@ -58,7 +58,7 @@ export async function createOpportunities(input: {
 
 export async function createOpportunity(input: {
   workspaceId: string; title: string; description?: string | null; customerSegment?: string | null
-  status?: "EXPLORING" | "VALIDATING" | "PRIORITIZED" | "ACTIVE"; keyResultId?: string | null; squadId?: string | null; source?: ProgrammaticSource
+  status?: "UNREVIEWED" | "EXPLORING" | "VALIDATING" | "PRIORITIZED" | "ACTIVE"; keyResultId?: string | null; squadId?: string | null; source?: ProgrammaticSource
 }) {
   const prisma = getPrisma()
   const workspace = await prisma.workspace.findUnique({ where: { id: input.workspaceId }, select: { id: true, name: true, slug: true, organization: { select: { slug: true } } } })
@@ -80,7 +80,7 @@ export async function createOpportunity(input: {
   })
 }
 
-export async function updateOpportunityStatus(input: { opportunityId: string; status: "EXPLORING" | "VALIDATING" | "PRIORITIZED" | "ACTIVE" | "ARCHIVED"; source?: ProgrammaticSource }) {
+export async function updateOpportunityStatus(input: { opportunityId: string; status: "UNREVIEWED" | "EXPLORING" | "VALIDATING" | "PRIORITIZED" | "ACTIVE" | "ARCHIVED"; source?: ProgrammaticSource }) {
   const prisma = getPrisma()
   const current = await prisma.opportunity.findUnique({ where: { id: input.opportunityId }, select: { id: true, title: true, status: true } })
   if (!current) return fail(`Opportunity "${input.opportunityId}" not found.`)

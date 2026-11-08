@@ -17,6 +17,8 @@ import { agentIdsAssignedInDoc, loadCommentTaskCards, loadMentionCandidates } fr
 import { documentRevision, hydrateDocument } from "@/lib/document-service";
 import { SpecDocHeader } from "@/components/docs/spec-doc-header";
 import { loadSpecScopeViews } from "@/lib/spec-docs/view";
+import { DocPublishControl } from "@/components/docs/doc-publish-control";
+import { getDocPublishState } from "@/lib/portal-docs/service";
 
 type Props = {
   params: Promise<{
@@ -122,9 +124,22 @@ export default async function DocPage({ params, searchParams }: Props) {
   // What the "/" menu may create comes from the live scope links, never from the client.
   const specScopes = specScopeViews?.map(({ scopeType, scopeId, title }) => ({ scopeType, scopeId, title }));
 
+  const publishState = await getDocPublishState(prisma, workspace.id, doc.id);
+
   return (
     <DocEditor
       key={doc.id}
+      publishAction={
+        <DocPublishControl
+          key="publish"
+          docId={doc.id}
+          orgSlug={orgSlug}
+          workspaceSlug={workspaceSlug}
+          initialPublishedAt={publishState.publishedAt}
+          publishable={publishState.publishable}
+          canPublish={!access.isReadOnly}
+        />
+      }
       specHeader={specHeader}
       specScopes={specScopes}
       readOnly={access.isReadOnly}

@@ -120,11 +120,11 @@ beforeEach(() => {
 // ─── createOpportunity ───────────────────────────────────────────────────────
 
 describe("createOpportunity", () => {
-  it("creates an opportunity with default status EXPLORING", async () => {
+  it("creates an opportunity with default status UNREVIEWED", async () => {
     const result = await createOpportunity("ws-1", { title: "Improve onboarding" });
     expect(mockOpportunity.create).toHaveBeenCalledOnce();
     const callArgs = mockOpportunity.create.mock.calls[0][0].data;
-    expect(callArgs.status).toBe("EXPLORING");
+    expect(callArgs.status).toBe("UNREVIEWED");
     expect(callArgs.title).toBe("Improve onboarding");
     expect(result).toEqual({ id: "opp-1", title: "Test Opp" });
   });

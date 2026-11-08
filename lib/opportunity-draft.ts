@@ -8,6 +8,7 @@
  * re-validates every one on submit, so a stale id can never be written.
  */
 import { createComposerDraftStore, draftId, draftString } from "@/lib/composer-draft"
+import { DEFAULT_OPPORTUNITY_STATUS, OPPORTUNITY_PIPELINE_STATUSES } from "@/lib/opportunity-status"
 import type { OpportunityStatus } from "@/lib/types"
 
 // Limits shared by the composer and the server (lib/opportunity-create.ts).
@@ -20,7 +21,7 @@ export const OPPORTUNITY_SEED_FEEDBACK_MAX = 50
 export const OPPORTUNITY_LINK_OBJECTIVES_MAX = 25
 
 /** The statuses a new opportunity can start in (never ARCHIVED). */
-export const NEW_OPPORTUNITY_STATUSES = ["EXPLORING", "VALIDATING", "PRIORITIZED", "ACTIVE"] as const
+export const NEW_OPPORTUNITY_STATUSES = OPPORTUNITY_PIPELINE_STATUSES
 
 export type NewOpportunityStatus = (typeof NEW_OPPORTUNITY_STATUSES)[number]
 
@@ -44,7 +45,7 @@ export const EMPTY_OPPORTUNITY_DRAFT: OpportunityDraft = Object.freeze({
   title: "",
   description: "",
   customerSegment: "",
-  status: "EXPLORING",
+  status: DEFAULT_OPPORTUNITY_STATUS,
   squadId: null,
   keyResultId: null,
   feedbackIds: [],
@@ -75,7 +76,7 @@ const store = createComposerDraftStore<OpportunityDraft>({
     title: draftString(v.title),
     description: draftString(v.description),
     customerSegment: draftString(v.customerSegment),
-    status: isNewOpportunityStatus(v.status) ? v.status : "EXPLORING",
+    status: isNewOpportunityStatus(v.status) ? v.status : DEFAULT_OPPORTUNITY_STATUS,
     squadId: draftId(v.squadId),
     keyResultId: draftId(v.keyResultId),
     feedbackIds: Array.isArray(v.feedbackIds)

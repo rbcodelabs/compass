@@ -33,6 +33,8 @@ type Props = {
   contextChips?: ReactNode
   /** The Agent and Model chips. The footer is omitted when there are none. */
   chips?: ReactNode
+  /** Called with the pasted text before it lands in the field; return true to consume the paste (it became a chip). */
+  onPasteText?: (text: string) => boolean
   /** Greys the card like a read-only surface (access lost). */
   readOnly?: boolean
   /** False when someone else started the run being watched: their run never moves this user's focus. Default true. */
@@ -40,7 +42,7 @@ type Props = {
 }
 
 export function ComposerCard(props: Props) {
-  const { textareaRef, value, onChange, onSend, placeholder = "Message the agent…", textareaDisabled, sendDisabled, running, onStop, stopDisabled, stopTitle, status, contextChips, chips, readOnly, runStartedByMe = true } = props
+  const { textareaRef, value, onChange, onSend, placeholder = "Message the agent…", textareaDisabled, sendDisabled, running, onStop, stopDisabled, stopTitle, status, contextChips, chips, readOnly, onPasteText, runStartedByMe = true } = props
   const hintId = useId()
   const stopRef = useRef<HTMLButtonElement>(null)
   const wasRunning = useRef(running)
@@ -124,6 +126,10 @@ export function ComposerCard(props: Props) {
             ref={textareaRef}
             value={value}
             onChange={(e) => onChange(e.target.value)}
+            onPaste={(e) => {
+              if (!onPasteText) return
+              if (onPasteText(e.clipboardData.getData("text/plain"))) e.preventDefault()
+            }}
             onKeyDown={(e) => {
               // Safari fires compositionend before the Enter that commits an IME candidate, so isComposing is already false
               // there; keyCode 229 ("processing") is what still marks that keydown.
