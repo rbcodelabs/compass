@@ -70,8 +70,11 @@ test("gallery shows previews, filmstrip, placeholders, grouping and stays usable
 
     // Screenshot hero, served through the authenticated thumbnail route.
     const shot = card(titles.shot);
-    await expect(shot.locator("img").first()).toBeVisible();
-    await expect.poll(() => shot.locator("img").first().evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0)).toBe(true);
+    // The hero itself (not a filmstrip thumbnail) must default to the artifact that has a screenshot, even though a newer artifact has none.
+    const hero = shot.getByRole("img", { name: `Preview of Newest shot ${suffix}` });
+    await expect(hero).toBeVisible();
+    await expect(shot.getByTestId("gallery-hero-pending")).toHaveCount(0);
+    await expect.poll(() => hero.evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0)).toBe(true);
     await page.screenshot({ path: testInfo.outputPath("gallery-hero-desktop-1280.png") });
     // Two artifacts → a filmstrip; focusing the second swaps the hero to its "no preview" state.
     await expect(shot.getByRole("group", { name: "Artifacts" }).getByRole("button")).toHaveCount(2);

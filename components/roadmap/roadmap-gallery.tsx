@@ -22,12 +22,13 @@ function artifactTypeLabel(artifact: GalleryArtifact): { label: string; icon: Re
 }
 
 function Hero({ item, extras, workspaceId, orgSlug, workspaceSlug }: { item: RoadmapCardData; extras: GalleryItemExtras; workspaceId: string; orgSlug: string; workspaceSlug: string }) {
-  const [active, setActive] = useState(0);
+  const { artifacts, moreArtifacts } = extras;
+  // Open on the first artifact that has a screenshot (newest-first order); only fall back to a placeholder when none do.
+  const [active, setActive] = useState(() => Math.max(0, artifacts.findIndex((artifact) => artifact.thumbnail)));
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const labels = useLabels();
   const solution = labels.solution.singular.toLowerCase();
-  const { artifacts, moreArtifacts } = extras;
   const current = artifacts[Math.min(active, Math.max(artifacts.length - 1, 0))];
   const withShot = artifacts.filter((artifact) => artifact.thumbnail);
 
