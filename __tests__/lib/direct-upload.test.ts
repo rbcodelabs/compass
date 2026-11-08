@@ -3,10 +3,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 const client = vi.hoisted(() => ({ generateClientTokenFromReadWriteToken: vi.fn(), put: vi.fn() }))
 vi.mock("@vercel/blob/client", () => client)
 
-import { createDirectUploadToken, privateDirectUploadConfigured } from "@/lib/storage/direct-upload"
+import { createDirectUpload, createDirectUploadToken, privateDirectUploadConfigured } from "@/lib/storage/direct-upload"
 import { uploadToTarget } from "@/lib/storage/direct-upload-client"
 
-const base = { pathname: "a/b.html", allowedContentTypes: ["text/html"], maxBytes: 10, validUntil: 123 }
+const base = { pathname: "a/b.html", allowedContentTypes: ["text/html"], maxBytes: 10, validUntil: 123, ttlSeconds: 60 }
 
 describe("direct upload (server)", () => {
   beforeEach(() => {
@@ -30,6 +30,11 @@ describe("direct upload (server)", () => {
     await expect(createDirectUploadToken({ ...base, store: "private" })).rejects.toThrow("Private artifact storage is not configured")
     await expect(createDirectUploadToken({ ...base, store: "private", notConfiguredMessage: "Direct upload is not configured" })).rejects.toThrow("Direct upload is not configured")
     expect(client.generateClientTokenFromReadWriteToken).not.toHaveBeenCalled()
+  })
+
+  it("createDirectUpload returns the credential as spreadable response fields", async () => {
+    vi.stubEnv("ARTIFACT_BLOB_READ_WRITE_TOKEN", "secret")
+    await expect(createDirectUpload({ ...base, store: "private" })).resolves.toEqual({ clientToken: "tok" })
   })
 
   it("public store: uses the ambient token (no explicit token) and omits an unset allowOverwrite", async () => {
