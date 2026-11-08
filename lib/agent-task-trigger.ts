@@ -47,6 +47,7 @@ import { trustedCompassBaseUrl } from "@/lib/compass-url"
 import { displayIdFromRow } from "@/lib/work-item-ids"
 import { createHash } from "node:crypto"
 import { isDsqlWriteConflict } from "@/lib/dsql-conflict"
+import { agentRunCredentialSource, logAgentRunCredentialSource } from "@/lib/agent-credential-source"
 
 export type AgentRunOutcome =
   /** Nothing to report: not an agent assignment, nothing changed, agents off, or an EXTERNAL agent (queue only). */
@@ -287,7 +288,6 @@ async function run(input: TriggerInput, deps: TriggerDeps): Promise<AgentRunOutc
       kind: "TASK_ASSIGNMENT",
       budgetMs: DEFAULT_AGENT_RUN_BUDGET_MS,
       fenceConversation: true,
-      credentialSource: resolvedModel?.ok ? resolvedModel.credentialSource : harness === "opencode" ? "gateway" : null,
     })
   } catch (error) {
     if (error instanceof AgentRunError) {
@@ -304,6 +304,9 @@ async function run(input: TriggerInput, deps: TriggerDeps): Promise<AgentRunOutc
     }
     throw error
   }
+
+  // One log line per run naming which credential pays for it (a closed label, never the key). Search "agent-run credential source".
+  logAgentRunCredentialSource({ runId: created.run.id, workspaceId: task.workspaceId, source: agentRunCredentialSource({ harness, model: resolvedModel?.ok ? resolvedModel : undefined }) })
 
   // Written after the run exists, so a run refused above leaves no orphaned "asked" message in the conversation.
   await prisma.agentMessage.create({

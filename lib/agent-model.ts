@@ -50,7 +50,7 @@ export const DEFAULT_BEDROCK_REGION = "us-east-1"
 type Env = Record<string, string | undefined>
 
 export type ResolvedAgentModel =
-  | { ok: true; provider: AgentModelProvider; modelId: string; keyEnv: string; apiKey: string; env: Env; credentialSource: AgentCredentialSource }
+  | { ok: true; provider: AgentModelProvider; modelId: string; keyEnv: string; apiKey: string; env: Env; credentialSource?: AgentCredentialSource }
   | { ok: false; message: string }
 
 /** Unset or blank selects the default; anything else must be a known provider. */

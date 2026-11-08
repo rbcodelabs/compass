@@ -8,7 +8,6 @@
  * already has, or waiting forever on a run that finished.
  */
 
-import { parseAgentCredentialSource, type AgentCredentialSource } from "@/lib/agent-credential-source"
 import { isTerminalAgentRunStatus, type AgentRunStatus } from "@/lib/agent-runs"
 
 export type SerializedAgentRun = {
@@ -26,8 +25,6 @@ export type SerializedAgentRun = {
   eventCount: number
   done: boolean
   model: string | null
-  /** Which model credential the run used; null = unknown (runs before migration 111). A closed non-secret label. */
-  credentialSource: AgentCredentialSource | null
   inputTokens: number | null
   outputTokens: number | null
   numTurns: number | null
@@ -54,7 +51,6 @@ type RunRow = {
   lastSeq: number
   eventCount: number
   model?: string | null
-  credentialSource?: string | null
   inputTokens?: number | null
   outputTokens?: number | null
   numTurns?: number | null
@@ -85,7 +81,6 @@ export function serializeAgentRun(run: RunRow): SerializedAgentRun {
     // every consumer asks, and `status` is an open enum from their point of view.
     done: isTerminalAgentRunStatus(run.status),
     model: run.model ?? null,
-    credentialSource: parseAgentCredentialSource(run.credentialSource),
     inputTokens: run.inputTokens ?? null,
     outputTokens: run.outputTokens ?? null,
     numTurns: run.numTurns ?? null,

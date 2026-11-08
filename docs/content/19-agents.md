@@ -273,7 +273,7 @@ A workspace administrator can make the in-app agent run on their own Anthropic a
 
 ### Which credential a run used
 
-While an agent run is working, the composer shows **Model credential: Platform API key**, **Workspace API key**, **Claude subscription**, **Bedrock** or **AI Gateway**, so you can tell which credential is paying for it. Only this label is recorded on the run; the key or token itself is never stored, logged or shown. Runs that started before the database update `111_agent_run_credential_source` is applied show no credential line.
+For operators: every agent run writes one server log line, `agent-run credential source=<label> runId=<id> workspaceId=<id>`, where the label is `platform-api-key`, `workspace-api-key`, `claude-subscription`, `bedrock` or `gateway`. Search the Vercel runtime logs for `agent-run credential source`. The line never contains the key or token, its length or any part of it, and nothing is stored in the database or shown in the app.
 
 ## GitHub access
 

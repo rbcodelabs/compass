@@ -1,10 +1,8 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { encrypt } from "@/lib/crypto-secrets"
 import { resolveAgentModel } from "@/lib/agent-model"
 import { resolveWorkspaceAgentModel } from "@/lib/workspace-anthropic-key"
-import { AGENT_CREDENTIAL_SOURCES, agentCredentialSourceLabel, parseAgentCredentialSource } from "@/lib/agent-credential-source"
-import { agentRunCredentialSourceAvailable, createAgentRun, resetAgentRunCredentialSourceAvailabilityCache } from "@/lib/agent-runs"
-import { serializeAgentRun } from "@/lib/agent-run-view"
+import { AGENT_CREDENTIAL_SOURCES, agentRunCredentialSource, formatAgentRunCredentialSourceLine, logAgentRunCredentialSource, parseAgentCredentialSource } from "@/lib/agent-credential-source"
 
 const ENC_KEY = Buffer.alloc(32, 3).toString("base64")
 const BYOK = "sk-ant-api03-customer-key-1234"
@@ -55,85 +53,44 @@ describe("credential source derivation", () => {
   })
 })
 
-describe("no secret reaches the persisted or displayed value", () => {
-  const cases: Array<[string, never, Record<string, string>]> = [
-    ["platform", withoutByok(), { ANTHROPIC_API_KEY: PLATFORM }],
-    ["workspace", withByok(), { ANTHROPIC_API_KEY: PLATFORM }],
-    ["bedrock", withoutByok(), { AGENT_MODEL_PROVIDER: "bedrock", BEDROCK_API_KEY: BEDROCK }],
-    ["subscription", withoutByok(), { AGENT_MODEL_PROVIDER: "claude-subscription", CLAUDE_CODE_OAUTH_TOKEN: OAUTH }],
+describe("the log line", () => {
+  const cases: Array<[string, never, Record<string, string>, string]> = [
+    ["platform", withoutByok(), { ANTHROPIC_API_KEY: PLATFORM }, "platform-api-key"],
+    ["workspace", withByok(), { ANTHROPIC_API_KEY: PLATFORM }, "workspace-api-key"],
+    ["bedrock", withoutByok(), { AGENT_MODEL_PROVIDER: "bedrock", BEDROCK_API_KEY: BEDROCK }, "bedrock"],
+    ["subscription", withoutByok(), { AGENT_MODEL_PROVIDER: "claude-subscription", CLAUDE_CODE_OAUTH_TOKEN: OAUTH }, "claude-subscription"],
   ]
 
-  it.each(cases)("the %s source is a closed label containing no key material", async (_name, db, env) => {
-    const source = await sourceFor(db, env)
-    expect(AGENT_CREDENTIAL_SOURCES).toContain(source)
-    for (const secret of SECRETS) expect(`${source}|${agentCredentialSourceLabel(source)}`).not.toContain(secret)
+  it.each(cases)("the %s line is exactly the allowed shape and contains no key material", async (_name, db, env, label) => {
+    const model = await resolveWorkspaceAgentModel(db, "ws-1", { SSO_SECRET_ENCRYPTION_KEY: ENC_KEY, ...env })
+    if (!model.ok) throw new Error(model.message)
+    const source = agentRunCredentialSource({ harness: "claude", model })
+    expect(source).toBe(label)
+    const line = formatAgentRunCredentialSourceLine({ runId: "run-1", workspaceId: "ws-1", source: source! })
+    expect(line).toBe(`agent-run credential source=${label} runId=run-1 workspaceId=ws-1`)
+    for (const secret of SECRETS) expect(line).not.toContain(secret)
   })
 
-  it("createAgentRun writes only the closed label to the column, and the full create payload never carries a key", async () => {
-    resetAgentRunCredentialSourceAvailabilityCache()
-    const create = vi.fn(({ data }: { data: unknown }) => Promise.resolve(data))
-    const prisma = {
-      agentRun: { findMany: vi.fn().mockResolvedValue([]), findFirst: vi.fn().mockResolvedValue(null), create },
-      agentConversation: { updateMany: vi.fn() },
-    } as never as Parameters<typeof createAgentRun>[0]["prisma"]
-    ;(prisma as unknown as { $transaction: unknown }).$transaction = (fn: (tx: unknown) => Promise<unknown>) => fn(prisma)
-    const source = await sourceFor(withByok(), {})
-    await createAgentRun({ prisma, conversationId: "c-1", workspaceId: "ws-1", userId: "u-1", credentialSource: source })
-    const data = create.mock.calls[0][0].data as Record<string, unknown>
-    expect(data.credentialSource).toBe("workspace-api-key")
-    for (const secret of SECRETS) expect(JSON.stringify(data)).not.toContain(secret)
+  it("opencode logs gateway; a failed resolution logs nothing", () => {
+    expect(agentRunCredentialSource({ harness: "opencode", model: undefined })).toBe("gateway")
+    expect(agentRunCredentialSource({ harness: "claude", model: undefined })).toBeNull()
+    const info = vi.spyOn(console, "info").mockImplementation(() => {})
+    logAgentRunCredentialSource({ runId: "r", workspaceId: "w", source: null })
+    expect(info).not.toHaveBeenCalled()
+    logAgentRunCredentialSource({ runId: "r", workspaceId: "w", source: "gateway" })
+    expect(info).toHaveBeenCalledExactlyOnceWith("agent-run credential source=gateway runId=r workspaceId=w")
+    info.mockRestore()
   })
 
-  it("an unknown or secret-looking stored value is never serialized to the client", () => {
-    const base = { id: "r", conversationId: "c", workspaceId: "w", status: "RUNNING", kind: "CHAT", lastSeq: 0, eventCount: 0, deadlineAt: new Date(0), createdAt: new Date(0) }
-    expect(serializeAgentRun({ ...base, credentialSource: BYOK }).credentialSource).toBeNull()
-    expect(JSON.stringify(serializeAgentRun({ ...base, credentialSource: BYOK }))).not.toContain(BYOK)
-    expect(serializeAgentRun({ ...base, credentialSource: "bedrock" }).credentialSource).toBe("bedrock")
-    expect(serializeAgentRun(base).credentialSource).toBeNull()
-  })
-
-  it("createAgentRun refuses to persist a value outside the closed set", async () => {
-    resetAgentRunCredentialSourceAvailabilityCache()
-    const create = vi.fn(({ data }: { data: unknown }) => Promise.resolve(data))
-    const prisma = { agentRun: { findMany: vi.fn().mockResolvedValue([]), findFirst: vi.fn().mockResolvedValue(null), create }, agentConversation: { updateMany: vi.fn() } } as never as Parameters<typeof createAgentRun>[0]["prisma"]
-    ;(prisma as unknown as { $transaction: unknown }).$transaction = (fn: (tx: unknown) => Promise<unknown>) => fn(prisma)
-    await createAgentRun({ prisma, conversationId: "c-1", workspaceId: "ws-1", userId: "u-1", credentialSource: BYOK as never })
-    expect(create.mock.calls[0][0].data).not.toHaveProperty("credentialSource")
+  it("refuses to format a value outside the closed set (e.g. a key passed by mistake)", () => {
+    expect(formatAgentRunCredentialSourceLine({ runId: "r", workspaceId: "w", source: BYOK as never })).toBeNull()
   })
 })
 
-describe("labels and parsing", () => {
-  it("maps each source to its display label", () => {
-    expect(agentCredentialSourceLabel("platform-api-key")).toBe("Platform API key")
-    expect(agentCredentialSourceLabel("workspace-api-key")).toBe("Workspace API key")
-    expect(agentCredentialSourceLabel("claude-subscription")).toBe("Claude subscription")
-    expect(agentCredentialSourceLabel("bedrock")).toBe("Bedrock")
-    expect(agentCredentialSourceLabel("gateway")).toBe("AI Gateway")
-  })
-
+describe("parsing", () => {
   it("parses only the closed set", () => {
     expect(parseAgentCredentialSource("bedrock")).toBe("bedrock")
     for (const bad of [null, undefined, 3, "", "sk-ant-api03-x", "Bedrock"]) expect(parseAgentCredentialSource(bad)).toBeNull()
-  })
-})
-
-describe("migration 111 tolerance", () => {
-  beforeEach(() => resetAgentRunCredentialSourceAvailabilityCache())
-
-  it("probe is false on a missing column (P2022) and createAgentRun then omits the column instead of failing", async () => {
-    const create = vi.fn(({ data }: { data: unknown }) => Promise.resolve(data))
-    const prisma = {
-      agentRun: { findMany: vi.fn().mockRejectedValue({ code: "P2022" }), findFirst: vi.fn().mockResolvedValue(null), create },
-      agentConversation: { updateMany: vi.fn() },
-    } as never as Parameters<typeof createAgentRun>[0]["prisma"]
-    ;(prisma as unknown as { $transaction: unknown }).$transaction = (fn: (tx: unknown) => Promise<unknown>) => fn(prisma)
-    expect(await agentRunCredentialSourceAvailable(prisma)).toBe(false)
-    await createAgentRun({ prisma, conversationId: "c-1", workspaceId: "ws-1", userId: "u-1", credentialSource: "bedrock" })
-    expect(create.mock.calls[0][0].data).not.toHaveProperty("credentialSource")
-  })
-
-  it("a non-schema error is surfaced, not swallowed", async () => {
-    const prisma = { agentRun: { findMany: vi.fn().mockRejectedValue(new Error("connection reset")) } } as never as Parameters<typeof agentRunCredentialSourceAvailable>[0]
-    await expect(agentRunCredentialSourceAvailable(prisma)).rejects.toThrow("connection reset")
+    expect(AGENT_CREDENTIAL_SOURCES).toHaveLength(5)
   })
 })
