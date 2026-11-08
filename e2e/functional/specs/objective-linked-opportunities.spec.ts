@@ -155,7 +155,7 @@ test("20 linked rows are bounded, scrollable and sorted by raw score with unscor
   }));
   expect(metrics.scrollable).toBe(true);
   expect(metrics.maxHeight).toBeLessThanOrEqual(330);
-  expect(metrics.tableMin).toBeGreaterThanOrEqual(400);
+  expect(metrics.tableMin).toBeGreaterThanOrEqual(384); // 24rem minimum
 
   // 390px: the Score (headline number) is the second column and is inside the visible region without scrolling.
   const region = section(page).getByRole("region");
