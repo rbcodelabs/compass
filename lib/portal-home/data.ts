@@ -10,6 +10,18 @@ export interface PortalHomeLink {
   href: string
   external: boolean
   kind: "url" | "doc"
+  /** Set for doc links: lets the customer redaction keep only the doc links that resolved. */
+  docId?: string
+}
+
+/** A published Doc as a card. Mirrors PublicDocSummary plus the viewer's link to it. */
+export interface DocCardItem {
+  id: string
+  title: string
+  excerpt: string
+  updatedAt: string
+  publishedAt: string
+  href: string
 }
 
 export interface SpotlightItem {
@@ -39,6 +51,7 @@ export type ResolvedWidgetData =
   | { type: "announcement" }
   | { type: "rich_text" }
   | { type: "key_links"; links: PortalHomeLink[] }
+  | { type: "docs"; docs: DocCardItem[] }
   | { type: "roadmap_spotlight"; items: SpotlightItem[]; auto: boolean; roadmapHref: string }
   | { type: "recent_updates"; items: UpdateItem[]; roadmapHref: string }
   | { type: "feedback_cta"; feedbackHref: string; topIdeas: TopIdea[] }

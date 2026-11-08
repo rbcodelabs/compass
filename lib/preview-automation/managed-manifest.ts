@@ -246,7 +246,13 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   // Digest recorded from the shipped SQL after reading it (single ALTER TABLE ... ADD COLUMN IF NOT EXISTS).
   "112_agent_conversation_archive": "5b9d029dd2de58f7e91adc163491fd2d56616de655ebeecaaae0ddc5b27eeba7",
   // Agent conversation links (RM-19): no executable SQL (comments only). The work is the TypeScript hook pinned in REVIEWED_MIGRATION_CODE_SHA256.
-  "113_entity_links_backfill_conversation": "76e164fc94afd8ac2a69e0be16121c0955b22ec0c2955ab89f6873d088daab66"
+  "113_entity_links_backfill_conversation": "76e164fc94afd8ac2a69e0be16121c0955b22ec0c2955ab89f6873d088daab66",
+  // Doc publishing: two nullable ADD COLUMNs on docs (published_at, published_by_id), no default, no backfill, no index, no FK. Additive; NULL = private.
+  // The 113 postcondition (both columns exist, typed, nullable) is pinned in REVIEWED_MIGRATION_CODE_SHA256. Digest recorded from the shipped SQL after reading it.
+  "113_doc_publishing": "a4b32cc07df478c2f228264697b039dbc42140e83519417180b7f43c81da5d0d",
+  // Portal home template: two nullable VARCHAR(20) ADD COLUMNs on portal_home_layouts (draft_template, published_template); NULL = editorial. No default, backfill, index or FK.
+  // Postcondition pinned in REVIEWED_MIGRATION_CODE_SHA256. Digest recorded from the shipped SQL after reading it.
+  "114_portal_home_template": "009701f53d716a8eb9ae81d0e208631a592c4b2b643ebf8811d75be566698421"
 };
 
 /**
@@ -401,6 +407,14 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
   "108_workspace_modules_legacy_flag_backfill": {
     "lib/migrations/workspace-modules.ts": "10dbe1f96ce6cf5813a942569095b672355d50b2436a5b4fcac4373ed418a4d1",
     "lib/migrations/workspace-id-on-solution-objective.ts": "43295c27b84b319d6cfcada757c7dab6c598c930e237aa642c8d05fa94a3f8c7",
+  },
+  // The 113 postcondition (docs.published_at / published_by_id exist, typed, nullable); editing it re-reviews the migration.
+  "113_doc_publishing": {
+    "lib/migrations/doc-publishing.ts": "10fafd1a573ddd2bfb97371eed663e8db7f9bec4899299d91d677d7a6b6ddb32",
+  },
+  // The 114 postcondition (portal_home_layouts.draft_template / published_template exist, varchar, nullable); editing it re-reviews the migration.
+  "114_portal_home_template": {
+    "lib/migrations/portal-home-template.ts": "c0e5cd9b2c05e8da4dad6d79162458799ee2c7beeeaa0569cccfc31d988edaf0",
   },
 };
 

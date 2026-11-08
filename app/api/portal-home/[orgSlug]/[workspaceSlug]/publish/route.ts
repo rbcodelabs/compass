@@ -6,8 +6,8 @@ import { NothingToPublishError, publishDraft } from "@/lib/portal-home/service"
 export async function POST(_req: Request, route: HomeRouteParams) {
   return withHomeAdmin(route, async ({ prisma, workspaceId, userId }) => {
     try {
-      const { published, publishedAt } = await publishDraft(prisma, workspaceId, userId)
-      return NextResponse.json({ published, publishedAt: publishedAt.toISOString(), hasUnpublishedChanges: false })
+      const { published, publishedAt, template } = await publishDraft(prisma, workspaceId, userId)
+      return NextResponse.json({ published, publishedTemplate: template, publishedAt: publishedAt.toISOString(), hasUnpublishedChanges: false })
     } catch (error) {
       if (error instanceof NothingToPublishError) return NextResponse.json({ error: error.message }, { status: 409 })
       throw error

@@ -4,6 +4,7 @@ import { createWidget, layoutSchema, normalizeOrder, parseStoredWidgets, WIDGET_
 import { isWidgetVisibleToCustomer, isWidgetVisibleToTeam } from "@/lib/portal-home/visibility"
 import { buildDefaultWidgets } from "@/lib/portal-home/defaults"
 import { hasUnpublishedChanges } from "@/lib/portal-home/schema"
+import { PORTAL_TEMPLATES, PORTAL_TEMPLATE_META, coerceStoredTemplate, portalTemplateSchema } from "@/lib/portal-home/templates"
 
 describe("isSafeLinkUrl", () => {
   it.each(["https://example.com/a?b=1", "http://example.com", "/portal/acme/ws/roadmap"])("accepts %s", (url) => {
@@ -128,5 +129,59 @@ describe("hasUnpublishedChanges key order", () => {
     const reparsed = widgetSchema.parse(JSON.parse(JSON.stringify(a)))
     expect(Object.keys(reparsed)).not.toEqual(Object.keys(a))
     expect(hasUnpublishedChanges([a], [reparsed])).toBe(false)
+  })
+})
+
+describe("portal templates", () => {
+  it("accepts exactly editorial, bento, shell and docs_hub", () => {
+    expect([...PORTAL_TEMPLATES]).toEqual(["editorial", "bento", "shell", "docs_hub"])
+    for (const template of PORTAL_TEMPLATES) expect(portalTemplateSchema.safeParse(template).success).toBe(true)
+    for (const bad of ["Editorial", "magazine", "", null, undefined, 3]) expect(portalTemplateSchema.safeParse(bad).success, String(bad)).toBe(false)
+  })
+
+  it("has a label and description for every template", () => {
+    for (const template of PORTAL_TEMPLATES) {
+      expect(PORTAL_TEMPLATE_META[template].label.length).toBeGreaterThan(0)
+      expect(PORTAL_TEMPLATE_META[template].description.length).toBeGreaterThan(0)
+    }
+  })
+
+  it("coerces NULL and unknown stored values to editorial", () => {
+    expect(coerceStoredTemplate(null)).toBe("editorial")
+    expect(coerceStoredTemplate("removed_template")).toBe("editorial")
+    expect(coerceStoredTemplate("bento")).toBe("bento")
+  })
+
+  it("counts a template-only change as unpublished", () => {
+    const widgets = [createWidget("rich_text", 0)]
+    expect(hasUnpublishedChanges(widgets, widgets, { draft: "bento", published: "editorial" })).toBe(true)
+    expect(hasUnpublishedChanges(widgets, widgets, { draft: "bento", published: "bento" })).toBe(false)
+    expect(hasUnpublishedChanges([], null, { draft: "shell", published: "editorial" })).toBe(true)
+    expect(hasUnpublishedChanges([], null, { draft: "editorial", published: "editorial" })).toBe(false)
+  })
+})
+
+describe("docs widget schema", () => {
+  const docId = "00000000-0000-4000-8000-000000000001"
+  const make = (config: Record<string, unknown>) => widgetSchema.safeParse({ id: "w1", type: "docs", size: "M", order: 0, config })
+
+  it("accepts all and selected modes with defaults", () => {
+    expect(make({ heading: "Docs" })).toMatchObject({ success: true, data: { config: { maxItems: 6, mode: "all", docIds: [] } } })
+    expect(make({ heading: "Docs", mode: "selected", docIds: [docId], maxItems: 12 }).success).toBe(true)
+  })
+
+  it("enforces maxItems 1-12, a heading, a known mode and uuid ids", () => {
+    expect(make({ heading: "Docs", maxItems: 0 }).success).toBe(false)
+    expect(make({ heading: "Docs", maxItems: 13 }).success).toBe(false)
+    expect(make({ heading: "Docs", maxItems: 1.5 }).success).toBe(false)
+    expect(make({ heading: "" }).success).toBe(false)
+    expect(make({ heading: "Docs", mode: "private" }).success).toBe(false)
+    expect(make({ heading: "Docs", mode: "selected", docIds: ["nope"] }).success).toBe(false)
+    expect(make({ heading: "Docs", docIds: Array.from({ length: 13 }, (_, i) => `00000000-0000-4000-8000-${String(i).padStart(12, "0")}`) }).success).toBe(false)
+  })
+
+  it("is part of the registry and has a valid default", () => {
+    expect(WIDGET_TYPES).toContain("docs")
+    expect(widgetSchema.safeParse(createWidget("docs", 0)).success).toBe(true)
   })
 })

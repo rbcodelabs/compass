@@ -2,8 +2,10 @@ import { NextResponse } from "next/server"
 import { z } from "zod"
 import { withHomeAdmin, type HomeRouteParams } from "@/lib/portal-home/admin-api"
 import { hasUnpublishedChanges, loadHomeLayout, saveDraft } from "@/lib/portal-home/service"
+import { portalTemplateSchema } from "@/lib/portal-home/templates"
 
-const putBody = z.object({ widgets: z.unknown() })
+/** `template` is optional: a widgets-only save leaves the stored draft template as it was. */
+const putBody = z.object({ widgets: z.unknown(), template: portalTemplateSchema.optional() })
 
 /** Admin: the stored draft and published layouts. */
 export async function GET(_req: Request, route: HomeRouteParams) {
@@ -13,7 +15,9 @@ export async function GET(_req: Request, route: HomeRouteParams) {
       draft: layout.draft,
       published: layout.published,
       publishedAt: layout.publishedAt?.toISOString() ?? null,
-      hasUnpublishedChanges: hasUnpublishedChanges(layout.draft, layout.published),
+      draftTemplate: layout.draftTemplate,
+      publishedTemplate: layout.publishedTemplate,
+      hasUnpublishedChanges: hasUnpublishedChanges(layout.draft, layout.published, { draft: layout.draftTemplate, published: layout.publishedTemplate }),
     })
   })
 }
@@ -22,12 +26,14 @@ export async function GET(_req: Request, route: HomeRouteParams) {
 export async function PUT(req: Request, route: HomeRouteParams) {
   return withHomeAdmin(route, async ({ prisma, workspaceId }) => {
     const body = putBody.parse(await req.json())
-    const draft = await saveDraft(prisma, workspaceId, body.widgets)
+    const draft = await saveDraft(prisma, workspaceId, body.widgets, body.template)
     const layout = await loadHomeLayout(prisma, workspaceId)
     return NextResponse.json({
       draft,
       publishedAt: layout.publishedAt?.toISOString() ?? null,
-      hasUnpublishedChanges: hasUnpublishedChanges(draft, layout.published),
+      draftTemplate: layout.draftTemplate,
+      publishedTemplate: layout.publishedTemplate,
+      hasUnpublishedChanges: hasUnpublishedChanges(draft, layout.published, { draft: layout.draftTemplate, published: layout.publishedTemplate }),
     })
   })
 }
