@@ -9,8 +9,8 @@ import {
   DragOverlay,
   type DragStartEvent,
   type DragEndEvent,
+  type DragCancelEvent,
   type DragOverEvent,
-  closestCenter,
   PointerSensor,
   KeyboardSensor,
   useSensor,
@@ -30,7 +30,22 @@ import {
   reorderExperiment,
 } from "@/app/[orgSlug]/[workspaceSlug]/experiments/actions";
 import type { ExperimentStatus } from "@/lib/types";
-import { Board, BoardColumn, EmptyState } from "@/components/patterns";
+import {
+  Board,
+  BoardColumn,
+  BoardDock,
+  BOARD_FADE_END_TRACK_CLASS,
+  EmptyState,
+  PINNED_COLUMN_BODY_CLASS,
+  PINNED_COLUMN_CLASS,
+  type BoardColumnLayoutControls,
+} from "@/components/patterns";
+import { DroppableDockTab, dockAwareCollisionDetection } from "@/components/patterns/board-dock-dnd";
+import { useBoardDock } from "@/components/patterns/use-board-dock";
+import { useExperimentsColumnLayout } from "@/components/experiments/experiments-column-layout";
+import { EXPERIMENT_BOARD_STATUSES } from "@/lib/experiments/board-layout";
+import { dockTabDropStatus } from "@/lib/discovery-board-ordering";
+import { cn } from "@/lib/utils";
 
 const COLUMNS: { status: ExperimentStatus; label: string; accent: "neutral" | "info" | "success" | "danger" }[] = [
   { status: "DESIGNING", label: "Designing", accent: "neutral" },
@@ -39,7 +54,8 @@ const COLUMNS: { status: ExperimentStatus; label: string; accent: "neutral" | "i
   { status: "KILLED", label: "Killed", accent: "danger" },
 ];
 
-const ALL_STATUSES: ExperimentStatus[] = ["DESIGNING", "RUNNING", "COMPLETE", "KILLED"];
+const ALL_STATUSES = EXPERIMENT_BOARD_STATUSES as readonly ExperimentStatus[];
+const COLUMN_BY_STATUS = Object.fromEntries(COLUMNS.map((c) => [c.status, c])) as Record<ExperimentStatus, (typeof COLUMNS)[number]>;
 
 type ColumnMap = Record<ExperimentStatus, ExperimentCardData[]>;
 
@@ -67,13 +83,20 @@ function ExperimentColumn({
   accent,
   items,
   revalidatePathStr,
+  placement = "scroller",
+  layoutControls,
 }: {
   status: ExperimentStatus;
   label: string;
   accent: "neutral" | "info" | "success" | "danger";
   items: ExperimentCardData[];
   revalidatePathStr: string;
+  /** "pinned" is the dock's open panel: fixed width, no horizontal flex sizing. */
+  placement?: "scroller" | "pinned";
+  /** Pin / reorder / collapse controls in the column header (lib/board-layout.ts). */
+  layoutControls?: BoardColumnLayoutControls;
 }) {
+  const pinned = placement === "pinned";
   const itemIds = items.map((i) => i.id);
   const { setNodeRef, isOver } = useDroppable({
     id: `column-${status}`,
@@ -85,9 +108,11 @@ function ExperimentColumn({
       title={label}
       count={items.length}
       accent={accent}
-      className="w-[calc(100cqw-1.5rem)] min-w-0 flex-none sm:w-[calc(100cqw-2rem)] md:w-72 md:min-w-[280px] md:flex-1 md:overflow-hidden md:h-full"
+      data-experiment-column={status}
+      className={pinned ? PINNED_COLUMN_CLASS : "w-[calc(100cqw-1.5rem)] min-w-0 flex-none sm:w-[calc(100cqw-2rem)] md:w-72 md:min-w-[280px] md:flex-1 md:overflow-hidden md:h-full"}
+      layoutControls={layoutControls}
       bodyRef={setNodeRef}
-      bodyClassName={`min-h-44 md:min-h-0 md:max-h-none md:flex-1 md:overflow-y-auto ${isOver ? "rounded-lg bg-primary/5 ring-2 ring-inset ring-ring/25" : ""}`}
+      bodyClassName={`${pinned ? PINNED_COLUMN_BODY_CLASS : "min-h-44 md:min-h-0 md:max-h-none md:flex-1 md:overflow-y-auto"} ${isOver ? "rounded-lg bg-primary/5 ring-2 ring-inset ring-ring/25" : ""}`}
     >
         <SortableContext items={itemIds} strategy={verticalListSortingStrategy}>
           {items.length === 0 ? (
@@ -142,6 +167,15 @@ export function ExperimentBoard({
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   );
 
+  // Column layout (lib/board-layout.ts): the column order, which columns are pinned (docked in ONE dock on the right,
+  // outside the scroller), which pinned column the dock shows and whether it is collapsed. Browser-local (no saved views).
+  const dock = useBoardDock({
+    controller: useExperimentsColumnLayout(workspaceId),
+    renderedIds: ALL_STATUSES,
+    labelOf: (id) => COLUMN_BY_STATUS[id as ExperimentStatus].label,
+    containerRef,
+  });
+
   function handleDragStart(event: DragStartEvent) {
     const id = event.active.id as string;
     for (const status of ALL_STATUSES) {
@@ -157,6 +191,10 @@ export function ExperimentBoard({
   function handleDragOver(event: DragOverEvent) {
     const { active, over } = event;
     if (!over) return;
+
+    // A dock tab is resolved at drag end: its column may not be rendered, and moving the dragged card into an unrendered
+    // column mid-drag unmounts it (and its menu) while dnd-kit is still tracking it.
+    if (dockTabDropStatus(over.data.current)) return;
 
     const activeId = active.id as string;
     const overId = over.id as string;
@@ -220,6 +258,23 @@ export function ExperimentBoard({
       return;
     }
 
+    // Dropped on a dock tab: that tab's status is the destination (the card was not moved there during the drag).
+    const tabStatus = dockTabDropStatus<ExperimentStatus>(over.data.current);
+    if (tabStatus) {
+      if (tabStatus !== currentStatus) {
+        setColumns((prev) => {
+          const item = prev[currentStatus].find((i) => i.id === activeId);
+          if (!item) return prev;
+          return { ...prev, [currentStatus]: prev[currentStatus].filter((i) => i.id !== activeId), [tabStatus]: [...prev[tabStatus], { ...item, status: tabStatus }] };
+        });
+        startTransition(async () => {
+          await moveExperiment(activeId, tabStatus, workspaceId, revalidatePathStr);
+        });
+      }
+      setDragSourceStatus(null);
+      return;
+    }
+
     if (dragSourceStatus && dragSourceStatus !== currentStatus) {
       startTransition(async () => {
         await moveExperiment(activeId, currentStatus, workspaceId, revalidatePathStr);
@@ -245,36 +300,87 @@ export function ExperimentBoard({
     setDragSourceStatus(null);
   }
 
+  /** Escape (or anything else that cancels the drag) puts the card back where the drag began. */
+  function handleDragCancel(event: DragCancelEvent) {
+    const activeId = event.active.id as string;
+    const found = findStatus(columns, activeId);
+    if (dragSourceStatus && found && found !== dragSourceStatus) {
+      setColumns((prev) => {
+        const item = prev[found].find((i) => i.id === activeId);
+        if (!item) return prev;
+        return {
+          ...prev,
+          [found]: prev[found].filter((i) => i.id !== activeId),
+          [dragSourceStatus]: [...prev[dragSourceStatus], { ...item, status: dragSourceStatus }],
+        };
+      });
+    }
+    setActiveItem(null);
+    setDragSourceStatus(null);
+  }
+
+  function renderColumn(status: ExperimentStatus, placement: "scroller" | "pinned") {
+    const { label, accent } = COLUMN_BY_STATUS[status];
+    return (
+      <ExperimentColumn
+        key={status}
+        status={status}
+        label={label}
+        accent={accent}
+        items={columns[status]}
+        revalidatePathStr={revalidatePathStr}
+        placement={placement}
+        layoutControls={dock.layoutControlsFor(status)}
+      />
+    );
+  }
+
+  const dockTabs = dock.dockTabsFor((id) => columns[id as ExperimentStatus].length);
+
   return (
     <div ref={containerRef} className="flex min-h-0 flex-1 flex-col overflow-y-auto md:overflow-hidden">
       <DndContext
         id={dndId}
         sensors={sensors}
-        collisionDetection={closestCenter}
+        collisionDetection={dockAwareCollisionDetection}
         onDragStart={handleDragStart}
         onDragOver={handleDragOver}
         onDragEnd={handleDragEnd}
+        onDragCancel={handleDragCancel}
       >
-        <Board
-          label="Experiment board"
-          className="block min-h-[24rem] flex-1 scroll-px-3 overflow-x-auto p-0 sm:scroll-px-4 md:overflow-y-hidden"
-        >
-          <div
-            data-slot="experiment-board-track"
-            className="flex h-full w-max min-w-full items-stretch gap-3 px-3 pt-3 pb-3 sm:px-4 sm:pt-4 md:px-4 md:pt-3"
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col md:flex-row">
+          <Board
+            label="Experiment board"
+            fadeEnd={dock.dockedIds.length > 0}
+            className="block min-h-[24rem] flex-1 scroll-px-3 overflow-x-auto p-0 sm:scroll-px-4 md:overflow-y-hidden"
           >
-            {COLUMNS.map(({ status, label, accent }) => (
-              <ExperimentColumn
-                key={status}
-                status={status}
-                label={label}
-                accent={accent}
-                items={columns[status]}
-                revalidatePathStr={revalidatePathStr}
-              />
-            ))}
-          </div>
-        </Board>
+            <div
+              data-slot="experiment-board-track"
+              className={cn(
+                "flex h-full w-max min-w-full items-stretch gap-3 px-3 pt-3 pb-3 sm:px-4 sm:pt-4 md:px-4 md:pt-3",
+                // Room for the scroller's tapered edge, so the last column at full scroll-end is not faded.
+                dock.dockedIds.length > 0 && BOARD_FADE_END_TRACK_CLASS,
+              )}
+            >
+              {dock.scrollerIds.map((status) => renderColumn(status as ExperimentStatus, "scroller"))}
+            </div>
+          </Board>
+          {/* The dock sits OUTSIDE the horizontal scroller, so it stays put while the rest scroll and a drag from it never needs a mid-drag scroll. */}
+          {dockTabs.length > 0 ? (
+            <BoardDock
+              tabs={dockTabs}
+              activeId={dock.activeDockId}
+              collapsed={!dock.dockOpen}
+              onSelectTab={dock.selectDockTab}
+              panel={dock.dockOpen && dock.activeDockId ? renderColumn(dock.activeDockId as ExperimentStatus, "pinned") : null}
+              wrapTab={(tab, node, { panelOpen }) => (
+                <DroppableDockTab columnId={tab.id} columnDroppableId={`column-${tab.id}`} panelOpen={panelOpen} slot="experiment-dock-tab-drop">
+                  {node}
+                </DroppableDockTab>
+              )}
+            />
+          ) : null}
+        </div>
 
         <DragOverlay>
           {activeItem ? (

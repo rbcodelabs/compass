@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { put } from "@vercel/blob/client";
+import { uploadToTarget } from "@/lib/storage/direct-upload-client";
 
 import {
   discardFeedbackAttachment,
@@ -48,13 +48,7 @@ export function defaultAttachmentTransport(orgSlug: string, workspaceSlug: strin
   return {
     prepare: (file) => prepareFeedbackAttachment(orgSlug, workspaceSlug, file),
     upload: (pathname, file, { token, contentType, onProgress, signal }) =>
-      put(pathname, file, {
-        access: "public",
-        token,
-        contentType,
-        abortSignal: signal,
-        onUploadProgress: ({ percentage }) => onProgress(percentage),
-      }),
+      uploadToTarget({ pathname, clientToken: token, access: "public" }, file, { contentType, signal, onProgress }),
     discard: (upload) => discardFeedbackAttachment(orgSlug, workspaceSlug, upload),
   };
 }

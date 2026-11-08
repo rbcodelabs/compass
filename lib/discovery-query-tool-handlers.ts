@@ -3,7 +3,7 @@ import { ok } from "@/lib/mcp-output"
 import { getLinkedKeyResultsBySolution } from "@/lib/typed-links"
 import { recencyOrderBy, type RecencySort } from "@/lib/mcp-recency"
 
-type OpportunityStatus = "EXPLORING" | "VALIDATING" | "PRIORITIZED" | "ACTIVE" | "ARCHIVED"
+type OpportunityStatus = "UNREVIEWED" | "EXPLORING" | "VALIDATING" | "PRIORITIZED" | "ACTIVE" | "ARCHIVED"
 type SolutionStatus = "IDEA" | "VALIDATED" | "IN_DELIVERY" | "SHIPPED" | "KILLED"
 type AssumptionStatus = "UNTESTED" | "TESTING" | "VALIDATED" | "INVALIDATED"
 type RiskLevel = "HIGH" | "MEDIUM" | "LOW"

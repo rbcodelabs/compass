@@ -8,6 +8,7 @@ import { OpportunityDetail } from "@/components/discovery/opportunity-detail";
 import { LinkedFeedback } from "@/components/discovery/linked-feedback";
 
 const { openPanel, refresh, detail } = vi.hoisted(() => ({ openPanel: vi.fn(), refresh: vi.fn(), detail: { data: {} as Record<string, unknown>, panel: null as { type: "solution"; id: string } | null } }));
+vi.mock("@/components/links/linked-conversations-section", () => ({ LinkedConversationsSection: () => null }));
 vi.mock("@/components/panels/panel-context", () => ({ usePanelContext: () => ({ openPanel, panel: detail.panel }) }));
 vi.mock("@/components/panels/panel-parts", async (load) => ({
   ...await load<typeof import("@/components/panels/panel-parts")>(),

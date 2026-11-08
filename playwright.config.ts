@@ -97,6 +97,12 @@ export default defineConfig({
         ANTHROPIC_API_KEY: "e2e-placeholder-not-a-real-key",
         // chat-model-picker.spec.ts: a second model so the chat's Model menu has something to offer next to the built-in one.
         COMPASS_CLOUD_AGENT_MODELS: "claude-opus-4-5",
+        // agent-model-catalog.spec.ts exercises the AI Gateway catalog picker, which exists only on the opencode harness. It is
+        // deliberately NOT set for every run: opencode swaps the Model field for the searchable picker, changes the chat's default
+        // model and refuses task runs without a gateway credential, which would break chat-model-picker.spec.ts and
+        // cloud-agents.spec.ts. Run the catalog spec as its own invocation:
+        //   E2E_AGENT_HARNESS=opencode pnpm test:e2e:functional -- agent-model-catalog
+        ...(process.env.E2E_AGENT_HARNESS ? { AGENT_HARNESS: process.env.E2E_AGENT_HARNESS } : {}),
         // passkeys.spec.ts needs the /login button and /settings/passkeys
         // panel visible. The underlying Passkey provider itself is only ever
         // registered in auth.ts's production/preview branch though — `pnpm

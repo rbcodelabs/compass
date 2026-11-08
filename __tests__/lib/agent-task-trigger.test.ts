@@ -168,6 +168,23 @@ describe("a task assigned to a cloud agent", () => {
     expect(outcome).toMatchObject({ conversationId: conversation.id, conversationUrl: `/acme/home/agent?c=${conversation.id}` })
   })
 
+  it("logs exactly one credential-source line for the run: closed label, run id and workspace id, no key material", async () => {
+    const SECRET = "sk-ant-api03-FAKE-trigger-secret-4321"
+    const info = vi.spyOn(console, "info").mockImplementation(() => {})
+    await trigger({}, { env: { ANTHROPIC_API_KEY: SECRET, MCP_BYPASS_SECRET: "bypass" } })
+    const lines = info.mock.calls.map((call) => String(call[0])).filter((line) => line.includes("agent-run credential source"))
+    expect(lines).toEqual([`agent-run credential source=platform-api-key runId=${runs()[0].id} workspaceId=${WS}`])
+    expect(JSON.stringify(info.mock.calls)).not.toContain(SECRET)
+    info.mockRestore()
+  })
+
+  it("logs no credential-source line when the run is refused", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => {})
+    await trigger({ actingUserId: "stranger" })
+    expect(info.mock.calls.filter((call) => String(call[0]).includes("agent-run credential source"))).toHaveLength(0)
+    info.mockRestore()
+  })
+
   it("puts the task in the prompt and the transcript, and hands the launcher the agent and its grants only (no claim)", async () => {
     await trigger()
     const [context] = launch.mock.calls[0] as unknown as [Row]

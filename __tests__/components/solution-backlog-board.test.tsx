@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, within } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
@@ -43,14 +43,17 @@ function renderBoard(props: Partial<React.ComponentProps<typeof SolutionBacklogB
   );
 }
 
+// The order of the status columns is the column layout's (active work first by default), not the prop's.
+beforeEach(() => window.localStorage.clear());
+
 describe("SolutionBacklogBoard", () => {
   it("renders one column per status with solutions from different opportunities side by side", () => {
     renderBoard();
     const columns = document.querySelectorAll("[data-slot=solution-backlog-column]");
     expect([...columns].map((c) => c.getAttribute("data-status"))).toEqual([
-      "IDEA", "VALIDATED", "IN_DELIVERY", "SHIPPED", "KILLED",
+      "IN_DELIVERY", "VALIDATED", "IDEA", "SHIPPED", "KILLED",
     ]);
-    const idea = columns[0] as HTMLElement;
+    const idea = columns[2] as HTMLElement;
     expect(within(idea).getByText("Wizard")).toBeInTheDocument();
     expect(within(idea).getByText("Checklist")).toBeInTheDocument();
     expect(within(columns[3] as HTMLElement).getByText("Templates")).toBeInTheDocument();

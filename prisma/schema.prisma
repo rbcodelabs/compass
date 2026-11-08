@@ -2301,7 +2301,7 @@ model Doc {
   /// One of: STANDARD | GTM_POSITIONING_BRIEF. Drives whether create_doc
   /// auto-fills GTM_POSITIONING_BRIEF_TEMPLATE and whether roadmapItemId is
   /// meaningful.
-  docType       String       @default("STANDARD") @map("doc_type") @db.VarChar(50)
+  docType       String?      @default("STANDARD") @map("doc_type") @db.VarChar(50)
   createdAt     DateTime     @default(now()) @map("created_at")
   updatedAt     DateTime     @default(now()) @map("updated_at")
   workspace     Workspace    @relation(fields: [workspaceId], references: [id])
@@ -2317,6 +2317,11 @@ model Doc {
   // Human-readable ID (ADR "Human-readable work item IDs"). Nullable until migration 093 numbers old rows.
   seqPrefix String? @map("seq_prefix") @db.VarChar(8)
   seqNumber Int? @map("seq_number")
+
+  /// Portal publishing (migration 113). NULL = private to workspace members. Set = readable on the public
+  /// portal, scoped by workspaceId AND publishedAt (lib/portal-docs). publishedById is a bare UUID (no FK).
+  publishedAt   DateTime? @map("published_at")
+  publishedById String?   @map("published_by_id") @db.Uuid
   @@unique([workspaceId, seqPrefix, seqNumber], map: "idx_docs_seq")
   @@map("docs")
 }
@@ -3783,6 +3788,9 @@ model PortalHomeLayout {
   publishedWidgets Json?     @map("published_widgets")
   publishedAt      DateTime? @map("published_at")
   publishedById    String?   @map("published_by_id") @db.Uuid
+  /// Template ids (lib/portal-home/templates.ts), migration 114. NULL = "editorial" (DSQL: no DEFAULT on ADD COLUMN).
+  draftTemplate     String?  @map("draft_template") @db.VarChar(20)
+  publishedTemplate String?  @map("published_template") @db.VarChar(20)
   createdAt        DateTime  @default(now()) @map("created_at")
   updatedAt        DateTime  @default(now()) @map("updated_at")
 
@@ -3807,7 +3815,7 @@ model SavedView {
   ownerId        String   @map("owner_id") @db.Uuid
   name           String   @db.VarChar(120)
   visibility     String   @default("PERSONAL") @db.VarChar(20)
-  /// OPPORTUNITIES_BOARD | SOLUTIONS_BOARD | ROADMAP_WORKSPACE | ROADMAP_ORG (lib/saved-views/surfaces.ts).
+  /// OPPORTUNITIES_BOARD | SOLUTIONS_BOARD | TASKS_BOARD | ROADMAP_WORKSPACE | ROADMAP_ORG (lib/saved-views/surfaces.ts).
   /// NULL = legacy row, read as ROADMAP_ORG (no workspace) or ROADMAP_WORKSPACE. Writes always set it.
   surface        String?  @db.VarChar(40)
   filters        Json     @default("{}")

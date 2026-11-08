@@ -67,8 +67,8 @@ export function ImportWorkspacePanel({ orgSlug }: Props) {
       let response: Response;
       if (plan.mode === "direct") {
         setStage("Uploading bundle…");
-        const { put } = await import("@vercel/blob/client");
-        await put(plan.pathname, file, { access: "private", token: plan.clientToken, contentType: "application/zip" });
+        const { uploadToTarget } = await import("@/lib/storage/direct-upload-client");
+        await uploadToTarget({ pathname: plan.pathname, clientToken: plan.clientToken, access: "private" }, file, { contentType: "application/zip" });
         setStage("Importing workspace… this can take a few minutes");
         response = await fetch(base, {
           method: "POST",

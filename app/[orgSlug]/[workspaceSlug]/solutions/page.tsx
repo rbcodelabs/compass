@@ -9,6 +9,8 @@ import { SolutionBacklogBoard, type SolutionBacklogItem } from "@/components/sol
 import { SolutionTableView } from "@/components/solutions/solution-table-view";
 import { SolutionSavedViewsMenu } from "@/components/solutions/solution-saved-views";
 import { SolutionColumnsPopover } from "@/components/solutions/solution-columns-popover";
+import { SolutionsColumnLayoutProvider } from "@/components/solutions/solutions-column-layout";
+import { legacyOrderToLayout } from "@/lib/solutions/board-layout";
 import { resolveSolutionColumns } from "@/lib/saved-views/solution-columns";
 import {
   needsSolutionsViewExpansion,
@@ -186,7 +188,24 @@ export default async function SolutionsPage({ params, searchParams }: Props) {
   );
   const boardColumns = resolveSolutionColumns(boardState.display.columns.status, columnCounts);
 
+  // Where the board's column layout starts. The layout is client state (see solutions-column-layout.tsx); it supersedes
+  // the older columns.status.order, which is still read: a selected view's own layout, else the layout its legacy order
+  // describes, and an explicit legacy ?order= link wins over a view that has no layout of its own. A legacy ?order= with
+  // no view starts the layout too (as a source of its own, so it is not mirrored to this browser's storage).
+  const urlOrder = typeof search.order === "string" ? boardState.display.columns.status?.order : undefined;
+  const layoutSource = selectedView && selectedState
+    ? {
+        id: selectedView.id,
+        version: selectedView.updatedAt,
+        columnLayout: selectedState.display.columnLayout ?? legacyOrderToLayout(urlOrder ?? selectedState.display.columns.status?.order),
+      }
+    : urlOrder && urlOrder.length > 0
+      ? { id: "url-order", version: urlOrder.join(","), columnLayout: legacyOrderToLayout(urlOrder) }
+      : null;
+
   return (
+    // The header (saved-views menu, Columns popover) and the board are siblings; they share the column layout through this provider.
+    <SolutionsColumnLayoutProvider workspaceId={workspace.id} savedView={layoutSource}>
     <WorkspacePage
       title={thinkingModel.labels.solution.plural}
       contentClassName={view === "board" ? "p-0 sm:p-0 md:p-0" : undefined}
@@ -212,6 +231,7 @@ export default async function SolutionsPage({ params, searchParams }: Props) {
             {hasActiveScoringModel && <DiscoverySortToggle sort={sort} />}
             {view === "board" && groupBy === "status" && (
               <SolutionColumnsPopover
+                workspaceId={workspace.id}
                 savedViews={{ views: savedViews, savedViewId: selectedView?.id ?? null }}
                 columns={boardColumns}
                 countsByStatus={columnCounts}
@@ -253,5 +273,6 @@ export default async function SolutionsPage({ params, searchParams }: Props) {
         />
       )}
     </WorkspacePage>
+    </SolutionsColumnLayoutProvider>
   );
 }

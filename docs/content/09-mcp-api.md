@@ -255,7 +255,7 @@ link on its own line, immediately after the usual `ID: <uuid>` line:
 **Opportunity created** in "Compass"
 ID: 0f2c…
 Title: Setup is confusing
-Status: EXPLORING
+Status: UNREVIEWED
 URL: https://compass.rbcodelabs.com/rbcodelabs/compass/discovery/0f2c…
 ```
 
@@ -413,10 +413,10 @@ Typed links connect an Opportunity to Objectives and a Solution to Key Results (
 | `get_opportunity` | Return full detail for an opportunity: solutions, assumptions per solution, and experiments linked to those assumptions |
 | `list_solutions` | Discover solutions across a workspace by solution status, parent opportunity status/squad, and roadmap-link presence; returns stable Opportunity and Roadmap Item IDs without making a readiness judgment; filterable by `updatedSince`/`updatedBefore` and orderable with `sort` (`recentlyUpdated` / `leastRecentlyUpdated`) |
 | `list_assumptions` | Discover assumptions across a workspace by status, risk, parent Solution status, and parent Opportunity status/squad; returns stable ancestry IDs and experiment counts; filterable by `updatedSince`/`updatedBefore` and orderable with `sort` (`recentlyUpdated` / `leastRecentlyUpdated`) |
-| `create_opportunity` | Create a new opportunity with title, description, status. An optional `keyResultId` behaves like `link_opportunity_to_kr` (the Key Result must be in this workspace) |
+| `create_opportunity` | Create a new opportunity with title, description, status (defaults to `UNREVIEWED`). An optional `keyResultId` behaves like `link_opportunity_to_kr` (the Key Result must be in this workspace) |
 | `create_opportunities` | Bulk-create up to 25 opportunities (agent callers) per call. Each item runs in its own transaction and is reported in `data.results` as created, an error, or `CONFLICT`; the call succeeds even if some items fail. Give each item a `clientId` (UUID) to make retries safe: a repeat returns `deduped: true`. Takes title, description, customerSegment, status and squadId, not a Key Result |
 | `update_opportunity` | Update an existing opportunity's title and/or description; pass `null` to clear its description |
-| `update_opportunity_status` | Move an opportunity through its discovery pipeline: EXPLORING → VALIDATING → PRIORITIZED → ACTIVE → ARCHIVED |
+| `update_opportunity_status` | Move an opportunity through its discovery pipeline: UNREVIEWED → EXPLORING → VALIDATING → PRIORITIZED → ACTIVE → ARCHIVED |
 | `link_opportunity_to_kr` | Associate an opportunity with a Key Result it is expected to move (pass `keyResultId: null` to clear). An opportunity has at most one linked Key Result. The Key Result must be in the opportunity's workspace: a Key Result from another workspace is rejected, even if you are a member of both. The link is also recorded as a `LEGACY` typed Opportunity–Objective link to that Key Result's Objective (see [Typed links](#typed-links)). The pointer is also mirrored into `entity_links` (`OPPORTUNITY_TARGETS_KEY_RESULT`) while the mirror flag is on |
 | `link_opportunity_to_objective` | Link an Opportunity directly to an Objective in the same workspace. Idempotent: repeating returns `created: false`. A direct link is not removed when the opportunity's Key Result is cleared. The legacy table stays the source of truth; links are also mirrored into `entity_links` (`OPPORTUNITY_TARGETS_OBJECTIVE`, origin `DIRECT` or `LEGACY` preserved) while the mirror flag is on, and `link_entities` refuses that type |
 | `unlink_opportunity_from_objective` | Remove an Opportunity–Objective link; returns `removed: 0` when there is none. A link implied by the opportunity's linked Key Result stays until that Key Result is cleared (`removed: 0, stillLinkedViaKeyResult: true` is a successful no-op, not a failure) |
@@ -1067,7 +1067,7 @@ These tools read Slack through the Compass bot's Vercel Connect credential. They
 accept an ISO `updatedSince` and/or `updatedBefore` window. Most also accept
 `sort`, which takes `recentlyUpdated` (most recently updated first) or
 `leastRecentlyUpdated` — the latter is for finding work that has gone quiet,
-such as opportunities still EXPLORING or experiments parked in DESIGNING.
+such as opportunities still UNREVIEWED or EXPLORING or experiments parked in DESIGNING.
 
 Docs are the one entity here **without** a recency filter: the `docs://`
 resource that replaced `list_docs` (see [Docs](#docs) above) takes no

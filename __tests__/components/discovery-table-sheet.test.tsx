@@ -260,7 +260,7 @@ describe("DiscoveryTableView in sheet mode", () => {
         clientId: expect.any(String),
         title: "Reporting",
         customerSegment: null,
-        status: "EXPLORING",
+        status: "UNREVIEWED",
         squadId: null,
         description: null,
       },

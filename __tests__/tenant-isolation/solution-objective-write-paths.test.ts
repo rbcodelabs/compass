@@ -425,6 +425,7 @@ const KNOWN_PRISMA_CREATE_SITES: Record<string, number> = {
   "app/api/mcp/route.ts": 1,
   "e2e/functional/specs/canvas-doc.spec.ts": 3, // three solution fixtures (one card test, two for the tree builder), each created with the e2e workspace's workspaceId
   "e2e/functional/specs/decisions.spec.ts": 1,
+  "e2e/functional/specs/objective-linked-opportunities.spec.ts": 1, // one objective fixture helper, created with the e2e workspace's workspaceId
   "e2e/functional/specs/pm-interview.spec.ts": 1,
   "lib/opportunity-batch-create.ts": 1, // the shared Solution create core; workspaceId comes from the authorized workspace
   "lib/rest/execute.ts": 1,
@@ -448,6 +449,7 @@ const KNOWN_RAW_INSERT_SITES: Record<string, number> = {
   "__tests__/entity-links-solution-key-result-backfill.integration.test.ts": 3, // objective, solution and bulk-solution fixtures for the 098 backfill, each listing workspace_id (a null parameter simulates a row with no workspace)
   "__tests__/work-item-ids-backfill.integration.test.ts": 3, // legacy objective/solution/task fixtures for the 093 backfill; one objective deliberately has no workspace
   "e2e/functional/fixtures/seed-e2e.ts": 2,
+  "e2e/functional/specs/agent-conversation-links.spec.ts": 1, // one solution fixture for the conversation-links check, listing workspace_id
   "e2e/functional/specs/link-authoring.spec.ts": 2, // one objective and one solution for the synthetic workspace, each listing workspace_id
   "e2e/functional/specs/kanban-mobile-scroll.spec.ts": 2, // 1 literal solutions insert + 1 allow-listed dynamic (board.table)
   "e2e/functional/specs/markdown-description.spec.ts": 1, // allow-listed dynamic (kind)
@@ -455,6 +457,7 @@ const KNOWN_RAW_INSERT_SITES: Record<string, number> = {
   "e2e/functional/specs/opportunity-detail.spec.ts": 1,
   "e2e/functional/specs/opportunity-ost-tab.spec.ts": 2, // one objective and one solution for the OST-tab fixture, each listing workspace_id
   "e2e/functional/specs/opportunity-relationships.spec.ts": 1,
+  "e2e/functional/specs/solutions-board-dock.spec.ts": 1,
   "e2e/functional/specs/typed-links.spec.ts": 1, // objectives for the typed-link fixture, listing workspace_id
   "e2e/functional/specs/thinking-model-tree.spec.ts": 2, // one objective and one solution for the tree fixture, each listing workspace_id
   "scripts/verify-managed-pilot-migrations.ts": 1, // allow-listed dynamic (sentinel table)

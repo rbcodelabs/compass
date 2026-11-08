@@ -168,7 +168,7 @@ const SURFACES: Surface[] = [
   { name: "opportunity-card", ui: () => <OpportunityCard opportunity={oppCard(3)} {...common} />, custom: ["3 bets"] },
   {
     name: "opportunity-board empty",
-    ui: () => <OpportunityBoard opportunitiesByStatus={{ EXPLORING: [], VALIDATING: [], PRIORITIZED: [], ACTIVE: [], ARCHIVED: [] }} workspaceId="w1" {...common} />,
+    ui: () => <OpportunityBoard opportunitiesByStatus={{ UNREVIEWED: [], EXPLORING: [], VALIDATING: [], PRIORITIZED: [], ACTIVE: [], ARCHIVED: [] }} workspaceId="w1" {...common} />,
     custom: ["No problems yet", "Problem board", "Add problem"],
   },
   {

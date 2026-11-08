@@ -9,6 +9,7 @@ vi.mock("@/app/[orgSlug]/[workspaceSlug]/discovery/actions", () => ({
   archiveOpportunity: vi.fn(),
   moveOpportunity: vi.fn(),
   reorderOpportunity: vi.fn(),
+  reorderOpportunitiesInColumn: vi.fn(),
   createOpportunity: vi.fn(),
 }));
 
@@ -52,6 +53,7 @@ function opp(
 
 function byStatus(items: OpportunityCardData[]): Record<OpportunityStatus, OpportunityCardData[]> {
   return {
+    UNREVIEWED: [],
     EXPLORING: items,
     VALIDATING: [],
     PRIORITIZED: [],

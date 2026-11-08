@@ -67,14 +67,16 @@ describe.skipIf(!databaseUrl)("portal home layout registered migration", () => {
     const widget = createWidget("rich_text", 0)
     await saveDraft(app, workspaceId, [widget])
     await saveDraft(app, workspaceId, [widget, createWidget("announcement", 1)])
-    const rows = await prisma.portalHomeLayout.findMany({ where: { workspaceId } })
+    // Explicit select: this schema has only 074 applied, so the template columns (114) do not exist here. The service
+    // reads above (loadPublishedWidgets / loadHomeLayout) therefore also prove the pre-114 fallback against real Prisma.
+    const rows = await prisma.portalHomeLayout.findMany({ where: { workspaceId }, select: { id: true } })
     expect(rows).toHaveLength(1)
 
     // The draft is invisible to the customer read path.
     expect(await loadPublishedWidgets(app, workspaceId)).toBeNull()
     expect((await loadHomeLayout(app, workspaceId)).draft).toHaveLength(2)
 
-    await expect(prisma.portalHomeLayout.create({ data: { workspaceId, draftWidgets: [] } })).rejects.toMatchObject({ code: "P2002" })
+    await expect(prisma.portalHomeLayout.create({ data: { workspaceId, draftWidgets: [] }, select: { id: true } })).rejects.toMatchObject({ code: "P2002" })
 
     const { publishedAt } = await publishDraft(app, workspaceId, randomUUID())
     const published = await loadPublishedWidgets(app, workspaceId)

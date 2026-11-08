@@ -28,24 +28,48 @@ In Table view, select the chevron next to an opportunity to reveal its child sol
 
 On touch screens, swipe over card content to scroll vertically or move horizontally between board columns. Use the dotted drag handle to move a card instead. On desktop, column headers stay visible while their cards scroll.
 
-Opportunities move through four columns on the kanban board:
+Opportunities move through five statuses, from Unreviewed to Active (the table below is in that order). The kanban board shows them as columns with Unreviewed last. Every new opportunity starts in **UNREVIEWED**, however it is created (the board, the table, the composer, an agent, the API, or feedback you promote). Existing opportunities keep the status they already have.
 
-- **EXPLORING** — Newly created opportunities that are being investigated. You've heard this problem from customers but haven't yet assessed its importance or frequency.
-- **VALIDATING** — Opportunities that look promising and are being actively validated. You're gathering more customer evidence, running interviews, or analysing usage data.
-- **PRIORITIZED** — Opportunities that have been validated and selected for investment. Your team is working on solutions.
-- **ACTIVE** — The opportunity your team is actively building toward right now. Typically only one or two opportunities are ACTIVE at a time.
+| Status | What it means | Move it here when |
+|---|---|---|
+| **UNREVIEWED** | Raw and captured, but nobody has triaged it yet; this is the inbox. | Entered by default whenever an opportunity is created. |
+| **EXPLORING** | Triaged and worth understanding; you are gathering first customer signal, with no evidence bar yet. | Someone has triaged it and decided the problem is worth a closer look. |
+| **VALIDATING** | Promising; you are actively collecting evidence through interviews and experiments to confirm its size and frequency. | Early signal suggests a real, recurring problem and you have started gathering evidence. |
+| **PRIORITIZED** | Validated and selected for investment; the team is working out solutions. | The evidence confirms the problem is big and frequent enough, and the team has chosen to invest in it. |
+| **ACTIVE** | Being built toward right now; keep this to one or two opportunities at a time. | A solution is in delivery and the team is working on it this cycle. |
 
-Drag cards between columns to update status. Use **Filters** at the top of the page to filter opportunities by squad, or switch between **Board** and **Tree** views using the view control.
+**ARCHIVED** is not a column: it closes out an opportunity that is done, no longer relevant, or deliberately dropped.
+
+Hover the **i** next to a column title to read its definition and entry criterion. The status dropdown in an opportunity's header shows the same text, because both read from one shared definition.
+
+The board opens with Active, Prioritized, Validating and Exploring, followed by Unreviewed as the last column. Use the **Columns** control to reorder or hide any of them; saved views that predate Unreviewed simply pick it up as an extra column.
+
+Drag cards between columns to update status. Use **Filters** at the top of the page to filter opportunities by squad, or switch between **Board** and **Tree** views using the view control. By default the columns run **Active**, **Prioritized**, **Validating**, **Exploring** (work in flight first); you can [pin and reorder them](#pin-collapse-and-reorder-columns-on-the-opportunity-board).
+
+### Pin, collapse and reorder columns on the Opportunity board
+
+The Opportunity board uses the same **dock** as the [Solutions backlog](#pin-collapse-and-reorder-columns) and the Roadmap board. On a wide screen (the medium breakpoint and up), any status column can be **pinned**: it moves into one dock on the right, outside the scrolling area, so it stays put while the other columns scroll. Nothing is pinned until you pin it, so the board looks the same as before.
+
+The dock is **one slot**, however many columns you pin: a panel showing one pinned column, with a narrow rail of **tabs** at its right edge, one per pinned column (its name and card count). Pinning more columns adds tabs; it never makes the dock wider.
+
+- **Pin or unpin.** Use the pin button in a column’s header (it appears when you hover the header) or **Pin to the right** / **Unpin** in the column’s **⋯** menu. A pinned column becomes the active tab and the dock opens on it.
+- **Switch and collapse.** Click a tab to show that column. Click the active tab, or the **Collapse** button in the panel’s header, to close the panel and leave only the tab rail. Arrow keys move between tabs; Enter or Space shows one.
+- **Drag cards.** A tab is a drop target even while the dock is closed: drop a card on the **Active** tab and its status becomes Active. Cards in the open panel can be dragged out to any other column. Dragging a card up or down within a column (the open panel included) still sets its order, and **Sort by score** still switches that off and ranks every column, docked or not, by score.
+- **Reorder columns.** **Move left** / **Move right** in a column’s **⋯** menu, or **Move up** / **Move down** in the **Columns** menu in the header. Both change the same column order, and a pinned column’s place in that order is its place among the tabs. **Columns** also still shows and hides columns; a hidden column that holds cards is shown anyway.
+- **Narrow screens.** Below the medium breakpoint nothing is docked: pinned columns appear in the scrolling board in their saved order, and the pin button is hidden. Your layout comes back when the screen is wide again.
+- Only the **Status** grouping docks. The custom-field board ([Card sorting by a custom field](#card-sorting-by-a-custom-field)) ignores pinning.
+
+Which columns are pinned, which tab is active, whether the dock is open and the column order are part of a saved view (the **Modified** badge appears when they differ from it, and **Reset** puts the saved layout back). With no saved view selected, Compass remembers the layout in this browser for each workspace. Views saved before this existed keep their column order, and a layout that can’t be read falls back to the default order with the rest of the view intact. Every status column can be pinned, **Unreviewed** included, and a layout saved before the Unreviewed column existed picks it up as the last column.
 
 ### Exporting opportunities to CSV
 
-Open the **⋯** (Discovery tools) menu and choose **Export CSV** to download the opportunities on the page as a spreadsheet-ready file. The export respects the squad and tag filters currently applied, so the file matches what you are looking at; view, group-by and sort are presentation only and do not change it. Columns: Title, Status, Squad, Customer segment, Score, Solutions, Evidence, and a Link back to the opportunity. Rows are ordered by status (Exploring, Validating, Prioritized, Active, then Archived), keeping the manual order within each status. Archived opportunities are included, so filter the Status column in your spreadsheet to hide them. Score is blank when an opportunity has no score or the workspace has no active scoring model.
+Open the **⋯** (Discovery tools) menu and choose **Export CSV** to download the opportunities on the page as a spreadsheet-ready file. The export respects the squad and tag filters currently applied, so the file matches what you are looking at; view, group-by and sort are presentation only and do not change it. Columns: Title, Status, Squad, Customer segment, Score, Solutions, Evidence, and a Link back to the opportunity. Rows are ordered by status (Exploring, Validating, Prioritized, Active, Unreviewed, then Archived), keeping the manual order within each status. Archived opportunities are included, so filter the Status column in your spreadsheet to hide them. Score is blank when an opportunity has no score or the workspace has no active scoring model.
 
 ### Group by: Status or a custom field
 
 In Board view, use the **Group by** picker next to Filters to switch how cards are grouped:
 
-- **Status** (default) — the Opportunity board described above, columns are Opportunity statuses.
+- **Status** (default) — the Opportunity board described above, columns are Opportunity statuses. This is the only grouping whose columns can be pinned.
 - **A custom field** — every Opportunity single-select custom field with at least one option is listed after the built-in groupings (for example a **MoSCoW** field with Must, Should, Could, and Won't). See [Card sorting by a custom field](#card-sorting-by-a-custom-field) below.
 
 Solutions are not grouped here any more — they have their own backlog, described in [The Solutions backlog](#the-solutions-backlog). An old link with `groupBy=opportunity` opens that page instead.
@@ -123,7 +147,7 @@ Linked Feedback and Evidence are separate records. Linking a feedback item does 
 
 ## The Solutions backlog
 
-Discovery is the Opportunity backlog. To see every Solution against each other, open **Solutions** in the sidebar (next to Opportunities). It is a flat board of all the Solutions in the workspace, with one column per status: **Idea**, **Validated**, **In delivery**, **Shipped**, **Killed**.
+Discovery is the Opportunity backlog. To see every Solution against each other, open **Solutions** in the sidebar (next to Opportunities). It is a flat board of all the Solutions in the workspace, with one column per status. By default the columns run **In delivery**, **Validated**, **Idea**, **Shipped**, **Killed** (work in flight first); you can [pin and reorder them](#pin-collapse-and-reorder-columns).
 
 - Each card shows the Solution title, its parent Opportunity (click it to open that Opportunity), a score badge when the workspace has an active Solution scoring model, and its assumption and evidence counts. Click the title to open the Solution panel.
 - Drag a card to another column to change its status. Order within a column is not draggable here, because a column mixes Solutions from many Opportunities; use **Sort by score** (shown when a Solution scoring model is active) to rank them instead.
@@ -132,7 +156,7 @@ Discovery is the Opportunity backlog. To see every Solution against each other, 
 
 ### Board and table views
 
-The **Board / Table** toggle switches between the status board and a flat table (`?view=table`). The table has one row per Solution: title (opens the Solution panel), parent Opportunity (a link), squad, status, score (only with an active Solution scoring model), evidence, and assumptions. Rows run from Idea to Killed in board order; **Sort by score** ranks them by score instead. The table respects the same filters as the board.
+The **Board / Table** toggle switches between the status board and a flat table (`?view=table`). The table has one row per Solution: title (opens the Solution panel), parent Opportunity (a link), squad, status, score (only with an active Solution scoring model), evidence, and assumptions. Rows run in lifecycle order, Idea to Killed (not the board’s column order); **Sort by score** ranks them by score instead. The table respects the same filters as the board.
 
 ### Group by
 
@@ -146,6 +170,21 @@ On the board, **Group by** changes what the columns are (`?groupBy=`):
 Squad, Opportunity and custom-field groupings are read-only: cards cannot be dragged between those columns (a Solution’s squad and parent belong to its Opportunity, and Solution field values are edited in the Solution panel). Use a card’s **⋯** menu to change status, or switch back to Status to drag. An unknown or stale `groupBy` value (for example a deleted field) opens the Status board.
 
 Columns keep a minimum width and the board scrolls sideways when the screen is narrower.
+
+### Pin, collapse and reorder columns
+
+On the **Status** board, on a wide screen (the medium breakpoint and up), any column can be **pinned**: it moves into the **dock** on the right, outside the scrolling area, so it stays put while the other columns scroll. **Shipped** and **Killed** are natural candidates, since they sit at the far end of the board and are the places you drop finished or abandoned work. Nothing is pinned until you pin it, so the board looks the same as before.
+
+The dock is **one slot**, however many columns you pin: a panel showing one pinned column, with a narrow rail of **tabs** at its right edge, one per pinned column (its name and card count). Pinning more columns adds tabs; it never makes the dock wider.
+
+- **Pin or unpin.** Use the pin button in a column’s header (it appears when you hover the header) or **Pin to the right** / **Unpin** in the column’s **⋯** menu. A pinned column becomes the active tab and the dock opens on it.
+- **Switch and collapse.** Click a tab to show that column. Click the active tab, or the **Collapse** button in the panel’s header, to close the panel and leave only the tab rail. Arrow keys move between tabs; Enter or Space shows one.
+- **Drag cards onto a tab.** A tab is a drop target even while the dock is closed: drop a card on the **Shipped** tab and its status becomes Shipped. Cards in the open panel can be dragged out to any other column.
+- **Reorder.** **Move left** / **Move right** in a column’s **⋯** menu, or **Move up** / **Move down** in the **Columns** menu in the header. Both change the same column order, and a pinned column’s place in that order is its place among the tabs. **Columns** also still shows and hides columns; a hidden column that holds cards is shown anyway.
+- **Narrow screens.** Below the medium breakpoint nothing is docked: pinned columns appear in the scrolling board in their saved order, and the pin button is hidden. Your layout comes back when the screen is wide again.
+- Only the **Status** grouping docks. The Squad, Opportunity and custom-field groupings are read-only boards and ignore pinning.
+
+Which columns are pinned, which tab is active, whether the dock is open and the column order are part of a saved view (the **Modified** badge appears when they differ from it, and **Reset** puts the saved layout back). With no saved view selected, Compass remembers the layout in this browser for each workspace. Views saved before this existed keep their column order, and a layout that can’t be read falls back to the default order with the rest of the view intact.
 
 ## Solutions
 
