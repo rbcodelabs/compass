@@ -286,6 +286,15 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
   const fileInputRef = useRef<HTMLInputElement>(null);
   const titleRef = useRef<HTMLTextAreaElement>(null);
 
+  const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showSavedBriefly = useCallback((saved: boolean) => {
+    if (savedTimer.current) clearTimeout(savedTimer.current);
+    savedTimer.current = null;
+    setSavedVisible(saved);
+    if (saved) savedTimer.current = setTimeout(() => setSavedVisible(false), 2500);
+  }, []);
+  useEffect(() => () => { if (savedTimer.current) clearTimeout(savedTimer.current); }, []);
+
   const saveQueue = useMemo(() => createDocumentSaveQueue<SaveChange>({
     revision: doc.revision,
     execute: async (change, token) => {
@@ -305,6 +314,7 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
     },
     onState: (state) => {
       queueState.current = state;
+      showSavedBriefly(state === "saved");
       // A save settling is the moment a held-back server copy can be judged (our own revision is now known, or the save conflicted).
       if (state !== "saving") queueMicrotask(() => reconcileRef.current());
       setSaveStatus(state === "saved" && pendingContent.current !== null ? "saving" : state);
@@ -313,13 +323,6 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
   // A server revalidation must not replace the queue's revision or unsaved draft.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [doc.id, revalidatePathStr]);
-
-  useEffect(() => {
-    if (saveStatus !== "saved") { setSavedVisible(false); return; }
-    setSavedVisible(true);
-    const timer = setTimeout(() => setSavedVisible(false), 2500);
-    return () => clearTimeout(timer);
-  }, [saveStatus]);
 
   const flushContent = useCallback(() => {
     if (debounceTimer.current) clearTimeout(debounceTimer.current);

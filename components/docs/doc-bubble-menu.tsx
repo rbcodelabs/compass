@@ -55,7 +55,7 @@ export function DocBubbleMenu({
     }),
   });
   const suppressedRef = useRef(suppressed);
-  suppressedRef.current = suppressed;
+  useEffect(() => { suppressedRef.current = suppressed; }, [suppressed]);
   const options = useMemo(
     () => ({
       strategy: "fixed" as const,

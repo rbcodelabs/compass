@@ -33,6 +33,22 @@ function blockAt(editor: Editor, clientY: number): { pos: number; dom: HTMLEleme
   return dom instanceof HTMLElement ? { pos: start, dom } : null;
 }
 
+/** Start a ProseMirror drag of the block at `pos`: select it as a node and hand the editor the slice, so its own drop handling moves it. */
+function beginBlockDrag(editor: Editor, pos: number, dataTransfer: DataTransfer) {
+  const { view } = editor;
+  const dom = view.nodeDOM(pos);
+  const selection = NodeSelection.create(view.state.doc, pos);
+  view.dispatch(view.state.tr.setSelection(selection));
+  view.dragging = { slice: selection.content(), move: true };
+  dataTransfer.effectAllowed = "move";
+  dataTransfer.setData("text/plain", " ");
+  if (dom instanceof HTMLElement) dataTransfer.setDragImage(dom, 0, 0);
+}
+
+function endBlockDrag(editor: Editor) {
+  editor.view.dragging = null;
+}
+
 export function DocBlockHandle({ editor, containerRef }: { editor: Editor; containerRef: React.RefObject<HTMLElement | null> }) {
   const [target, setTarget] = useState<Target | null>(null);
   const overHandle = useRef(false);
@@ -96,21 +112,14 @@ export function DocBlockHandle({ editor, containerRef }: { editor: Editor; conta
   function onDragStart(event: React.DragEvent<HTMLButtonElement>) {
     const current = targetRef.current;
     if (!current) { event.preventDefault(); return; }
-    const { view } = editor;
-    const dom = view.nodeDOM(current.pos);
-    const selection = NodeSelection.create(view.state.doc, current.pos);
-    view.dispatch(view.state.tr.setSelection(selection));
-    view.dragging = { slice: selection.content(), move: true };
     dragging.current = true;
-    event.dataTransfer.effectAllowed = "move";
-    event.dataTransfer.setData("text/plain", " ");
-    if (dom instanceof HTMLElement) event.dataTransfer.setDragImage(dom, 0, 0);
+    beginBlockDrag(editor, current.pos, event.dataTransfer);
   }
 
   function onDragEnd() {
     dragging.current = false;
     overHandle.current = false;
-    editor.view.dragging = null;
+    endBlockDrag(editor);
     update(null);
   }
 
