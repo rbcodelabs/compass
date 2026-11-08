@@ -44,6 +44,8 @@ describe("groupGalleryItems", () => {
 describe("loadRoadmapGalleryExtras", () => {
   const WS = "ws"
   const rev = (id: string, thumb: boolean) => ({ id, thumbnailPathname: thumb ? "p" : null, thumbnailWidth: thumb ? 800 : null, thumbnailHeight: thumb ? 500 : null, thumbnailCapturedAt: thumb ? new Date(5) : null })
+  // Hand-rolled partial Prisma transaction client: only the delegates the loader touches are stubbed.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let db: any
   beforeEach(() => {
     db = {
