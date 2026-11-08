@@ -26,7 +26,7 @@ export const BOARD_COLUMN_LABELS: Record<BoardColumnId, string> = {
 }
 
 /** Geode's order: in-flight first, then what needs a look, then settled, then failures. */
-const COLUMN_ORDER: BoardColumnId[] = ["working", "new", "done", "failed", "ready"]
+export const BOARD_COLUMN_ORDER: readonly BoardColumnId[] = ["working", "new", "done", "failed", "ready"]
 
 /** Shown even when empty, so the board never reads as broken. Every other empty column is hidden. */
 const ALWAYS_SHOWN: ReadonlySet<BoardColumnId> = new Set(["working", "new"])
@@ -62,10 +62,10 @@ export function classifyBoardCard(card: Pick<AgentBoardCard, "runStatus" | "mess
 }
 
 export function bucketizeBoard(cards: readonly AgentBoardCard[]): AgentBoardColumn[] {
-  const buckets = new Map<BoardColumnId, AgentBoardCard[]>(COLUMN_ORDER.map((id) => [id, []]))
+  const buckets = new Map<BoardColumnId, AgentBoardCard[]>(BOARD_COLUMN_ORDER.map((id) => [id, []]))
   for (const card of cards) buckets.get(classifyBoardCard(card))!.push(card)
 
-  return COLUMN_ORDER.flatMap((id) => {
+  return BOARD_COLUMN_ORDER.flatMap((id) => {
     const bucket = buckets.get(id)!
     if (bucket.length === 0 && !ALWAYS_SHOWN.has(id)) return []
     const sorted = [...bucket].sort((a, b) => time(b.lastActivityAt) - time(a.lastActivityAt))
