@@ -14,7 +14,9 @@ export async function clickNewDoc(page: Page): Promise<void> {
   await page.getByTestId("library-create-menu").click();
   await page.getByRole("menuitem", { name: "New doc" }).click();
   await page.waitForURL((url) => url.href !== before && /\/docs\/[0-9a-f-]+$/.test(url.pathname), { timeout: 15_000 });
-  // The rail may be an overlay drawer that covers the page; close it so the editor and its controls are reachable.
-  if ((await toggle.getAttribute("aria-pressed")) === "true") await toggle.click();
-  await page.getByTestId("library-toggle").and(page.locator('[aria-pressed="false"]')).waitFor();
+  // The rail may be an overlay drawer that covers the page; close it so the editor and its controls are reachable. A docked rail has
+  // nothing to uncover, so this is best effort.
+  const hide = page.getByRole("button", { name: "Hide library" });
+  if (await hide.isVisible().catch(() => false)) await hide.click({ timeout: 3_000 }).catch(() => {});
+  await page.locator('aside[data-mode="overlay"][aria-label="Library"]').waitFor({ state: "hidden", timeout: 3_000 }).catch(() => {});
 }
