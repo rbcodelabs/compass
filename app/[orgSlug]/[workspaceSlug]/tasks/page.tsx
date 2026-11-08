@@ -66,15 +66,22 @@ export default async function TasksPage({ params, searchParams }: TasksPageProps
   const search = await searchParams;
   const prisma = getPrisma();
 
-  const workspace = await getWorkspace(orgSlug, workspaceSlug, session.user.id);
+  // The workspace and the saved-view actor only need the user and org, so they resolve together.
+  const [workspace, savedActor] = await Promise.all([
+    getWorkspace(orgSlug, workspaceSlug, session.user.id),
+    resolveSavedViewActor(session.user.id, orgSlug),
+  ]);
   if (!workspace) notFound();
 
   // Saved views (personal). A stale, foreign or invisible ?saved= id falls through to the defaults. The filters and the
   // Board/List choice are resolved from the URL over the selected view, with the same pure function the header uses.
-  const savedActor = await resolveSavedViewActor(session.user.id, orgSlug);
-  const savedViews = savedActor ? await listSavedViews(savedActor, "TASKS_BOARD", workspace.id) : [];
+  // The list is started now but only AWAITED here when a view is selected (its filters decide what the page queries);
+  // otherwise it runs alongside the page's own queries and is awaited after them, so it adds no latency to a plain visit.
+  const savedViewsPromise = savedActor ? listSavedViews(savedActor, "TASKS_BOARD", workspace.id) : Promise.resolve([]);
+  savedViewsPromise.catch(() => undefined); // awaited below; this only keeps an early notFound/redirect from leaving it unhandled
   const savedParam = Array.isArray(search.saved) ? search.saved[0] : search.saved;
-  const selectedView = savedParam ? (savedViews.find((v) => v.id === savedParam) ?? null) : null;
+  const selectedViews = savedParam ? await savedViewsPromise : [];
+  const selectedView = savedParam ? (selectedViews.find((v) => v.id === savedParam) ?? null) : null;
   const selectedState: TasksState | null = selectedView
     ? { filters: selectedView.filters as TasksState["filters"], display: selectedView.display as TasksState["display"] }
     : null;
@@ -132,6 +139,8 @@ export default async function TasksPage({ params, searchParams }: TasksPageProps
       orderBy: { createdAt: "asc" },
     }),
   ]);
+
+  const savedViews = await savedViewsPromise;
 
   const squads: SquadData[] = rawSquads.map((s) => ({ id: s.id, name: s.name, color: s.color }));
 
