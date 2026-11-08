@@ -23,7 +23,7 @@ export type LinkedEntitiesTarget = { linkType: string; entityType: string; entit
  * the type does not apply (feature flag off, entity not eligible) and only offers candidates the service
  * would accept.
  */
-export function LinkedEntitiesSection({ orgSlug, workspaceSlug, target, title, refreshKey }: { orgSlug: string; workspaceSlug: string; target: LinkedEntitiesTarget; /** Changing this reloads the section (e.g. the viewed record was archived, which changes whether it can take a new link). */ refreshKey?: string; /** Overrides the registry label as the heading (e.g. "Linked experiments"). */ title?: string }) {
+export function LinkedEntitiesSection({ orgSlug, workspaceSlug, target, title, refreshKey, fullWidth }: { orgSlug: string; workspaceSlug: string; target: LinkedEntitiesTarget; /** Changing this reloads the section (e.g. the viewed record was archived, which changes whether it can take a new link). */ refreshKey?: string; /** Fill the container instead of capping at a readable column width (for pages whose other cards are full width). */ fullWidth?: boolean; /** Overrides the registry label as the heading (e.g. "Linked experiments"). */ title?: string }) {
   const [view, setView] = useState<LinkedEntitiesView | null>(null)
   const [loaded, setLoaded] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -81,7 +81,7 @@ export function LinkedEntitiesSection({ orgSlug, workspaceSlug, target, title, r
   const heading = title ?? view?.label ?? "Links"
   const idBase = `linked-entities-${linkType}-${entityId}`
 
-  return <section aria-label={title ?? (view ? `${heading} ${plural}` : "Links")} data-link-type={linkType} className="flex max-w-3xl flex-col gap-3 rounded-xl border bg-surface-panel p-4">
+  return <section aria-label={title ?? (view ? `${heading} ${plural}` : "Links")} data-link-type={linkType} className={`flex flex-col gap-3 rounded-xl border bg-surface-panel p-4${fullWidth ? "" : " max-w-3xl"}`}>
     <div>
       <h2 className="text-sm font-semibold">{heading}</h2>
       <p className="text-xs text-muted-foreground">{capitalize(plural)}. Linking never changes either record&apos;s status, settings or results.</p>
