@@ -1,6 +1,6 @@
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto"
 import { head } from "@vercel/blob"
-import { generateClientTokenFromReadWriteToken } from "@vercel/blob/client"
+import { createDirectUploadToken } from "@/lib/storage/direct-upload"
 import { getPublicFileStore } from "@/lib/storage/public-store"
 
 import {
@@ -246,12 +246,12 @@ export async function prepareFeedbackAttachmentUpload(input: {
   const pathname = `feedback/${input.workspaceId}/${randomUUID()}-${sanitizeFeedbackAttachmentFilename(input.filename)}`
   const attachmentId = randomUUID()
   const expiresAt = Date.now() + DIRECT_UPLOAD_TTL_MS
-  const clientToken = await generateClientTokenFromReadWriteToken({
+  const clientToken = await createDirectUploadToken({
+    store: "public",
     pathname,
     allowedContentTypes: [input.fileType],
-    maximumSizeInBytes: input.fileSize,
+    maxBytes: input.fileSize,
     validUntil: expiresAt,
-    addRandomSuffix: false,
     allowOverwrite: false,
   })
   const receipt = createFeedbackUploadReceipt({ version: 1, attachmentId, ...input, pathname, expiresAt })
