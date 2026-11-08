@@ -206,7 +206,7 @@ function SolidCard({ card, ctx }: { card: PlacedCard; ctx: CardContext }) {
   const article = (
     <EntityCard
       interactive
-      selected={landed || isPanelOpen(panel, ctx.panelType, card.objectId)}
+      selected={isPanelOpen(panel, ctx.panelType, card.objectId)}
       title={
         <button
           type="button"
