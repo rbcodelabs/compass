@@ -160,7 +160,7 @@ export function BlockSlashMenu({
 
   // Keep the highlighted row in view while arrowing through a long list.
   useEffect(() => {
-    menuRef.current?.querySelector<HTMLElement>('[aria-selected="true"]')?.scrollIntoView({ block: "nearest" });
+    menuRef.current?.querySelector<HTMLElement>('[aria-selected="true"]')?.scrollIntoView?.({ block: "nearest" });
   }, [highlight, active]);
 
   if (!editor || !active || visible.length === 0 || typeof document === "undefined") return null;

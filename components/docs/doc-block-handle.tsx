@@ -41,6 +41,8 @@ export function DocBlockHandle({ editor, containerRef }: { editor: Editor; conta
 
   const update = useCallback((next: Target | null) => {
     targetRef.current = next;
+    // Unmounting the handle under the pointer never delivers a mouseleave, so clear the flag here or the handle could never reappear.
+    if (!next) overHandle.current = false;
     setTarget((previous) => (previous && next && previous.pos === next.pos && previous.top === next.top ? previous : next));
   }, []);
 

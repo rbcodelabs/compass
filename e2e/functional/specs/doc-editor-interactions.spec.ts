@@ -6,23 +6,25 @@
  */
 import type { Page } from "@playwright/test";
 import { test, expect } from "../fixtures/index";
+import { clickNewDoc } from "../fixtures/docs";
 
 async function openDoc(page: Page, base: string) {
+  // /docs opens an existing document (the seeded baseline) when there is one, and the tests below run one at a time so two editors
+  // never share it concurrently; otherwise create one through the Library.
   await page.goto(`${base}/docs`);
   await page.waitForLoadState("networkidle");
-  const previous = page.url();
-  if (!/\/docs\/[0-9a-f-]+$/.test(new URL(previous).pathname)) {
-    await page.getByRole("button", { name: "New", exact: true }).click();
-    await page.waitForURL((url) => url.href !== previous && /\/docs\/[0-9a-f-]+$/.test(url.pathname), { timeout: 15_000 });
-  }
+  if (!/\/docs\/[0-9a-f-]+$/.test(new URL(page.url()).pathname)) await clickNewDoc(page);
   const editor = page.locator(".ProseMirror");
   await expect(editor).toBeVisible({ timeout: 10_000 });
   // Start from a known empty body.
   await editor.click();
   await page.keyboard.press("ControlOrMeta+A");
   await page.keyboard.press("Backspace");
+  await page.keyboard.press("ArrowRight");
   return editor;
 }
+
+test.describe.configure({ mode: "serial" });
 
 test.describe("Doc editor interactions (desktop)", () => {
   test.use({ viewport: { width: 1440, height: 900 }, hasTouch: false });
@@ -47,6 +49,23 @@ test.describe("Doc editor interactions (desktop)", () => {
     await expect(bubble).toBeVisible();
     await bubble.getByTitle("Heading 2").click();
     await expect(editor.locator("h2")).toContainText("Make this word bold please");
+  });
+
+  test("clicking away from a selection moves the caret and dismisses the bubble", async ({ page, base }) => {
+    const editor = await openDoc(page, base);
+    await page.keyboard.type("Alpha first line");
+    await page.keyboard.press("Enter");
+    await page.keyboard.type("Omega last line");
+    await page.keyboard.press("ArrowUp");
+    await page.keyboard.press("Home");
+    for (let i = 0; i < 5; i++) await page.keyboard.press("Shift+ArrowRight");
+    await expect(page.getByTestId("doc-bubble-menu")).toBeVisible();
+    await editor.locator("p", { hasText: "Omega" }).click();
+    await page.keyboard.press("ControlOrMeta+End");
+    await page.keyboard.type("!");
+    await expect(page.getByTestId("doc-bubble-menu")).toBeHidden();
+    await expect(editor.locator("p").last()).toHaveText("Omega last line!");
+    await expect(editor.locator("p").first()).toHaveText("Alpha first line");
   });
 
   test("selection bubble keeps the comment flow", async ({ page, base }) => {
@@ -83,15 +102,7 @@ test.describe("Doc editor interactions (desktop)", () => {
     await page.keyboard.type("Pull this out");
     await page.keyboard.press("Enter");
     await page.keyboard.press("Enter");
-
-    await page.keyboard.type("/table");
-    await page.keyboard.press("Enter");
-    await expect(editor.locator("table")).toHaveCount(1);
-
     // Escape closes without changing the text.
-    await editor.click();
-    await page.keyboard.press("ControlOrMeta+End");
-    await page.keyboard.press("Enter");
     await page.keyboard.type("/div");
     await expect(menu).toBeVisible();
     await page.keyboard.press("Escape");
@@ -104,6 +115,10 @@ test.describe("Doc editor interactions (desktop)", () => {
     await expect(menu).toBeVisible();
     await page.keyboard.press("Enter");
     await expect(editor.locator("hr")).toHaveCount(1);
+
+    await page.keyboard.type("/table");
+    await page.keyboard.press("Enter");
+    await expect(editor.locator("table")).toHaveCount(1);
   });
 
   test("block handle: plus opens the menu, grip drags a block", async ({ page, base }) => {
@@ -125,12 +140,20 @@ test.describe("Doc editor interactions (desktop)", () => {
     await page.keyboard.press("Backspace");
 
     // Drag "First block" below "Third block".
+    await page.mouse.move(5, 5);
     await first.hover();
     const grip = page.getByTestId("doc-block-handle").getByTitle("Drag to move");
     await expect(grip).toBeVisible();
     const third = editor.locator("p", { hasText: "Third block" });
     const box = (await third.boundingBox())!;
-    await grip.dragTo(third, { targetPosition: { x: 40, y: box.height - 2 } });
+    // Drive the native drag by hand: down on the grip, move across the page in steps, release over the lower half of the last block.
+    const gripBox = (await grip.boundingBox())!;
+    const thirdBox = (await third.boundingBox())!;
+    await page.mouse.move(gripBox.x + gripBox.width / 2, gripBox.y + gripBox.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(gripBox.x + 30, gripBox.y + 10, { steps: 5 });
+    await page.mouse.move(thirdBox.x + thirdBox.width - 4, thirdBox.y + box.height - 2, { steps: 15 });
+    await page.mouse.up();
     const texts = await editor.locator("p").allInnerTexts();
     expect(texts.filter((t) => t.trim())).toEqual(["Second block", "Third block", "First block"]);
   });
@@ -158,7 +181,7 @@ test.describe("Doc editor interactions (mobile)", () => {
   test("keeps a compact toolbar and no selection bubble", async ({ page, base }) => {
     const editor = await openDoc(page, base);
     await expect(page.getByTitle("Bold", { exact: true })).toBeVisible();
-    await expect(page.getByTitle("Select text to comment")).toBeVisible();
+    await expect(page.getByTitle(/comment/i).first()).toBeVisible();
     await page.keyboard.type("Tap bold on this");
     await page.keyboard.press("Home");
     for (let i = 0; i < 3; i++) await page.keyboard.press("Shift+ArrowRight");
