@@ -83,6 +83,7 @@ Key Results and Objectives are the bridge between outcomes and work.
 
 - **Opportunity → Key Result.** When you create an Opportunity on the Discovery board, you can choose its **Driving Key Result**, the one measure it is expected to move. An opportunity has at most one.
 - **Opportunity ↔ Objective.** An opportunity can also be linked directly to any number of Objectives, to record that you chose to pursue it for them. Choosing a Driving Key Result links the opportunity to that Key Result's Objective automatically. The box for adding other Objectives appears on opportunities in workspaces using the Opportunity-first or Torres model (see [Thinking models](/help/27-thinking-models)).
+- **See them from the Objective.** An Objective's detail panel has a read-only **Linked Opportunities** list of the opportunities linked to it directly or through its Key Results, ranked by raw score when the workspace scores opportunities (see [Detail panel](/help/14-detail-panel#linked-opportunities-on-an-objective)).
 - **Solution ↔ Key Result.** A solution can be linked to the Key Results it is meant to move; on the Opportunity-first and Torres models the solution's panel has a **Linked Key Results** box for making them, and the workspace tree and Canvas show them. Agents make the same links with the link tools in the [MCP API](/help/09-mcp-api#typed-links).
 - **Roadmap items** can also be linked to KRs, so you always have a clear line from "what we decided to build" back to "why we decided to build it."
 

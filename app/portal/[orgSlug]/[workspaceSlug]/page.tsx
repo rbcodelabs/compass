@@ -6,7 +6,7 @@ import { EmptyHome, PortalHomeBoard } from "@/components/portal-home/board";
 import { PortalHomeEditor } from "@/components/portal-home/editor";
 import { buildDefaultWidgets } from "@/lib/portal-home/defaults";
 import { resolveCustomerAvailability, resolveHomeForCustomer, resolveHomeForMember } from "@/lib/portal-home/resolve";
-import { loadHomeLayout, loadPublishedWidgets } from "@/lib/portal-home/service";
+import { loadHomeLayout, loadPublishedHome } from "@/lib/portal-home/service";
 
 type Props = {
   params: Promise<{ orgSlug: string; workspaceSlug: string }>;
@@ -59,12 +59,12 @@ export default async function PortalHomePage({ params }: Props) {
 
   // Customers only ever read the PUBLISHED layout (or the default). Visibility
   // and public-data rules are applied server-side inside resolveHomeForCustomer.
-  const published = await loadPublishedWidgets(prisma, workspace.id);
+  const { widgets: published, template } = await loadPublishedHome(prisma, workspace.id);
   const baseline = published ?? defaults;
   const home = await resolveHomeForCustomer(resolveContext, baseline, { signedIn: !!portalSession });
   const board =
     home.widgets.length > 0 ? (
-      <PortalHomeBoard widgets={home.widgets} resolved={home.resolved} />
+      <PortalHomeBoard widgets={home.widgets} resolved={home.resolved} template={template} />
     ) : (
       <EmptyHome>Nothing to show here yet. Check back soon.</EmptyHome>
     );
@@ -84,6 +84,8 @@ export default async function PortalHomePage({ params }: Props) {
       workspaceSlug={workspaceSlug}
       initialDraft={draft}
       initialBaseline={baseline}
+      initialTemplate={layout.hasRow ? layout.draftTemplate : template}
+      initialBaselineTemplate={template}
       publishedAt={layout.publishedAt?.toISOString() ?? null}
       initialResolved={initialResolved}
       initialCustomerAvailability={initialCustomerAvailability}

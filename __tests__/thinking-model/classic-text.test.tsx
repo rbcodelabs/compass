@@ -282,7 +282,7 @@ describe("CLASSIC text is identical to main (Phase 4C-2 surfaces)", () => {
   check("opportunity-card 3", <OpportunityCard opportunity={oppCard(3)} {...common} />)
   check(
     "opportunity-board empty",
-    <OpportunityBoard opportunitiesByStatus={{ EXPLORING: [], VALIDATING: [], PRIORITIZED: [], ACTIVE: [], ARCHIVED: [] }} workspaceId="w1" {...common} />,
+    <OpportunityBoard opportunitiesByStatus={{ UNREVIEWED: [], EXPLORING: [], VALIDATING: [], PRIORITIZED: [], ACTIVE: [], ARCHIVED: [] }} workspaceId="w1" {...common} />,
   )
   check(
     "opportunity-field-board",

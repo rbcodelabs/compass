@@ -18,7 +18,7 @@ import { csvDownloadResponse, csvFilenameStem } from "@/lib/csv";
  * Board status order (active statuses, then archived) matches the page, with the
  * Status column kept in the file so archived rows can be filtered out in a sheet.
  */
-const STATUS_ORDER = ["EXPLORING", "VALIDATING", "PRIORITIZED", "ACTIVE", "ARCHIVED"] as const;
+const STATUS_ORDER = ["EXPLORING", "VALIDATING", "PRIORITIZED", "ACTIVE", "UNREVIEWED", "ARCHIVED"] as const;
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);

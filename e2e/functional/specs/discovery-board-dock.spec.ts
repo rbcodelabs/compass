@@ -2,7 +2,7 @@
  * Opportunities (Discovery) status board dock (Compass TASK-109, PR 3 of the consistent pinned/tabbed dock program).
  *
  * The Opportunity board, grouped by status, uses the same ONE-dock-with-tabs as the roadmap and Solutions boards:
- *   1. Nothing is pinned by default: no dock, the Active-first order (Active, Prioritized, Validating, Exploring).
+ *   1. Nothing is pinned by default: no dock, the Active-first order (Active, Prioritized, Validating, Exploring, Unreviewed).
  *   2. Pin VALIDATING, then ACTIVE: one dock, two tabs (column order), constant width; switch tabs.
  *   3. Drag and drop with the dock: drop an Exploring card on a dock TAB (it registers under the column's own
  *      `column-<status>` droppable id), drag a card out of the docked panel into a scroller column, and the IN-COLUMN
@@ -69,7 +69,15 @@ const tab = (page: Page, title: string) => dock(page).getByRole("tab", { name: n
 const panel = (page: Page) => dock(page).getByRole("tabpanel");
 const tabTitles = async (page: Page) => (await tabs(page).evaluateAll((els) => els.map((el) => el.getAttribute("aria-label") ?? ""))).map((l) => l.replace(/ \(\d+\)$/, ""));
 const tabCount = async (page: Page, title: string) => Number(/\((\d+)\)$/.exec((await tab(page, title).getAttribute("aria-label")) ?? "")?.[1]);
-const columnTitles = (root: Locator) => root.locator("section > header h3").allTextContents();
+// A column title carries a status-definition hint (an info button); only the name counts here.
+const columnTitles = (root: Locator) =>
+  root.locator("section > header h3").evaluateAll((els) =>
+    els.map((el) => {
+      const copy = el.cloneNode(true) as HTMLElement;
+      copy.querySelectorAll("[data-slot=tooltip-trigger]").forEach((node) => node.remove());
+      return (copy.textContent ?? "").replace(/hidden in view, has cards/, "").trim();
+    }),
+  );
 const dockWidth = async (page: Page) => (await dock(page).boundingBox())!.width;
 const column = (page: Page, status: string) => page.locator(`[data-slot='opportunity-board-column'][data-status='${status}']`);
 const cardOf = (root: Locator, title: string) => root.locator("[data-flip-id]", { hasText: title });
@@ -198,7 +206,7 @@ test.describe("Opportunity board dock", () => {
       await page.waitForLoadState("networkidle");
       await expect(column(page, "EXPLORING").getByText(titles.exploringOne)).toBeVisible({ timeout: 30_000 });
       await expect(dock(page)).toHaveCount(0);
-      expect(await columnTitles(scroller(page))).toEqual(["Active", "Prioritized", "Validating", "Exploring"]);
+      expect(await columnTitles(scroller(page))).toEqual(["Active", "Prioritized", "Validating", "Exploring", "Unreviewed"]);
       await expect(page.getByRole("button", { name: "Pin Exploring to the right" })).toBeAttached();
       await shot(page, "desktop-1-default");
 
@@ -224,7 +232,7 @@ test.describe("Opportunity board dock", () => {
       await tab(page, "Validating").click();
       await expect(panel(page).getByText(titles.validating)).toBeVisible();
       await expect(panel(page).getByText(titles.activeOne)).toHaveCount(0);
-      expect(await columnTitles(scroller(page))).toEqual(["Prioritized", "Exploring"]);
+      expect(await columnTitles(scroller(page))).toEqual(["Prioritized", "Exploring", "Unreviewed"]);
       await shot(page, "desktop-3-two-pinned-tab-switch");
 
       // ── 3. Drag and drop with the dock ───────────────────────────────────────
@@ -298,18 +306,18 @@ test.describe("Opportunity board dock", () => {
       await shot(page, "desktop-4-dock-collapsed");
       await page.getByTestId("columns-trigger").click();
       const rowOrder = () => page.locator("[data-testid^=columns-row-]").evaluateAll((els) => els.map((el) => el.getAttribute("data-testid")!.replace("columns-row-", "")));
-      expect(await rowOrder()).toEqual(["ACTIVE", "PRIORITIZED", "VALIDATING", "EXPLORING"]);
+      expect(await rowOrder()).toEqual(["ACTIVE", "PRIORITIZED", "VALIDATING", "EXPLORING", "UNREVIEWED"]);
       await page.getByLabel("Move Exploring up").click();
-      await expect.poll(rowOrder).toEqual(["ACTIVE", "PRIORITIZED", "EXPLORING", "VALIDATING"]);
+      await expect.poll(rowOrder).toEqual(["ACTIVE", "PRIORITIZED", "EXPLORING", "VALIDATING", "UNREVIEWED"]);
       expect(new URL(page.url()).search, "reordering writes the layout, not the URL").not.toMatch(/order=/);
       await page.keyboard.press("Escape");
-      expect(await columnTitles(scroller(page))).toEqual(["Prioritized", "Exploring"]);
+      expect(await columnTitles(scroller(page))).toEqual(["Prioritized", "Exploring", "Unreviewed"]);
       // The column menu moves the same order, and the popover sees it.
       await page.getByRole("button", { name: "Exploring column options" }).click();
       await page.getByRole("menuitem", { name: "Move left" }).click();
-      await expect.poll(async () => await columnTitles(scroller(page))).toEqual(["Exploring", "Prioritized"]);
+      await expect.poll(async () => await columnTitles(scroller(page))).toEqual(["Exploring", "Prioritized", "Unreviewed"]);
       await page.getByTestId("columns-trigger").click();
-      await expect.poll(rowOrder).toEqual(["ACTIVE", "EXPLORING", "PRIORITIZED", "VALIDATING"]);
+      await expect.poll(rowOrder).toEqual(["ACTIVE", "EXPLORING", "PRIORITIZED", "VALIDATING", "UNREVIEWED"]);
       await page.keyboard.press("Escape");
       await tab(page, "Active").click();
       await expect(tab(page, "Active")).toHaveAttribute("aria-selected", "true");
@@ -335,7 +343,7 @@ test.describe("Opportunity board dock", () => {
       expect(savedLayout.pinnedColumnIds).toEqual(expect.arrayContaining(["ACTIVE", "VALIDATING"]));
       expect(savedLayout.activePinnedId).toBe("ACTIVE");
       expect(savedLayout.dockCollapsed).toBe(false);
-      expect(savedLayout.columnOrder).toEqual(["ACTIVE", "EXPLORING", "PRIORITIZED", "VALIDATING"]);
+      expect(savedLayout.columnOrder).toEqual(["ACTIVE", "EXPLORING", "PRIORITIZED", "VALIDATING", "UNREVIEWED"]);
       expect(viewRows[0].display.columns?.status?.order ?? [], "the layout is the one source of order: no second legacy order").toEqual([]);
 
       // This browser's own copy would also restore the layout, so clear it: the VIEW must carry it.
@@ -345,7 +353,7 @@ test.describe("Opportunity board dock", () => {
       await expect(page.getByTestId("saved-views-trigger")).toContainText(viewName, { timeout: 30_000 });
       await expect(tab(page, "Active")).toHaveAttribute("aria-selected", "true", { timeout: 30_000 });
       expect(await tabTitles(page)).toEqual(["Active", "Validating"]);
-      expect(await columnTitles(scroller(page))).toEqual(["Exploring", "Prioritized"]);
+      expect(await columnTitles(scroller(page))).toEqual(["Exploring", "Prioritized", "Unreviewed"]);
       await expect(page.getByTestId("saved-view-modified")).toHaveCount(0);
       await expect(page.getByTestId("save-view-changes")).toHaveCount(0);
 
@@ -381,7 +389,7 @@ test.describe("Opportunity board dock", () => {
       await page.waitForLoadState("networkidle");
       await expect(page.getByTestId("saved-views-trigger"), "the view itself still loads").toContainText(viewName, { timeout: 30_000 });
       await expect(dock(page)).toHaveCount(0);
-      expect(await columnTitles(scroller(page))).toEqual(["Active", "Prioritized", "Validating", "Exploring"]);
+      expect(await columnTitles(scroller(page))).toEqual(["Active", "Prioritized", "Validating", "Exploring", "Unreviewed"]);
 
       // ── 6b. A view saved before layouts existed (only columns.status.order) still loads, unmodified ─
       const { rows: legacy } = await pool.query<{ id: string }>(

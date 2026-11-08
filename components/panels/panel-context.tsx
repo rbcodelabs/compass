@@ -46,8 +46,9 @@ export { COMPOSER_PANEL_TYPES, isComposerPanelType, type ComposerPanelType };
 /**
  * `pullRequest` is a GitHub PR sidebar, opened from the PR chip in agent chat. Its id is `<owner>/<repo>/<number>` (see
  * lib/github-pull-request-links.ts); it is not a Compass entity, so it has no mutation channel.
+ * `review` is a decision request: addressed by UUID only and served by /api/panels/review, not the entity route.
  */
-export type PanelType = EntityPanelType | "discovery-rail" | "pullRequest" | ComposerPanelType;
+export type PanelType = EntityPanelType | "discovery-rail" | "pullRequest" | "review" | ComposerPanelType;
 
 export const FEEDBACK_COMPOSER_ID = "new";
 
@@ -69,7 +70,7 @@ export type PanelState = {
 // shareable, survives refresh, and the browser back button closes it.
 const PANEL_PARAM = "detail";
 
-const VALID_TYPES = new Set<string>([...PANEL_ENTITY_TYPES, "discovery-rail", "pullRequest", ...COMPOSER_PANEL_TYPES]);
+const VALID_TYPES = new Set<string>([...PANEL_ENTITY_TYPES, "discovery-rail", "pullRequest", "review", ...COMPOSER_PANEL_TYPES]);
 
 function encodePanel(type: PanelType, id: string): string {
   return `${type}:${id}`;

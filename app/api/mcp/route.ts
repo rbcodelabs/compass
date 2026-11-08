@@ -28,6 +28,7 @@ import {
 import { widenRefSchemas, resolveToolRefs } from "@/lib/mcp-work-item-refs"
 import { runWithMcpActor, getMcpActor, peekMcpActor, isResearchActor, assertWorkspaceMember, McpAuthzError } from "@/lib/mcp-authz"
 import { registerArtifactResources } from "@/lib/artifact-resource"
+import { linkAgentToolCall } from "@/lib/links/conversation-links"
 import { applyToolGate, AGENT_TOOL_POLICY, scopesSatisfy, type ToolScope } from "@/lib/mcp-tool-gates"
 import { bearerChallenge, requiredScopeForPayload } from "@/lib/mcp-oauth-challenge"
 import { SCOPE_MCP_READ } from "@/lib/oauth/constants"
@@ -115,6 +116,7 @@ import {
 } from "@/lib/solution-comment-tool-handlers"
 import { updateSolutionStatus } from "@/lib/solution-status-tool-handlers"
 import { createOpportunities, createOpportunity, updateOpportunity, updateOpportunityKeyResult, updateOpportunityStatus } from "@/lib/opportunity-tool-handlers"
+import { DEFAULT_OPPORTUNITY_STATUS, OPPORTUNITY_PIPELINE_STATUSES, OPPORTUNITY_PIPELINE_TEXT, OPPORTUNITY_STATUSES, OPPORTUNITY_STATUS_GUIDE } from "@/lib/opportunity-status"
 import { listAssumptions, listSolutions } from "@/lib/discovery-query-tool-handlers"
 import {
   listScoringModels,
@@ -184,7 +186,7 @@ import {
   unlinkSolutionFromKeyResultTool,
 } from "@/lib/typed-link-tool-handlers"
 import { linkEntitiesTool, linkSummariesForCaller, listLinksTool, unlinkEntitiesTool } from "@/lib/link-tool-handlers"
-import { ENTITY_TYPE_VOCABULARY } from "@/lib/entity-types"
+import { PUBLIC_LINK_ENTITY_TYPES } from "@/lib/entity-types"
 import { decisionOptionsInputSchema, decisionQuestionsInputSchema } from "@/lib/decision-option-schema"
 import { applyRecordedDecision, closeDecisionNoAction, getDecision, getReviewRequest, listDecisions, listReviewRequests, requestDecision, requestReleaseAuthorization } from "@/lib/decision-tool-handlers"
 import { uiGetState, uiNavigate, uiScreenshot } from "@/lib/ui-control-tool-handlers"
@@ -301,7 +303,12 @@ const _handler = createMcpHandler(
         await applyToolGate(name, actor, args, resolveOnce)
         // A service actor returns from the gate early; its handler still needs UUIDs.
         await resolveOnce()
-      }, () => withAnalyticsTool(name, () => withInterviewMutation(name, args, () => handler(args, extra)))))
+      }, () => withAnalyticsTool(name, () => withInterviewMutation(name, args, async () => {
+        const result = await handler(args, extra)
+        // RM-19: an agent turn's create/read/update of an opportunity, solution or task links the conversation to it. Never throws.
+        await linkAgentToolCall(name, args, result)
+        return result
+      }))))
     })
 
     register("get_current_identity", { title: "Current Identity", description: "Returns the authenticated caller and currently accessible workspaces.", inputSchema: {}, outputSchema: TOOL_OUTPUT_SCHEMA }, async () => {
@@ -1107,7 +1114,7 @@ const _handler = createMcpHandler(
           workspaceId: z.string().uuid().describe("UUID of the workspace"),
           includeCustomFields: z.boolean().optional().describe("Include each opportunity's custom field values (default false)"),
           customFieldIds: z.array(z.string().uuid()).min(1).max(30).optional().describe("Only these OPPORTUNITY custom fields in the output (implies includeCustomFields)"),
-          status: z.enum(["EXPLORING", "VALIDATING", "PRIORITIZED", "ACTIVE", "ARCHIVED"]).optional().describe("Filter by status"),
+          status: z.enum(OPPORTUNITY_STATUSES).optional().describe("Filter by status"),
           squadId: z.string().uuid().optional().describe("Filter by squad"),
           updatedSince: z.string().datetime().optional().describe("Filter to opportunities updated at or after this ISO timestamp"),
           updatedBefore: z.string().datetime().optional().describe("Filter to opportunities updated before this ISO timestamp (useful for stale-work scans)"),
@@ -1349,7 +1356,7 @@ const _handler = createMcpHandler(
         inputSchema: {
           workspaceId: z.string().uuid().describe("UUID of the workspace"),
           status: z.enum(["IDEA", "VALIDATED", "IN_DELIVERY", "SHIPPED", "KILLED"]).optional().describe("Filter by solution lifecycle status"),
-          opportunityStatus: z.enum(["EXPLORING", "VALIDATING", "PRIORITIZED", "ACTIVE", "ARCHIVED"]).optional().describe("Filter by parent opportunity status"),
+          opportunityStatus: z.enum(OPPORTUNITY_STATUSES).optional().describe("Filter by parent opportunity status"),
           squadId: z.string().uuid().optional().describe("Filter by the parent opportunity's squad"),
           hasRoadmapItem: z.boolean().optional().describe("Filter by whether the solution is linked to any roadmap item"),
           updatedSince: z.string().datetime().optional().describe("Filter to solutions updated at or after this ISO timestamp"),
@@ -1373,7 +1380,7 @@ const _handler = createMcpHandler(
           status: z.enum(["UNTESTED", "TESTING", "VALIDATED", "INVALIDATED"]).optional().describe("Filter by assumption status"),
           riskLevel: z.enum(["HIGH", "MEDIUM", "LOW"]).optional().describe("Filter by recorded risk level"),
           solutionStatus: z.enum(["IDEA", "VALIDATED", "IN_DELIVERY", "SHIPPED", "KILLED"]).optional().describe("Filter by parent solution status"),
-          opportunityStatus: z.enum(["EXPLORING", "VALIDATING", "PRIORITIZED", "ACTIVE", "ARCHIVED"]).optional().describe("Filter by ancestor opportunity status"),
+          opportunityStatus: z.enum(OPPORTUNITY_STATUSES).optional().describe("Filter by ancestor opportunity status"),
           squadId: z.string().uuid().optional().describe("Filter by the ancestor opportunity's squad"),
           updatedSince: z.string().datetime().optional().describe("Filter to assumptions updated at or after this ISO timestamp"),
           updatedBefore: z.string().datetime().optional().describe("Filter to assumptions updated before this ISO timestamp (useful for stale-work scans)"),
@@ -1388,13 +1395,13 @@ const _handler = createMcpHandler(
       "create_opportunity",
       {
         title: "Create Opportunity",
-        description: "Creates a new customer or product Opportunity. Optionally link to a Key Result and assign to a squad.",
+        description: `Creates a new customer or product Opportunity. Optionally link to a Key Result and assign to a squad. New opportunities start as ${DEFAULT_OPPORTUNITY_STATUS} (the triage inbox) unless you pass a status.`,
         inputSchema: {
           workspaceId: z.string().uuid().describe("UUID of the workspace"),
           title: z.string().min(1).describe("Short title for the opportunity"),
           description: z.string().optional().describe("What problem or need this represents"),
           customerSegment: z.string().optional().describe("The customer segment affected"),
-          status: z.enum(["EXPLORING", "VALIDATING", "PRIORITIZED", "ACTIVE"]).optional().default("EXPLORING"),
+          status: z.enum(OPPORTUNITY_PIPELINE_STATUSES).optional().default(DEFAULT_OPPORTUNITY_STATUS),
           keyResultId: z.string().uuid().optional().describe("UUID of a Key Result this opportunity is driving"),
           squadId: z.string().uuid().optional().describe("UUID of the owning squad"),
         },
@@ -1410,7 +1417,7 @@ const _handler = createMcpHandler(
         description:
           "Creates several Opportunities in one call: up to 25 items for agent callers (100 for human API keys). Each item is created in its own transaction and reported separately, so one invalid item never blocks the others; the call succeeds even when some items fail, so read data.results. " +
           "Pass your own `clientId` (a UUID) per item to make retries safe: resending an item that was already created returns { ok: true, deduped: true } instead of a duplicate, and an id that is taken by different content returns CONFLICT. Omit it only if you will not retry. " +
-          "Items take title, description, customerSegment, status (EXPLORING, VALIDATING, PRIORITIZED or ACTIVE) and squadId; use create_opportunity to link a Key Result.",
+          "Items take title, description, customerSegment, status (UNREVIEWED, EXPLORING, VALIDATING, PRIORITIZED or ACTIVE; defaults to UNREVIEWED) and squadId; use create_opportunity to link a Key Result.",
         inputSchema: {
           workspaceId: z.string().uuid().describe("UUID of the workspace"),
           items: z.array(z.object({
@@ -1418,7 +1425,7 @@ const _handler = createMcpHandler(
             title: z.string().describe("Short title (at most 255 characters)"),
             description: z.string().nullable().optional(),
             customerSegment: z.string().nullable().optional(),
-            status: z.string().optional().describe("EXPLORING (default), VALIDATING, PRIORITIZED or ACTIVE"),
+            status: z.string().optional().describe("UNREVIEWED (default), EXPLORING, VALIDATING, PRIORITIZED or ACTIVE"),
             squadId: z.string().uuid().nullable().optional(),
           }).strict()).min(1).max(100),
         },
@@ -1474,10 +1481,10 @@ const _handler = createMcpHandler(
       "update_opportunity_status",
       {
         title: "Update Opportunity Status",
-        description: "Moves an opportunity through its discovery pipeline: EXPLORING → VALIDATING → PRIORITIZED → ACTIVE → ARCHIVED.",
+        description: `Moves an opportunity through its discovery pipeline: ${OPPORTUNITY_PIPELINE_TEXT}. ${OPPORTUNITY_STATUS_GUIDE}`,
         inputSchema: {
           opportunityId: z.string().uuid().describe("UUID of the opportunity"),
-          status: z.enum(["EXPLORING", "VALIDATING", "PRIORITIZED", "ACTIVE", "ARCHIVED"]).describe("New status"),
+          status: z.enum(OPPORTUNITY_STATUSES).describe("New status"),
         },
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
@@ -1557,7 +1564,7 @@ const _handler = createMcpHandler(
           objectiveId: z.string().uuid().optional().describe("UUID of an objective"),
           solutionId: z.string().uuid().optional().describe("UUID of a solution"),
           keyResultId: z.string().uuid().optional().describe("UUID of a Key Result"),
-          entityType: z.enum(ENTITY_TYPE_VOCABULARY).optional().describe("Generic mode: the type of the entity to list links for (use with entityId)"),
+          entityType: z.enum(PUBLIC_LINK_ENTITY_TYPES).optional().describe("Generic mode: the type of the entity to list links for (use with entityId)"),
           entityId: z.string().uuid().optional().describe("Generic mode: UUID of the entity (use with entityType)"),
           linkType: z.string().max(60).optional().describe("Generic mode: restrict to one link type, e.g. EXPERIMENT_INFORMED_BY_STUDY"),
           limit: z.number().int().min(1).max(100).optional().default(50).describe("Page size (default 50)"),
@@ -1588,7 +1595,7 @@ const _handler = createMcpHandler(
           linkType: z.string().min(1).max(60).describe("A registered link type key, e.g. EXPERIMENT_INFORMED_BY_STUDY"),
           fromId: z.string().uuid().describe("UUID of the entity on the `from` end of the link type"),
           toId: z.string().uuid().describe("UUID of the entity on the `to` end of the link type"),
-          toType: z.enum(ENTITY_TYPE_VOCABULARY).optional().describe("Only for link types that allow several `to` types"),
+          toType: z.enum(PUBLIC_LINK_ENTITY_TYPES).optional().describe("Only for link types that allow several `to` types"),
         },
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },

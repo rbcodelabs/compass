@@ -17,10 +17,20 @@ import {
   type BoardLayout,
   type BoardLayoutDefaults,
 } from "@/lib/board-layout"
+import { OPPORTUNITY_PIPELINE_STATUSES } from "@/lib/opportunity-status"
 import { DEFAULT_OPPORTUNITY_COLUMN_ORDER } from "@/lib/saved-views/columns"
 
-/** Every Opportunities status column, in default order (Active first). ARCHIVED is not a board column. */
-export const OPPORTUNITY_BOARD_COLUMN_IDS: readonly string[] = DEFAULT_OPPORTUNITY_COLUMN_ORDER
+/**
+ * Every Opportunities status column, in default order. The SET of columns is the shared status definitions' board columns
+ * (lib/opportunity-status.ts: every status but ARCHIVED, so UNREVIEWED is one and a future status will be too); the default
+ * ORDER is the board's own (lib/saved-views/columns.ts: Active first, the Unreviewed inbox last). A status the default order
+ * does not place yet is appended in definition order, so adding a status never needs this file to change. A stored layout
+ * that predates a status resolves with that status appended (lib/board-layout.ts: ids a layout never mentioned follow the order).
+ */
+export const OPPORTUNITY_BOARD_COLUMN_IDS: readonly string[] = [
+  ...DEFAULT_OPPORTUNITY_COLUMN_ORDER.filter((status) => OPPORTUNITY_PIPELINE_STATUSES.includes(status)),
+  ...OPPORTUNITY_PIPELINE_STATUSES.filter((status) => !DEFAULT_OPPORTUNITY_COLUMN_ORDER.includes(status as never)),
+]
 
 /** Nothing is pinned until someone pins a column, so the board looks exactly as it did before docking existed. The dock starts collapsed. */
 export const OPPORTUNITY_BOARD_LAYOUT_DEFAULTS: BoardLayoutDefaults = { pinned: [], dockCollapsed: true }

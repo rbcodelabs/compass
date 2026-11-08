@@ -74,7 +74,7 @@ describe("useDiscoveryViewState with the column layout", () => {
 
   it("an untouched legacy-order view (started from the layout its order describes) is not modified", () => {
     const legacy = { columns: { status: { order: ["EXPLORING", "VALIDATING"], hidden: [] } } };
-    const startLayout = { columnOrder: ["EXPLORING", "VALIDATING", "ACTIVE", "PRIORITIZED"], pinnedColumnIds: [] };
+    const startLayout = { columnOrder: ["EXPLORING", "VALIDATING", "ACTIVE", "PRIORITIZED", "UNREVIEWED"], pinnedColumnIds: [] };
     render(<Page views={[view(legacy)]} savedViewId="v1" layout={startLayout} />);
     expect(read().modified).toBe(false);
   });
@@ -105,7 +105,7 @@ describe("ColumnsPopover (Discovery)", () => {
       JSON.stringify({ columnOrder: ["EXPLORING", "PRIORITIZED", "ACTIVE", "VALIDATING"], pinnedColumnIds: [] }),
     );
     renderPopover();
-    expect(rows()).toEqual(["columns-row-EXPLORING", "columns-row-PRIORITIZED", "columns-row-ACTIVE", "columns-row-VALIDATING"]);
+    expect(rows()).toEqual(["columns-row-EXPLORING", "columns-row-PRIORITIZED", "columns-row-ACTIVE", "columns-row-VALIDATING", "columns-row-UNREVIEWED"]); // a layout stored before Unreviewed existed gets it appended
   });
 
   it("reordering writes the layout (localStorage), not the URL", () => {
@@ -113,7 +113,7 @@ describe("ColumnsPopover (Discovery)", () => {
     fireEvent.click(screen.getByLabelText("Move Active down"));
     expect(replace).not.toHaveBeenCalled();
     const stored = JSON.parse(window.localStorage.getItem("compass:discovery-column-layout:w1")!);
-    expect(stored.columnOrder).toEqual(["PRIORITIZED", "ACTIVE", "VALIDATING", "EXPLORING"]);
+    expect(stored.columnOrder).toEqual(["PRIORITIZED", "ACTIVE", "VALIDATING", "EXPLORING", "UNREVIEWED"]);
     expect(rows()[0]).toBe("columns-row-PRIORITIZED");
   });
 
@@ -128,6 +128,6 @@ describe("ColumnsPopover (Discovery)", () => {
   it("disables moving past either end of the layout order", () => {
     renderPopover();
     expect(screen.getByLabelText("Move Active up")).toBeDisabled();
-    expect(screen.getByLabelText("Move Exploring down")).toBeDisabled();
+    expect(screen.getByLabelText("Move Unreviewed down")).toBeDisabled();
   });
 });

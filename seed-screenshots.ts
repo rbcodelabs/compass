@@ -526,8 +526,8 @@ export async function seedDocs(exec: SqlExec, schema: string, workspaceId: strin
   if (existingDoc) return;
   await one(
     exec,
-    `INSERT INTO "${schema}".docs (workspace_id, title, content, metadata, sort_order)
-     VALUES ($1,$2,$3,$4,$5) RETURNING id`,
+    `INSERT INTO "${schema}".docs (workspace_id, title, content, metadata, sort_order, doc_type)
+     VALUES ($1,$2,$3,$4,$5,'STANDARD') RETURNING id`,
     [workspaceId, DOC_TITLE, DOC_CONTENT, JSON.stringify(DOC_METADATA), -1]
   );
 }

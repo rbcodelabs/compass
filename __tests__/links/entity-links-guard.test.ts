@@ -99,6 +99,8 @@ describe("the entity_links table is reached only through lib/links/", () => {
       })
       // E2E teardown deletes by raw SQL (FK-ordered cleanup of test workspaces); it never reads or writes links via the app.
       .filter((line) => line !== "e2e/functional/global-teardown.ts: entity_links model/table name")
+      // The RM-19 spec seeds and checks the links the MCP dispatcher would have written, by raw SQL; it never goes through app code.
+      .filter((line) => line !== "e2e/functional/specs/agent-conversation-links.spec.ts: entity_links model/table name")
       // Files that legitimately use non-literal delegates over a fixed model list that does not include EntityLink.
       .filter((line) => !/^(lib\/entity-mutations\.ts|lib\/workspace-update-mutations\.ts|lib\/prisma-updated-at\.ts|scripts\/verify-geode-document-migration\.ts): dynamic delegate access$/.test(line));
     expect(offenders).toEqual([]);

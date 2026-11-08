@@ -130,7 +130,7 @@ export async function searchWorkspace(input: {
       { type: "roadmapItem", label: "Roadmap", items: lead("roadmapItem", roadmapItems).map((row) => item("roadmapItem", row, context(row.horizon, row.status))) },
       { type: "task", label: "Tasks", items: lead("task", tasks).map((row) => item("task", row, context(row.status, row.priority))) },
       { type: "feedback", label: "Feedback", items: lead("feedback", feedback).map((row) => item("feedback", row, context(row.type, row.status))) },
-      { type: "doc", label: "Docs", items: lead("doc", docs).map((row) => item("doc", row, row.docType)) },
+      { type: "doc", label: "Docs", items: lead("doc", docs).map((row) => item("doc", row, row.docType ?? undefined)) },
       {
         type: "help",
         label: "User Guide",

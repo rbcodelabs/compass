@@ -26,6 +26,8 @@ import { assertGeodeDocumentStorageMigration, getGeodeDocumentStorageHealth } fr
 import { assertWorkspaceUpdatesMigration } from "@/lib/migrations/workspace-updates";
 import { assertFollowsNotificationsMigration } from "@/lib/migrations/follows-notifications";
 import { assertPortalHomeLayoutMigration } from "@/lib/migrations/portal-home-layout";
+import { assertDocPublishingMigration } from "@/lib/migrations/doc-publishing";
+import { assertPortalHomeTemplateMigration } from "@/lib/migrations/portal-home-template";
 import { assertRoadmapViewsMigration } from "@/lib/migrations/roadmap-views";
 import { SAVED_VIEWS_SURFACE_MIGRATION, assertSavedViewsSurfaceMigration, backfillSavedViewsSurface } from "@/lib/migrations/saved-views-surface";
 import { assertAgentSessionsMigration } from "@/lib/migrations/agent-sessions";
@@ -40,6 +42,7 @@ import { assertAgentKindAndWorkspaceOwnerMigration, assertAgentOwnerUserNullable
 import { assertEntityLinksMigration } from "@/lib/migrations/entity-links";
 import { assertWorkItemIdsMigration, WORK_ITEM_IDS_MIGRATION } from "@/lib/migrations/work-item-ids";
 import { ENTITY_LINKS_SOLUTION_KEY_RESULT_BACKFILL_MIGRATION, assertEntityLinksSolutionKeyResultBackfill, backfillEntityLinksSolutionKeyResult, getEntityLinksSolutionKeyResultStatus } from "@/lib/migrations/entity-links-solution-key-result-backfill";
+import { ENTITY_LINKS_CONVERSATION_BACKFILL_MIGRATION, assertEntityLinksConversationBackfill, backfillEntityLinksConversation, getEntityLinksConversationStatus } from "@/lib/migrations/entity-links-conversation-backfill";
 import { ENTITY_LINKS_TASK_BACKFILL_MIGRATION, assertEntityLinksTaskBackfill, backfillEntityLinksTask, getEntityLinksTaskStatus } from "@/lib/migrations/entity-links-task-backfill";
 import { getEntityLinksReadParityStatus } from "@/lib/migrations/entity-links-read-parity";
 import { ENTITY_LINKS_OPPORTUNITY_BACKFILL_MIGRATION, ENTITY_LINKS_OPPORTUNITY_RESIDUAL_MIGRATION, assertEntityLinksOpportunityBackfill, backfillEntityLinksOpportunity, getEntityLinksOpportunityStatus } from "@/lib/migrations/entity-links-opportunity-backfill";
@@ -763,6 +766,25 @@ const MIGRATIONS: readonly MigrationEntry[] = [
     // agent_conversations.archived_at (nullable, no backfill, no index). NULL = active, so code may ship before this applies.
     name: "112_agent_conversation_archive",
     filePath: path.join(process.cwd(), "prisma/migrations/112_agent_conversation_archive/migration.sql"),
+  },
+  {
+    // (RM-19 from main; kept ahead of this branch's 113/114)
+    // No DDL, EXPLICIT-ONLY. Backfills entity_links (CONVERSATION_CREATED) from the legacy AGENT_CONVERSATION task links (RM-19). Inconsistent legacy
+    // rows are quarantined and reported, never linked or deleted. The hook proves its postconditions before the receipt. POST it by name after the
+    // code that writes the conversation link types is live; never untargeted.
+    name: "113_entity_links_backfill_conversation",
+    filePath: path.join(process.cwd(), "prisma/migrations/113_entity_links_backfill_conversation/migration.sql"),
+  },
+  {
+    // docs.published_at / published_by_id (nullable, no backfill, no index). NULL = private, so code may ship before this applies.
+    // The hook asserts both columns exist, are typed and are nullable before the receipt.
+    name: "113_doc_publishing",
+    filePath: path.join(process.cwd(), "prisma/migrations/113_doc_publishing/migration.sql"),
+  },
+  {
+    // portal_home_layouts.draft_template / published_template (nullable VARCHAR, no default: DSQL; NULL = editorial). Hook asserts both.
+    name: "114_portal_home_template",
+    filePath: path.join(process.cwd(), "prisma/migrations/114_portal_home_template/migration.sql"),
   },
 ];
 
@@ -1960,6 +1982,7 @@ export async function getMigrationStatus(pool: Pool, schema: string) {
       entityLinksArtifactBackfill: await getEntityLinksArtifactStatus(client, schema).catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error) })),
       // Counts and capped quarantine ids for 097 (task links), readable before it is POSTed.
       entityLinksTaskBackfill: await getEntityLinksTaskStatus(client, schema).catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error) })),
+      entityLinksConversationBackfill: await getEntityLinksConversationStatus(client, schema).catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error) })),
       // Counts and capped quarantine ids for 098_entity_links_backfill_solution_key_result, readable before it is POSTed.
       entityLinksSolutionKeyResultBackfill: await getEntityLinksSolutionKeyResultStatus(client, schema).catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error) })),
       // Read-flip parity (PR A of the entity_links read flip): per family, live legacy rows vs live mirror rows, plus the read modes. Counts and capped ids only.
@@ -1976,7 +1999,7 @@ export async function getMigrationStatus(pool: Pool, schema: string) {
 }
 
 /** Migrations that an untargeted run must NOT pick up on its own: they are only correct at a moment a human chooses. */
-const EXPLICIT_ONLY_MIGRATIONS: readonly string[] = [WORKSPACE_ID_RESIDUAL_MIGRATION, TYPED_LINK_RESIDUAL_MIGRATION, WORK_ITEM_IDS_RESIDUAL_MIGRATION, ENTITY_LINKS_OPPORTUNITY_BACKFILL_MIGRATION, ENTITY_LINKS_OPPORTUNITY_RESIDUAL_MIGRATION, ENTITY_LINKS_ARTIFACT_BACKFILL_MIGRATION, ENTITY_LINKS_TASK_BACKFILL_MIGRATION, ENTITY_LINKS_SOLUTION_KEY_RESULT_BACKFILL_MIGRATION, SHARED_COMPASS_AGENT_BOOTSTRAP_MIGRATION, WORKSPACE_MODULES_LEGACY_FLAG_BACKFILL_MIGRATION];
+const EXPLICIT_ONLY_MIGRATIONS: readonly string[] = [WORKSPACE_ID_RESIDUAL_MIGRATION, TYPED_LINK_RESIDUAL_MIGRATION, WORK_ITEM_IDS_RESIDUAL_MIGRATION, ENTITY_LINKS_OPPORTUNITY_BACKFILL_MIGRATION, ENTITY_LINKS_OPPORTUNITY_RESIDUAL_MIGRATION, ENTITY_LINKS_ARTIFACT_BACKFILL_MIGRATION, ENTITY_LINKS_TASK_BACKFILL_MIGRATION, ENTITY_LINKS_CONVERSATION_BACKFILL_MIGRATION, ENTITY_LINKS_SOLUTION_KEY_RESULT_BACKFILL_MIGRATION, SHARED_COMPASS_AGENT_BOOTSTRAP_MIGRATION, WORKSPACE_MODULES_LEGACY_FLAG_BACKFILL_MIGRATION];
 
 /**
  * Which pending migrations a POST runs: the named one, or everything except the explicit-only one-shots (069, 072, 094, 095, 096, 097, 098_entity_links_backfill_solution_key_result, 103, 106_entity_links_residual_opportunity).
@@ -2280,6 +2303,8 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
       if (migration.name === "062_mcp_connectors") await assertMcpConnectorsMigration(client, schema)
       if (migration.name === "068_follows_notifications") await assertFollowsNotificationsMigration(client, schema)
       if (migration.name === "074_portal_home_layout") await assertPortalHomeLayoutMigration(client, schema)
+      if (migration.name === "113_doc_publishing") await assertDocPublishingMigration(client, schema)
+      if (migration.name === "114_portal_home_template") await assertPortalHomeTemplateMigration(client, schema)
       if (migration.name === "075_roadmap_item_provenance") await assertRoadmapItemProvenanceMigration(client, schema)
       if (migration.name === "079_roadmap_views") await assertRoadmapViewsMigration(client, schema)
       if (migration.name === SAVED_VIEWS_SURFACE_MIGRATION) {
@@ -2343,6 +2368,12 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
         // leaves an unfinished attempt and the next POST resumes.
         await backfillEntityLinksTask(client, schema, log)
         await assertEntityLinksTaskBackfill(client, schema)
+      }
+      if (migration.name === ENTITY_LINKS_CONVERSATION_BACKFILL_MIGRATION) {
+        // Data half: link the legacy AGENT_CONVERSATION task links as CONVERSATION_CREATED (quarantining the inconsistent ones), then prove it. Before
+        // the receipt below, so a failure leaves an unfinished attempt and the next POST resumes.
+        await backfillEntityLinksConversation(client, schema, log)
+        await assertEntityLinksConversationBackfill(client, schema)
       }
       if (migration.name === ENTITY_LINKS_SOLUTION_KEY_RESULT_BACKFILL_MIGRATION) {
         // Data half: mirror the legacy Solution-Key Result links (quarantining the inconsistent ones), then prove it. Before the receipt below, so a

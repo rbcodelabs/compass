@@ -51,6 +51,7 @@ const BY_STATUS = {
   VALIDATING: [card("v1", "Checklist", "VALIDATING")],
   PRIORITIZED: [],
   ACTIVE: [card("a1", "Onboarding", "ACTIVE", 0, 10), card("a2", "Billing", "ACTIVE", 1, 90)],
+  UNREVIEWED: [],
   ARCHIVED: [],
 };
 
@@ -64,7 +65,13 @@ const tablist = () => screen.getByRole("tablist", { name: "Pinned columns" });
 const tabs = () => within(tablist()).getAllByRole("tab");
 const tabNames = () => tabs().map((t) => t.getAttribute("aria-label"));
 const tab = (name: RegExp | string) => within(tablist()).getByRole("tab", { name });
-const headings = (el: HTMLElement) => Array.from(el.querySelectorAll("section > header h3")).map((h) => h.textContent);
+// The column title carries a status-definition hint (an info button); only the name counts here.
+const headings = (el: HTMLElement) =>
+  Array.from(el.querySelectorAll("section > header h3")).map((h) => {
+    const copy = h.cloneNode(true) as HTMLElement;
+    copy.querySelectorAll("[data-slot=tooltip-trigger]").forEach((node) => node.remove());
+    return copy.textContent?.replace(/hidden in view, has cards/, "").trim();
+  });
 const cardTitles = (el: HTMLElement) => Array.from(el.querySelectorAll("[data-flip-id] button:not([aria-label])")).map((b) => b.textContent).filter((t) => t && t.length > 1 && !/^\d/.test(t));
 
 beforeEach(() => {
@@ -78,7 +85,7 @@ describe("Opportunities status board dock (md and up)", () => {
     render(<Board />);
     expect(pinnedRegion()).not.toBeInTheDocument();
     expect(screen.queryByRole("tablist")).not.toBeInTheDocument();
-    expect(headings(scroller())).toEqual(["Active", "Prioritized", "Validating", "Exploring"]);
+    expect(headings(scroller())).toEqual(["Active", "Prioritized", "Validating", "Exploring", "Unreviewed"]);
   });
 
   it("pinning a column docks it, opens the dock on it and leaves the rest in the scroller", () => {
@@ -90,7 +97,7 @@ describe("Opportunities status board dock (md and up)", () => {
     expect(headings(panel)).toEqual(["Exploring"]);
     expect(within(panel).getByText("Templates")).toBeInTheDocument();
     expect(scroller()).not.toContainElement(pinnedRegion());
-    expect(headings(scroller())).toEqual(["Active", "Prioritized", "Validating"]);
+    expect(headings(scroller())).toEqual(["Active", "Prioritized", "Validating", "Unreviewed"]);
   });
 
   it("two pinned columns share ONE dock; tabs follow column order and switching swaps the single panel", () => {
@@ -104,7 +111,7 @@ describe("Opportunities status board dock (md and up)", () => {
     fireEvent.click(tab(/^Exploring/));
     expect(headings(screen.getByRole("tabpanel"))).toEqual(["Exploring"]);
     expect(screen.getAllByRole("tabpanel")).toHaveLength(1);
-    expect(headings(scroller())).toEqual(["Active", "Prioritized"]);
+    expect(headings(scroller())).toEqual(["Active", "Prioritized", "Unreviewed"]);
   });
 
   it("clicking the active tab, or the panel's collapse button, collapses the dock to its rail", () => {
@@ -123,7 +130,7 @@ describe("Opportunities status board dock (md and up)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Pin Exploring to the right" }));
     fireEvent.click(within(screen.getByRole("tabpanel")).getByRole("button", { name: "Unpin Exploring" }));
     expect(pinnedRegion()).not.toBeInTheDocument();
-    expect(headings(scroller())).toEqual(["Active", "Prioritized", "Validating", "Exploring"]);
+    expect(headings(scroller())).toEqual(["Active", "Prioritized", "Validating", "Exploring", "Unreviewed"]);
   });
 
   it("reorders from the column menu (the layout's order, which the Columns popover moves too)", async () => {
@@ -131,13 +138,13 @@ describe("Opportunities status board dock (md and up)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Active column options" }));
     expect(await screen.findByRole("menuitem", { name: "Move left" })).toHaveAttribute("aria-disabled", "true");
     fireEvent.click(screen.getByRole("menuitem", { name: "Move right" }));
-    expect(headings(scroller())).toEqual(["Prioritized", "Active", "Validating", "Exploring"]);
+    expect(headings(scroller())).toEqual(["Prioritized", "Active", "Validating", "Exploring", "Unreviewed"]);
   });
 
   it("renders only the columns the page says are visible (hide stays with the popover) and never docks a hidden one", () => {
     window.localStorage.setItem(
       STORAGE_KEY,
-      JSON.stringify({ columnOrder: ["ACTIVE", "PRIORITIZED", "VALIDATING", "EXPLORING"], pinnedColumnIds: ["EXPLORING"], activePinnedId: "EXPLORING", dockCollapsed: false }),
+      JSON.stringify({ columnOrder: ["ACTIVE", "PRIORITIZED", "VALIDATING", "EXPLORING", "UNREVIEWED"], pinnedColumnIds: ["EXPLORING"], activePinnedId: "EXPLORING", dockCollapsed: false }),
     );
     render(<Board columnOrder={["ACTIVE", "PRIORITIZED", "VALIDATING"]} />);
     expect(pinnedRegion()).not.toBeInTheDocument();
@@ -165,7 +172,7 @@ describe("Opportunities status board dock (md and up)", () => {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ columnOrder: 5, pinnedColumnIds: "x" }));
     render(<Board />);
     expect(pinnedRegion()).not.toBeInTheDocument();
-    expect(headings(scroller())).toEqual(["Active", "Prioritized", "Validating", "Exploring"]);
+    expect(headings(scroller())).toEqual(["Active", "Prioritized", "Validating", "Exploring", "Unreviewed"]);
   });
 
   it("makes each tab a drop target, and the open panel keeps its cards draggable and sortable", () => {
@@ -206,7 +213,7 @@ describe("Opportunities status board dock below md", () => {
     expect(pinnedRegion()).not.toBeInTheDocument();
     expect(screen.queryByRole("tablist")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^Pin .* to the right$/ })).not.toBeInTheDocument();
-    expect(headings(scroller())).toEqual(["Active", "Prioritized", "Validating", "Exploring"]);
+    expect(headings(scroller())).toEqual(["Active", "Prioritized", "Validating", "Exploring", "Unreviewed"]);
   });
 
   it("keeps pinned state in the layout but renders pinned columns in the scroller in saved order", () => {
@@ -216,14 +223,14 @@ describe("Opportunities status board dock below md", () => {
     );
     render(<Board />);
     expect(pinnedRegion()).not.toBeInTheDocument();
-    expect(headings(scroller())).toEqual(["Exploring", "Active", "Prioritized", "Validating"]);
+    expect(headings(scroller())).toEqual(["Exploring", "Active", "Prioritized", "Validating", "Unreviewed"]);
   });
 
   it("still allows reordering from the menu", async () => {
     render(<Board />);
     fireEvent.click(screen.getByRole("button", { name: "Exploring column options" }));
     fireEvent.click(await screen.findByRole("menuitem", { name: "Move left" }));
-    expect(headings(scroller()).slice(-2)).toEqual(["Exploring", "Validating"]);
+    expect(headings(scroller()).slice(2, 4)).toEqual(["Exploring", "Validating"]);
   });
 });
 
@@ -241,7 +248,7 @@ describe("OpportunitiesColumnLayoutProvider", () => {
     );
   }
   const saved = {
-    columnOrder: ["ACTIVE", "PRIORITIZED", "VALIDATING", "EXPLORING"],
+    columnOrder: ["ACTIVE", "PRIORITIZED", "VALIDATING", "EXPLORING", "UNREVIEWED"],
     pinnedColumnIds: ["EXPLORING"],
     activePinnedId: "EXPLORING",
     dockCollapsed: false,
@@ -262,9 +269,9 @@ describe("OpportunitiesColumnLayoutProvider", () => {
   });
 
   it("starts from the layout a legacy columns.status.order describes", () => {
-    const legacy = { columnOrder: ["EXPLORING", "VALIDATING", "ACTIVE", "PRIORITIZED"], pinnedColumnIds: [] };
+    const legacy = { columnOrder: ["EXPLORING", "VALIDATING", "ACTIVE", "PRIORITIZED", "UNREVIEWED"], pinnedColumnIds: [] };
     render(<Page columnLayout={legacy} />);
-    expect(headings(scroller())).toEqual(["Exploring", "Validating", "Active", "Prioritized"]);
+    expect(headings(scroller())).toEqual(["Exploring", "Validating", "Active", "Prioritized", "Unreviewed"]);
   });
 
   it("a corrupt saved layout degrades to the default", () => {

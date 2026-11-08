@@ -10,6 +10,7 @@ import {
   groupOpportunitiesByStatus,
 } from "@/lib/discovery-rail";
 import type { OpportunityStatus } from "@/lib/types";
+import { OPPORTUNITY_STATUSES, OPPORTUNITY_STATUS_DEFINITIONS } from "@/lib/opportunity-status";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -27,13 +28,9 @@ export type DiscoveryRailOpportunity = {
   linkedObjectives?: { id: string; title: string }[];
 };
 
-const STATUS_LABELS: Record<OpportunityStatus, string> = {
-  EXPLORING: "Exploring",
-  VALIDATING: "Validating",
-  PRIORITIZED: "Prioritized",
-  ACTIVE: "Active",
-  ARCHIVED: "Archived",
-};
+const STATUS_LABELS: Record<OpportunityStatus, string> = Object.fromEntries(
+  OPPORTUNITY_STATUSES.map((s) => [s, OPPORTUNITY_STATUS_DEFINITIONS[s].label]),
+) as Record<OpportunityStatus, string>;
 
 const COLLAPSE_STORAGE_KEY = "discovery-rail-collapsed";
 

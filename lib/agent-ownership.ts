@@ -84,6 +84,16 @@ export function agentOwner(agent: Pick<AgentRecord, "ownerUserId" | "ownerType" 
   return null
 }
 
+/**
+ * Whether a CHAT run as this agent may use the running user's connected third-party accounts (Settings > Agents).
+ * Only a personal (USER-owned), active agent whose owner is the person running it: such an agent can be run only by
+ * its owner, so the run is the owner acting through their own agent. A shared (WORKSPACE-owned) agent never
+ * qualifies, since it is not any one person's. Fails closed on an inconsistent row.
+ */
+export function agentMayUseOwnerConnectors(agent: Pick<AgentRecord, "status" | "ownerUserId" | "ownerType" | "ownerWorkspaceId">, userId: string | null | undefined): boolean {
+  return agent.status === "ACTIVE" && isUserOwnedBy(agent, userId)
+}
+
 /** True only for a USER-owned agent whose owner is `userId`. A WORKSPACE-owned agent is never user-owned. */
 export function isUserOwnedBy(agent: Pick<AgentRecord, "ownerUserId" | "ownerType" | "ownerWorkspaceId">, userId: string | null | undefined): boolean {
   const owner = agentOwner(agent)

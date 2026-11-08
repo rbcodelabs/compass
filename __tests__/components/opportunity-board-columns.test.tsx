@@ -33,13 +33,17 @@ const card = (id: string, status: OpportunityCardData["status"]): OpportunityCar
 }) as OpportunityCardData
 
 const BY_STATUS = {
-  EXPLORING: [card("e1", "EXPLORING")], VALIDATING: [], PRIORITIZED: [], ACTIVE: [], ARCHIVED: [],
+  UNREVIEWED: [], EXPLORING: [card("e1", "EXPLORING")], VALIDATING: [], PRIORITIZED: [], ACTIVE: [], ARCHIVED: [],
 }
 
 // Column titles only: the empty-state headings ("No ... yet") are h3s too.
 const headings = () =>
   screen.getAllByRole("heading", { level: 3 })
-    .map((h) => h.textContent?.replace(/hidden in view, has cards/, "").trim() ?? "")
+    .map((h) => {
+      const copy = h.cloneNode(true) as HTMLElement
+      copy.querySelectorAll("[data-slot=tooltip-trigger]").forEach((el) => el.remove())
+      return copy.textContent?.replace(/hidden in view, has cards/, "").trim() ?? ""
+    })
     .filter((text) => !text.startsWith("No "))
 
 function renderBoard(props: Partial<React.ComponentProps<typeof OpportunityBoard>> = {}) {
@@ -52,22 +56,22 @@ describe("OpportunityBoard column layout", () => {
   beforeEach(() => window.localStorage.clear())
   afterEach(cleanup)
 
-  it("renders Active first with no layout", () => {
+  it("renders Active first and Unreviewed last with no layout", () => {
     renderBoard()
-    expect(headings()).toEqual(["Active", "Prioritized", "Validating", "Exploring"])
+    expect(headings()).toEqual(["Active", "Prioritized", "Validating", "Exploring", "Unreviewed"])
   })
 
   it("renders the column order of the layout (the page's `columnOrder` only says which columns are shown)", () => {
     window.localStorage.setItem(LAYOUT_KEY, JSON.stringify({ columnOrder: ["EXPLORING", "VALIDATING"], pinnedColumnIds: [] }))
     const { visible } = resolveOpportunityColumns(undefined, {})
     renderBoard({ columnOrder: visible })
-    expect(headings()).toEqual(["Exploring", "Validating", "Active", "Prioritized"])
+    expect(headings()).toEqual(["Exploring", "Validating", "Active", "Prioritized", "Unreviewed"])
   })
 
   it("omits hidden empty columns", () => {
     const { visible } = resolveOpportunityColumns({ order: [], hidden: ["VALIDATING", "PRIORITIZED"] }, { EXPLORING: 1 })
     renderBoard({ columnOrder: visible })
-    expect(headings()).toEqual(["Active", "Exploring"])
+    expect(headings()).toEqual(["Active", "Exploring", "Unreviewed"])
   })
 
   it("marks a hidden column that still has cards", () => {
@@ -104,23 +108,23 @@ describe("ColumnsPopover", () => {
     open(undefined, {})
     fireEvent.click(await screen.findByRole("button", { name: "Move Exploring up" }))
     expect(mocks.replace).not.toHaveBeenCalled()
-    expect(JSON.parse(window.localStorage.getItem(LAYOUT_KEY)!).columnOrder).toEqual(["ACTIVE", "PRIORITIZED", "EXPLORING", "VALIDATING"])
+    expect(JSON.parse(window.localStorage.getItem(LAYOUT_KEY)!).columnOrder).toEqual(["ACTIVE", "PRIORITIZED", "EXPLORING", "VALIDATING", "UNREVIEWED"])
     const rows = [...document.querySelectorAll("[data-testid^=columns-row-]")].map((r) => r.getAttribute("data-testid"))
-    expect(rows).toEqual(["columns-row-ACTIVE", "columns-row-PRIORITIZED", "columns-row-EXPLORING", "columns-row-VALIDATING"])
+    expect(rows).toEqual(["columns-row-ACTIVE", "columns-row-PRIORITIZED", "columns-row-EXPLORING", "columns-row-VALIDATING", "columns-row-UNREVIEWED"])
   })
 
   it("lists the columns in the layout's order", async () => {
-    window.localStorage.setItem(LAYOUT_KEY, JSON.stringify({ columnOrder: ["EXPLORING", "ACTIVE", "PRIORITIZED", "VALIDATING"], pinnedColumnIds: [] }))
+    window.localStorage.setItem(LAYOUT_KEY, JSON.stringify({ columnOrder: ["EXPLORING", "ACTIVE", "PRIORITIZED", "VALIDATING", "UNREVIEWED"], pinnedColumnIds: [] }))
     open(undefined, {})
     await screen.findByTestId("columns-row-ACTIVE")
     const rows = [...document.querySelectorAll("[data-testid^=columns-row-]")].map((r) => r.getAttribute("data-testid"))
-    expect(rows).toEqual(["columns-row-EXPLORING", "columns-row-ACTIVE", "columns-row-PRIORITIZED", "columns-row-VALIDATING"])
+    expect(rows).toEqual(["columns-row-EXPLORING", "columns-row-ACTIVE", "columns-row-PRIORITIZED", "columns-row-VALIDATING", "columns-row-UNREVIEWED"])
   })
 
   it("cannot move the first column up or the last down", async () => {
     open(undefined, {})
     expect(await screen.findByRole("button", { name: "Move Active up" })).toBeDisabled()
-    expect(screen.getByRole("button", { name: "Move Exploring down" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Move Unreviewed down" })).toBeDisabled()
   })
 
   it("shows the hidden count and lets a forced-visible column be un-hidden", async () => {
@@ -143,7 +147,7 @@ describe("OpportunityBoard live sync", () => {
   beforeEach(() => window.localStorage.clear())
   afterEach(cleanup)
 
-  const column = (title: string) => screen.getByRole("heading", { level: 3, name: title }).closest("section")!
+  const column = (title: string) => screen.getByRole("heading", { level: 3, name: new RegExp(`^${title}`) }).closest("section")!
   const board = (byStatus: React.ComponentProps<typeof OpportunityBoard>["opportunitiesByStatus"]) => (
     <OpportunityBoard opportunitiesByStatus={byStatus} orgSlug="acme" workspaceSlug="core" workspaceId="w1" />
   )

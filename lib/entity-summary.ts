@@ -115,5 +115,17 @@ export async function getEntitySummary(
       const r = await prisma.artifact.findFirst({ where: { id, workspaceId }, select: { id: true, title: true, status: true, kind: true, description: true } })
       return r && { ...base("Artifact", r), status: r.status, meta: r.kind, description: clip(r.description) }
     }
+    case "review": {
+      const r = await prisma.reviewRequest.findFirst({
+        where: { id, workspaceId },
+        select: { id: true, state: true, currentRevision: { select: { title: true, summary: true } } },
+      })
+      return r && {
+        ...base("Decision", { id: r.id, title: r.currentRevision?.title ?? "Decision request" }),
+        status: r.state,
+        meta: null,
+        description: clip(r.currentRevision?.summary),
+      }
+    }
   }
 }
