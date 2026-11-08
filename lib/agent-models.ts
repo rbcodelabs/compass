@@ -11,7 +11,7 @@
  * metacharacters and whitespace out of a value that is later forwarded into a sandbox environment.
  */
 
-export type AgentModelOption = { value: string; label: string }
+export type AgentModelOption = { value: string; label: string; /** Gateway catalog entries only: the model's owner, for grouping and filtering. */ provider?: string }
 
 /**
  * Claude harness ids (the default harness only holds an Anthropic key) and the opencode gateway reference.
@@ -27,7 +27,7 @@ export const BUILT_IN_AGENT_MODELS: readonly AgentModelOption[] = [
 ]
 
 /** Same shape rule as agentModelForHarness, minus the harness-specific half. */
-const MODEL_SHAPE = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,99}$/
+export const MODEL_SHAPE = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,99}$/
 
 function extraModels(env: Record<string, string | undefined>): AgentModelOption[] {
   return (env.COMPASS_CLOUD_AGENT_MODELS ?? "")

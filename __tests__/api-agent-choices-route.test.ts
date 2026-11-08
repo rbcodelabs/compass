@@ -11,6 +11,7 @@ const grants = vi.hoisted(() => ({ list: vi.fn() }))
 vi.mock("@/lib/mcp-connectors/store", () => ({ listConnectedGrants: grants.list }))
 
 import { GET } from "@/app/api/agent/choices/route"
+import { resetCatalogFailureCache } from "@/lib/agent-model-catalog"
 
 const get = (query: string) => GET(new Request(`https://compass.test/api/agent/choices?${query}`))
 
@@ -18,6 +19,7 @@ afterEach(() => { delete process.env.COMPASS_CLOUD_AGENT_MODELS; delete process.
 
 beforeEach(() => {
   vi.clearAllMocks()
+  resetCatalogFailureCache()
   grants.list.mockResolvedValue([])
   mockAuth.mockResolvedValue({ user: { id: "u1" } })
   mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
@@ -91,6 +93,21 @@ describe("GET /api/agent/choices", () => {
       const body = await (await get("workspaceId=ws-1")).json()
       expect(body.models.map((m: { value: string }) => m.value)).toEqual(["anthropic/claude-sonnet-5.5"])
       expect(body.deploymentModel).toBe("anthropic/claude-sonnet-5.5")
+    })
+
+    it("keeps the curated menu but labels an agent's own catalog model by its catalog name (bare id when the catalog is down)", async () => {
+      process.env.AGENT_HARNESS = "opencode"
+      identity.list.mockResolvedValue({ agents: [{ id: "a1", name: "Triage", ownerType: "WORKSPACE", model: "openai/gpt-5" }], defaultAgentId: "a1" })
+      const catalog = { data: [{ id: "openai/gpt-5", name: "GPT-5", type: "language", tags: ["tool-use"], owned_by: "openai" }] }
+      vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(catalog), { status: 200 })))
+      let body = await (await get("workspaceId=ws-1")).json()
+      expect(body.models.map((m: { value: string }) => m.value)).toEqual(["anthropic/claude-sonnet-5.5"])
+      expect(body.agents[0].model).toBe("openai/gpt-5")
+      expect(body.modelLabels["openai/gpt-5"]).toBe("GPT-5")
+      vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("down") }))
+      body = await (await get("workspaceId=ws-1")).json()
+      expect(body.modelLabels["openai/gpt-5"]).toBe("openai/gpt-5")
+      vi.unstubAllGlobals()
     })
 
     it("offers nothing on Bedrock, and an agent's Anthropic-API model is not claimed for it", async () => {
