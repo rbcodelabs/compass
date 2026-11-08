@@ -2,7 +2,7 @@
  * Data and grouping for the roadmap Gallery view (`?view=gallery`).
  *
  * Each roadmap item is shown as one large card whose hero is the screenshot of an
- * Artifact linked to the item's Solution. This module is the pure + loader half; the
+ * Artifact linked to the item's Solution. This module is the pure, client-safe half (types + grouping; the DB loader is in ./gallery-server); the
  * card UI lives in components/roadmap/roadmap-gallery.tsx.
  */
 import type { ArtifactKind } from "@/lib/artifact-kind"

@@ -1,4 +1,3 @@
-import "server-only"
 /**
  * Server-side loader for the roadmap Gallery view. Kept apart from ./gallery so the
  * client component can import the pure grouping helpers without bundling the DB layer.
