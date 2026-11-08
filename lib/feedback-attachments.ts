@@ -1,6 +1,7 @@
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto"
-import { del, head, put } from "@vercel/blob"
-import { generateClientTokenFromReadWriteToken } from "@vercel/blob/client"
+import { head } from "@vercel/blob"
+import { createDirectUploadToken } from "@/lib/storage/direct-upload"
+import { getPublicFileStore } from "@/lib/storage/public-store"
 
 import {
   FEEDBACK_ATTACHMENT_ALLOWED_MIME_TYPES,
@@ -123,7 +124,7 @@ export function decodeInlineFeedbackAttachments(
 export async function deleteFeedbackBlobs(urls: string[]): Promise<void> {
   if (!urls.length) return
   try {
-    await del(urls)
+    await getPublicFileStore().delete(urls)
   } catch {
     // Cleanup is best-effort; the original upload/database failure is the useful error.
   }
@@ -138,13 +139,13 @@ export async function uploadInlineFeedbackAttachments(
   try {
     for (const attachment of prepared) {
       const safeName = sanitizeFeedbackAttachmentFilename(attachment.filename)
-      const blob = await put(
+      const stored = await getPublicFileStore().put(
         `feedback/${workspaceId}/${randomUUID()}-${safeName}`,
         attachment.bytes,
-        { access: "public", contentType: attachment.fileType, addRandomSuffix: false },
+        { contentType: attachment.fileType, addRandomSuffix: false },
       )
       uploaded.push({
-        url: blob.url,
+        url: stored.url,
         filename: attachment.filename,
         fileType: attachment.fileType,
         fileSize: attachment.fileSize,
@@ -245,12 +246,12 @@ export async function prepareFeedbackAttachmentUpload(input: {
   const pathname = `feedback/${input.workspaceId}/${randomUUID()}-${sanitizeFeedbackAttachmentFilename(input.filename)}`
   const attachmentId = randomUUID()
   const expiresAt = Date.now() + DIRECT_UPLOAD_TTL_MS
-  const clientToken = await generateClientTokenFromReadWriteToken({
+  const clientToken = await createDirectUploadToken({
+    store: "public",
     pathname,
     allowedContentTypes: [input.fileType],
-    maximumSizeInBytes: input.fileSize,
+    maxBytes: input.fileSize,
     validUntil: expiresAt,
-    addRandomSuffix: false,
     allowOverwrite: false,
   })
   const receipt = createFeedbackUploadReceipt({ version: 1, attachmentId, ...input, pathname, expiresAt })

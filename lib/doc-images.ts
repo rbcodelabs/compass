@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto"
-import { generateClientTokenFromReadWriteToken } from "@vercel/blob/client"
 import type { ArtifactStorage } from "@/lib/artifact-storage"
+import { createDirectUploadToken } from "@/lib/storage/direct-upload"
 
 export const DOC_IMAGE_MAX_BYTES = 10 * 1024 * 1024
 export const DOC_IMAGE_ALLOWED_MIME_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"] as const
@@ -47,10 +47,8 @@ export async function createDocImage(input: { workspaceId: string; filename: str
 
 export async function prepareDocImageUpload(input: { workspaceId: string; filename: string; fileType: string; fileSize: number }, now = Date.now()) {
   const fileType = validateImageInput(input)
-  const token = process.env.ARTIFACT_BLOB_READ_WRITE_TOKEN?.trim()
-  if (!token) throw new Error("Private artifact storage is not configured")
   const identity = createIdentity(input.workspaceId, fileType)
   const expiresAt = now + DIRECT_UPLOAD_TTL_MS
-  const clientToken = await generateClientTokenFromReadWriteToken({ token, pathname: identity.pathname, allowedContentTypes: [fileType], maximumSizeInBytes: input.fileSize, validUntil: expiresAt, addRandomSuffix: false, allowOverwrite: false })
+  const clientToken = await createDirectUploadToken({ store: "private", pathname: identity.pathname, allowedContentTypes: [fileType], maxBytes: input.fileSize, validUntil: expiresAt, allowOverwrite: false })
   return { ...identity, filename: input.filename, fileType, fileSize: input.fileSize, clientToken, expiresAt, access: "private" as const, markdown: `![${input.filename}](${identity.url})` }
 }
