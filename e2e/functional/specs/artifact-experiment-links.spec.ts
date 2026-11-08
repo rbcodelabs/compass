@@ -1,4 +1,4 @@
-import type { Page } from "@playwright/test"
+import type { Page, TestInfo } from "@playwright/test"
 import { expect, test } from "../fixtures/index"
 import { execFileSync } from "node:child_process"
 import getPrisma from "../../../lib/db"
@@ -6,6 +6,12 @@ import getPrisma from "../../../lib/db"
 // lib/artifacts.ts (and the entity_links reads behind it) load only under tsx, which resolves the repo's "@/" aliases.
 const cli = (command: "read" | "delete" | "leftover", workspaceId: string, id: string): unknown =>
   JSON.parse(execFileSync("pnpm", ["exec", "tsx", "e2e/functional/fixtures/artifact-experiment-cli.ts", command, workspaceId, id], { encoding: "utf8", env: process.env }).trim().split("\n").at(-1)!)
+/** Full-page screenshot into the test output; also into ARTEXP_QA_DIR when set (the QA run keeps them). */
+async function shoot(page: Page, testInfo: TestInfo, name: string) {
+  const capture = { fullPage: true, animations: "disabled" as const, style: "nextjs-portal { display: none }" }
+  await page.screenshot({ path: testInfo.outputPath(`${name}.png`), ...capture })
+  if (process.env.ARTEXP_QA_DIR) await page.screenshot({ path: `${process.env.ARTEXP_QA_DIR}/${name}.png`, ...capture })
+}
 const attachedArtifacts = (workspaceId: string, experimentId: string) => cli("read", workspaceId, experimentId)
 
 /**
@@ -35,7 +41,8 @@ test("an artifact links to an experiment, shows on both pages, unlinks, and its 
   const prisma = getPrisma()
   const workspace = await prisma.workspace.findFirstOrThrow({ where: { slug: workspaceSlug } })
   const suffix = Date.now().toString(36)
-  const experimentTitle = `Checkout prompt test ${suffix}`
+  // Long on purpose: the title must wrap on a 390px screen, not push the page sideways.
+  const experimentTitle = `Checkout prompt test ${suffix} — does a contextual savings prompt on the payment step raise completion for first-time buyers without hurting average order value`
   const artifactTitle = `Checkout prototype ${suffix}`
   const experiment = await prisma.experiment.create({ data: { workspaceId: workspace.id, title: experimentTitle, hypothesis: "A prompt increases completion.", method: "Prototype prompt", killCondition: "No increase", status: "DESIGNING" } })
 
@@ -58,7 +65,7 @@ test("an artifact links to an experiment, shows on both pages, unlinks, and its 
     await page.setViewportSize(viewport)
     await experimentsSection.scrollIntoViewIfNeeded()
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
-    await page.screenshot({ path: testInfo.outputPath(`artifact-experiments-${viewport.label}.png`), fullPage: true, animations: "disabled", style: "nextjs-portal { display: none }" })
+    await shoot(page, testInfo, `artifact-linked-experiments-${viewport.label}`)
   }
   await page.setViewportSize({ width: 1280, height: 800 })
 
@@ -72,7 +79,7 @@ test("an artifact links to an experiment, shows on both pages, unlinks, and its 
     await page.setViewportSize(viewport)
     await artifactsSection.scrollIntoViewIfNeeded()
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
-    await page.screenshot({ path: testInfo.outputPath(`experiment-artifacts-${viewport.label}.png`), fullPage: true, animations: "disabled", style: "nextjs-portal { display: none }" })
+    await shoot(page, testInfo, `experiment-linked-artifacts-${viewport.label}`)
   }
   await page.setViewportSize({ width: 1280, height: 800 })
 
@@ -88,6 +95,21 @@ test("an artifact links to an experiment, shows on both pages, unlinks, and its 
   await expect(artifactsSection.getByRole("link", { name: artifactTitle, exact: true })).toBeVisible()
   await page.goto(artifactUrl)
   await expect(page.getByRole("region", { name: "Linked experiments" }).getByRole("link", { name: experimentTitle, exact: true })).toBeVisible()
+
+  // An archived artifact keeps its link visible and removable but cannot take a new one.
+  await page.getByRole("button", { name: "Archive", exact: true }).click()
+  await expect(page.getByText("This artifact is archived.")).toBeVisible()
+  const archivedSection = page.getByRole("region", { name: "Linked experiments" })
+  await expect(archivedSection.getByRole("link", { name: experimentTitle, exact: true })).toBeVisible()
+  await expect(archivedSection.getByRole("button", { name: `Unlink ${experimentTitle}`, exact: true })).toBeEnabled()
+  await expect(archivedSection.getByRole("button", { name: "Link existing experiment" })).toHaveCount(0)
+  for (const viewport of [{ width: 1280, height: 800, label: "desktop" }, { width: 390, height: 844, label: "mobile" }]) {
+    await page.setViewportSize(viewport)
+    await archivedSection.scrollIntoViewIfNeeded()
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+    await shoot(page, testInfo, `artifact-linked-experiments-archived-${viewport.label}`)
+  }
+  await page.setViewportSize({ width: 1280, height: 800 })
 
   // Deleting the artifact removes the link and leaves the experiment.
   cli("delete", workspace.id, artifactId)
