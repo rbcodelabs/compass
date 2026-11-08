@@ -18,7 +18,9 @@ vi.mock("@/lib/workspace-updates-capture", () => ({
   withUpdatesTables: async (client: unknown, callback: (tx: unknown, tablesExist: boolean) => unknown) => callback(client, false),
 }))
 vi.mock("@/lib/links/legacy-mirror", () => ({ mirrorArtifactLink: vi.fn(), unmirrorArtifactLink: vi.fn() }))
-const sweep = vi.hoisted(() => ({ deleteLinksForEntity: vi.fn() }))
+const sweep = vi.hoisted(() => ({ deleteLinksForEntity: vi.fn(), linkEntities: vi.fn(), unlinkEntities: vi.fn() }))
+const experimentLinks = vi.hoisted(() => ({ readEntityLinksArtifactExperiment: vi.fn() }))
+vi.mock("@/lib/links/read-compare", () => experimentLinks)
 vi.mock("@/lib/links/service", () => sweep)
 
 import {
@@ -28,10 +30,15 @@ import {
   createHtmlArtifact,
   deleteArtifact,
   deleteWorkspaceArtifacts,
+  getArtifactExperimentIds,
+  getExperimentArtifactIds,
+  getExperimentsArtifactIds,
+  linkArtifactToExperiment,
   linkArtifactToSolution,
   replaceHtmlArtifactRevision,
   replaceExternalArtifactRevision,
   toArtifactDetailDto,
+  unlinkArtifactFromExperiment,
   validateExternalUrl,
   validateHtmlUpload,
 } from "@/lib/artifacts"
@@ -314,5 +321,59 @@ describe("artifact lifecycle", () => {
     })
     expect(JSON.stringify(dto)).not.toContain("blobPathname")
     expect(JSON.stringify(dto)).not.toContain("private/")
+  })
+})
+
+describe("artifact <-> experiment links (native entity_links type)", () => {
+  const link = (fromId: string, toId: string) => ({ linkType: "ARTIFACT_ATTACHED_TO_EXPERIMENT", fromType: "ARTIFACT", fromId, toType: "EXPERIMENT", toId })
+  beforeEach(() => {
+    sweep.linkEntities.mockReset()
+    sweep.unlinkEntities.mockReset()
+    experimentLinks.readEntityLinksArtifactExperiment.mockReset()
+  })
+
+  it("links through the generic service as a direct write (never as the legacy writer) with the caller's source and actor", async () => {
+    sweep.linkEntities.mockResolvedValue({ link: { id: "link-1" }, created: true })
+    expect(await linkArtifactToExperiment({ artifactId: "art-1", experimentId: "exp-1", workspaceId: "ws-1", createdById: "user-1", source: "MCP" })).toEqual({ id: "link-1", created: true })
+    expect(sweep.linkEntities).toHaveBeenCalledWith(prisma, {
+      linkType: "ARTIFACT_ATTACHED_TO_EXPERIMENT", fromId: "art-1", toId: "exp-1", expectedWorkspaceId: "ws-1", ctx: { source: "MCP", createdById: "user-1" },
+    })
+    expect(sweep.linkEntities.mock.calls[0][1]).not.toHaveProperty("viaLegacyWriter")
+  })
+
+  it("defaults the source to UI and the actor to null, and unlinks idempotently", async () => {
+    sweep.linkEntities.mockResolvedValue({ link: { id: "link-1" }, created: false })
+    await linkArtifactToExperiment({ artifactId: "art-1", experimentId: "exp-1", workspaceId: "ws-1" })
+    expect(sweep.linkEntities.mock.calls[0][1].ctx).toEqual({ source: "UI", createdById: null })
+    sweep.unlinkEntities.mockResolvedValueOnce({ removed: 1 }).mockResolvedValueOnce({ removed: 0 })
+    expect(await unlinkArtifactFromExperiment({ artifactId: "art-1", experimentId: "exp-1", workspaceId: "ws-1" })).toEqual({ removed: true })
+    expect(await unlinkArtifactFromExperiment({ artifactId: "art-1", experimentId: "exp-1", workspaceId: "ws-1" })).toEqual({ removed: false })
+    expect(sweep.unlinkEntities.mock.calls[0][1]).toEqual({ linkType: "ARTIFACT_ATTACHED_TO_EXPERIMENT", fromId: "art-1", toId: "exp-1", expectedWorkspaceId: "ws-1" })
+  })
+
+  it("propagates a service refusal (foreign, archived) instead of swallowing it", async () => {
+    sweep.linkEntities.mockRejectedValue(new Error("Experiment not found in this workspace."))
+    await expect(linkArtifactToExperiment({ artifactId: "art-1", experimentId: "exp-x", workspaceId: "ws-1" })).rejects.toThrow("Experiment not found in this workspace.")
+  })
+
+  it("the single-entity readers ask for their own end and return the other end's ids", async () => {
+    experimentLinks.readEntityLinksArtifactExperiment.mockResolvedValue([link("art-1", "exp-1"), link("art-1", "exp-2")])
+    expect(await getArtifactExperimentIds(prisma as never, "ws-1", "art-1")).toEqual(["exp-1", "exp-2"])
+    expect(experimentLinks.readEntityLinksArtifactExperiment).toHaveBeenLastCalledWith(prisma, "ws-1", { artifactIds: ["art-1"] })
+    experimentLinks.readEntityLinksArtifactExperiment.mockResolvedValue([link("art-1", "exp-1"), link("art-2", "exp-1")])
+    expect(await getExperimentArtifactIds(prisma as never, "ws-1", "exp-1")).toEqual(["art-1", "art-2"])
+    expect(experimentLinks.readEntityLinksArtifactExperiment).toHaveBeenLastCalledWith(prisma, "ws-1", { experimentIds: ["exp-1"] })
+  })
+
+  it("getExperimentsArtifactIds groups by experiment, de-duplicates ids and rows, and omits experiments with none", async () => {
+    experimentLinks.readEntityLinksArtifactExperiment.mockResolvedValue([link("art-1", "exp-1"), link("art-2", "exp-1"), link("art-1", "exp-1"), link("art-1", "exp-2")])
+    const map = await getExperimentsArtifactIds(prisma as never, "ws-1", ["exp-1", "exp-2", "exp-1", "exp-3"])
+    expect(experimentLinks.readEntityLinksArtifactExperiment).toHaveBeenCalledWith(prisma, "ws-1", { experimentIds: ["exp-1", "exp-2", "exp-3"] })
+    expect(map).toEqual(new Map([["exp-1", ["art-1", "art-2"]], ["exp-2", ["art-1"]]]))
+  })
+
+  it("getExperimentsArtifactIds does not query for an empty list", async () => {
+    expect((await getExperimentsArtifactIds(prisma as never, "ws-1", [])).size).toBe(0)
+    expect(experimentLinks.readEntityLinksArtifactExperiment).not.toHaveBeenCalled()
   })
 })
