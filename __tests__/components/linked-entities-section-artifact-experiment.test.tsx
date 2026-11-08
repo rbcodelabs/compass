@@ -52,4 +52,15 @@ describe("LinkedEntitiesSection for artifact -> experiment", () => {
     rerender(<LinkedEntitiesSection orgSlug="acme" workspaceSlug="compass" target={{ ...target, entityId: "art-2" }} />)
     expect(await screen.findByRole("heading", { name: "Attached to" })).toBeTruthy()
   })
+
+  it("reloads when refreshKey changes, so an artifact archived in place loses its add button without a page reload", async () => {
+    mocks.read.mockResolvedValue({ ok: true, view: view(true) })
+    const { rerender } = render(<LinkedEntitiesSection orgSlug="acme" workspaceSlug="compass" target={target} title="Linked experiments" refreshKey="ACTIVE" />)
+    expect(await screen.findByRole("button", { name: "Link existing experiment" })).toBeTruthy()
+    mocks.read.mockResolvedValue({ ok: true, view: view(false) })
+    rerender(<LinkedEntitiesSection orgSlug="acme" workspaceSlug="compass" target={target} title="Linked experiments" refreshKey="ARCHIVED" />)
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Link existing experiment" })).toBeNull())
+    expect(screen.getByRole("button", { name: "Unlink Onboarding test" })).toBeTruthy()
+    expect(mocks.read).toHaveBeenCalledTimes(2)
+  })
 })

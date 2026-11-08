@@ -23,7 +23,7 @@ export type LinkedEntitiesTarget = { linkType: string; entityType: string; entit
  * the type does not apply (feature flag off, entity not eligible) and only offers candidates the service
  * would accept.
  */
-export function LinkedEntitiesSection({ orgSlug, workspaceSlug, target, title }: { orgSlug: string; workspaceSlug: string; target: LinkedEntitiesTarget; /** Overrides the registry label as the heading (e.g. "Linked experiments"). */ title?: string }) {
+export function LinkedEntitiesSection({ orgSlug, workspaceSlug, target, title, refreshKey }: { orgSlug: string; workspaceSlug: string; target: LinkedEntitiesTarget; /** Changing this reloads the section (e.g. the viewed record was archived, which changes whether it can take a new link). */ refreshKey?: string; /** Overrides the registry label as the heading (e.g. "Linked experiments"). */ title?: string }) {
   const [view, setView] = useState<LinkedEntitiesView | null>(null)
   const [loaded, setLoaded] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -52,7 +52,7 @@ export function LinkedEntitiesSection({ orgSlug, workspaceSlug, target, title }:
     setLoaded(false)
     void load()
     return () => { request.current++ }
-  }, [load])
+  }, [load, refreshKey])
   useEffect(() => {
     if (!open) return
     const timer = setTimeout(() => { void load(search) }, 200)
