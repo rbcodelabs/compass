@@ -24,9 +24,16 @@ export function EntityCard({ title, description, eyebrow, leading, metadata, sta
       data-selected={selected || undefined}
       aria-current={selected ? "true" : undefined}
       className={cn(
-        "group rounded-xl border bg-surface-card p-4 shadow-[var(--shadow-card)] transition",
-        selected ? "border-border-interactive ring-2 ring-ring/15" : "border-border-default",
-        interactive && "hover:border-border-strong hover:shadow-[var(--shadow-panel)] focus-within:border-border-focus",
+        "group rounded-xl border bg-surface-card p-4 transition",
+        // Active (open in the detail panel). The border colour needs `!` because
+        // globals.css has an unlayered `* { border-color }` that beats layered
+        // utilities, and the ring is an explicit shadow because `--shadow-card`
+        // is `none`, which makes a composed `ring-*` + `shadow-*` list invalid.
+        selected
+          ? "border-border-interactive! shadow-[0_0_0_2px_color-mix(in_oklab,var(--ring)_15%,transparent)]"
+          : "border-border-default shadow-[var(--shadow-card)]",
+        interactive && !selected && "hover:border-border-strong hover:shadow-[var(--shadow-panel)] focus-within:border-border-focus",
+        interactive && selected && "hover:shadow-[0_0_0_2px_color-mix(in_oklab,var(--ring)_15%,transparent),var(--shadow-panel)]",
         className
       )}
       {...props}
