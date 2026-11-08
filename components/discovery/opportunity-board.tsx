@@ -1,7 +1,7 @@
 "use client";
 
 import { useLabels } from "@/components/thinking-model/thinking-model-provider";
-import { useState, useTransition, useId } from "react";
+import { useEffect, useId, useRef, useState, useTransition } from "react";
 import { useLiveRefresh } from "@/hooks/use-live-refresh";
 import { useServerSyncedState } from "@/hooks/use-server-synced-state";
 import { useFlipAnimation } from "@/hooks/use-flip-animation";
@@ -10,8 +10,8 @@ import {
   DragOverlay,
   type DragStartEvent,
   type DragEndEvent,
+  type DragCancelEvent,
   type DragOverEvent,
-  closestCenter,
   PointerSensor,
   KeyboardSensor,
   useSensor,
@@ -25,14 +25,29 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { Lightbulb } from "lucide-react";
-import { Board, BoardColumn, EmptyState } from "@/components/patterns";
+import {
+  Board,
+  BOARD_FADE_END_TRACK_CLASS,
+  BoardColumn,
+  BoardDock,
+  EmptyState,
+  PINNED_COLUMN_BODY_CLASS,
+  PINNED_COLUMN_CLASS,
+  type BoardColumnLayoutControls,
+  type BoardDockTab,
+} from "@/components/patterns";
+import { DroppableDockTab, useStableBoardCollision } from "@/components/patterns/board-dock-dnd";
+import { useOpportunitiesColumnLayout } from "@/components/discovery/discovery-column-layout";
+import { useMediaQuery } from "@/hooks/use-media-query";
+import { cn } from "@/lib/utils";
+import { canMoveColumn, collapseDock, moveColumn, setActiveColumn, togglePinColumn, type BoardLayout, type MoveDirection } from "@/lib/board-layout";
 import { OpportunityCard, type OpportunityCardData } from "./opportunity-card";
 import { NewOpportunityButton } from "./new-opportunity-button";
 import {
   moveOpportunity,
-  reorderOpportunity,
+  reorderOpportunitiesInColumn,
 } from "@/app/[orgSlug]/[workspaceSlug]/discovery/actions";
-import { orderCards, planDragEnd } from "@/lib/discovery-board-ordering";
+import { dockTabDropStatus, orderCards, planDragEnd } from "@/lib/discovery-board-ordering";
 import { OPPORTUNITY_PIPELINE_STATUSES, OPPORTUNITY_STATUS_DEFINITIONS } from "@/lib/opportunity-status";
 import { InfoHint } from "@/components/card-sort/card-sort-info";
 import type { OpportunityStatus } from "@/lib/types";
@@ -104,8 +119,13 @@ function DiscoveryColumn({
   showScore,
   dragEnabled,
   forcedVisible,
+  placement = "scroller",
+  layoutControls,
 }: {
   forcedVisible: boolean;
+  /** "pinned" is the dock's open panel: fixed width, no horizontal flex sizing. */
+  placement?: "scroller" | "pinned";
+  layoutControls?: BoardColumnLayoutControls;
   status: OpportunityStatus;
   label: string;
   accent: "neutral" | "info" | "warning" | "success";
@@ -116,6 +136,7 @@ function DiscoveryColumn({
   dragEnabled: boolean;
 }) {
   const labels = useLabels();
+  const pinned = placement === "pinned";
   const itemIds = items.map((i) => i.id);
   const { setNodeRef, isOver } = useDroppable({
     id: `column-${status}`,
@@ -159,9 +180,12 @@ function DiscoveryColumn({
       }
       count={items.length}
       accent={accent}
-      className="w-[calc(100cqw-1.5rem)] min-w-0 flex-none sm:w-[calc(100cqw-2rem)] md:w-72 md:min-w-[280px] md:flex-1 md:overflow-hidden md:h-full"
+      data-slot="opportunity-board-column"
+      data-status={status}
+      className={pinned ? PINNED_COLUMN_CLASS : "w-[calc(100cqw-1.5rem)] min-w-0 flex-none sm:w-[calc(100cqw-2rem)] md:w-72 md:min-w-[280px] md:flex-1 md:overflow-hidden md:h-full"}
+      layoutControls={layoutControls}
       bodyRef={setNodeRef}
-      bodyClassName={`min-h-44 md:min-h-0 md:max-h-none md:flex-1 md:overflow-y-auto ${isOver ? "rounded-lg bg-primary/5 ring-2 ring-inset ring-ring/25" : ""}`}
+      bodyClassName={`${pinned ? PINNED_COLUMN_BODY_CLASS : "min-h-44 md:min-h-0 md:max-h-none md:flex-1 md:overflow-y-auto"} ${isOver ? "rounded-lg bg-primary/5 ring-2 ring-inset ring-ring/25" : ""}`}
       footer={<NewOpportunityButton variant="column" status={status} />}
     >
         {dragEnabled ? (
@@ -186,7 +210,10 @@ type Props = {
   hasActiveScoringModel?: boolean;
   /** "Sort by score" view mode. Never persisted — see planDragEnd. */
   sortByScore?: boolean;
-  /** Columns to render, in order (the resolved saved-view / URL layout). Defaults to the Active-first order. */
+  /**
+   * Which status columns to render (the resolved saved-view / URL hide state). Defaults to all of them. Only MEMBERSHIP
+   * matters here: the order they appear in is the column layout's (see discovery-column-layout.tsx).
+   */
   columnOrder?: readonly OpportunityStatus[];
   /** Columns the layout hides that are shown because they hold cards. */
   forcedVisibleColumns?: readonly OpportunityStatus[];
@@ -225,9 +252,60 @@ export function OpportunityBoard({
   const { containerRef, capture } = useFlipAnimation(generation);
   useLiveRefresh({ orgSlug, workspaceSlug, scope: "opportunities", paused: busy, onBeforeRefresh: capture });
 
+  // Column layout (lib/board-layout.ts): the column order, which columns are pinned (docked in ONE dock on the right,
+  // outside the scroller), which pinned column the dock shows and whether it is collapsed to its tab rail. Docking
+  // applies from md up only; below md every column is an ordinary scroller column, in the same order. This board is the
+  // Status grouping, the only one that docks (the custom-field board is a different component and ignores the layout).
+  const isDesktop = useMediaQuery("(min-width: 768px)", false);
+  const { layout, update: updateLayout } = useOpportunitiesColumnLayout(workspaceId);
+  const rendered = new Set<string>(columnOrder);
+  const orderedStatuses = layout.columnOrder.filter((id) => rendered.has(id)) as OpportunityStatus[];
+  const isDocked = (id: string) => isDesktop && layout.pinnedColumnIds.includes(id);
+  const dockedStatuses = orderedStatuses.filter(isDocked);
+  const scrollerStatuses = orderedStatuses.filter((id) => !isDocked(id));
+  // The stored active column may be one that isn't rendered (a hidden column): show the first rendered one then.
+  const activeDockId = layout.activePinnedId && dockedStatuses.includes(layout.activePinnedId as OpportunityStatus) ? layout.activePinnedId : (dockedStatuses[0] ?? null);
+  const dockOpen = activeDockId !== null && !layout.dockCollapsed;
+
+  // Keyboard users keep their place: after a layout change the control that now represents the column gets focus.
+  const pendingFocus = useRef<string | null>(null);
+  useEffect(() => {
+    const target = pendingFocus.current;
+    if (!target) return;
+    pendingFocus.current = null;
+    containerRef.current?.querySelector<HTMLElement>(`[data-column-control="${target}"]`)?.focus();
+  }, [layout, containerRef]);
+  const changeLayout = (transition: (current: BoardLayout) => BoardLayout, focus?: string) => {
+    if (focus) pendingFocus.current = focus;
+    updateLayout(transition);
+  };
+
+  // The active tab of an open dock closes it; any other tab shows its column and opens the dock.
+  function selectDockTab(id: string) {
+    changeLayout((current) => (dockOpen && id === activeDockId ? collapseDock(current) : setActiveColumn(current, id)), `${id}:tab`);
+  }
+
+  function layoutControlsFor(status: OpportunityStatus): BoardColumnLayoutControls {
+    // A column moves among the columns rendered in its own region (the dock's tabs, or the scroller; everything on narrow screens).
+    const scope = { among: (other: string) => rendered.has(other) && (!isDesktop || isDocked(other) === isDocked(status)) };
+    const docked = isDocked(status);
+    return {
+      columnId: status,
+      label: OPPORTUNITY_COLUMN_META[status].label,
+      pinned: docked,
+      pinnable: isDesktop,
+      onTogglePin: () => changeLayout((l) => togglePinColumn(l, status), `${status}:pin`),
+      canMoveLeft: canMoveColumn(layout, status, "left", scope),
+      canMoveRight: canMoveColumn(layout, status, "right", scope),
+      onMove: (direction: MoveDirection) => changeLayout((l) => moveColumn(l, status, direction, scope), `${status}:menu`),
+      onCollapse: docked ? () => changeLayout(collapseDock, `${status}:tab`) : undefined,
+    };
+  }
+
   // Stable across server and client; without it @dnd-kit numbers its
   // aria-describedby ids from a global counter and hydration mismatches.
   const dndId = useId();
+  const { collisionDetection, noteMoved, reset: resetCollision } = useStableBoardCollision();
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
@@ -250,6 +328,9 @@ export function OpportunityBoard({
     if (!dragEnabled) return;
     const { active, over } = event;
     if (!over) return;
+    // A dock tab is resolved at drag end (see dockTabDropStatus): its column may not be rendered, and moving the
+    // dragged card into an unrendered column mid-drag unmounts it while dnd-kit is still tracking it.
+    if (dockTabDropStatus(over.data.current)) return;
 
     const activeId = active.id as string;
     const overId = over.id as string;
@@ -266,6 +347,7 @@ export function OpportunityBoard({
 
     if (sourceStatus === destStatus) return;
 
+    noteMoved();
     setColumns((prev) => {
       const item = prev[sourceStatus].find((i) => i.id === activeId);
       if (!item) return prev;
@@ -298,11 +380,26 @@ export function OpportunityBoard({
   function handleDragEnd(event: DragEndEvent) {
     const { active, over } = event;
     setActiveItem(null);
+    resetCollision();
 
     const activeId = active.id as string;
     const overId = (over?.id as string | undefined) ?? null;
-    const currentStatus = findStatus(columns, activeId);
-    const columnItems = currentStatus ? columns[currentStatus] : [];
+    const tabStatus = dockTabDropStatus(over?.data.current);
+    const foundStatus = findStatus(columns, activeId);
+    // Dropped on a dock tab: that tab's status is the destination (the card has not been moved there during the drag).
+    const currentStatus = tabStatus ?? foundStatus;
+    const columnItems = foundStatus ? columns[foundStatus] : [];
+    if (tabStatus && foundStatus && tabStatus !== foundStatus) {
+      setColumns((prev) => {
+        const item = prev[foundStatus].find((i) => i.id === activeId);
+        if (!item) return prev;
+        return {
+          ...prev,
+          [foundStatus]: prev[foundStatus].filter((i) => i.id !== activeId),
+          [tabStatus]: [...prev[tabStatus], { ...item, status: tabStatus }],
+        };
+      });
+    }
 
     const plan = planDragEnd({
       activeId,
@@ -325,49 +422,109 @@ export function OpportunityBoard({
       setColumns((prev) => ({ ...prev, [currentStatus]: reordered }));
 
       startTransition(async () => {
-        await reorderOpportunity(activeId, plan.newIndex, revalidatePathStr);
+        await reorderOpportunitiesInColumn(currentStatus, reordered.map((item) => item.id), workspaceId, revalidatePathStr);
       });
     }
 
     setDragSourceStatus(null);
   }
 
+  /** Escape (or anything else that cancels the drag) puts the card back where the drag began, in its manual order. */
+  function handleDragCancel(event: DragCancelEvent) {
+    resetCollision();
+    const activeId = event.active.id as string;
+    const found = findStatus(columns, activeId);
+    if (dragSourceStatus && found && found !== dragSourceStatus) {
+      setColumns((prev) => {
+        const item = prev[found].find((i) => i.id === activeId);
+        if (!item) return prev;
+        return {
+          ...prev,
+          [found]: prev[found].filter((i) => i.id !== activeId),
+          [dragSourceStatus]: [...prev[dragSourceStatus], { ...item, status: dragSourceStatus }].sort((a, b) => a.sortOrder - b.sortOrder),
+        };
+      });
+    }
+    setActiveItem(null);
+    setDragSourceStatus(null);
+  }
+
   const visibleColumns = displayColumns(columns, scoreSortActive);
+
+  function renderColumn(status: OpportunityStatus, placement: "scroller" | "pinned") {
+    return (
+      <DiscoveryColumn
+        key={status}
+        status={status}
+        label={OPPORTUNITY_COLUMN_META[status].label}
+        accent={OPPORTUNITY_COLUMN_META[status].accent}
+        forcedVisible={forcedVisibleColumns.includes(status)}
+        items={visibleColumns[status]}
+        orgSlug={orgSlug}
+        workspaceSlug={workspaceSlug}
+        showScore={hasActiveScoringModel}
+        dragEnabled={dragEnabled}
+        placement={placement}
+        layoutControls={layoutControlsFor(status)}
+      />
+    );
+  }
+
+  const dockTabs: BoardDockTab[] = dockedStatuses.map((status) => ({
+    id: status,
+    title: OPPORTUNITY_COLUMN_META[status].label,
+    count: visibleColumns[status].length,
+  }));
 
   return (
     <div ref={containerRef} className="flex min-h-0 flex-1 flex-col overflow-y-auto md:overflow-hidden">
       <DndContext
         id={dndId}
         sensors={sensors}
-        collisionDetection={closestCenter}
+        collisionDetection={collisionDetection}
         onDragStart={handleDragStart}
         onDragOver={handleDragOver}
         onDragEnd={handleDragEnd}
+        onDragCancel={handleDragCancel}
       >
-        <Board
-          label={`${labels.opportunity.singular} board`}
-          className="block min-h-[24rem] flex-1 scroll-px-3 overflow-x-auto p-0 sm:scroll-px-4 md:overflow-y-hidden"
-        >
-          <div
-            data-slot="opportunity-board-track"
-            className="flex h-full w-max min-w-full items-stretch gap-3 px-3 pt-3 pb-3 sm:px-4 sm:pt-4 md:px-4 md:pt-3"
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col md:flex-row">
+          <Board
+            label={`${labels.opportunity.singular} board`}
+            fadeEnd={dockedStatuses.length > 0}
+            className="block min-h-[24rem] flex-1 scroll-px-3 overflow-x-auto p-0 sm:scroll-px-4 md:overflow-y-hidden"
           >
-            {columnOrder.map((status) => (
-              <DiscoveryColumn
-                key={status}
-                status={status}
-                label={OPPORTUNITY_COLUMN_META[status].label}
-                accent={OPPORTUNITY_COLUMN_META[status].accent}
-                forcedVisible={forcedVisibleColumns.includes(status)}
-                items={visibleColumns[status]}
-                orgSlug={orgSlug}
-                workspaceSlug={workspaceSlug}
-                showScore={hasActiveScoringModel}
-                dragEnabled={dragEnabled}
-              />
-            ))}
-          </div>
-        </Board>
+            <div
+              data-slot="opportunity-board-track"
+              className={cn(
+                "flex h-full w-max min-w-full items-stretch gap-3 px-3 pt-3 pb-3 sm:px-4 sm:pt-4 md:px-4 md:pt-3",
+                // Room for the scroller's tapered edge, so the last column at full scroll-end is not faded.
+                dockedStatuses.length > 0 && BOARD_FADE_END_TRACK_CLASS,
+              )}
+            >
+              {scrollerStatuses.map((status) => renderColumn(status, "scroller"))}
+            </div>
+          </Board>
+          {/* The dock sits OUTSIDE the horizontal scroller, so it stays put while the rest scroll and a drag from it never needs a mid-drag scroll. */}
+          {dockTabs.length > 0 ? (
+            <BoardDock
+              tabs={dockTabs}
+              activeId={activeDockId}
+              collapsed={!dockOpen}
+              onSelectTab={selectDockTab}
+              panel={dockOpen && activeDockId ? renderColumn(activeDockId as OpportunityStatus, "pinned") : null}
+              wrapTab={(tab, node, { panelOpen }) => (
+                <DroppableDockTab
+                  columnId={tab.id}
+                  columnDroppableId={`column-${tab.id}`}
+                  panelOpen={panelOpen}
+                  slot="opportunity-dock-tab-drop"
+                >
+                  {node}
+                </DroppableDockTab>
+              )}
+            />
+          ) : null}
+        </div>
 
         <DragOverlay>
           {activeItem ? (

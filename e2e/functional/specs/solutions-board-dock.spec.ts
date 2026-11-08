@@ -71,6 +71,22 @@ const columnTitles = (root: Locator) => root.locator("section > header h3").allT
 const dockWidth = async (page: Page) => (await dock(page).boundingBox())!.width;
 const column = (page: Page, status: string) => page.locator(`[data-slot='solution-backlog-column'][data-status='${status}']`);
 
+/**
+ * Collects uncaught page errors and prints each one's full stack to the test output (an error such as React's
+ * "Maximum update depth exceeded" is otherwise only a line in the browser console). The journey asserts none occurred.
+ */
+function capturePageErrors(page: Page): string[] {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => {
+    errors.push(error.message);
+    console.log(`[pageerror] ${error.message}\n${error.stack ?? "(no stack)"}`);
+  });
+  page.on("console", (message) => {
+    if (message.type() === "error" && /Maximum update depth/.test(message.text())) console.log(`[console.error] ${message.text()}`);
+  });
+  return errors;
+}
+
 async function shot(page: Page, name: string, { resize = true } = {}) {
   const dir = process.env.QA_SHOTS_DIR;
   if (!dir) return;
@@ -85,6 +101,7 @@ async function shot(page: Page, name: string, { resize = true } = {}) {
 test.describe("Solutions board dock", () => {
   test("pin, tabs, drag and drop, Columns popover, saved view, legacy view, grouped board and narrow screens", async ({ page, base }) => {
     test.setTimeout(420_000);
+    const pageErrors = capturePageErrors(page);
     const pool = requireLocalE2eDatabase();
     const tag = randomUUID().slice(0, 8);
     const opportunity = `E2E Dock Opportunity ${tag}`;
@@ -317,6 +334,7 @@ test.describe("Solutions board dock", () => {
       await expect(scroller(page).locator("[data-status=SHIPPED]")).toBeAttached();
       await expect(page.getByRole("button", { name: /^Pin .* to the right$/ })).toHaveCount(0);
       await shot(page, "narrow-390x844-no-dock-fallback");
+      expect(pageErrors, "no uncaught page errors during the journey").toEqual([]);
     } finally {
       await pool.query(`DELETE FROM "${S}".roadmap_views WHERE name = ANY($1)`, [[viewName, legacyName]]);
       await pool.query(`DELETE FROM "${S}".solutions WHERE title = ANY($1)`, [[ideaOne, ideaTwo, shipped, killed]]);

@@ -12,10 +12,16 @@
  * Column layout lives under `display.columns.status` and is always stored normalized
  * (see {@link normalizeStatusLayout}), so a saved order that only omits a status is not
  * "modified" on first load.
+ *
+ * Column ORDER is the dock layout's (display.columnLayout, lib/discovery/board-layout.ts), which supersedes the older
+ * display.columns.status.order. Both are still READ: a view or URL that only has the legacy order means the layout that
+ * order describes (effectiveStoredLayout), so nothing needs migrating. Hide/show stays in columns.status.hidden.
  */
 import { z } from "zod"
 import { DEFAULT_OPPORTUNITY_COLUMN_ORDER, resolveColumns, type ColumnLayout } from "@/lib/saved-views/columns"
 import { OPPORTUNITY_BOARD_STATUSES, type BoardViewDisplay, type BoardViewFilters } from "@/lib/saved-views/schema"
+import type { BoardLayout } from "@/lib/board-layout"
+import { effectiveStoredLayout, opportunityBoardLayoutKey, serializeOpportunityBoardLayout } from "@/lib/discovery/board-layout"
 
 export type OpportunitiesState = { filters: BoardViewFilters; display: BoardViewDisplay }
 export type RawSearchParams = Record<string, string | string[] | undefined>
@@ -161,6 +167,21 @@ export function needsSavedViewExpansion(params: RawSearchParams): boolean {
   return first(params[OPPORTUNITIES_URL_PARAMS.savedView]) !== undefined && first(params[OPPORTUNITIES_URL_PARAMS.edited]) !== "1"
 }
 
+/**
+ * The live state with the board's column layout folded in, which is what Save captures and what "modified" compares.
+ * The layout is client state (not a URL param), so it is merged in from the store. It is the one source of column order,
+ * so the legacy `columns.status.order` is cleared (hide/show stays), and the layout is serialized as `undefined` when it is
+ * the default, so an untouched board adds nothing to a saved view.
+ */
+export function withLiveColumnLayout(state: OpportunitiesState, layout: BoardLayout | undefined): OpportunitiesState {
+  const status = state.display.columns.status
+  const otherGroupings = Object.fromEntries(Object.entries(state.display.columns).filter(([groupKey]) => groupKey !== "status"))
+  const hidden = status?.hidden ?? []
+  const columns = hidden.length > 0 ? { ...otherGroupings, status: { order: [], hidden } } : otherGroupings
+  const stored = layout ? serializeOpportunityBoardLayout(layout) : undefined
+  return normalizeOpportunitiesState({ filters: state.filters, display: { ...state.display, columns, columnLayout: stored } })
+}
+
 /** Stable identity of a state, for "is this view modified?". Filters are single-valued, so only the layout needs normalizing. */
 export function opportunitiesStateKey(state: OpportunitiesState): string {
   const layout = normalizeStatusLayout(state.display.columns.status)
@@ -168,7 +189,9 @@ export function opportunitiesStateKey(state: OpportunitiesState): string {
     state.filters.squadIds,
     state.filters.customField ? [state.filters.customField.fieldId, state.filters.customField.value] : null,
     state.display.view, state.display.groupBy, state.display.sort,
-    layout ? [layout.order, layout.hidden] : null,
+    layout?.hidden ?? [],
+    // Column order, from the layout or (views saved before layouts existed) the legacy order: an absent layout is the default.
+    opportunityBoardLayoutKey(effectiveStoredLayout(state.display)),
   ])
 }
 

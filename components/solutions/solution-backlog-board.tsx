@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useRef, useState, useTransition, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, useTransition } from "react";
 import { useLiveRefresh } from "@/hooks/use-live-refresh";
 import { useServerSyncedState } from "@/hooks/use-server-synced-state";
 import { useFlipAnimation } from "@/hooks/use-flip-animation";
@@ -8,13 +8,11 @@ import {
   DndContext,
   DragOverlay,
   type DragEndEvent,
+  type DragCancelEvent,
   type DragOverEvent,
   type DragStartEvent,
-  closestCenter,
-  pointerWithin,
   KeyboardSensor,
   PointerSensor,
-  type CollisionDetection,
   useDroppable,
   useSensor,
   useSensors,
@@ -33,6 +31,7 @@ import {
   type BoardColumnLayoutControls,
   type BoardDockTab,
 } from "@/components/patterns";
+import { DroppableDockTab, useStableBoardCollision } from "@/components/patterns/board-dock-dnd";
 import { useSolutionsColumnLayout } from "@/components/solutions/solutions-column-layout";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { cn } from "@/lib/utils";
@@ -146,34 +145,6 @@ function BacklogColumn({
         )}
       </SortableContext>
     </BoardColumn>
-  );
-}
-
-/**
- * A tab only counts as a drop target when the pointer is actually on it: closestCenter alone lets a tall column body beat
- * a small tab, because it measures the dragged card's centre rather than the pointer.
- */
-const collisionDetection: CollisionDetection = (args) => {
-  const onTab = pointerWithin(args).find((hit) => args.droppableContainers.find((c) => c.id === hit.id)?.data.current?.dockTab);
-  return onTab ? [onTab] : closestCenter(args);
-};
-
-/**
- * A dock tab, which is also a drop target: a card dropped on it lands in that status exactly as a drop on the open column
- * would, so it registers under the column's own `column-<status>` id with `{ status }` data, which the drag handlers
- * already parse. While that column is the open panel the panel owns that id (two droppables must not share one), so the
- * tab is disabled and parked under an id nothing refers to; the wrapper element stays put so the tab keeps focus.
- */
-function DroppableDockTab({ status, panelOpen, children }: { status: SolutionStatus; panelOpen: boolean; children: ReactNode }) {
-  const { setNodeRef, isOver } = useDroppable({
-    id: panelOpen ? `dock-tab-${status}` : solutionBacklogColumnId(status),
-    data: { status, dockTab: true },
-    disabled: panelOpen,
-  });
-  return (
-    <div ref={setNodeRef} data-slot="solution-dock-tab-drop" data-status={status} className={cn("h-fit rounded-xl", isOver && "ring-2 ring-ring/40")}>
-      {children}
-    </div>
   );
 }
 
@@ -341,6 +312,7 @@ function StatusBacklogBoard({
 
   // Stable across server and client, or dnd-kit's counter-based ids mismatch on hydration.
   const dndId = useId();
+  const { collisionDetection, noteMoved, reset: resetCollision } = useStableBoardCollision();
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
@@ -409,6 +381,9 @@ function StatusBacklogBoard({
     if (scoreSortActive) return;
     const { active, over } = event;
     if (!over) return;
+    // A dock tab is resolved at drag end: its column may not be rendered, and moving the dragged card into an unrendered
+    // column mid-drag unmounts it while dnd-kit is still tracking it.
+    if (over.data.current?.dockTab) return;
     const activeId = active.id as string;
     const overId = over.id as string;
     const source = findStatus(columns, activeId);
@@ -416,6 +391,7 @@ function StatusBacklogBoard({
     const dest = parseSolutionBacklogColumnId(overId) ?? findStatus(columns, overId) ?? source;
     if (source === dest) return;
 
+    noteMoved();
     setColumns((prev) => {
       const item = prev[source].find((i) => i.id === activeId);
       if (!item) return prev;
@@ -431,29 +407,60 @@ function StatusBacklogBoard({
   }
 
   function handleDragEnd(event: DragEndEvent) {
+    resetCollision();
     const activeId = event.active.id as string;
-    const current = findStatus(columns, activeId);
+    const found = findStatus(columns, activeId);
+    // Dropped on a dock tab: that tab's status is the destination (the card has not been moved there during the drag).
+    const tabStatus = event.over?.data.current?.dockTab ? ((event.over.data.current.status as SolutionStatus | undefined) ?? null) : null;
+    const current = tabStatus ?? found;
     const plan = scoreSortActive || !event.over ? { kind: "none" as const } : planSolutionDrop(dragSourceStatus, current);
-    const moved = current ? columns[current].find((item) => item.id === activeId) : null;
+    const moved = found ? columns[found].find((item) => item.id === activeId) : null;
+    if (tabStatus && found && tabStatus !== found && !scoreSortActive) {
+      setColumns((prev) => {
+        const item = prev[found].find((i) => i.id === activeId);
+        if (!item) return prev;
+        return { ...prev, [found]: prev[found].filter((i) => i.id !== activeId), [tabStatus]: [...prev[tabStatus], { ...item, status: tabStatus }] };
+      });
+    }
 
     if (plan.kind === "move" && moved) {
       startTransition(async () => {
         const result = await moveSolutionStatus(activeId, plan.status, moved.opportunity.id, workspaceId, revalidatePathStr);
         announceRoadmapSync(result.roadmapSync);
       });
-    } else if (dragSourceStatus && current && dragSourceStatus !== current) {
+    } else if (dragSourceStatus && found && !tabStatus && dragSourceStatus !== found) {
       // Dropped outside any column: snap back to where the drag began.
       setColumns((prev) => {
-        const item = prev[current].find((i) => i.id === activeId);
+        const item = prev[found].find((i) => i.id === activeId);
         if (!item) return prev;
         return {
           ...prev,
-          [current]: prev[current].filter((i) => i.id !== activeId),
+          [found]: prev[found].filter((i) => i.id !== activeId),
           [dragSourceStatus]: [...prev[dragSourceStatus], { ...item, status: dragSourceStatus }],
         };
       });
     }
 
+    setActiveItem(null);
+    setDragSourceStatus(null);
+  }
+
+  /** Escape (or anything else that cancels the drag) puts the card back where the drag began. */
+  function handleDragCancel(event: DragCancelEvent) {
+    resetCollision();
+    const activeId = event.active.id as string;
+    const found = findStatus(columns, activeId);
+    if (dragSourceStatus && found && found !== dragSourceStatus) {
+      setColumns((prev) => {
+        const item = prev[found].find((i) => i.id === activeId);
+        if (!item) return prev;
+        return {
+          ...prev,
+          [found]: prev[found].filter((i) => i.id !== activeId),
+          [dragSourceStatus]: [...prev[dragSourceStatus], { ...item, status: dragSourceStatus }],
+        };
+      });
+    }
     setActiveItem(null);
     setDragSourceStatus(null);
   }
@@ -495,6 +502,7 @@ function StatusBacklogBoard({
         onDragStart={handleDragStart}
         onDragOver={handleDragOver}
         onDragEnd={handleDragEnd}
+        onDragCancel={handleDragCancel}
       >
         <div className="flex min-h-0 min-w-0 flex-1 flex-col md:flex-row">
           <Board
@@ -522,7 +530,14 @@ function StatusBacklogBoard({
               onSelectTab={selectDockTab}
               panel={dockOpen && activeDockId ? renderColumn(activeDockId as SolutionStatus, "pinned") : null}
               wrapTab={(tab, node, { panelOpen }) => (
-                <DroppableDockTab status={tab.id as SolutionStatus} panelOpen={panelOpen}>{node}</DroppableDockTab>
+                <DroppableDockTab
+                  columnId={tab.id}
+                  columnDroppableId={solutionBacklogColumnId(tab.id as SolutionStatus)}
+                  panelOpen={panelOpen}
+                  slot="solution-dock-tab-drop"
+                >
+                  {node}
+                </DroppableDockTab>
               )}
             />
           ) : null}
