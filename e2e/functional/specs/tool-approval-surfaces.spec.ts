@@ -21,8 +21,9 @@ import { seedDecidedToolApproval, seedHostileToolApproval, seedRichToolApproval,
 // The page may clip with overflow-x-hidden, so check the document AND the main column's own scroll width: content that is merely hidden still counts as overflow.
 const noPageOverflow = (page: Page) =>
   page.evaluate(() => {
-    const main = document.querySelector("main")
-    return document.documentElement.scrollWidth <= window.innerWidth && (!main || main.scrollWidth <= main.clientWidth + 1)
+    // The app shell has its own <main>; the approval pages add a second one inside it. Both must fit.
+    const mains = [...document.querySelectorAll("main")]
+    return document.documentElement.scrollWidth <= window.innerWidth && mains.every((main) => main.scrollWidth <= main.clientWidth + 1)
   })
 
 test("admins see the effect and decide; members get a 404; every state reads right; both viewports fit", async ({ page, base, browser, playwright, workspaceSlug, orgSlug }) => {
@@ -74,8 +75,8 @@ test("admins see the effect and decide; members get a 404; every state reads rig
       await page.goto(`${base}/approvals/${hostile.requestId}`)
       await expect(page.getByTestId("effect-diff")).toBeVisible()
       expect(await page.evaluate(() => (window as unknown as { __approval_xss?: boolean }).__approval_xss), "approval content must never execute").toBeUndefined()
-      expect(await page.locator("main script, main img[src='x']").count()).toBe(0)
-      await expect(page.locator("main")).toContainText("<script>window.__approval_xss = true</script>")
+      expect(await page.locator("main.max-w-3xl script, main.max-w-3xl img[src='x']").count()).toBe(0)
+      await expect(page.locator("main.max-w-3xl")).toContainText("<script>window.__approval_xss = true</script>")
       expect(await noPageOverflow(page), `no horizontal page overflow at ${viewport.width}px`).toBe(true)
     }
 
