@@ -5,34 +5,15 @@
  * Artifact linked to the item's Solution. This module is the pure, client-safe half (types + grouping; the DB loader is in ./gallery-server); the
  * card UI lives in components/roadmap/roadmap-gallery.tsx.
  */
-import type { ArtifactKind } from "@/lib/artifact-kind"
-import type { ArtifactThumbnailDto } from "@/lib/artifacts"
+import type { GalleryArtifactSet } from "@/lib/gallery/artifacts"
 import type { RoadmapCardData } from "@/components/roadmap/roadmap-card"
 import type { SquadData } from "@/lib/types"
 
-/** Keeps a card's payload (and filmstrip) bounded when a solution has many artifacts. */
-export const MAX_GALLERY_ARTIFACTS_PER_ITEM = 6
+// The artifact DTO and its limits are shared with the Experiments Gallery (lib/gallery/artifacts).
+export { MAX_GALLERY_ARTIFACTS_PER_ITEM, isCapturableSource, type GalleryArtifact } from "@/lib/gallery/artifacts"
 
-export type GalleryArtifact = {
-  id: string
-  title: string
-  sourceType: string
-  kind: ArtifactKind
-  /** null = the artifact exists but no screenshot has been captured yet. */
-  thumbnail: ArtifactThumbnailDto | null
-  /** Only HTML uploads and external links can be screenshotted (see captureAndStoreArtifactThumbnail). */
-  capturable: boolean
-}
-
-export type GalleryItemExtras = {
+export type GalleryItemExtras = GalleryArtifactSet & {
   solutionStatus: string | null
-  artifacts: GalleryArtifact[]
-  /** Artifacts linked beyond MAX_GALLERY_ARTIFACTS_PER_ITEM. */
-  moreArtifacts: number
-}
-
-export function isCapturableSource(sourceType: string): boolean {
-  return sourceType === "HTML_UPLOAD" || sourceType === "EXTERNAL_LINK"
 }
 
 /* ------------------------------------------------------------------ grouping */
