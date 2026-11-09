@@ -109,6 +109,11 @@ test("experiments gallery: previews, filmstrip, placeholders, grouping, filter, 
     await expect(shot.getByText(`We believe shot ${suffix} moves the metric`)).toBeVisible();
     await expect(shot.getByText(squadNames.alpha)).toBeVisible();
     await expect(shot.getByText("Running", { exact: true })).toBeVisible();
+    // Captured while the hero still shows the screenshot (the hover below swaps it to the uncaptured artifact).
+    await page.mouse.move(1270, 790);
+    await page.screenshot({ path: testInfo.outputPath("experiments-gallery-desktop-1280.png") });
+    await shot.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: testInfo.outputPath("experiments-gallery-hero-desktop-1280.png") });
     // Filmstrip of three, hovering swaps the hero.
     await expect(shot.getByRole("group", { name: "Artifacts" }).getByRole("button")).toHaveCount(3);
     await shot.getByRole("button", { name: `Show Uncaptured newest ${suffix}` }).hover();
@@ -126,8 +131,6 @@ test("experiments gallery: previews, filmstrip, placeholders, grouping, filter, 
     await expect(card("bare").getByText("Proceed", { exact: true })).toBeVisible();
     await expect(card("killed").getByText("Kill", { exact: true })).toBeVisible();
     await expect(card("pending").getByText("Proceed", { exact: true })).toHaveCount(0);
-    await page.screenshot({ path: testInfo.outputPath("experiments-gallery-desktop-1280.png") });
-    await page.screenshot({ path: testInfo.outputPath("experiments-gallery-hero-desktop-1280.png"), clip: { x: 0, y: 0, width: 1280, height: 800 } });
 
     // ── Grouping: status (default, board order), squad, conclusion, none ───────────────────────────
     const headings = () => gallery.getByRole("heading", { level: 2 }).allTextContents();
