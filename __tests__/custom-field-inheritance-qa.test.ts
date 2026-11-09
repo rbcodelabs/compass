@@ -264,8 +264,8 @@ describe("concurrency: createMany skipDuplicates", () => {
   it("a racing explicit write that lands between read and insert is never overwritten", async () => {
     pair("TEXT")
     db.addValue("src", OPP, "inherited")
-    const original = db.tx.customFieldValue.createMany.bind(db.tx.customFieldValue)
-    db.tx.customFieldValue.createMany = (async (args: never) => {
+    const original = db.tx.customFieldValue.createManyAndReturn.bind(db.tx.customFieldValue)
+    db.tx.customFieldValue.createManyAndReturn = (async (args: never) => {
       db.addValue("dst", ITEM, "typed-by-human") // the human wins the race
       return original(args)
     }) as never
@@ -276,11 +276,11 @@ describe("concurrency: createMany skipDuplicates", () => {
     expect(db.values().filter((row) => row.fieldId === "dst")).toHaveLength(1)
   })
 
-  it("KNOWN LIMITATION: when the race is lost, the result still REPORTS the value as inherited (MCP inheritedFields can be wrong)", async () => {
+  it("when the race is lost, the result does NOT report the value as inherited (only rows actually written are reported)", async () => {
     pair("TEXT")
     db.addValue("src", OPP, "inherited")
-    const original = db.tx.customFieldValue.createMany.bind(db.tx.customFieldValue)
-    db.tx.customFieldValue.createMany = (async (args: never) => {
+    const original = db.tx.customFieldValue.createManyAndReturn.bind(db.tx.customFieldValue)
+    db.tx.customFieldValue.createManyAndReturn = (async (args: never) => {
       db.addValue("dst", ITEM, "typed-by-human")
       return original(args)
     }) as never
@@ -288,7 +288,7 @@ describe("concurrency: createMany skipDuplicates", () => {
     const result = await apply({ opportunityId: OPP })
 
     expect(db.valueOf("dst", ITEM)).toBe("typed-by-human")
-    expect(result.applied).toEqual([expect.objectContaining({ fieldId: "dst", value: "inherited" })])
+    expect(result.applied).toEqual([])
   })
 })
 
@@ -341,34 +341,37 @@ describe("archived items and the 500 cap", () => {
     warn.mockRestore()
   })
 
-  it("KNOWN LIMITATION: items past the cap are never reachable, even by writing the source again (the window is the first 500 by id, filled or not)", async () => {
+  it("items past the cap are reached by the next write for the source (filled items take no slot)", async () => {
     pair("TEXT")
     for (let i = 0; i < 700; i++) addItem(`item-${String(i).padStart(5, "0")}`)
     db.addValue("src", OPP, "v1")
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined)
 
-    await late("src")
+    const first = await late("src")
+    expect(first.skippedByCap).toBe(200)
+    expect(targetCount()).toBe(500)
     db.tables.customFieldValue.find((row) => row.fieldId === "src")!.value = "v2"
     const second = await late("src")
 
-    expect(targetCount()).toBe(500)
-    expect(second.applied).toEqual([])
-    expect(second.skippedByCap).toBe(200)
+    expect(targetCount()).toBe(700)
+    expect(second.applied).toHaveLength(200)
+    expect(second.skippedByCap).toBe(0)
+    // The first 500 kept their original value: a changed source never rewrites a filled target.
+    expect(db.valueOf("dst", "item-00000")).toBe("v1")
+    expect(db.valueOf("dst", "item-00600")).toBe("v2")
     warn.mockRestore()
   })
 
-  it("KNOWN LIMITATION: archived items are filled too and consume cap slots (no status filter)", async () => {
+  it("archived items are never filled and take no cap slots", async () => {
     pair("TEXT")
     for (let i = 0; i < 500; i++) addItem(`a-${String(i).padStart(5, "0")}`, "ARCHIVED")
     addItem("z-active", "ACTIVE")
     db.addValue("src", OPP, "v")
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined)
 
     await late("src")
 
-    expect(db.valueOf("dst", "a-00000")).toBe("v")
-    expect(db.valueOf("dst", "z-active")).toBeUndefined() // the only live item starved by 500 archived ones
-    warn.mockRestore()
+    expect(db.valueOf("dst", "a-00000")).toBeUndefined()
+    expect(db.valueOf("dst", "z-active")).toBe("v")
   })
 
   it("KNOWN LIMITATION: a target the user deliberately emptied is refilled by the next source write", async () => {
@@ -479,13 +482,14 @@ describe("admin service", () => {
     expect(admin.tables.customFieldInheritanceRule).toEqual([])
   })
 
-  it("KNOWN LIMITATION: a client-supplied priority is not validated (createInheritanceRuleAction forwards it)", async () => {
-    const odd = await create("s0", { priority: 1.5 })
-    expect(odd.priority).toBe(1.5) // Prisma Int would reject this at the DB; not an InheritanceRuleError
+  it("a client-supplied priority is validated: whole numbers from 0 to 1000 only", async () => {
+    await expect(create("s0", { priority: 1.5 })).rejects.toThrow(/whole number from 0 to 1000/)
+    await expect(create("s0", { priority: -1 })).rejects.toThrow(/whole number from 0 to 1000/)
+    await expect(create("s0", { priority: 1001 })).rejects.toThrow(/whole number from 0 to 1000/)
   })
 
-  it("KNOWN LIMITATION: a rule created with priority -1 collides with the reorder swap slot and every move on that target then throws a raw error", async () => {
-    await create("s0", { priority: -1 }); await create("s1", { priority: 0 }); const c = await create("s2", { priority: 1 })
-    await expect(moveInheritanceRule(admin.tx as never, WS, c.id, "up")).rejects.toMatchObject({ code: "P2002" })
+  it("so the reorder swap slot (-1) can never collide with a real rule and every move works", async () => {
+    await create("s0", { priority: 0 }); await create("s1", { priority: 1 }); const c = await create("s2", { priority: 2 })
+    await expect(moveInheritanceRule(admin.tx as never, WS, c.id, "up")).resolves.toBeUndefined()
   })
 })
