@@ -32,6 +32,7 @@ import {
   assertEntityAccess,
   assertSameWorkspaceEntities,
   assertScoringModelAccess,
+  assertScoringModelActivation,
 } from "@/lib/mcp-authz"
 import { SCOPE_MCP_READ, SCOPE_MCP_WRITE } from "@/lib/oauth/constants"
 import { gateInterviewTool } from "@/lib/pm-agent-service"
@@ -635,7 +636,7 @@ export const TOOL_GATES: Record<string, Gate> = {
   get_workspace_scoring_model: (a, x) => assertWorkspaceMember(a, x.workspaceId),
   set_workspace_scoring_model: async (a, x) => {
     await assertWorkspaceAdmin(a, x.workspaceId, { agentCapability: "SCORING_MODEL_ADMIN" })
-    if (x.scoringModelId) await assertScoringModelAccess(a, x.scoringModelId)
+    if (x.scoringModelId) await assertScoringModelActivation(a, x.workspaceId, x.scoringModelId)
   },
   score_opportunity: async (a, x) => void (await assertEntityAccess(a, "opportunity", x.opportunityId)),
   get_opportunity_score: async (a, x) => void (await assertEntityAccess(a, "opportunity", x.opportunityId)),
