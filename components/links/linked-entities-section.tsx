@@ -24,6 +24,9 @@ export type LinkedEntitiesTarget = { linkType: string; entityType: string; entit
  * the view the server builds out of the registry, so a new link type adds no copy here. Renders nothing when
  * the type does not apply (feature flag off, entity not eligible) and only offers candidates the service
  * would accept.
+ *
+ * Props beyond the target: `title` overrides the registry label as the heading, `refreshKey` re-reads without blanking the view
+ * (for example when the viewed record is archived in place), and `fullWidth` fills the container on pages whose cards are full width.
  */
 export function LinkedEntitiesSection({ orgSlug, workspaceSlug, target, title, refreshKey, fullWidth }: { orgSlug: string; workspaceSlug: string; target: LinkedEntitiesTarget; /** Changing this reloads the section (e.g. the viewed record was archived, which changes whether it can take a new link). */ refreshKey?: string; /** Fill the container instead of capping at a readable column width (for pages whose other cards are full width). */ fullWidth?: boolean; /** Overrides the registry label as the heading (e.g. "Linked experiments"). */ title?: string }) {
   const [view, setView] = useState<LinkedEntitiesView | null>(null)
