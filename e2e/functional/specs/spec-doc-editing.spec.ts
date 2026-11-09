@@ -45,6 +45,14 @@ async function createSpecFromSolution(page: Page, base: string, stamp: number) {
   return { oppTitle, solTitle, oppUrl, docUrl: page.url() };
 }
 
+/**
+ * Embed cards load lazily, once within 200px of the viewport (doc-embed-cards.tsx). After a reload the page starts at the top, so a
+ * card near the end of a long document is not rendered until it is scrolled to. Scroll the end of the document into view first.
+ */
+async function scrollDocEndIntoView(page: Page) {
+  await page.locator(".ProseMirror").evaluate((el) => (el.lastElementChild ?? el).scrollIntoView({ block: "end" }));
+}
+
 /** The markdown the editor currently holds (after a reload: exactly what is stored, since nothing has been edited). */
 function editorMarkdown(page: Page) {
   return page.evaluate(() => {
@@ -142,6 +150,8 @@ test.describe("Spec docs: editing", () => {
     await expect(status).toHaveAttribute("data-state", "saved", { timeout: 20_000 });
 
     await page.reload();
+    await expect(page.locator(".ProseMirror")).toBeVisible();
+    await scrollDocEndIntoView(page);
     await expect(page.getByRole("group", { name: `Assumption: ${assumptionTitle}` })).toBeVisible({ timeout: 15_000 });
     const withAssumption = await editorMarkdown(page);
     expect(withAssumption.match(new RegExp(`compass://assumption/`, "g")) ?? []).toHaveLength(1);
