@@ -35,7 +35,7 @@ const squads = [{ id: "s1", name: "Growth", color: "#111111" }]
 const exp = (id: string, over: Partial<ExperimentGalleryItem> = {}): ExperimentGalleryItem => ({
   id, title: `Exp ${id}`, hypothesis: `We believe ${id}`, status: "RUNNING", conclusion: null, squad: null, ...over,
 })
-const shot = { src: "/api/artifacts/a1/revisions/r1/thumbnail?v=1", width: 800, height: 500 }
+const shot = { src: "/api/artifacts/a1/revisions/r1/thumbnail?v=1", width: 800, height: 500, capturedAt: "2026-01-01T00:00:00.000Z" }
 const withArtifacts: GalleryArtifactSet = {
   artifacts: [
     { id: "a0", title: "No shot", sourceType: "HTML_UPLOAD", kind: "DOCUMENT", thumbnail: null, capturable: true },

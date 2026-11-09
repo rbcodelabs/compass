@@ -9,7 +9,7 @@ import type { GalleryArtifact } from "@/lib/gallery/artifacts"
 
 afterEach(cleanup)
 
-const thumb = (id: string) => ({ src: `/api/artifacts/${id}/thumb`, width: 800, height: 500 }) as GalleryArtifact["thumbnail"]
+const thumb = (id: string) => ({ src: `/api/artifacts/${id}/thumb`, width: 800, height: 500, capturedAt: "2026-01-01T00:00:00.000Z" })
 const art = (id: string, over: Partial<GalleryArtifact> = {}): GalleryArtifact => ({
   id, title: id, sourceType: "HTML_UPLOAD", kind: "DOCUMENT", thumbnail: null, capturable: true, ...over,
 })
