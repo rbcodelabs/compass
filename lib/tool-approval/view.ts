@@ -7,7 +7,8 @@ import type { Prisma } from "@prisma/client"
 import type { AppPrismaClient } from "@/lib/db"
 import { displayIdFromRow } from "@/lib/work-item-ids"
 import { TOOL_APPROVAL_GATE, toolApprovalPath } from "@/lib/tool-approval/gate"
-import { parseEffectPacket, type Json } from "@/lib/tool-approval/packet"
+import { isWorkspaceAdminUser } from "@/lib/agent-ownership"
+import { fingerprintOf, parseEffectPacket, type Json } from "@/lib/tool-approval/packet"
 import { getToolApprovalSpec } from "@/lib/tool-approval/registry"
 import { sanitizeText } from "@/lib/tool-approval/sanitize"
 import { deriveApprovalState, type ApprovalStateInfo } from "@/lib/tool-approval/state"
@@ -59,17 +60,35 @@ async function namesOf(prisma: AppPrismaClient, userIds: string[]): Promise<Map<
   return new Map(users.map((user) => [user.id, user.name?.trim() || user.email || "Workspace admin"]))
 }
 
-function toView(row: RequestRow, names: Map<string, string>, now: Date): ApprovalView | null {
+/** The executor's static guards, read-only: could it still claim this approval? (It re-checks every one when it actually runs.) */
+function executorCouldRun(row: RequestRow, packet: NonNullable<ReturnType<typeof parseEffectPacket>>, now: Date): boolean {
+  const revision = row.currentRevision
+  const spec = getToolApprovalSpec(packet.tool)
+  if (!revision || !spec || spec.toolName !== packet.tool || spec.capabilityClass !== packet.capabilityClass) return false
+  if (packet.workspaceId !== row.workspaceId) return false
+  if (revision.expiresAt && revision.expiresAt <= now) return false
+  try {
+    return fingerprintOf(row.id, row.decisionCycle, revision.revisionNumber, JSON.parse(revision.packetJson)) === revision.fingerprint
+  } catch {
+    return false
+  }
+}
+
+async function toView(prisma: AppPrismaClient, row: RequestRow, names: Map<string, string>, now: Date): Promise<ApprovalView | null> {
   const revision = row.currentRevision
   const packet = revision ? parseEffectPacket(revision.packetJson) : null
   if (!revision || !packet) return null
   const decision = revision.decisions[0] ?? null
   const receipt = decision?.applications[0] ?? null
+  // Only an approved call with no receipt needs this: a refusal leaves no receipt, so "no receipt" must be told apart from
+  // "about to run". The approver's admin standing is the one guard that needs a read, so it is asked last and only then.
+  let runnable = executorCouldRun(row, packet, now)
+  if (runnable && decision && decision.option.outcomeClass === "APPROVE" && !receipt) runnable = await isWorkspaceAdminUser(prisma, decision.actorUserId, row.workspaceId)
   const state = deriveApprovalState({
     requestState: row.state, revisionSupersededAt: revision.supersededAt, revisionExpiresAt: revision.expiresAt,
     decision: decision ? { outcomeClass: decision.option.outcomeClass, decidedAt: decision.decidedAt } : null,
     receipt: receipt ? { status: receipt.status, updatedAt: receipt.updatedAt } : null,
-    toolRegistered: Boolean(getToolApprovalSpec(packet.tool)), now,
+    runnable, now,
   })
   const org = row.workspace.organization
   return {
@@ -93,7 +112,7 @@ export async function loadApprovalView(prisma: AppPrismaClient, input: { request
   if (!isUuid(input.requestId) || !isUuid(input.workspaceId)) return null
   const row = await prisma.reviewRequest.findFirst({ where: { id: input.requestId, workspaceId: input.workspaceId, gateType: TOOL_APPROVAL_GATE }, include: requestInclude })
   if (!row) return null
-  return toView(row, await namesOf(prisma, decidedBy([row])), input.now ?? new Date())
+  return toView(prisma, row, await namesOf(prisma, decidedBy([row])), input.now ?? new Date())
 }
 
 /** Newest first: everything that is no longer waiting (decided, expired unanswered, replaced). */
@@ -106,5 +125,17 @@ export async function loadRecentApprovals(prisma: AppPrismaClient, workspaceId: 
     take: RECENT_APPROVALS_LIMIT,
   })
   const names = await namesOf(prisma, decidedBy(rows))
-  return rows.flatMap((row) => { const view = toView(row, names, now); return view ? [view] : [] })
+  const views: ApprovalView[] = []
+  for (const row of rows) { const view = await toView(prisma, row, names, now); if (view) views.push(view) }
+  return views
+}
+
+/** Who raised a tool approval (the key owner and, for a named agent, that agent). Null for a malformed id or no such request. */
+export async function loadApprovalRequester(prisma: AppPrismaClient, input: { requestId: string; workspaceId: string }): Promise<{ userId: string | null; agentId: string | null } | null> {
+  if (!isUuid(input.requestId) || !isUuid(input.workspaceId)) return null
+  const row = await prisma.reviewRequest.findFirst({
+    where: { id: input.requestId, workspaceId: input.workspaceId, gateType: TOOL_APPROVAL_GATE },
+    select: { requestedById: true, requestedByAgentId: true },
+  })
+  return row ? { userId: row.requestedById, agentId: row.requestedByAgentId } : null
 }

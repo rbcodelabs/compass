@@ -12,6 +12,7 @@ import { ToolApprovalError } from "@/lib/tool-approval/errors"
 import { decideToolApproval } from "@/lib/tool-approval/decide"
 import { addApprovalUpdateToConversation } from "@/lib/tool-approval/conversation"
 import { describeDecisionError, describeExecution, type ApprovalActionResult } from "@/lib/tool-approval/messages"
+import { APPROVAL_STATES } from "@/lib/tool-approval/state"
 import { isUuid, loadApprovalView } from "@/lib/tool-approval/view"
 
 export type ApprovalDecisionInput = {
@@ -52,12 +53,15 @@ export async function runApprovalDecision(input: ApprovalDecisionInput): Promise
     }
   }
 
-  // Read the stored state back: it, not the click's own outcome, is what the page and the agent are told.
+  // Which state to report and tell the agent. A final answer from the executor (ran, failed, stale, blocked, refused, unknown) is
+  // the truth about this click and wins over anything derived from stored rows. Only when the click gave no final answer (a
+  // replay, a refused decision) is the stored state read back, and then only a FINAL stored state is ever passed on.
   const view = await loadApprovalView(prisma, { requestId: input.requestId, workspaceId: input.workspaceId })
-  if (view) result = { ...result, state: view.state.key }
-  if (view && view.state.key !== "PENDING" && isUuid(input.conversationId)) {
+  const finalKey = result.state ?? view?.state.key
+  if (finalKey) result = { ...result, state: finalKey }
+  if (view && finalKey && APPROVAL_STATES[finalKey].terminal && isUuid(input.conversationId)) {
     try {
-      await addApprovalUpdateToConversation(prisma, { conversationId: input.conversationId, workspaceId: input.workspaceId, userId: input.userId, view })
+      await addApprovalUpdateToConversation(prisma, { conversationId: input.conversationId, workspaceId: input.workspaceId, userId: input.userId, view: { ...view, state: { key: finalKey } } })
     } catch (error) {
       console.error("Tool approval could not be reported to the conversation", { error: error instanceof Error ? error.name : "unknown" })
     }

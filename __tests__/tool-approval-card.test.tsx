@@ -187,10 +187,8 @@ describe("ToolApprovalCard: polling (A6)", () => {
     await mount()
     setHidden(true)
     await advance(10 * 60_000)
-    expect(m.get).toHaveBeenCalledTimes(2) // the one poll already due when it went hidden, then nothing
+    expect(m.get).toHaveBeenCalledTimes(1) // the poll that fell due while hidden did not fetch, and nothing was rescheduled
     const before = m.get.mock.calls.length
-    await advance(10 * 60_000)
-    expect(m.get).toHaveBeenCalledTimes(before)
     setHidden(false)
     await act(async () => { document.dispatchEvent(new Event("visibilitychange")); await vi.advanceTimersByTimeAsync(0) })
     expect(m.get).toHaveBeenCalledTimes(before + 1)

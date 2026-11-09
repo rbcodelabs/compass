@@ -2,6 +2,7 @@ import type { ReactNode } from "react"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { ApprovalStateBadge } from "@/components/tool-approval/approval-state-badge"
 import { EffectDiff } from "@/components/tool-approval/effect-diff"
+import { previewJson } from "@/lib/tool-approval/diff"
 import { APPROVAL_STATES } from "@/lib/tool-approval/state"
 import type { ApprovalView } from "@/lib/tool-approval/view"
 import { cn } from "@/lib/utils"
@@ -55,6 +56,8 @@ export function OutcomeBox({ view }: { view: ApprovalView }) {
 
 /** The full read-only view of one approval: summary, facts, the before -> after effect, and the arguments. */
 export function ApprovalDetail({ view }: { view: ApprovalView }) {
+  // Bounded and never throws, however the stored arguments are shaped.
+  const args = previewJson(view.args, 50_000, { pretty: true })
   return (
     <div className="min-w-0 space-y-6">
       <header className="min-w-0 space-y-2">
@@ -86,7 +89,8 @@ export function ApprovalDetail({ view }: { view: ApprovalView }) {
             Call arguments (as stored, with sensitive fields removed)
           </CollapsibleTrigger>
           <CollapsibleContent>
-            <pre data-testid="approval-args" className="m-0 max-h-96 min-w-0 overflow-auto px-4 pb-4 font-mono text-xs break-words whitespace-pre-wrap [overflow-wrap:anywhere]">{JSON.stringify(view.args, null, 2)}</pre>
+            <pre data-testid="approval-args" className="m-0 max-h-96 min-w-0 overflow-auto px-4 pb-4 font-mono text-xs break-words whitespace-pre-wrap [overflow-wrap:anywhere]">{args.text}</pre>
+            {args.truncated && <p className="m-0 px-4 pb-4 text-xs text-status-warning">Too deep or too large to display in full; the stored arguments are cut here.</p>}
           </CollapsibleContent>
         </Collapsible>
       </section>

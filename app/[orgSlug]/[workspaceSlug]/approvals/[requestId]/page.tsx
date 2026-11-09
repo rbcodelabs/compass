@@ -25,15 +25,17 @@ export default async function ToolApprovalPage({ params }: { params: Promise<{ o
   return (
     <main className="mx-auto w-full min-w-0 max-w-3xl space-y-6 overflow-x-hidden p-4 sm:p-6">
       <ApprovalDetail view={view} />
-      {pending ? (
-        <section aria-label="Decide" className="min-w-0 space-y-3 rounded-lg border border-border-default bg-surface-panel p-4">
-          <h2 className="m-0 text-lg font-semibold">Decide</h2>
-          <p className="m-0 text-sm text-text-secondary">Approving runs the change above once, as you. Denying runs nothing.</p>
-          <ApprovalActions decide={decideApprovalAction.bind(null, { orgSlug, workspaceSlug, requestId: view.requestId })} />
-        </section>
-      ) : (
-        <OutcomeBox view={view} />
-      )}
+      <section aria-label="Decide" className={pending ? "min-w-0 space-y-3 rounded-lg border border-border-default bg-surface-panel p-4" : "min-w-0"}>
+        {pending && (
+          <>
+            <h2 className="m-0 text-lg font-semibold">Decide</h2>
+            <p className="m-0 text-sm text-text-secondary">Approving runs the change above once, as you. Denying runs nothing.</p>
+          </>
+        )}
+        {/* Stays mounted when the request resolves so its live region announces the outcome and keeps focus. */}
+        <ApprovalActions resolved={!pending} decide={decideApprovalAction.bind(null, { orgSlug, workspaceSlug, requestId: view.requestId })} />
+      </section>
+      {!pending && <OutcomeBox view={view} />}
       <RefreshWhile active={view.state.key === "APPLYING"} />
     </main>
   )

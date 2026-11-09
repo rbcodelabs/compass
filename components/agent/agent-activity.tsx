@@ -151,12 +151,12 @@ function SubagentCard({ agent }: { agent: Subagent }) {
   )
 }
 
-export function AgentActivity({ toolCalls = [], plan = [], subagents = [], running, workspaceId, conversationId = null }: TurnActivity & { running: boolean; /** Where approval cards look their request up; without it no card is drawn. */ workspaceId?: string; conversationId?: string | null }) {
+export function AgentActivity({ toolCalls = [], plan = [], subagents = [], running, workspaceId, conversationId = null, basePath }: TurnActivity & { running: boolean; /** Where approval cards look their request up; without it no card is drawn. */ workspaceId?: string; conversationId?: string | null; /** `/org/workspace`, for the card's fallback link. */ basePath?: string }) {
   if (!hasActivity({ toolCalls, plan, subagents })) return null
   const approvalIds = workspaceId ? approvalRequestIds([...toolCalls, ...subagents.flatMap((agent) => agent.steps)]) : []
   return (
     <div className="mb-2 flex flex-col gap-2 border-b border-default pb-2">
-      {workspaceId && approvalIds.map((id) => <ToolApprovalCard key={id} workspaceId={workspaceId} requestId={id} conversationId={conversationId} />)}
+      {workspaceId && approvalIds.map((id) => <ToolApprovalCard key={id} workspaceId={workspaceId} requestId={id} conversationId={conversationId} approvalsHref={basePath ? `${basePath}/approvals` : undefined} />)}
       <PlanCard plan={plan} running={running} />
       {subagents.length > 0 && (
         <section aria-label="Subagents" className="flex flex-col gap-1.5">

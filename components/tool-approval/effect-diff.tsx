@@ -1,16 +1,18 @@
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
-import { diffJson, type DiffKind, type DiffRow } from "@/lib/tool-approval/diff"
+import Link from "next/link"
+import { COMPACT_ROW_LIMIT, diffJson, type DiffKind, type DiffRow } from "@/lib/tool-approval/diff"
 import type { Json } from "@/lib/tool-approval/packet"
 import { cn } from "@/lib/utils"
 
 // Every value is rendered as a React text child, so it is escaped by React; there is deliberately no raw-HTML path in this file.
 
-const KIND_LABEL: Record<DiffKind, string> = { added: "Added", removed: "Removed", changed: "Changed", unchanged: "Unchanged" }
+const KIND_LABEL: Record<DiffKind, string> = { added: "Added", removed: "Removed", changed: "Changed", unchanged: "Unchanged", truncated: "Too large to show" }
 const KIND_BADGE: Record<DiffKind, string> = {
   added: "bg-status-success-surface text-status-success",
   removed: "bg-status-danger-surface text-status-danger",
   changed: "bg-status-warning-surface text-status-warning",
   unchanged: "bg-status-neutral-surface text-status-neutral",
+  truncated: "bg-status-warning-surface text-status-warning",
 }
 
 /** A value that may be a very long string or JSON: wraps inside its own box and scrolls there, never widening the page. */
@@ -33,6 +35,15 @@ function ValueBox({ side, text, empty }: { side: "before" | "after"; text?: stri
 }
 
 function ChangedRow({ row, compact }: { row: DiffRow; compact: boolean }) {
+  if (row.kind === "truncated") {
+    return (
+      <li data-testid="effect-diff-row" data-kind="truncated" className="min-w-0 rounded-lg border border-status-warning/40 bg-status-warning-surface p-3 text-sm text-status-warning">
+        <span className="font-medium">{KIND_LABEL.truncated}</span>
+        <code className="ml-2 font-mono text-xs break-words [overflow-wrap:anywhere]">{row.path}</code>
+        <p className="m-0 mt-1 text-text-primary">Too deep or too large to display in full. Review the call arguments before deciding.</p>
+      </li>
+    )
+  }
   return (
     <li data-testid="effect-diff-row" data-kind={row.kind} className="min-w-0 rounded-lg border border-border-default bg-surface-panel p-3">
       <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -55,7 +66,7 @@ function ChangedRow({ row, compact }: { row: DiffRow; compact: boolean }) {
  */
 export function EffectDiff({ before, after, compact = false, moreHref }: { before: Json; after: Json; compact?: boolean; moreHref?: string }) {
   const diff = diffJson(before, after)
-  const limit = compact ? 4 : diff.changed.length
+  const limit = compact ? COMPACT_ROW_LIMIT : diff.changed.length
   const shown = diff.changed.slice(0, limit)
   const hidden = diff.changed.length - shown.length
   return (
@@ -69,7 +80,7 @@ export function EffectDiff({ before, after, compact = false, moreHref }: { befor
       )}
       {hidden > 0 && (
         <p className="text-xs text-text-subtle">
-          {hidden} more {hidden === 1 ? "change" : "changes"}{moreHref ? <> are on <a className="font-medium text-primary underline" href={moreHref}>the full approval page</a></> : " are not shown here"}.
+          {hidden} more {hidden === 1 ? "change" : "changes"}{moreHref ? <> are on <Link className="inline-flex min-h-11 items-center font-medium text-primary underline sm:min-h-0" href={moreHref}>the full approval page</Link></> : " are not shown here"}.
         </p>
       )}
       {diff.omittedChanges > 0 && <p className="text-xs text-status-warning">{diff.omittedChanges} further changes are not displayed because this change is very large.</p>}

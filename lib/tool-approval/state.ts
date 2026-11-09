@@ -18,8 +18,14 @@ export type ApprovalStateInfo = {
   terminal: boolean
 }
 
-/** How long a just-approved call may sit without a finished receipt and still read as "running now". */
+/** How long a claimed-but-unfinished receipt may sit and still read as "running now"; older, it is an unknown outcome. */
 export const APPLYING_WINDOW_MS = 2 * 60 * 1000
+/**
+ * An approval with NO receipt yet is only "about to run" for the few seconds between the decision committing and the executor
+ * claiming its receipt. A refusal (executor guards) leaves no receipt, so a long window would show a spinner for something that
+ * will never run.
+ */
+export const NO_RECEIPT_WINDOW_MS = 10 * 1000
 
 export const APPROVAL_STATES: Record<ApprovalStateKey, Omit<ApprovalStateInfo, "key">> = {
   PENDING: { label: "Pending", tone: "warning", terminal: false, explanation: "Waiting for a workspace admin to approve or deny. Nothing has run." },
@@ -41,8 +47,11 @@ export type ApprovalStateInput = {
   revisionExpiresAt: Date | null
   decision: { outcomeClass: string; decidedAt: Date } | null
   receipt: { status: string; updatedAt: Date } | null
-  /** Whether the tool still has an approval spec; without one an approved call cannot run. */
-  toolRegistered: boolean
+  /**
+   * Whether the executor could still claim this approval: the tool is registered and unchanged, the stored request is intact and
+   * unexpired, and the approver is still an admin. When false, an approved call without a receipt was refused: it will not run.
+   */
+  runnable: boolean
   now: Date
 }
 
@@ -63,7 +72,7 @@ export function deriveApprovalState(input: ApprovalStateInput): ApprovalStateInf
       }
     }
     // Approved but no receipt: either the executor is about to claim it, or it refused before claiming (nothing ran).
-    return input.toolRegistered && now.getTime() - decision.decidedAt.getTime() < APPLYING_WINDOW_MS ? info("APPLYING") : info("NOT_RUN")
+    return input.runnable && now.getTime() - decision.decidedAt.getTime() < NO_RECEIPT_WINDOW_MS ? info("APPLYING") : info("NOT_RUN")
   }
   if (input.requestState === "SUPERSEDED" || input.revisionSupersededAt) return info("SUPERSEDED")
   if (input.revisionExpiresAt && input.revisionExpiresAt <= now) return info("EXPIRED")

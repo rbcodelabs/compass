@@ -88,5 +88,12 @@ export function conversationUpdateText(input: { state: ApprovalStateKey; request
     NOT_RUN: "The admin approved it, but it did not run. The action was NOT performed.",
     SUPERSEDED: "It was replaced or closed. The action was NOT performed.",
   }
-  return `[Approval update] Tool approval ${ref} for ${safeToolName(input.tool)}: ${APPROVAL_STATES[input.state].label}. ${outcome[input.state]} Do not retry the call unless asked.`
+  return `${APPROVAL_UPDATE_PREFIX}Tool approval ${ref} for ${safeToolName(input.tool)}: ${APPROVAL_STATES[input.state].label}. ${outcome[input.state]} Do not retry the call unless asked.`
+}
+
+export const APPROVAL_UPDATE_PREFIX = "[Approval update] "
+
+/** True for the message conversationUpdateText produces, so the chat can show it as system-generated rather than as typed by a person. */
+export function isApprovalUpdateMessage(content: string): boolean {
+  return content.startsWith(APPROVAL_UPDATE_PREFIX)
 }
