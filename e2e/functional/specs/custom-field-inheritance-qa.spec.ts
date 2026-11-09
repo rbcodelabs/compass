@@ -236,8 +236,10 @@ test.describe("Inheritance rules QA", () => {
     expect((await rulesFor(target)).map((rule) => rule.priority)).toEqual([0, 1, 2]);
     await expect(row("Sol2").getByRole("button", { name: "Raise priority" })).toBeDisabled();
     // The rendered order follows the DB order.
-    const texts = await panel.getByRole("listitem").filter({ hasText: nameOf("Target") }).allTextContents();
-    expect(texts.findIndex((t) => t.includes(nameOf("Sol2")))).toBeLessThan(texts.findIndex((t) => t.includes(nameOf("SolOk"))));
+    await expect.poll(async () => {
+      const texts = await panel.getByRole("listitem").filter({ hasText: nameOf("Target") }).allTextContents();
+      return texts.findIndex((t) => t.includes(nameOf("Sol2"))) < texts.findIndex((t) => t.includes(nameOf("SolOk")));
+    }, { timeout: 10_000, message: "the rendered list follows the new priority order after router.refresh" }).toBe(true);
     await shot(page, "after-reorder");
 
     // g. Keyboard: Space on the focused switch disables, Space again enables; Enter on the arrow button moves the rule.
