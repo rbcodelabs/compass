@@ -49,6 +49,21 @@ For an Opportunity single-select field, you can also set values in bulk by group
 
 Fields with no value set display a placeholder. Fields are always optional — an empty custom field does not affect the object in any way.
 
+## Inheritance rules
+
+An inheritance rule lets a roadmap item field start from a field on the Opportunity or Solution the item is linked to, so you do not have to copy values across by hand. For example, "Partner on roadmap items comes from Customer on the Opportunity", or, as a fallback, from "Investment Area".
+
+Manage rules in **Settings → Custom Fields → Inheritance rules**. Pick the roadmap item field and the field to inherit from; both must have the same type, and for select fields the roadmap item field must offer every option the source can hold. Use the arrows to set priority when several rules fill the same field (the lowest priority with a value wins), the switch to turn a rule off without deleting it, and the bin to delete it. A rule whose options have drifted apart shows **Inactive** with the reason and is skipped until fixed.
+
+Rules apply when a roadmap item is created with a link, when an existing item is linked to a different Opportunity or Solution, and when the source value is set later on an item that is already linked. They only ever **fill an empty field**:
+
+- An existing value is never overwritten, including an explicit "No" or 0.
+- Changing or clearing the source value afterwards does not change or clear the roadmap item's value; there is no ongoing sync.
+- Unlinking does nothing, and re-linking does not rewrite a value that was inherited earlier.
+- A source value that is set on an Opportunity linked to more than 500 roadmap items fills the first 500; the rest are skipped and noted in the server log.
+
+Agents can read the rules with `list_custom_field_inheritance_rules`, and `add_to_roadmap`, `promote_to_roadmap` and `update_roadmap_item` report what they filled in `inheritedFields`. Rules can only be created, reordered or deleted in Settings.
+
 ## Supported Object Types
 
 Custom fields can be defined for:
