@@ -12,6 +12,7 @@ import { EvidenceBadge } from "@/components/discovery/evidence-badge";
 import { ScoreBadge } from "@/components/discovery/score-badge";
 import { CardMenu } from "@/components/ui/card-menu";
 import { usePanelContext } from "@/components/panels/panel-context";
+import { isPanelOpen } from "@/components/panels/is-panel-open";
 import { SOLUTION_STATUS } from "@/lib/solution-status";
 import { announceRoadmapSync } from "@/lib/ui/roadmap-sync-toast";
 import {
@@ -88,7 +89,7 @@ type Props = {
 };
 
 export function SolutionCard({ solution, revalidatePathStr, showStatus = true, showScore = false, scoringHref, parent, draggable = true, onChanged }: Props) {
-  const { openPanel } = usePanelContext();
+  const { openPanel, panel } = usePanelContext();
   const [isPending, startTransition] = useTransition();
 
   const {
@@ -131,6 +132,7 @@ export function SolutionCard({ solution, revalidatePathStr, showStatus = true, s
     <div ref={setNodeRef} style={style} className="group" data-flip-id={solution.id}>
       <EntityCard
         interactive
+        selected={isPanelOpen(panel, "solution", solution.id)}
         title={
           <button
             type="button"
