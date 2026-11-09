@@ -2,10 +2,11 @@
 import { cleanup, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-const mocks = vi.hoisted(() => ({ auth: vi.fn(), getWorkspace: vi.fn(), list: vi.fn(), members: vi.fn(), orgMembers: vi.fn() }))
+const mocks = vi.hoisted(() => ({ auth: vi.fn(), getWorkspace: vi.fn(), list: vi.fn(), members: vi.fn(), orgMembers: vi.fn(), isAdmin: vi.fn() }))
 
 vi.mock("@/auth", () => ({ auth: mocks.auth }))
 vi.mock("@/lib/workspace", () => ({ getWorkspace: mocks.getWorkspace }))
+vi.mock("@/lib/agent-ownership", () => ({ isWorkspaceAdminUser: mocks.isAdmin }))
 vi.mock("@/lib/db", () => ({ default: () => ({ workspaceMember: { findMany: mocks.members }, organizationMember: { findMany: mocks.orgMembers } }) }))
 vi.mock("@/lib/tracked-decisions", async () => {
   const types = await import("@/lib/tracked-decision-types")
@@ -40,6 +41,7 @@ describe("decisions list page", () => {
     mocks.getWorkspace.mockResolvedValue({ id: "ws-1", organizationId: "org-1" })
     mocks.members.mockResolvedValue([{ userId: "user-1", user: { name: "Rick", email: "rick@example.com" } }])
     mocks.orgMembers.mockResolvedValue([])
+    mocks.isAdmin.mockResolvedValue(false)
   })
 
   const renderPage = async () => render(await DecisionsPage({ params: Promise.resolve({ orgSlug: "acme", workspaceSlug: "product" }), searchParams: Promise.resolve({ tab: "decided" }) }))
@@ -96,5 +98,16 @@ describe("decisions list page — multi-question answers", () => {
     mocks.list.mockResolvedValue({ requests: [row("r1", "Open", null), row("r2", "Plain", option("APPROVE", "Approve", "APPROVE"))], total: 2, page: 1, pageSize: 20, pageCount: 1 })
     render(await DecisionsPage({ params: Promise.resolve({ orgSlug: "acme", workspaceSlug: "product" }), searchParams: Promise.resolve({ tab: "decided" }) }))
     expect(screen.queryByRole("list", { name: "Answers" })).toBeNull()
+  })
+
+  it("links admins to the tool approvals page, and shows no such link to anyone else", async () => {
+    mocks.list.mockResolvedValue({ requests: [], total: 0, page: 1, pageSize: 20, pageCount: 1 })
+    mocks.isAdmin.mockResolvedValue(true)
+    const { unmount } = await renderPage()
+    expect(screen.getByRole("link", { name: "Tool approvals" }).getAttribute("href")).toBe("/acme/product/approvals")
+    unmount()
+    mocks.isAdmin.mockResolvedValue(false)
+    await renderPage()
+    expect(screen.queryByRole("link", { name: "Tool approvals" })).toBeNull()
   })
 })

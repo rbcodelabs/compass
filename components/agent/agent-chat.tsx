@@ -804,7 +804,7 @@ export function AgentChat({
             )}
 
             {messages.map((m) => (
-              <MessageRow key={m.id} message={m} userInitials={userInitials} userId={userId} shared={shared} />
+              <MessageRow key={m.id} message={m} userInitials={userInitials} userId={userId} shared={shared} workspaceId={workspaceId} conversationId={activeConversationId} />
             ))}
 
             {isStreaming && (
@@ -814,6 +814,8 @@ export function AgentChat({
                 userId={userId}
                 shared={shared}
                 phaseLabel={phaseLabel}
+                workspaceId={workspaceId}
+                conversationId={activeConversationId}
               />
             )}
 
@@ -985,12 +987,16 @@ function MessageRow({
   userId,
   shared,
   phaseLabel,
+  workspaceId,
+  conversationId,
 }: {
   message: Message
   userInitials: string
   userId: string
   shared: boolean
   phaseLabel?: string | null
+  workspaceId: string
+  conversationId: string | null
 }) {
   const isUser = message.role === "user"
   // A message with no recorded author is this tab's own, not yet reported back.
@@ -1014,7 +1020,7 @@ function MessageRow({
               : "border border-default bg-surface-card text-text-primary"
           }`}
         >
-          {!isUser && <AgentActivity toolCalls={message.toolCalls} plan={message.plan} subagents={message.subagents} running={message.id === "streaming"} />}
+          {!isUser && <AgentActivity toolCalls={message.toolCalls} plan={message.plan} subagents={message.subagents} running={message.id === "streaming"} workspaceId={workspaceId} conversationId={conversationId} />}
           {isUser ? (
             <p className="whitespace-pre-wrap break-words">{message.content}</p>
           ) : message.content ? (

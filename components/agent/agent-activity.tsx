@@ -7,6 +7,8 @@
 import { useState } from "react"
 import { AlertCircle, Check, ChevronRight, Circle, ListChecks, Loader2, Users } from "lucide-react"
 import type { PlanItem, StepStatus, Subagent, ToolStep } from "@/lib/agent-run-stream"
+import { approvalRequestIds } from "@/lib/tool-approval/chat-detect"
+import { ToolApprovalCard } from "@/components/tool-approval/approval-card"
 
 export type TurnActivity = { toolCalls?: ToolStep[]; plan?: PlanItem[]; subagents?: Subagent[] }
 
@@ -149,10 +151,12 @@ function SubagentCard({ agent }: { agent: Subagent }) {
   )
 }
 
-export function AgentActivity({ toolCalls = [], plan = [], subagents = [], running }: TurnActivity & { running: boolean }) {
+export function AgentActivity({ toolCalls = [], plan = [], subagents = [], running, workspaceId, conversationId = null }: TurnActivity & { running: boolean; /** Where approval cards look their request up; without it no card is drawn. */ workspaceId?: string; conversationId?: string | null }) {
   if (!hasActivity({ toolCalls, plan, subagents })) return null
+  const approvalIds = workspaceId ? approvalRequestIds([...toolCalls, ...subagents.flatMap((agent) => agent.steps)]) : []
   return (
     <div className="mb-2 flex flex-col gap-2 border-b border-default pb-2">
+      {workspaceId && approvalIds.map((id) => <ToolApprovalCard key={id} workspaceId={workspaceId} requestId={id} conversationId={conversationId} />)}
       <PlanCard plan={plan} running={running} />
       {subagents.length > 0 && (
         <section aria-label="Subagents" className="flex flex-col gap-1.5">
