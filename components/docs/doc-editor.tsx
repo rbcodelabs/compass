@@ -132,7 +132,7 @@ interface RemoteDoc {
 const UPDATED_INDICATOR_MS = 4_000;
 const TYPING_RECHECK_MS = 500;
 
-/** The reading column: ~700px of text plus the 2rem gutters. Title, toolbar and body all share it so they align. */
+/** The reading column: ~700px of text plus the 2rem gutters (764px max). Title, toolbar and body all share it so they align. */
 const DOC_COLUMN = "mx-auto w-full max-w-[764px]";
 
 const NO_MENTION_OPTIONS: MentionOptions = { people: [], agents: [], outside: [] };
