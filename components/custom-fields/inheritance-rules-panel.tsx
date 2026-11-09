@@ -15,6 +15,7 @@ import {
   type InheritanceRuleActionResult,
 } from "@/app/[orgSlug]/[workspaceSlug]/settings/actions";
 import { checkRuleCompatibility } from "@/lib/custom-field-inheritance-compat";
+import { useLabels } from "@/components/thinking-model/thinking-model-provider";
 import type { CustomFieldDefinitionData } from "@/lib/types";
 
 export type InheritanceRuleRow = {
@@ -39,8 +40,6 @@ interface Props {
   available: boolean;
 }
 
-const SOURCE_LABEL: Record<string, string> = { OPPORTUNITY: "opportunity", SOLUTION: "solution" };
-
 const STATUS_STYLE: Record<InheritanceRuleRow["status"], string> = {
   active: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
   disabled: "bg-muted text-muted-foreground",
@@ -54,6 +53,11 @@ function statusLabel(rule: InheritanceRuleRow) {
 
 export function InheritanceRulesPanel({ orgSlug, workspaceSlug, fields, rules, available }: Props) {
   const router = useRouter();
+  const labels = useLabels();
+  // Workspaces rename these entities (thinking model); the copy follows.
+  const opportunity = labels.opportunity.singular.toLowerCase();
+  const solution = labels.solution.singular.toLowerCase();
+  const SOURCE_LABEL: Record<string, string> = { OPPORTUNITY: opportunity, SOLUTION: solution };
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
@@ -100,7 +104,7 @@ export function InheritanceRulesPanel({ orgSlug, workspaceSlug, fields, rules, a
       <div>
         <h3 className="text-sm font-semibold">Inheritance rules</h3>
         <p className="mt-1 text-xs text-muted-foreground">
-          A roadmap item field can default from a field on the opportunity or solution it is linked to. A rule only fills an empty field, never
+          A roadmap item field can default from a field on the {opportunity} or {solution} it is linked to. A rule only fills an empty field, never
           overwrites a value, and never keeps the two in sync. When several rules target one field, the lowest priority with a value wins.
         </p>
       </div>
@@ -253,7 +257,7 @@ export function InheritanceRulesPanel({ orgSlug, workspaceSlug, fields, rules, a
                 </SelectContent>
               </Select>
               {target && sources.length === 0 && (
-                <p className="text-xs text-muted-foreground">No opportunity or solution field has the same type and covers these options.</p>
+                <p className="text-xs text-muted-foreground">No {opportunity} or {solution} field has the same type and covers these options.</p>
               )}
             </div>
           </div>
