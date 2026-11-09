@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { createCloudAgent, grantWorkspaceAgent, revokeWorkspaceAgent, setMyDefaultAgentAction, setWorkspaceDefaultAgentAction, updateCloudAgent } from "@/app/settings/agents/actions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { changedRunLimits, CloudAgentFields, EMPTY_CLOUD_AGENT_VALUES, runLimitText, type CloudAgentFormValues, type CloudAgentModelOption, type CloudAgentModelUi } from "@/components/settings/cloud-agent-form";
@@ -32,6 +33,9 @@ export type WorkspaceAgentRow = {
   maxRunsPerDay?: number | null;
   /** STANDARD | DEVELOPER. Only sent for editable cloud agents. */
   sandboxClass?: "STANDARD" | "DEVELOPER";
+  /** Git author for commits (both or neither). Only sent for editable cloud agents. */
+  gitAuthorName?: string | null;
+  gitAuthorEmail?: string | null;
   canEdit?: boolean;
   /** The viewer could start a run as this agent right now (cloud, active, enabled here, allowed by its policy). */
   canUse?: boolean;
@@ -50,12 +54,21 @@ function SandboxClassSelect({ id, value, onChange, developerSandboxEnabled, disa
   </div>;
 }
 
-function CloudAgentEditor({ agent, models, modelUi, disabled, developerSandboxEnabled, onSave }: { agent: WorkspaceAgentRow; models: CloudAgentModelOption[]; modelUi?: CloudAgentModelUi; disabled: boolean; developerSandboxEnabled: boolean; onSave: (values: CloudAgentFormValues, sandboxClass: "STANDARD" | "DEVELOPER") => void }) {
+function CloudAgentEditor({ agent, models, modelUi, disabled, developerSandboxEnabled, onSave }: { agent: WorkspaceAgentRow; models: CloudAgentModelOption[]; modelUi?: CloudAgentModelUi; disabled: boolean; developerSandboxEnabled: boolean; onSave: (values: CloudAgentFormValues, sandboxClass: "STANDARD" | "DEVELOPER", gitAuthor: { name: string; email: string }) => void }) {
+  const [gitName, setGitName] = useState(agent.gitAuthorName ?? "");
+  const [gitEmail, setGitEmail] = useState(agent.gitAuthorEmail ?? "");
   const [sandboxClass, setSandboxClass] = useState<"STANDARD" | "DEVELOPER">(agent.sandboxClass ?? "STANDARD");
   const [values, setValues] = useState<CloudAgentFormValues>({ name: agent.name, description: agent.description ?? "", instructions: agent.instructions ?? "", model: agent.model ?? "", invokePolicy: agent.invokePolicy ?? "WORKSPACE_MEMBERS", maxConcurrentRuns: runLimitText(agent.maxConcurrentRuns), maxRunsPerDay: runLimitText(agent.maxRunsPerDay) });
-  return <form className="mt-3 min-w-0 space-y-2 border-t border-border-default pt-3" aria-label={`Edit ${agent.name}`} onSubmit={(e) => { e.preventDefault(); onSave(values, sandboxClass); }}>
+  return <form className="mt-3 min-w-0 space-y-2 border-t border-border-default pt-3" aria-label={`Edit ${agent.name}`} onSubmit={(e) => { e.preventDefault(); onSave(values, sandboxClass, { name: gitName, email: gitEmail }); }}>
     <CloudAgentFields values={values} onChange={setValues} models={models} modelUi={modelUi} disabled={disabled} showInvokePolicy={!!agent.shared} showRunLimits />
     {agent.shared && <SandboxClassSelect id={`sandbox-class-${agent.id}`} value={sandboxClass} onChange={setSandboxClass} developerSandboxEnabled={developerSandboxEnabled} disabled={disabled} />}
+    <div className="space-y-1">
+      <Label htmlFor={`git-author-name-${agent.id}`}>Git author name</Label>
+      <Input id={`git-author-name-${agent.id}`} data-testid="agent-git-author-name" value={gitName} maxLength={100} placeholder="Compass Agent" disabled={disabled} onChange={(e) => setGitName(e.target.value)} />
+      <Label htmlFor={`git-author-email-${agent.id}`}>Git author email</Label>
+      <Input id={`git-author-email-${agent.id}`} data-testid="agent-git-author-email" type="email" value={gitEmail} maxLength={254} placeholder="compass-agent@users.noreply.github.com" disabled={disabled} onChange={(e) => setGitEmail(e.target.value)} />
+      <p className="text-xs text-muted-foreground">Commits this agent makes are authored as this identity. On a private repo, Vercel only deploys commits whose author email belongs to a GitHub account on your Vercel team, so use a team member or a machine account (e.g. 12345+login@users.noreply.github.com). Leave both empty to use the Compass Agent bot.</p>
+    </div>
     <Button type="submit" size="sm" disabled={disabled || !values.name.trim()}>Save agent</Button>
   </form>;
 }
@@ -105,7 +118,7 @@ export function WorkspaceAgentsPanel({ orgSlug, workspaceSlug, agents, canManage
           {canManage && <Button variant="outline" size="sm" aria-label={`Revoke access to ${a.name}`} disabled={pending} onClick={() => run(() => revokeWorkspaceAgent(orgSlug, workspaceSlug, a.id))}>Revoke access</Button>}
         </div>
       </div>
-      {editing === a.id && <CloudAgentEditor agent={a} models={models} modelUi={modelUi} disabled={pending} developerSandboxEnabled={developerSandboxEnabled} onSave={(values, sandboxClass) => run(() => updateCloudAgent(a.id, { name: values.name, description: values.description, instructions: values.instructions, model: values.model || null, ...(a.shared ? { invokePolicy: values.invokePolicy === "OWNER" ? "ADMINS" : values.invokePolicy } : {}), ...changedRunLimits(values, a), ...(a.shared && sandboxClass !== (a.sandboxClass ?? "STANDARD") ? { sandboxClass } : {}) }), () => setEditing(null))} />}
+      {editing === a.id && <CloudAgentEditor agent={a} models={models} modelUi={modelUi} disabled={pending} developerSandboxEnabled={developerSandboxEnabled} onSave={(values, sandboxClass, gitAuthor) => run(() => updateCloudAgent(a.id, { name: values.name, description: values.description, instructions: values.instructions, model: values.model || null, ...(a.shared ? { invokePolicy: values.invokePolicy === "OWNER" ? "ADMINS" : values.invokePolicy } : {}), ...changedRunLimits(values, a), ...(a.shared && sandboxClass !== (a.sandboxClass ?? "STANDARD") ? { sandboxClass } : {}), ...(gitAuthor.name.trim() !== (a.gitAuthorName ?? "") || gitAuthor.email.trim() !== (a.gitAuthorEmail ?? "") ? { gitAuthorName: gitAuthor.name, gitAuthorEmail: gitAuthor.email } : {}) }), () => setEditing(null))} />}
     </li>)}</ul>
     {(creating
       ? <form className="min-w-0 space-y-2 rounded-md border border-border-default p-3" aria-label="New cloud agent" onSubmit={(e) => {

@@ -252,7 +252,10 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   "113_doc_publishing": "a4b32cc07df478c2f228264697b039dbc42140e83519417180b7f43c81da5d0d",
   // Portal home template: two nullable VARCHAR(20) ADD COLUMNs on portal_home_layouts (draft_template, published_template); NULL = editorial. No default, backfill, index or FK.
   // Postcondition pinned in REVIEWED_MIGRATION_CODE_SHA256. Digest recorded from the shipped SQL after reading it.
-  "114_portal_home_template": "009701f53d716a8eb9ae81d0e208631a592c4b2b643ebf8811d75be566698421"
+  "114_portal_home_template": "009701f53d716a8eb9ae81d0e208631a592c4b2b643ebf8811d75be566698421",
+  // Per-agent git author: two nullable ADD COLUMNs on agents. Additive, no backfill, no index, no postcondition hook.
+  // Digest recorded from the shipped SQL, not a fresh audit: please review this line.
+  "111_agent_git_author": "933a63e17f38f7439fce166e524609d1982ee81fd4f83574197cb13e0fe784fe"
 };
 
 /**

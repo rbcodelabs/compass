@@ -94,6 +94,7 @@ import {
   createBashPreToolUseHook,
   githubAccessFromEnv,
   prepareBashJail,
+  gitAuthorFromEnv,
   REPOS_DIR,
   SHELL_UNAVAILABLE_NOTICE,
 } from "./github-access.ts"
@@ -618,7 +619,7 @@ async function main(): Promise<void> {
   const githubAccess = githubAccessFromEnv(process.env, docsRoot)
   if (githubAccess.enabled && docsSession && docsRoot) {
     try {
-      prepareBashJail({ docsRoot, note, npmToken: process.env.AGENT_SANDBOX_CLASS === "DEVELOPER" && Boolean(process.env.NPM_TOKEN?.trim()) })
+      prepareBashJail({ docsRoot, note, author: gitAuthorFromEnv(process.env), npmToken: process.env.AGENT_SANDBOX_CLASS === "DEVELOPER" && Boolean(process.env.NPM_TOKEN?.trim()) })
       githubShell = true
       note(`shell enabled for ${githubAccess.repos.length} repository(ies)`)
     } catch (error) {

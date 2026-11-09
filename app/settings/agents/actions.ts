@@ -11,6 +11,7 @@ import { AgentSelectionError, resolveRunAgent } from "@/lib/agent-run-identity";
 import { clearUserDefaultAgent, clearWorkspaceDefaultAgent, setUserDefaultAgent, setWorkspaceDefaultAgent } from "@/lib/agent-defaults";
 import { parseAgentModelWithCatalog } from "@/lib/agent-model-catalog";
 import { parseAgentCap } from "@/lib/agent-limits";
+import { gitAuthorInput } from "@/lib/agent-git-author";
 import { readWorkspaceDeveloperSandboxEnabled } from "@/lib/agent-sandbox-class";
 
 async function account() {
@@ -142,6 +143,8 @@ export async function updateCloudAgent(id: string, input: {
   maxConcurrentRuns?: number | null; maxRunsPerDay?: number | null;
   /** Sandbox class (migration 110). DEVELOPER needs a shared agent in a workspace that has the developer sandbox enabled. */
   sandboxClass?: "STANDARD" | "DEVELOPER";
+  /** Git author for commits this agent makes (migration 111). Both empty/null clears it (back to the Compass Agent bot); omitted = unchanged. */
+  gitAuthorName?: string | null; gitAuthorEmail?: string | null;
 }) {
   const { prisma, userId } = await account();
   const agent = await findAgentById(prisma, id);
@@ -175,9 +178,18 @@ export async function updateCloudAgent(id: string, input: {
     if (input.sandboxClass === "DEVELOPER" && !(await readWorkspaceDeveloperSandboxEnabled(prisma, owner.workspaceId))) throw new Error("Enable the developer sandbox for this workspace first");
     data.sandboxClass = input.sandboxClass;
   }
+  const gitAuthorRequested = input.gitAuthorName !== undefined || input.gitAuthorEmail !== undefined;
+  if (gitAuthorRequested) {
+    // Same gate as the other agent settings: canManageAgent above already limited this to the agent's owner (personal) or an
+    // administrator (shared). The pair is validated as one unit, so the stored columns are always both set or both null.
+    const author = gitAuthorInput(input.gitAuthorName, input.gitAuthorEmail);
+    data.gitAuthorName = author?.name ?? null;
+    data.gitAuthorEmail = author?.email ?? null;
+  }
   try {
     await prisma.agent.update({ where: { id }, data, select: { id: true } });
   } catch (error) {
+    if (gitAuthorRequested && isMissingColumn(error)) throw new Error("Git author is not available yet. Try again after the database update finishes.");
     if (sandboxClassRequested && isMissingColumn(error)) throw new Error("The developer sandbox is not available yet. Try again after the database update finishes.");
     if (capsRequested && isMissingColumn(error)) throw new Error("Run limits are not available yet. Try again after the database update finishes.");
     throw error;

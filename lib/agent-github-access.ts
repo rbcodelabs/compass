@@ -56,6 +56,7 @@ export function githubSandboxEnv(enabled: boolean, githubEnv: Record<string, str
     GH_TOKEN: githubEnv.GH_TOKEN,
     GITHUB_TOKEN: githubEnv.GITHUB_TOKEN ?? githubEnv.GH_TOKEN,
     AGENT_GITHUB_REPOS: githubEnv.AGENT_GITHUB_REPOS,
+    ...(githubEnv.AGENT_GIT_AUTHOR_NAME && githubEnv.AGENT_GIT_AUTHOR_EMAIL ? { AGENT_GIT_AUTHOR_NAME: githubEnv.AGENT_GIT_AUTHOR_NAME, AGENT_GIT_AUTHOR_EMAIL: githubEnv.AGENT_GIT_AUTHOR_EMAIL } : {}),
     AGENT_GITHUB_SHELL: "1",
   }
 }

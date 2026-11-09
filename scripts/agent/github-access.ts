@@ -61,13 +61,27 @@ export const BASH_MATCHER = "Bash"
 
 // ── git configuration enforced inside the jail ──────────────────────────────
 
-export function systemGitConfig(): string {
+/**
+ * The author for commits: AGENT_GIT_AUTHOR_NAME / _EMAIL when both are present and well-formed, else the bot. Re-validated here
+ * (the host already did) because the values are written into a root-owned config file; a stray newline or quote must never become
+ * a config directive such as `hooksPath`. Mirrors lib/agent-git-author.ts, which this file cannot import.
+ */
+export function gitAuthorFromEnv(env: Env): { name: string; email: string } {
+  const name = (env.AGENT_GIT_AUTHOR_NAME ?? "").trim()
+  const email = (env.AGENT_GIT_AUTHOR_EMAIL ?? "").trim()
+  // eslint-disable-next-line no-control-regex
+  const nameOk = name.length > 0 && name.length <= 100 && !/[\u0000-\u001f\u007f"'\\<>]/.test(name)
+  const emailOk = email.length > 0 && email.length <= 254 && /^[^\s@"'\\<>]+@[^\s@"'\\<>]+\.[^\s@"'\\<>]+$/.test(email)
+  return nameOk && emailOk ? { name, email } : { name: AGENT_GIT_NAME, email: AGENT_GIT_EMAIL }
+}
+
+export function systemGitConfig(author: { name: string; email: string } = { name: AGENT_GIT_NAME, email: AGENT_GIT_EMAIL }): string {
   // `;` and `#` start a comment in a git config value unless the value is quoted, hence the quoting.
   const helper = '"!f() { test \\"$1\\" = get || exit 0; echo username=x-access-token; echo \\"password=${GH_TOKEN:-$GITHUB_TOKEN}\\"; }; f"'
   return [
     "[user]",
-    `\tname = ${AGENT_GIT_NAME}`,
-    `\temail = ${AGENT_GIT_EMAIL}`,
+    `\tname = "${author.name}"`,
+    `\temail = "${author.email}"`,
     '[credential "https://github.com"]',
     "\thelper =",
     `\thelper = ${helper}`,
@@ -198,7 +212,7 @@ const defaultRunner: JailRunner = (command, args, input) =>
  * as it. Throws if any REQUIRED step fails; the caller then runs the turn WITHOUT a shell.
  * Idempotent. `run` is injectable for tests.
  */
-export function prepareBashJail(opts: { docsRoot: string; run?: JailRunner; note?: (message: string) => void; npmToken?: boolean }): void {
+export function prepareBashJail(opts: { docsRoot: string; run?: JailRunner; note?: (message: string) => void; npmToken?: boolean; author?: { name: string; email: string } }): void {
   const run = opts.run ?? defaultRunner
   const note = opts.note ?? (() => {})
   const sudo = (...args: string[]) => run("sudo", ["-n", ...args])
@@ -220,7 +234,7 @@ export function prepareBashJail(opts: { docsRoot: string; run?: JailRunner; note
   run("find", [opts.docsRoot, REPOS_DIR, "-type", "d", "-exec", "chmod", "g+s", "{}", "+"])
 
   sudo("mkdir", "-p", JAIL_HOOKS_DIR)
-  run("sudo", ["-n", "tee", JAIL_GITCONFIG], systemGitConfig())
+  run("sudo", ["-n", "tee", JAIL_GITCONFIG], systemGitConfig(opts.author))
   run("sudo", ["-n", "tee", `${JAIL_HOOKS_DIR}/pre-push`], prePushHook())
   sudo("chmod", "755", `${JAIL_HOOKS_DIR}/pre-push`)
   sudo("chmod", "644", JAIL_GITCONFIG)
