@@ -62,6 +62,8 @@ async function chooseExisting(page: Page, noun: "experiment" | "artifact", title
 }
 
 test("an artifact links to an experiment, shows on both pages, unlinks, and its link disappears when the artifact is deleted", async ({ page, base, workspaceSlug }, testInfo) => {
+  // One long journey (two pages, archive, delete, 390px and 1280px captures, held loading states) on a dev server that compiles on demand.
+  test.setTimeout(240_000)
   const prisma = getPrisma()
   const workspace = await prisma.workspace.findFirstOrThrow({ where: { slug: workspaceSlug } })
   const suffix = Date.now().toString(36)
