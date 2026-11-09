@@ -354,3 +354,55 @@ describe("applyInheritanceForSourceValue (late source values)", () => {
     warn.mockRestore()
   })
 })
+
+describe("review fixes", () => {
+  const WS2 = "ws-1"
+  beforeEach(() => {
+    db = createInheritanceFakeDb()
+    setFeatureTables({ inheritance: true })
+    seedCustomerToPartner()
+  })
+  const late = () => applyInheritanceForSourceValue(db.tx, { workspaceId: WS2, sourceObjectType: "OPPORTUNITY", sourceId: OPP, fieldId: "f-customer" })
+
+  it("never fills an archived roadmap item, and archived items take no slot in the cap window", async () => {
+    db.addRoadmapItem("archived-1", WS, { opportunityId: OPP, status: "ARCHIVED" })
+    db.addRoadmapItem("active-1", WS, { opportunityId: OPP })
+    db.addValue("f-customer", OPP, "acme")
+
+    await late()
+
+    expect(db.valueOf("f-partner", "archived-1")).toBeUndefined()
+    expect(db.valueOf("f-partner", "active-1")).toBe("acme")
+  })
+
+  it("a later write progresses past the cap: items already filled take no slot, so the next 3 get filled", async () => {
+    for (let index = 0; index < 503; index++) db.addRoadmapItem(`bulk-${String(index).padStart(4, "0")}`, WS, { opportunityId: OPP })
+    db.addValue("f-customer", OPP, "acme")
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+
+    const first = await late()
+    expect(first.skippedByCap).toBe(3)
+    expect(db.values().filter((row) => row.fieldId === "f-partner")).toHaveLength(500)
+
+    const second = await late()
+    expect(second.skippedByCap).toBe(0)
+    expect(db.values().filter((row) => row.fieldId === "f-partner")).toHaveLength(503)
+    warn.mockRestore()
+  })
+
+  it("reports only the values actually written: a concurrent explicit write that wins the race is not reported as inherited", async () => {
+    db.addRoadmapItem(ITEM, WS, { opportunityId: OPP })
+    db.addValue("f-customer", OPP, "acme")
+    const original = db.tx.customFieldValue.createManyAndReturn.bind(db.tx.customFieldValue)
+    // The user sets Partner by hand between the empty-check and the insert.
+    ;(db.tx.customFieldValue as unknown as { createManyAndReturn: unknown }).createManyAndReturn = async (args: unknown) => {
+      db.addValue("f-partner", ITEM, "initech")
+      return original(args as never)
+    }
+
+    const result = await applyInheritanceRules(db.tx, { workspaceId: WS, targetObjectType: "ROADMAP_ITEM", targetId: ITEM, links: { opportunityId: OPP } })
+
+    expect(result.applied).toEqual([])
+    expect(db.valueOf("f-partner", ITEM)).toBe("initech")
+  })
+})

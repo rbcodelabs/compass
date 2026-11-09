@@ -79,6 +79,15 @@ describe("createInheritanceRule", () => {
     await expect(create({ targetFieldId: "narrow" })).rejects.toThrow(/b/)
   })
 
+  it.each([[-1], [1.5], [1001], [Number.NaN]])("rejects priority %s (must be a whole number from 0 to 1000)", async (priority) => {
+    await expect(create({ priority })).rejects.toThrow(/whole number from 0 to 1000/)
+    expect(db.tables.customFieldInheritanceRule).toHaveLength(0)
+  })
+
+  it.each([[0], [1000]])("accepts the boundary priority %s", async (priority) => {
+    await expect(create({ priority })).resolves.toMatchObject({ priority })
+  })
+
   it("rejects a duplicate source/target pair with a friendly error", async () => {
     await create()
     await expect(create()).rejects.toBeInstanceOf(InheritanceRuleError)

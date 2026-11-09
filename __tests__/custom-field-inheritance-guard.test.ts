@@ -49,6 +49,18 @@ const UPDATE_SITES: Record<string, UpdateEntry> = {
   "lib/analytics/service.ts": { updates: 1, linkUpdates: 0, reason: "writes analytics tracking fields" },
 }
 
+/**
+ * Writers that pick the Prisma delegate by a runtime model name (`tx[config.model].update(...)`). The literal
+ * `roadmapItem.update(` scan above cannot see them, which is how the roadmap detail panel's opportunity link slipped past once.
+ */
+const GENERIC_DELEGATE_WRITERS: Record<string, { hooked: boolean; reason: string }> = {
+  "lib/entity-mutations.ts": { hooked: true, reason: "updateEntityField: the roadmap detail panel links an opportunity through it (ROADMAP_ITEM_FIELDS includes opportunityId)" },
+  "lib/entity-detail.ts": { hooked: false, reason: "read-only: findMany by model name for panel lookups, never writes" },
+  "lib/task-tool-handlers.ts": { hooked: false, reason: "task rows only (modelName is a task-link target lookup); never writes a roadmap item" },
+  "lib/workspace-update-mutations.ts": { hooked: false, reason: "reads the row a mutation just wrote for update capture; the writes stay in the callers the other scans cover" },
+  "lib/analytics/activity.ts": { hooked: false, reason: "wraps a delegate for activity capture; the caller's write is covered by the other scans" },
+}
+
 const VALUE_WRITE_SITES: Record<string, { writes: number; hooked: boolean; reason?: string }> = {
   "lib/custom-field-value-write.ts": { writes: 1, hooked: true },
   "lib/custom-field-inheritance.ts": { writes: 1, hooked: false, reason: "the inserter itself: insert-only fill of ROADMAP_ITEM targets" },
@@ -150,9 +162,33 @@ describe("roadmap item link-changing updates", () => {
   })
 })
 
+describe("generic-delegate writers (dynamic model name)", () => {
+  const GENERIC = /\)\[\s*(?:config\.model|modelName)\b|\btx\[\s*(?:config\.model|model)\b/
+  const found = files.filter((file) => GENERIC.test(file.text)).map((file) => file.rel)
+
+  it("finds no dynamic-model writer outside the declared files", () => {
+    const unlisted = found.filter((rel) => !GENERIC_DELEGATE_WRITERS[rel])
+    expect(unlisted, `Un-classified generic-delegate writer(s): ${unlisted.join(", ")}. If it can write a roadmap item's opportunityId/solutionId it must call applyInheritanceRules; otherwise justify it in GENERIC_DELEGATE_WRITERS.`).toEqual([])
+    for (const [rel, entry] of Object.entries(GENERIC_DELEGATE_WRITERS)) {
+      expect(found, `${rel} no longer matches; remove the stale entry`).toContain(rel)
+      expect(entry.reason.length).toBeGreaterThan(20)
+    }
+  })
+
+  it("hooks the generic path that sets a roadmap item's opportunity link", () => {
+    const mutations = files.find((file) => file.rel === "lib/entity-mutations.ts")!
+    expect(mutations.text).toMatch(/ROADMAP_ITEM_FIELDS = \[[^\]]*"opportunityId"/)
+    expect(count(mutations.text, HOOK), "lib/entity-mutations.ts: applyInheritanceRules( calls").toBeGreaterThanOrEqual(1)
+    expect(mutations.text).toMatch(/type === "roadmapItem" && field === "opportunityId"[^]*applyInheritanceRules\(/)
+    for (const [rel, entry] of Object.entries(GENERIC_DELEGATE_WRITERS)) {
+      if (entry.hooked) expect(count(files.find((file) => file.rel === rel)!.text, HOOK), rel).toBeGreaterThanOrEqual(1)
+    }
+  })
+})
+
 describe("custom field value write paths (late source values)", () => {
   const found = files
-    .map((file) => ({ ...file, writes: [...file.text.matchAll(/\bcustomFieldValue\.(upsert|create|createMany)\(/g)].length }))
+    .map((file) => ({ ...file, writes: [...file.text.matchAll(/\bcustomFieldValue\.(upsert|create|createMany|createManyAndReturn)\(/g)].length }))
     .filter((file) => file.writes > 0)
 
   it("allows customFieldValue writes only in the declared files", () => {

@@ -15,8 +15,9 @@ function matches(row: Row, where: Where | undefined): boolean {
   return Object.entries(where).every(([key, cond]) => {
     const actual = row[key]
     if (cond && typeof cond === "object" && !Array.isArray(cond) && !(cond instanceof Date)) {
-      const c = cond as { in?: unknown[]; not?: unknown }
+      const c = cond as { in?: unknown[]; not?: unknown; gt?: unknown }
       if (c.in) return c.in.includes(actual)
+      if ("gt" in c) return String(actual) > String(c.gt)
       if ("not" in c) return actual !== c.not
     }
     return actual === cond
@@ -77,6 +78,21 @@ export function createInheritanceFakeDb(options: { permissive?: boolean } = {}) 
         created++
       }
       return { count: created }
+    },
+    createManyAndReturn: async (args: { data: Row[]; skipDuplicates?: boolean; select?: Record<string, boolean> }) => {
+      queries.push({ model, op: "createManyAndReturn", where: {} })
+      const written: Row[] = []
+      for (const data of args.data) {
+        const duplicate = tables[model].some((row) => row.fieldId === data.fieldId && row.objectId === data.objectId)
+        if (duplicate) {
+          if (args.skipDuplicates) continue
+          throw new Error("unique violation")
+        }
+        const row = { id: `gen-${++seq}`, ...data }
+        tables[model].push(row)
+        written.push({ fieldId: row.fieldId, objectId: row.objectId })
+      }
+      return written
     },
     create: async (args: { data: Row }) => {
       queries.push({ model, op: "create", where: {} })
@@ -139,8 +155,8 @@ export function createInheritanceFakeDb(options: { permissive?: boolean } = {}) 
     addEntity(model: "opportunity" | "solution", id: string, workspaceId: string) {
       tables[model].push({ id, workspaceId })
     },
-    addRoadmapItem(id: string, workspaceId: string, links: { opportunityId?: string | null; solutionId?: string | null } = {}) {
-      tables.roadmapItem.push({ id, workspaceId, opportunityId: links.opportunityId ?? null, solutionId: links.solutionId ?? null })
+    addRoadmapItem(id: string, workspaceId: string, links: { opportunityId?: string | null; solutionId?: string | null; status?: string } = {}) {
+      tables.roadmapItem.push({ id, workspaceId, status: links.status ?? "ACTIVE", opportunityId: links.opportunityId ?? null, solutionId: links.solutionId ?? null })
     },
   }
 }

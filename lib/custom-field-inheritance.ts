@@ -121,6 +121,7 @@ async function fillEmptyTargets(
   for (const rule of rules) rulesByTarget.set(rule.targetFieldId, [...(rulesByTarget.get(rule.targetFieldId) ?? []), rule])
 
   const inserts: { fieldId: string; objectId: string; value: object }[] = []
+  const planned: { itemId: string; entry: InheritedField }[] = []
   for (const item of linked) {
     for (const [targetFieldId, group] of rulesByTarget) {
       if (filled.has(`${targetFieldId}:${item.id}`)) continue
@@ -144,15 +145,23 @@ async function fillEmptyTargets(
           ruleId: rule.id, fieldId: targetFieldId, fieldName: target.name, value,
           from: { objectType: sourceType, objectId: sourceId, fieldId: source.id, fieldName: source.name },
         }
-        result.applied.push(entry)
-        itemsApplied.set(item.id, [...(itemsApplied.get(item.id) ?? []), entry])
+        planned.push({ itemId: item.id, entry })
         break
       }
     }
   }
 
-  // skipDuplicates turns a concurrent explicit write into a no-op instead of an error (which would abort the transaction).
-  if (inserts.length > 0) await tx.customFieldValue.createMany({ data: inserts, skipDuplicates: true })
+  // skipDuplicates turns a concurrent explicit write into a no-op instead of an error (which would abort the transaction), and the
+  // rows it returns are the ones actually written: only those are reported as inherited.
+  if (inserts.length > 0) {
+    const written = await tx.customFieldValue.createManyAndReturn({ data: inserts, skipDuplicates: true, select: { fieldId: true, objectId: true } })
+    const wrote = new Set(written.map((row) => `${row.fieldId}:${row.objectId}`))
+    for (const { itemId, entry } of planned) {
+      if (!wrote.has(`${entry.fieldId}:${itemId}`)) continue
+      result.applied.push(entry)
+      itemsApplied.set(itemId, [...(itemsApplied.get(itemId) ?? []), entry])
+    }
+  }
   return { result, itemsApplied }
 }
 
@@ -200,21 +209,41 @@ export async function applyInheritanceForSourceValue(
   })
   if (feeding.length === 0) return empty()
 
-  const where = { workspaceId, [pair.linkColumn]: sourceId }
-  const found = (await tx.roadmapItem.findMany({
-    where,
-    select: { id: true, opportunityId: true, solutionId: true },
-    orderBy: { id: "asc" },
-    take: MAX_ITEMS_PER_SOURCE_WRITE + 1,
-  })) as Item[]
+  // Window: the first MAX_ITEMS_PER_SOURCE_WRITE ACTIVE linked items that still have an empty target for a rule, in id order. Items whose
+  // targets are already filled take no slot, so a later write keeps progressing past the cap instead of re-reading the same first page.
+  const targetFieldIds = [...new Set(feeding.map((rule) => rule.targetFieldId))]
+  const baseWhere = { workspaceId, status: "ACTIVE", [pair.linkColumn]: sourceId }
+  const items: Item[] = []
+  let cursor: string | null = null
+  let exhausted = false
+  while (items.length < MAX_ITEMS_PER_SOURCE_WRITE && !exhausted) {
+    const page = (await tx.roadmapItem.findMany({
+      where: cursor ? { ...baseWhere, id: { gt: cursor } } : baseWhere,
+      select: { id: true, opportunityId: true, solutionId: true },
+      orderBy: { id: "asc" },
+      take: MAX_ITEMS_PER_SOURCE_WRITE,
+    })) as Item[]
+    if (page.length < MAX_ITEMS_PER_SOURCE_WRITE) exhausted = true
+    if (page.length === 0) break
+    cursor = page[page.length - 1].id
+    const have = await tx.customFieldValue.findMany({ where: { objectId: { in: page.map((item) => item.id) }, fieldId: { in: targetFieldIds } }, select: { fieldId: true, objectId: true } })
+    const filledCount = new Map<string, number>()
+    for (const row of have) filledCount.set(row.objectId, (filledCount.get(row.objectId) ?? 0) + 1)
+    for (const item of page) {
+      if ((filledCount.get(item.id) ?? 0) >= targetFieldIds.length) continue
+      if (items.length < MAX_ITEMS_PER_SOURCE_WRITE) items.push(item)
+      else { exhausted = true; break }
+    }
+  }
   let skippedByCap = 0
-  let items = found
-  if (found.length > MAX_ITEMS_PER_SOURCE_WRITE) {
-    skippedByCap = (await tx.roadmapItem.count({ where })) - MAX_ITEMS_PER_SOURCE_WRITE
-    items = found.slice(0, MAX_ITEMS_PER_SOURCE_WRITE)
-    console.warn("[custom-field-inheritance] source value fan-out capped; the remaining linked items were not filled", {
-      workspaceId, sourceObjectType, sourceId, fieldId, processed: items.length, skippedByCap,
-    })
+  if (items.length >= MAX_ITEMS_PER_SOURCE_WRITE && cursor) {
+    // Linked ACTIVE items past the window (not yet examined): the next write for this source starts with them.
+    skippedByCap = await tx.roadmapItem.count({ where: { ...baseWhere, id: { gt: items[items.length - 1].id } } })
+    if (skippedByCap > 0) {
+      console.warn("[custom-field-inheritance] source value fan-out capped; the remaining linked items were not examined and are picked up by the next write", {
+        workspaceId, sourceObjectType, sourceId, fieldId, processed: items.length, skippedByCap,
+      })
+    }
   }
 
   const { result, itemsApplied } = await fillEmptyTargets(tx, workspaceId, pair.target, items)
