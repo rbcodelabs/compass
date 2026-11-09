@@ -109,7 +109,7 @@ async function expectNoClipping(page: Page, label: string) {
   await page.setViewportSize({ width: 1280, height: 900 });
 }
 
-test.describe.serial("Inheritance rules QA", () => {
+test.describe("Inheritance rules QA", () => {
   test.setTimeout(180_000);
   let ws: string;
 
@@ -168,7 +168,8 @@ test.describe.serial("Inheritance rules QA", () => {
     await page.getByRole("option", { name: nameOf("NumTarget"), exact: true }).click();
     await expect(panel.getByText(/No opportunity or solution field has the same type/)).toBeVisible();
     await panel.getByLabel("Inherit from").click();
-    expect(await page.getByRole("option").count()).toBe(0);
+    await page.waitForTimeout(800);
+    expect(await page.getByRole("option").count(), "no source offered for a NUMBER target").toBe(0);
     await page.keyboard.press("Escape");
     await shot(page, "form-no-compatible-source");
 
@@ -176,6 +177,7 @@ test.describe.serial("Inheritance rules QA", () => {
     await panel.getByLabel("Roadmap item field").click();
     await page.getByRole("option", { name: nameOf("Target"), exact: true }).click();
     await panel.getByLabel("Inherit from").click();
+    await expect(page.getByRole("option").first()).toBeVisible();
     const offered = (await page.getByRole("option").allTextContents()).map((text) => text.trim());
     await shot(page, "form-source-picker-open");
     expect(offered.some((text) => text.startsWith(nameOf("OppOk")))).toBe(true);
@@ -201,6 +203,7 @@ test.describe.serial("Inheritance rules QA", () => {
     await panel.getByLabel("Roadmap item field").click();
     await page.getByRole("option", { name: nameOf("Target"), exact: true }).click();
     await panel.getByLabel("Inherit from").click();
+    await page.waitForTimeout(800);
     expect(await page.getByRole("option").count(), "all compatible sources are used up").toBe(0);
     await page.keyboard.press("Escape");
     await panel.getByRole("button", { name: "Cancel" }).click();
