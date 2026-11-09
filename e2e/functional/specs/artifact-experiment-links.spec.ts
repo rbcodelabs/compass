@@ -27,6 +27,7 @@ async function captureLoading(page: Page, testInfo: TestInfo, name: string, sect
   try {
     await visit()
     await expect(page.getByRole("region", { name: section }).getByRole("status").filter({ hasText: "Loading links…" })).toBeVisible({ timeout: 60_000 })
+    await page.getByRole("region", { name: section }).scrollIntoViewIfNeeded()
     await shoot(page, testInfo, name)
   } finally {
     release()
