@@ -1,5 +1,6 @@
 "use server";
 
+import { writeCustomFieldValue } from "@/lib/custom-field-value-write";
 import { captureWorkspaceMutation } from "@/lib/workspace-update-mutations"
 import { revalidatePath } from "next/cache";
 import { auth } from "@/auth";
@@ -534,15 +535,7 @@ export async function setOpportunityFieldValue(
   const validationError = validateOpportunityFieldMove(toCustomFieldDefinitionData(row), value);
   if (validationError) throw new Error(validationError);
 
-  if (value === null) {
-    await prisma.customFieldValue.deleteMany({ where: { fieldId, objectId: opportunityId } });
-  } else {
-    await prisma.customFieldValue.upsert({
-      where: { fieldId_objectId: { fieldId, objectId: opportunityId } },
-      create: { fieldId, objectId: opportunityId, value },
-      update: { value, updatedAt: new Date() },
-    });
-  }
+  await writeCustomFieldValue(prisma, { workspaceId, objectType: "OPPORTUNITY", objectId: opportunityId, fieldId, value });
   revalidatePath(revalidatePathStr);
   return { value };
 }

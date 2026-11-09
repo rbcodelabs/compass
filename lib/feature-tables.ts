@@ -16,6 +16,7 @@ const isMissingTable = (error: unknown) =>
 
 let followingKnownToExist = false
 let updatesKnownToExist = false
+let inheritanceKnownToExist = false
 
 export async function followingTablesExist(prisma: AppPrismaClient): Promise<boolean> {
   if (followingKnownToExist) return true
@@ -49,8 +50,26 @@ export async function workspaceUpdatesTablesExist(prisma: AppPrismaClient): Prom
   }
 }
 
+/**
+ * Whether the custom field inheritance rules table (migration 113) exists yet. A missing table means "no rules", so the code can
+ * deploy before or after the migration. Same contract as above: a plain client, never a caller's transaction, and only a positive answer
+ * is cached.
+ */
+export async function customFieldInheritanceTableExists(prisma: AppPrismaClient = getPrisma()): Promise<boolean> {
+  if (inheritanceKnownToExist) return true
+  try {
+    await prisma.customFieldInheritanceRule.findFirst({ select: { id: true } })
+    inheritanceKnownToExist = true
+    return true
+  } catch (error) {
+    if (isMissingTable(error)) return false
+    throw error
+  }
+}
+
 /** Test seam: forget the cached positive answers. */
 export function resetFeatureTablesCache(): void {
   followingKnownToExist = false
   updatesKnownToExist = false
+  inheritanceKnownToExist = false
 }

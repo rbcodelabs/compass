@@ -41,7 +41,7 @@ const UPDATE_SITES: Record<string, UpdateEntry> = {
   "app/[orgSlug]/[workspaceSlug]/roadmap/actions.ts": { updates: 8, linkUpdates: 1, reason: "editRoadmapItem (card save) changes opportunityId and is hooked; the rest move, order, archive, rename or squad-assign without changing a link" },
   "lib/roadmap-tool-handlers.ts": { updates: 1, linkUpdates: 1, reason: "update_roadmap_item can set opportunityId/solutionId and is hooked" },
   "app/[orgSlug]/[workspaceSlug]/settings/actions.ts": { updates: 2, linkUpdates: 0, reason: "squad assignment / unassignment only" },
-  "app/api/mcp/route.ts": { updates: 1, linkUpdates: 0, reason: "assign_squad only" },
+  "app/api/mcp/route.ts": { updates: 1, linkUpdates: 0, reason: "assign_squad only: sets squadId and nothing about opportunity or solution links" },
   "lib/launch-checklist.ts": { updates: 1, linkUpdates: 0, reason: "horizon change to LAUNCHING" },
   "lib/okr-tool-handlers.ts": { updates: 1, linkUpdates: 0, reason: "clears keyResultId when a key result is deleted; never sets an opportunity or solution" },
   "lib/roadmap/solution-sync.ts": { updates: 1, linkUpdates: 0, reason: "mirrors solution title/status/dates onto the item; not a link event (ADR)" },

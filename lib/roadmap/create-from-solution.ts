@@ -23,6 +23,7 @@ import {
   type SlotRange,
 } from "@/lib/roadmap/scheduling";
 import { allocateOneSeq } from "@/lib/work-item-sequence"
+import { applyInheritanceRules, type InheritedField } from "@/lib/custom-field-inheritance"
 
 type CaptureSource = Parameters<typeof captureWorkspaceMutation>[3];
 export type RoadmapCreateHorizon = ScheduleHorizon | "SHIPPED";
@@ -69,6 +70,8 @@ export type CreatedRoadmapItem = {
   startDate: Date | null;
   endDate: Date | null;
   autoCreated: boolean | null;
+  /** Empty target fields this item filled from its linked opportunity / solution (custom field inheritance rules). */
+  inheritedFields: InheritedField[];
 };
 export type CreateFromSolutionsResult = {
   created: CreatedRoadmapItem[];
@@ -199,13 +202,16 @@ export async function createRoadmapItemsFromSolutions(
     const endDate = range ? new Date(`${range.end}T00:00:00.000Z`) : undefined;
 
     try {
+      // The callback can replay on a rolled-back attempt: only the attempt that commits leaves its result behind.
+      let inheritedFields: InheritedField[] = [];
       const item = await captureWorkspaceMutation(prisma, "roadmapItem", "create", context.captureSource, undefined, async (tx) => {
+        inheritedFields = [];
         const last = await tx.roadmapItem.findFirst({
           where: { workspaceId, horizon, status: "ACTIVE" },
           orderBy: [{ sortOrder: "desc" }, { id: "desc" }],
           select: { sortOrder: true },
         });
-        return tx.roadmapItem.create({
+        const createdItem = await tx.roadmapItem.create({
           data: {
             ...(request.id ? { id: request.id } : {}),
             workspaceId,
@@ -227,6 +233,11 @@ export async function createRoadmapItemsFromSolutions(
             autoCreated: context.autoCreated ? true : null,
           },
         });
+        inheritedFields = (await applyInheritanceRules(tx, {
+          workspaceId, targetObjectType: "ROADMAP_ITEM", targetId: createdItem.id,
+          links: { opportunityId: createdItem.opportunityId ?? null, solutionId: solution.id },
+        })).applied;
+        return createdItem;
       });
       if (range) {
         const key = occupiedKey(squadId);
@@ -243,6 +254,7 @@ export async function createRoadmapItemsFromSolutions(
         startDate: item.startDate,
         endDate: item.endDate,
         autoCreated: item.autoCreated ?? null,
+        inheritedFields,
       });
     } catch (error) {
       if (request.id && isUniqueConflict(error)) {

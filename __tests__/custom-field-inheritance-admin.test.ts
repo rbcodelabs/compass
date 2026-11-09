@@ -10,6 +10,7 @@ import {
   setInheritanceRuleEnabled,
 } from "@/lib/custom-field-inheritance-admin"
 import { createInheritanceFakeDb, type InheritanceFakeDb } from "./helpers/inheritance-fake-db"
+import { setFeatureTables } from "./helpers/modules"
 
 const WS = "ws-1"
 const OTHER = "ws-2"
@@ -20,6 +21,7 @@ const create = (input: Partial<Parameters<typeof createInheritanceRule>[1]> = {}
   createInheritanceRule(db.tx as never, { workspaceId: WS, targetFieldId: "dst", sourceFieldId: "src", actorUserId: "user-1", source: "UI", ...input })
 
 beforeEach(() => {
+  setFeatureTables({ inheritance: true })
   db = createInheritanceFakeDb({ permissive: true })
   db.addField({ id: "src", workspaceId: WS, objectType: "OPPORTUNITY", fieldType: "SELECT", name: "Customer", options: opts("a", "b") })
   db.addField({ id: "dst", workspaceId: WS, objectType: "ROADMAP_ITEM", fieldType: "SELECT", name: "Partner", options: opts("a", "b", "c") })

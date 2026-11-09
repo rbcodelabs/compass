@@ -14,6 +14,16 @@ import { encryptAnthropicApiKey, validateAnthropicApiKey } from "@/lib/workspace
 import { generateSsoSecret } from "@/lib/portal-sso";
 import { requireProductEntity, requireProductWorkspace, type ProductEntityKind } from "@/lib/product-action-auth";
 import { deleteWorkspaceCascade } from "@/lib/delete-workspace-cascade";
+import { writeCustomFieldValue } from "@/lib/custom-field-value-write";
+import {
+  createInheritanceRule,
+  deleteInheritanceRule,
+  deleteInheritanceRulesForField,
+  InheritanceRuleError,
+  moveInheritanceRule,
+  setInheritanceRuleEnabled,
+} from "@/lib/custom-field-inheritance-admin";
+import { retryUpdatesTransaction } from "@/lib/workspace-updates-capture";
 import { revokeMemberAgentGrants } from "@/lib/agent-lifecycle";
 import { deleteMemberFollowState } from "@/lib/follow-cleanup";
 import {
@@ -471,12 +481,60 @@ export async function deleteFieldDefinition(
   const field = await prisma.customFieldDefinition.findFirst({ where: { id: fieldId, workspaceId }, select: { id: true } });
   if (!field) throw new Error("Field not found");
 
-  // Delete values first (cascade not enforced at DB level with DSQL relationMode=prisma)
+  // Nothing cascades with DSQL relationMode=prisma: the field's inheritance rules (as target or source) and its values go first.
+  await deleteInheritanceRulesForField(prisma, workspaceId, fieldId);
   await prisma.customFieldValue.deleteMany({ where: { fieldId } });
   const deleted = await prisma.customFieldDefinition.deleteMany({ where: { id: fieldId, workspaceId } });
   if (deleted.count !== 1) throw new Error("Field not found");
 
   revalidatePath(`/${orgSlug}/${workspaceSlug}/settings`);
+}
+
+// ─── Inheritance rules ────────────────────────────────────────────────────────
+// Settings-only (ADR 0013): the MCP surface can list rules but never create or delete them. Authorized exactly
+// like createFieldDefinition (resolveWorkspace = signed-in member of the workspace); the workspace comes from
+// the session, never from the client, and the service checks every field id against it.
+
+export type InheritanceRuleActionResult = { ok: true } | { ok: false; error: string };
+
+/**
+ * An invalid rule (foreign field, type or option mismatch, duplicate) is an expected outcome, returned as a value:
+ * Next.js replaces a thrown server-action message with a generic one in production builds.
+ */
+async function runInheritanceRuleAction(orgSlug: string, workspaceSlug: string, run: (ctx: { prisma: ReturnType<typeof getPrisma>; workspaceId: string; userId: string | null }) => Promise<void>): Promise<InheritanceRuleActionResult> {
+  const session = await auth();
+  const { prisma, workspaceId } = await resolveWorkspace(orgSlug, workspaceSlug);
+  try {
+    await run({ prisma, workspaceId, userId: session?.user?.id ?? null });
+  } catch (error) {
+    if (error instanceof InheritanceRuleError) return { ok: false, error: error.message };
+    throw error;
+  }
+  revalidatePath(`/${orgSlug}/${workspaceSlug}/settings`);
+  return { ok: true };
+}
+
+export async function createInheritanceRuleAction(
+  orgSlug: string,
+  workspaceSlug: string,
+  input: { targetFieldId: string; sourceFieldId: string; priority?: number }
+): Promise<InheritanceRuleActionResult> {
+  return runInheritanceRuleAction(orgSlug, workspaceSlug, async ({ prisma, workspaceId, userId }) => {
+    await createInheritanceRule(prisma, { workspaceId, targetFieldId: input.targetFieldId, sourceFieldId: input.sourceFieldId, priority: input.priority, actorUserId: userId, source: "UI" });
+  });
+}
+
+export async function setInheritanceRuleEnabledAction(orgSlug: string, workspaceSlug: string, ruleId: string, enabled: boolean): Promise<InheritanceRuleActionResult> {
+  return runInheritanceRuleAction(orgSlug, workspaceSlug, ({ prisma, workspaceId }) => setInheritanceRuleEnabled(prisma, workspaceId, ruleId, enabled));
+}
+
+export async function moveInheritanceRuleAction(orgSlug: string, workspaceSlug: string, ruleId: string, direction: "up" | "down"): Promise<InheritanceRuleActionResult> {
+  return runInheritanceRuleAction(orgSlug, workspaceSlug, ({ prisma, workspaceId }) =>
+    retryUpdatesTransaction(prisma, (tx) => moveInheritanceRule(tx, workspaceId, ruleId, direction)));
+}
+
+export async function deleteInheritanceRuleAction(orgSlug: string, workspaceSlug: string, ruleId: string): Promise<InheritanceRuleActionResult> {
+  return runInheritanceRuleAction(orgSlug, workspaceSlug, ({ prisma, workspaceId }) => deleteInheritanceRule(prisma, workspaceId, ruleId));
 }
 
 export async function updateFieldDefinition(
@@ -577,16 +635,9 @@ export async function upsertFieldValue(
   await requireProductWorkspace(field.workspaceId);
   await requireProductEntity(kind, objectId, field.workspaceId);
 
-  if (value === null || value === "" || (Array.isArray(value) && value.length === 0)) {
-    // Clear: delete if exists
-    await prisma.customFieldValue.deleteMany({ where: { fieldId, objectId } });
-  } else {
-    await prisma.customFieldValue.upsert({
-      where: { fieldId_objectId: { fieldId, objectId } },
-      create: { fieldId, objectId, value: value as object },
-      update: { value: value as object, updatedAt: new Date() },
-    });
-  }
+  // The single value-write funnel: clearing deletes the row; setting an opportunity or solution value also fills
+  // empty inheritance targets on linked roadmap items (lib/custom-field-inheritance.ts).
+  await writeCustomFieldValue(prisma, { workspaceId: field.workspaceId, objectType: field.objectType as CustomFieldObjectType, objectId, fieldId, value });
 
   revalidatePath(revalidatePathStr);
 }

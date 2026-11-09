@@ -1,6 +1,6 @@
 /** Auditable MCP → REST ledger. It documents parity but never drives routing. */
 export const MCP_PARITY_CATALOG = {
-  toolCount: 212,
+  toolCount: 213,
   sortedToolNamesSha256: "2a9f517831caf4cf0181f491e53f5bd627e4a4797d1bd8c6df35b7411708ffe0",
 } as const
 
@@ -130,6 +130,7 @@ export const MCP_REST_PARITY_MANIFEST = {
   list_checklist_templates: direct("listChecklistTemplates"),
   list_comments: direct("listComments"),
   list_custom_field_definitions: direct("listCustomFieldDefinitions"),
+  list_custom_field_inheritance_rules: direct("listCustomFieldInheritanceRules"),
   list_decisions: direct("listDecisions"),
   list_doc_history: composition(["listDocVersions"], "REST lists versions by document id rather than by path."),
   list_doc_comments: direct("listDocComments"),
