@@ -183,20 +183,21 @@ test.describe.serial("Custom field inheritance rules", () => {
     await capture(page, "1-create-rule-form");
     await panel.getByTestId("inheritance-rule-save").click();
 
-    const row = panel.getByTestId("inheritance-rule-0");
+    // Other specs may leave rules in the shared workspace: find this spec's row by its field names, never by position.
+    const row = panel.getByRole("listitem").filter({ hasText: seeded.partnerName });
     await expect(row).toContainText(seeded.partnerName);
     await expect(row).toContainText(seeded.customerName);
-    await expect(panel.getByTestId("inheritance-rule-status-0")).toHaveText("Active");
+    await expect(row.getByTestId(/^inheritance-rule-status-/)).toHaveText("Active");
     await expect.poll(() => rules(seeded.workspaceId, seeded.partnerFieldId)).toEqual([{ enabled: true, priority: 0, source_object_type: "OPPORTUNITY" }]);
     await capture(page, "2-rule-list-active");
 
     await row.getByRole("switch").click();
-    await expect(panel.getByTestId("inheritance-rule-status-0")).toHaveText("Disabled");
+    await expect(row.getByTestId(/^inheritance-rule-status-/)).toHaveText("Disabled");
     await expect.poll(async () => (await rules(seeded.workspaceId, seeded.partnerFieldId))[0]?.enabled).toBe(false);
     await capture(page, "3-rule-disabled");
 
     await row.getByRole("switch").click();
-    await expect(panel.getByTestId("inheritance-rule-status-0")).toHaveText("Active");
+    await expect(row.getByTestId(/^inheritance-rule-status-/)).toHaveText("Active");
     await expect.poll(async () => (await rules(seeded.workspaceId, seeded.partnerFieldId))[0]?.enabled).toBe(true);
   });
 
