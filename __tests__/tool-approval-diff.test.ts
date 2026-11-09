@@ -172,7 +172,7 @@ describe("reviewableInCard (A3)", () => {
     const after = Object.fromEntries(Array.from({ length: COMPACT_ROW_LIMIT + 1 }, (_, i) => [`k${i}`, i]))
     const r = reviewableInCard({} as never, after as never, {} as never)
     expect(r.ok).toBe(false)
-    expect(r.reason).toMatch(/not all changes are shown/i)
+    expect("reason" in r ? r.reason : "").toMatch(/not all changes are shown/i)
   })
   it("is not ok when the diff was cut or the arguments are too long to show", () => {
     expect(reviewableInCard(deep(100) as never, deep(100, 2) as never, {} as never).ok).toBe(false)
