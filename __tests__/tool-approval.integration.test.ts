@@ -67,7 +67,6 @@ describe.skipIf(!databaseUrl)("tool approval core (real PostgreSQL)", () => {
   const approve = (requestId: string, userId = u.admin, extra: { key?: string; action?: "APPROVE" | "REJECT" } = {}) =>
     decideToolApproval({ requestId, optionActionKey: extra.action ?? "APPROVE", actingUserId: userId, idempotencyKey: extra.key ?? randomUUID() })
   const description = async () => (await prisma.workspace.findUnique({ where: { id: workspaceId }, select: { description: true } }))!.description
-  const decisionIdOf = async (requestId: string) => (await prisma.decisionRecord.findFirstOrThrow({ where: { requestId } })).id
   const setDescription = (value: string | null) => prisma.workspace.update({ where: { id: workspaceId }, data: { description: value } })
 
   beforeAll(async () => {

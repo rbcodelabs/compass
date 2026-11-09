@@ -56,7 +56,7 @@ describe("generic review surfaces refuse TOOL_APPROVAL", () => {
 describe("generic readers exclude TOOL_APPROVAL rows", () => {
   it("get_review_request looks the request up with the exclusion, so an approval id is simply not found", async () => {
     const result = await getReviewRequest({ requestId: "req-1" })
-    expect(m.prisma.reviewRequest.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "req-1", ...NOT_TOOL_APPROVAL } }))
+    expect(m.prisma.reviewRequest.findUnique).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "req-1", ...NOT_TOOL_APPROVAL } }))
     expect(result.structuredContent.ok).toBe(false)
   })
 
