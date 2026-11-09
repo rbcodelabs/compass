@@ -6,8 +6,8 @@
  *  2. Settings journey: incompatible sources are not offered, create three rules for one target, arrows at the ends,
  *     reorder, keyboard operation, stale-tab duplicate, options drift -> inactive, deleting a source field and then the
  *     target field removes the rules, layout at desktop and mobile.
- *  3. Link-then-fill through the roadmap detail panel (the UI's real link editor). Marked test.fail(): the panel saves
- *     the link through updateEntityField, which does not call applyInheritanceRules (QA defect). Remove test.fail() once fixed.
+ *  3. Link-then-fill through the roadmap detail panel (the UI's real link editor). The panel saves the link through
+ *     updateEntityField; it runs applyInheritanceRules there (this test failed before that hook was added).
  *  4. Console / page errors / Next dev overlay text on /settings compared with other pages.
  *
  * Screenshots: test-results/qa-shots/*.png (desktop 1280x900, mobile 390x844), each with a label strip.
@@ -326,8 +326,7 @@ test.describe("Inheritance rules QA", () => {
     for (const id of [numTarget, oppOk, solOk, oppTooMany, oppText]) await sql(`DELETE FROM "${S}".custom_field_definitions WHERE id = $1`, [id]);
   });
 
-  test("3. DEFECT: linking an opportunity in the roadmap detail panel does not fill the inherited field", async ({ page, base }) => {
-    test.fail(true, "updateEntityField (panel PATCH) sets roadmap opportunityId without applyInheritanceRules; editRoadmapItem has no callers");
+  test("3. linking an opportunity in the roadmap detail panel fills the empty inherited field", async ({ page, base }) => {
     const stamp = Date.now();
     const customer = await field(ws, "OPPORTUNITY", `QA Customer ${stamp}`, "SELECT", opts("acme", "globex"));
     const partner = await field(ws, "ROADMAP_ITEM", `QA Partner ${stamp}`, "SELECT", opts("acme", "globex"));
