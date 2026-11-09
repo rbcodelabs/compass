@@ -110,6 +110,14 @@ async function rules(workspaceId: string, targetFieldId: string) {
   }
 }
 
+/** Drag until the card shows up in the target column: a real pointer drag over dnd-kit occasionally drops without landing. */
+async function dragUntil(page: Page, handle: () => Locator, target: Locator, landed: Locator) {
+  await expect(async () => {
+    if (!(await landed.isVisible())) await dragTo(page, handle(), target);
+    await expect(landed).toBeVisible({ timeout: 4_000 });
+  }).toPass({ timeout: 40_000 });
+}
+
 /** dnd-kit's PointerSensor needs stepped movement past its 8px threshold. */
 async function dragTo(page: Page, source: Locator, target: Locator) {
   await source.scrollIntoViewIfNeeded();
@@ -212,22 +220,19 @@ test.describe.serial("Custom field inheritance rules", () => {
     expect(await value(seeded.partnerFieldId, seeded.emptyItem)).toBeNull();
 
     const handle = () => card(page, seeded.opportunity.title).getByRole("button", { name: `Drag to change ${seeded.customerName}` });
-    await dragTo(page, handle(), column(page, "option:acme"));
-    await expect(column(page, "option:acme").getByText(seeded.opportunity.title)).toBeVisible();
+    await dragUntil(page, handle, column(page, "option:acme"), column(page, "option:acme").getByText(seeded.opportunity.title));
 
     await expect.poll(() => value(seeded.partnerFieldId, seeded.emptyItem), { timeout: 10_000 }).toBe("acme");
     // The item whose Partner was set by hand keeps it.
     expect(await value(seeded.partnerFieldId, seeded.handSetItem)).toBe("initech");
 
     // Changing the source later does not rewrite a filled target.
-    await dragTo(page, handle(), column(page, "option:globex"));
-    await expect(column(page, "option:globex").getByText(seeded.opportunity.title)).toBeVisible();
+    await dragUntil(page, handle, column(page, "option:globex"), column(page, "option:globex").getByText(seeded.opportunity.title));
     await expect.poll(() => value(seeded.customerFieldId, seeded.opportunity.id)).toBe("globex");
     expect(await value(seeded.partnerFieldId, seeded.emptyItem)).toBe("acme");
 
     // Clearing the source does not clear the target.
-    await dragTo(page, handle(), column(page, "unspecified"));
-    await expect(column(page, "unspecified").getByText(seeded.opportunity.title)).toBeVisible();
+    await dragUntil(page, handle, column(page, "unspecified"), column(page, "unspecified").getByText(seeded.opportunity.title));
     await expect.poll(() => value(seeded.customerFieldId, seeded.opportunity.id)).toBeNull();
     expect(await value(seeded.partnerFieldId, seeded.emptyItem)).toBe("acme");
     expect(await value(seeded.partnerFieldId, seeded.handSetItem)).toBe("initech");
