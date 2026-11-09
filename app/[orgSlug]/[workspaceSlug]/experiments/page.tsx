@@ -6,6 +6,11 @@ import { getWorkspace } from "@/lib/workspace"
 import { ExperimentBoard } from "@/components/experiments/experiment-board"
 import { NewExperimentButton } from "@/components/experiments/new-experiment-button"
 import { ExperimentsFilters } from "@/components/experiments/experiments-filters"
+import { ExperimentsGallery } from "@/components/experiments/experiments-gallery"
+import { ExperimentsViewToggle } from "@/components/experiments/experiments-view-toggle"
+import { ExperimentsGroupByToggle } from "@/components/experiments/experiments-group-by-toggle"
+import { loadExperimentGalleryExtras } from "@/lib/experiments/gallery-server"
+import { parseExperimentGalleryGroupMode, parseExperimentsView, type ExperimentGalleryItem } from "@/lib/experiments/gallery"
 import type { ExperimentStatus, SquadData } from "@/lib/types"
 import { experimentComposerId } from "@/lib/experiment-draft"
 import type { ExperimentCardData } from "@/components/experiments/experiment-card"
@@ -17,7 +22,7 @@ export const metadata = {
 
 interface ExperimentsPageProps {
   params: Promise<{ orgSlug: string; workspaceSlug: string }>
-  searchParams: Promise<{ squad?: string; assumptionId?: string }>
+  searchParams: Promise<{ squad?: string; assumptionId?: string; view?: string; groupBy?: string }>
 }
 
 export default async function ExperimentsPage({
@@ -25,7 +30,8 @@ export default async function ExperimentsPage({
   searchParams,
 }: ExperimentsPageProps) {
   const { orgSlug, workspaceSlug } = await params
-  const { squad: squadFilter, assumptionId: legacyAssumptionId } = await searchParams
+  const { squad: squadFilter, assumptionId: legacyAssumptionId, view: viewParam, groupBy: groupByParam } = await searchParams
+  const view = parseExperimentsView(viewParam)
 
   const session = await auth()
   const userId = session?.user?.id
@@ -44,6 +50,7 @@ export default async function ExperimentsPage({
   if (legacyAssumptionId) {
     const params = new URLSearchParams()
     if (squadFilter) params.set("squad", squadFilter)
+    if (view === "gallery") params.set("view", view)
     params.set("detail", `experiment-new:${experimentComposerId(legacyAssumptionId)}`)
     redirect(`/${orgSlug}/${workspaceSlug}/experiments?${params.toString()}`)
   }
@@ -69,6 +76,7 @@ export default async function ExperimentsPage({
         status: true,
         sortOrder: true,
         conclusion: true,
+        squadId: true,
       },
     }),
   ])
@@ -80,9 +88,30 @@ export default async function ExperimentsPage({
   }))
 
   const experiments: ExperimentCardData[] = rawExperiments.map((e) => ({
-    ...e,
+    id: e.id,
+    title: e.title,
+    hypothesis: e.hypothesis,
+    killCondition: e.killCondition,
     status: e.status as ExperimentStatus,
+    sortOrder: e.sortOrder,
+    conclusion: e.conclusion,
   }))
+
+  // Only the Gallery pays for artifact + screenshot lookups.
+  const gallery = view === "gallery"
+  const squadById = new Map(squads.map((s) => [s.id, s]))
+  const galleryItems: ExperimentGalleryItem[] = gallery
+    ? rawExperiments.map((e) => ({
+        id: e.id,
+        title: e.title,
+        hypothesis: e.hypothesis,
+        status: e.status as ExperimentStatus,
+        conclusion: e.conclusion,
+        squad: (e.squadId ? squadById.get(e.squadId) : undefined) ?? null,
+      }))
+    : []
+  const galleryExtras = gallery ? await loadExperimentGalleryExtras(prisma, workspace.id, rawExperiments.map((e) => e.id)) : null
+  const groupMode = parseExperimentGalleryGroupMode(groupByParam)
 
   return (
     <WorkspacePage
@@ -90,6 +119,8 @@ export default async function ExperimentsPage({
       contentClassName="p-0 sm:p-0 md:p-0"
       actions={(
         <>
+          <ExperimentsViewToggle view={view} />
+          {gallery && <ExperimentsGroupByToggle value={groupMode} />}
           <Suspense>
             <ExperimentsFilters squads={squads} />
           </Suspense>
@@ -97,13 +128,25 @@ export default async function ExperimentsPage({
         </>
       )}
     >
-      <ExperimentBoard
-        key={experiments.map((e) => e.id).join(",")}
-        experiments={experiments}
-        orgSlug={orgSlug}
-        workspaceSlug={workspaceSlug}
-        workspaceId={workspace.id}
-      />
+      {gallery && galleryExtras ? (
+        <ExperimentsGallery
+          experiments={galleryItems}
+          extras={galleryExtras}
+          squads={squads}
+          groupMode={groupMode}
+          workspaceId={workspace.id}
+          orgSlug={orgSlug}
+          workspaceSlug={workspaceSlug}
+        />
+      ) : (
+        <ExperimentBoard
+          key={experiments.map((e) => e.id).join(",")}
+          experiments={experiments}
+          orgSlug={orgSlug}
+          workspaceSlug={workspaceSlug}
+          workspaceId={workspace.id}
+        />
+      )}
     </WorkspacePage>
   )
 }
