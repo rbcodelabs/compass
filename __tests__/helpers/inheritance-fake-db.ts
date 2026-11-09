@@ -36,9 +36,23 @@ export function createInheritanceFakeDb(options: { permissive?: boolean } = {}) 
   let seq = 0
 
   const delegate = (model: string) => ({
-    findMany: async (args: { where?: Where; take?: number } = {}) => {
+    findMany: async (args: { where?: Where; take?: number; orderBy?: Record<string, "asc" | "desc"> | Record<string, "asc" | "desc">[] } = {}) => {
       queries.push({ model, op: "findMany", where: args.where ?? {} })
       const rows = tables[model].filter((row) => matches(row, args.where))
+      // Honour orderBy (single or list) so priority ordering and the id-ordered fan-out window behave like the database.
+      const orderBy = args.orderBy ? (Array.isArray(args.orderBy) ? args.orderBy : [args.orderBy]) : []
+      if (orderBy.length > 0) {
+        rows.sort((a, b) => {
+          for (const clause of orderBy) {
+            const [key, direction] = Object.entries(clause)[0]
+            const left = a[key] as string | number
+            const right = b[key] as string | number
+            if (left === right) continue
+            return (left < right ? -1 : 1) * (direction === "desc" ? -1 : 1)
+          }
+          return 0
+        })
+      }
       return (args.take ? rows.slice(0, args.take) : rows).map((row) => ({ ...row }))
     },
     findFirst: async (args: { where?: Where } = {}) => {
