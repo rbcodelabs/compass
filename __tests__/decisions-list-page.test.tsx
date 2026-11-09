@@ -103,6 +103,7 @@ describe("decisions list page — multi-question answers", () => {
   it("links admins to the tool approvals page, and shows no such link to anyone else", async () => {
     mocks.list.mockResolvedValue({ requests: [], total: 0, page: 1, pageSize: 20, pageCount: 1 })
     mocks.isAdmin.mockResolvedValue(true)
+    const renderPage = async () => render(await DecisionsPage({ params: Promise.resolve({ orgSlug: "acme", workspaceSlug: "product" }), searchParams: Promise.resolve({ tab: "decided" }) }))
     const { unmount } = await renderPage()
     expect(screen.getByRole("link", { name: "Tool approvals" }).getAttribute("href")).toBe("/acme/product/approvals")
     unmount()

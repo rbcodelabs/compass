@@ -46,7 +46,11 @@ function collect(value: Json, path: string, kind: "added" | "removed", out: Diff
     return
   }
   if (Array.isArray(value)) value.forEach((item, index) => collect(item, indexPath(path, index), kind, out))
-  else for (const key of Object.keys(value).sort()) collect((value as { [key: string]: Json })[key], keyPath(path, key), kind, out)
+  else {
+    // isLeaf already took null and scalars, so this is a non-empty object.
+    const record = value as { [key: string]: Json }
+    for (const key of Object.keys(record).sort()) collect(record[key], keyPath(path, key), kind, out)
+  }
 }
 
 function walk(before: Json, after: Json, path: string, out: DiffRow[]): void {
