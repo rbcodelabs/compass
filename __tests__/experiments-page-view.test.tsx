@@ -90,10 +90,11 @@ describe("experiments page view handling", () => {
   })
 
   it("carries view and squad through the legacy ?assumptionId= redirect", async () => {
-    await expect(page({ assumptionId: "abc", view: "gallery", squad: "s1" })).rejects.toThrow(/NEXT_REDIRECT:\/acme\/product\/experiments\?/)
+    await expect(page({ assumptionId: "abc", view: "gallery", squad: "s1", groupBy: "squad" })).rejects.toThrow(/NEXT_REDIRECT:\/acme\/product\/experiments\?/)
     const url = new URL(mocks.redirect.mock.calls[0][0] as string, "http://x")
     expect(url.searchParams.get("view")).toBe("gallery")
     expect(url.searchParams.get("squad")).toBe("s1")
+    expect(url.searchParams.get("groupBy")).toBe("squad")
     expect(url.searchParams.get("detail")).toMatch(/^experiment-new:/)
     expect(mocks.experiments).not.toHaveBeenCalled()
   })

@@ -50,7 +50,10 @@ export default async function ExperimentsPage({
   if (legacyAssumptionId) {
     const params = new URLSearchParams()
     if (squadFilter) params.set("squad", squadFilter)
-    if (view === "gallery") params.set("view", view)
+    if (view === "gallery") {
+      params.set("view", view)
+      if (groupByParam) params.set("groupBy", groupByParam)
+    }
     params.set("detail", `experiment-new:${experimentComposerId(legacyAssumptionId)}`)
     redirect(`/${orgSlug}/${workspaceSlug}/experiments?${params.toString()}`)
   }
