@@ -12,7 +12,7 @@
  *  - Assigning an agent that has no task in this doc yet asks for a scope
  *    confirmation before the comment is posted.
  */
-import { useMemo, useState } from "react"
+import { useMemo, useRef, useState } from "react"
 import { Link2, Check, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -95,6 +95,9 @@ export function DocCommentComposer({
   // The assignee the scope step was opened for. The step only shows while that is still the assignee,
   // so deleting or swapping the chip behind it brings the normal buttons straight back.
   const [confirmingFor, setConfirmingFor] = useState<string | null>(null)
+  // When the scope confirm last opened: the second click of a double-click on "Comment & create task" lands on the confirm button the
+  // first click just revealed, and must not count as the person's decision to assign.
+  const confirmOpenedAt = useRef(0)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [editorKey, setEditorKey] = useState(0)
@@ -152,7 +155,7 @@ export function DocCommentComposer({
   }
 
   function submit() {
-    if (needsScopeConfirm) { setConfirmingFor(assigneeKey); return }
+    if (needsScopeConfirm) { confirmOpenedAt.current = Date.now(); setConfirmingFor(assigneeKey); return }
     void post(false)
   }
 
@@ -304,7 +307,7 @@ export function DocCommentComposer({
       {confirmingAgent && (
         <div className="flex shrink-0 justify-end gap-2" data-testid="composer-actions">
           <Button type="button" size="sm" variant="ghost" disabled={busy} onClick={() => setConfirmingFor(null)}>Cancel</Button>
-          <Button type="button" size="sm" disabled={busy} onClick={() => void post(true)} data-testid="confirm-agent-assign">Assign to agent</Button>
+          <Button type="button" size="sm" disabled={busy} onClick={(event) => { if (event.detail > 1 && Date.now() - confirmOpenedAt.current < 600) return; void post(true) }} data-testid="confirm-agent-assign">Assign to agent</Button>
         </div>
       )}
 
