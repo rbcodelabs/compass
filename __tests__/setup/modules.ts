@@ -42,6 +42,7 @@ vi.mock("@/lib/modules/server", async () => {
 vi.mock("@/lib/feature-tables", () => ({
   followingTablesExist: vi.fn(async () => moduleTestState().tables.following),
   workspaceUpdatesTablesExist: vi.fn(async () => moduleTestState().tables.updates),
+  customFieldInheritanceTableExists: vi.fn(async () => moduleTestState().tables.inheritance),
   resetFeatureTablesCache: vi.fn(),
 }))
 
