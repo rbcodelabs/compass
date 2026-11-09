@@ -31,11 +31,11 @@ vi.mock("@/components/ui/select", async () => {
   const Ctx = React.createContext<(value: string) => void>(() => {})
   return {
     Select: ({ onValueChange, children }: { onValueChange: (value: string) => void; children: React.ReactNode }) => <Ctx.Provider value={onValueChange}>{children}</Ctx.Provider>,
-    SelectTrigger: ({ children, ...props }: React.ComponentProps<"button">) => <button role="combobox" {...props}>{children}</button>,
+    SelectTrigger: ({ children, ...props }: React.ComponentProps<"button">) => <button role="combobox" aria-expanded={false} aria-controls="stub-list" {...props}>{children}</button>,
     SelectContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
     SelectItem: ({ value, children }: { value: string; children: React.ReactNode }) => {
       const choose = React.useContext(Ctx)
-      return <button role="option" onClick={() => choose(value)}>{children}</button>
+      return <button role="option" aria-selected={false} onClick={() => choose(value)}>{children}</button>
     },
   }
 })
@@ -65,7 +65,6 @@ const withArtifacts: GalleryArtifactSet = {
   ],
   moreArtifacts: 0,
 }
-const none: GalleryArtifactSet = { artifacts: [], moreArtifacts: 0 }
 const renderGallery = (experiments: ExperimentGalleryItem[], extras: Record<string, GalleryArtifactSet>, groupMode: "status" | "squad" | "conclusion" | "none" = "status") =>
   render(createElement(ExperimentsGallery, { experiments, extras, squads, groupMode, workspaceId: "ws-1", orgSlug: "acme", workspaceSlug: "product" }))
 
