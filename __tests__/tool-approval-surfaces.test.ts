@@ -32,7 +32,7 @@ describe("generic review surfaces refuse TOOL_APPROVAL", () => {
   it("decideReviewAction throws, points at the approval page, and never records a decision", async () => {
     m.prisma.reviewRevision.findUnique.mockResolvedValue({ id: "rev-1", request: { id: "req-1", workspaceId: "ws-1", gateType: "TOOL_APPROVAL" } })
     m.auth.mockResolvedValue({ user: { id: "admin-1" } })
-    await expect(decideReviewAction({ workspaceId: "ws-1", revisionId: "rev-1", fingerprint: "f", optionId: "o" })).rejects.toThrow(/approval page.*\/acme\/product\/approvals\/req-1/s)
+    await expect(decideReviewAction({ workspaceId: "ws-1", revisionId: "rev-1", fingerprint: "f", optionId: "o" })).rejects.toThrow(/approval page[\s\S]*\/acme\/product\/approvals\/req-1/)
     expect(m.recordDecision).not.toHaveBeenCalled()
   })
 
