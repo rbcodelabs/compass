@@ -44,6 +44,12 @@ export type PendingApproval = {
 
 export type RequestToolApprovalOutcome = { status: "NOT_REGISTERED" } | { status: "BLOCKED"; floors: string[] } | PendingApproval
 
+/** Pending and not yet past the current revision's expiry. */
+const livePending = (now: Date) => ({
+  state: "PENDING",
+  currentRevision: { is: { OR: [{ expiresAt: null }, { expiresAt: { gt: now } }] } },
+})
+
 const clip = (text: string, max: number): string => (text.length > max ? `${text.slice(0, max - 1)}…` : text)
 
 async function approvalPathFor(prisma: AppPrismaClient, workspaceId: string, requestId: string): Promise<string> {
@@ -101,7 +107,8 @@ async function findSlot(prisma: AppPrismaClient, workspaceId: string, tool: stri
       where: { workspaceId, gateType: TOOL_APPROVAL_GATE, subjectType: TOOL_APPROVAL_GATE, subjectId: { in: ids } },
       select: { id: true, subjectId: true, state: true, seqPrefix: true, seqNumber: true, expiresAt: true, currentRevision: { select: { id: true, packetJson: true, expiresAt: true, title: true, summary: true } } },
     })
-    const live = rows.find((row) => row.state === "PENDING" && (!row.expiresAt || row.expiresAt > now))
+    // The revision's expiry is the one recordDecision enforces, so it is the one that decides whether a request is still live.
+    const live = rows.find((row) => row.state === "PENDING" && (!row.currentRevision?.expiresAt || row.currentRevision.expiresAt > now))
     if (live) return { kind: "pending", row: live }
     const used = new Set(rows.map((row) => row.subjectId))
     const free = ids.findIndex((id) => !used.has(id))
@@ -153,7 +160,7 @@ export async function requestToolApproval(input: { toolName: string; args: Recor
       continue
     }
     const pendingCount = await prisma.reviewRequest.count({
-      where: { workspaceId, gateType: TOOL_APPROVAL_GATE, state: "PENDING", OR: [{ expiresAt: null }, { expiresAt: { gt: now } }] },
+      where: { workspaceId, gateType: TOOL_APPROVAL_GATE, ...livePending(now) },
     })
     if (pendingCount >= MAX_PENDING_TOOL_APPROVALS) {
       throw new ToolApprovalError("TOO_MANY_PENDING", `This workspace already has ${MAX_PENDING_TOOL_APPROVALS} approvals waiting. Ask an admin to review them first.`)
@@ -198,7 +205,7 @@ export async function listPendingToolApprovals(workspaceId: string, actor: { use
   const prisma = getPrisma()
   if (!(await isWorkspaceAdminUser(prisma, actor.userId, workspaceId))) throw new ToolApprovalError("ADMIN_REQUIRED", "Workspace admin access is required.")
   const rows = await prisma.reviewRequest.findMany({
-    where: { workspaceId, gateType: TOOL_APPROVAL_GATE, state: "PENDING", OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] },
+    where: { workspaceId, gateType: TOOL_APPROVAL_GATE, ...livePending(new Date()) },
     include: { currentRevision: true },
     orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     take: MAX_PENDING_TOOL_APPROVALS * 2,

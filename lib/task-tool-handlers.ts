@@ -556,7 +556,7 @@ export async function linkTask({
   // LINK_TARGET_MODEL and resolveLinkTitles above.
   let target: { id: string; title: string } | null
   if (linkedType === "DECISION") {
-    const row = await prisma.reviewRequest.findFirst({ where: { id: linkedId, ...excludeToolApprovals }, select: { id: true, currentRevision: { select: { title: true } } } })
+    const row = await prisma.reviewRequest.findUnique({ where: { id: linkedId, ...excludeToolApprovals }, select: { id: true, currentRevision: { select: { title: true } } } })
     target = row ? { id: row.id, title: row.currentRevision?.title ?? "Untitled decision" } : null
   } else {
     const modelName = LINK_TARGET_MODEL[linkedType]

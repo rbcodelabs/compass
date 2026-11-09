@@ -200,7 +200,7 @@ describe.skipIf(!databaseUrl)("tool approval core (real PostgreSQL)", () => {
 
     it("approvals share the DEC-n counter with decisions, and numbers stay unique and dense", async () => {
       const numbers = async () => (await prisma.reviewRequest.findMany({ where: { workspaceId }, select: { seqNumber: true }, orderBy: { seqNumber: "asc" } })).map((r) => r.seqNumber!)
-      const tracked = await createTrackedDecisionRequest({ workspaceId, subjectType: "SOLUTION", subjectId: randomUUID(), question: "Q?", context: "c", idempotencyKey: randomUUID(), requestedById: u.admin } as never)
+      const tracked = await createTrackedDecisionRequest({ workspaceId, subjectType: "WORKSPACE", subjectId: workspaceId, question: "Q?", context: "c", idempotencyKey: randomUUID(), requestedById: u.admin } as never)
       const out = await pending("numbering")
       const all = await numbers()
       expect(new Set(all).size).toBe(all.length)
@@ -366,6 +366,7 @@ describe.skipIf(!databaseUrl)("tool approval core (real PostgreSQL)", () => {
       const a = await approveWithoutExecuting("unregistered")
       setToolApprovalRegistryForTest({})
       expect(await executeApprovedToolCall(a.decision.id)).toMatchObject({ status: "REFUSED", reason: "TOOL_NOT_REGISTERED" })
+      useSpec()
       const b = await approveWithoutExecuting("reclassified")
       setToolApprovalRegistryForTest({ [TOOL]: { ...spec, capabilityClass: "workspace.other" } })
       expect(await executeApprovedToolCall(b.decision.id)).toMatchObject({ status: "REFUSED", reason: "TOOL_MISMATCH" })
@@ -386,7 +387,7 @@ describe.skipIf(!databaseUrl)("tool approval core (real PostgreSQL)", () => {
     })
 
     it("a decision on a non-TOOL_APPROVAL request, or a missing decision, is refused", async () => {
-      const tracked = await createTrackedDecisionRequest({ workspaceId, subjectType: "SOLUTION", subjectId: randomUUID(), question: "Q2?", context: "c", idempotencyKey: randomUUID(), requestedById: u.admin } as never)
+      const tracked = await createTrackedDecisionRequest({ workspaceId, subjectType: "WORKSPACE", subjectId: workspaceId, question: "Q2?", context: "c", idempotencyKey: randomUUID(), requestedById: u.admin } as never)
       const revision = await prisma.reviewRevision.findUniqueOrThrow({ where: { id: tracked.id }, include: { options: true } })
       const decision = await recordDecision({ actor: { kind: "USER", userId: u.admin }, revisionId: revision.id, fingerprint: revision.fingerprint, optionId: revision.options[0].id, idempotencyKey: randomUUID() })
       expect(await executeApprovedToolCall(decision.id)).toMatchObject({ status: "REFUSED", reason: "WRONG_GATE" })

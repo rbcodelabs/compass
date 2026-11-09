@@ -32,6 +32,8 @@ const NOT_A_STATUS_WRITE: Allow[] = [
   { site: "lib/pm-interview-service.ts::solution.update", count: 1, reason: "PM_INTERVIEW_ALLOWED_FIELDS contains no status field" },
   { site: "lib/pm-interview-service.ts::assumption.update", count: 1, reason: "PM_INTERVIEW_ALLOWED_FIELDS contains no status field" },
   { site: "lib/pm-interview-service.ts::experiment.update", count: 1, reason: "PM_INTERVIEW_ALLOWED_FIELDS contains no status field" },
+  { site: "lib/tool-approval/request.ts::reviewRequest.update", count: 1, reason: "moves a freshly created TOOL_APPROVAL request DRAFT to PENDING; approvals are not followable (REVIEW_REQUEST display is TRACKED_DECISION-only) and emit no updates" },
+  { site: "lib/tool-approval/request.ts::reviewRequest.updateMany", count: 1, reason: "supersedes a stale pending TOOL_APPROVAL request; approvals are not followable and emit no updates" },
 ]
 
 /**

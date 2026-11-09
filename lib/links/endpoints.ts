@@ -18,7 +18,7 @@
 import type { AppTransactionClient } from "@/lib/db"
 import type { LinkableEntityType } from "@/lib/entity-types"
 import type { LinkEndpoint } from "@/lib/links/registry"
-import { excludeToolApprovals } from "@/lib/tool-approval/gate"
+import { isToolApprovalGate } from "@/lib/tool-approval/gate"
 
 type Tx = AppTransactionClient
 type Found = { id: string; title: string }
@@ -53,8 +53,9 @@ async function find(tx: Tx, type: LinkableEntityType, workspaceId: string, ids: 
       return rows.map((row) => ({ id: row.id, title: row.name }))
     }
     case "REVIEW_REQUEST": {
-      const rows = await tx.reviewRequest.findMany({ where: { id, workspaceId, ...excludeToolApprovals }, select: { id: true, currentRevision: { select: { title: true } } } })
-      return rows.map((row) => ({ id: row.id, title: row.currentRevision?.title ?? "Review request" }))
+      const rows = await tx.reviewRequest.findMany({ where: { id, workspaceId }, select: { id: true, gateType: true, currentRevision: { select: { title: true } } } })
+      // A tool approval is not linkable: it has no generic page, title or link surface.
+      return rows.filter((row) => !isToolApprovalGate(row.gateType)).map((row) => ({ id: row.id, title: row.currentRevision?.title ?? "Review request" }))
     }
     case "METRIC": {
       const definitions = await tx.metricDefinition.findMany({ where: { id, workspaceId }, select: { id: true, currentRevisionId: true } })

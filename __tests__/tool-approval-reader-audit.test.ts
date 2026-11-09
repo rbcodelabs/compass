@@ -20,6 +20,9 @@ const EXEMPT: Record<string, string> = {
   "lib/delete-workspace-decision-data.ts": "workspace deletion must remove every row, approvals included",
   "app/[orgSlug]/[workspaceSlug]/reviews/[requestId]/page.tsx": "the generic page renders approvals read-only with a link to the approval surface and no decision buttons",
   "app/[orgSlug]/[workspaceSlug]/reviews/actions.ts": "reads the revision only to refuse TOOL_APPROVAL (decideReviewAction) before any write",
+  "lib/legacy-decision-repair.ts": "repairs TRACKED_DECISION rows only; refuses any other gate before writing (gateType checks after each read)",
+  "lib/release-authorization.ts": "the RELEASE_AUTHORIZATION gate's own module; every decision it reads is then gate-checked",
+  "lib/tracked-decisions.ts": "the TRACKED_DECISION gate's own module: reads are scoped through identityWhere/TRACKED_GATE or a tracked request, and the includeLegacy list excludes TOOL_APPROVAL (see tool-approval-surfaces.test.ts)",
   "lib/followable.ts": "REVIEW_REQUEST resolveDisplay is TRACKED_DECISION-scoped",
 }
 

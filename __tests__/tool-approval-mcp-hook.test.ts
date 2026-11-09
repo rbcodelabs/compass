@@ -10,6 +10,7 @@ import { runWithMcpActor } from "@/lib/mcp-authz"
 
 const mockPrisma = {
   workspace: { findMany: vi.fn(), findFirst: vi.fn() },
+  organization: { findUnique: vi.fn(), findMany: vi.fn() },
   workspaceMember: { findFirst: vi.fn() },
   agent: { findFirst: vi.fn() },
   agentToolCall: { create: vi.fn(), update: vi.fn() },
@@ -158,9 +159,11 @@ describe("an opted-in tool never reaches its handler", () => {
   })
 
   it("other tools are unaffected while one is registered", async () => {
-    const result = await as({ userId: null, purpose: "SERVICE" }, "list_workspaces")
+    mockPrisma.organization.findUnique.mockResolvedValue(null)
+    await as({ userId: null, purpose: "SERVICE" }, "list_workspaces", { orgSlug: "acme" }).catch(() => undefined)
+    // Reached its own handler (which reads the organization), untouched by the approval hook.
+    expect(mockPrisma.organization.findUnique).toHaveBeenCalled()
     expect(requestMock.requestToolApproval).not.toHaveBeenCalled()
-    expect(result.structuredContent.ok).toBe(true)
   })
 
   it("REST cannot be used to bypass the hook for an opted-in tool", () => {

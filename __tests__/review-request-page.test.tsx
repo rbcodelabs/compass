@@ -385,7 +385,7 @@ describe("review request page — TOOL_APPROVAL rows", () => {
     expect(screen.queryByText("Approve")).toBeNull()
     expect(screen.queryByText("Deny")).toBeNull()
     expect(screen.getByRole("link", { name: "Open the approval page" }).getAttribute("href")).toBe("/acme/product/approvals/request-1")
-    expect(screen.getByText(/update_agent_github_repos/)).toBeDefined()
+    expect(screen.getAllByText(/update_agent_github_repos/).length).toBeGreaterThan(0)
   })
 
   it("renders no decision buttons for a non-admin member, and hides the before/after detail from them", async () => {

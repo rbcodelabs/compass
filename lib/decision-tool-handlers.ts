@@ -285,7 +285,8 @@ export async function requestReleaseAuthorization(scope: ReleaseScope) {
 
 export async function getReviewRequest({ requestId }: { requestId: string }) {
   // Tool approvals are decided and shown only on their own surface; to this reader they do not exist.
-  const request = await getPrisma().reviewRequest.findFirst({
+  // findUnique with an extra non-unique filter (Prisma extendedWhereUnique): same primary-key lookup, plus the exclusion.
+  const request = await getPrisma().reviewRequest.findUnique({
     where: { id: requestId, ...excludeToolApprovals },
     include: { currentRevision: { include: { options: { orderBy: { sortOrder: "asc" } }, decisions: true } } },
   })
