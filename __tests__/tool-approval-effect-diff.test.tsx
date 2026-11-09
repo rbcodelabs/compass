@@ -72,9 +72,8 @@ describe("EffectDiff", () => {
   })
 
   it("shows an explicit row, not a crash, for values too deep or too large to display in full", () => {
-    let deepValue: unknown = 1
-    for (let i = 0; i < 10_000; i += 1) deepValue = { a: deepValue }
-    const out = html(deepValue, { a: 1 })
+    const nest = (leaf: number) => { let value: unknown = leaf; for (let i = 0; i < 10_000; i += 1) value = { a: value }; return value }
+    const out = html(nest(1), nest(2))
     expect(out).toContain("Too large to show")
     expect(out).toMatch(/too deep or too large to display in full/i)
   })

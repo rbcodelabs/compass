@@ -31,6 +31,7 @@ let prisma: { reviewRequest: { findFirst: ReturnType<typeof vi.fn>; findMany: Re
 afterEach(() => setToolApprovalRegistryForTest(null))
 beforeEach(() => {
   setToolApprovalRegistryForTest({ [spec.toolName]: spec })
+  m.isAdmin.mockReset()
   m.isAdmin.mockResolvedValue(true)
   prisma = { reviewRequest: { findFirst: vi.fn().mockResolvedValue(row()), findMany: vi.fn().mockResolvedValue([row()]) }, user: { findMany: vi.fn().mockResolvedValue([{ id: "admin-1", name: "Ada Admin", email: "ada@example.com" }]) } }
 })

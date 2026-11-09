@@ -81,14 +81,30 @@ export function formatValue(value: Json): string {
   return text.length > MAX_DISPLAY_VALUE_CHARS ? `${text.slice(0, MAX_DISPLAY_VALUE_CHARS)}… (${text.length - MAX_DISPLAY_VALUE_CHARS} more characters)` : text
 }
 
-/** `JSON.stringify` that cannot throw on absurd nesting and never returns more than `maxChars`; says whether it cut. */
+/** Iterative size probe (no recursion, bounded work): is this value small and shallow enough to hand to JSON.stringify safely? */
+function safeToStringify(value: Json): boolean {
+  const stack: Array<[Json, number]> = [[value, 0]]
+  let nodes = 0
+  while (stack.length > 0) {
+    const [current, depth] = stack.pop()!
+    nodes += 1
+    if (nodes > 50_000 || depth > 64) return false
+    if (current !== null && typeof current === "object") for (const child of Array.isArray(current) ? current : Object.values(current)) stack.push([child, depth + 1])
+  }
+  return true
+}
+
+/**
+ * `JSON.stringify` that cannot throw, cannot go quadratic on deep nesting (pretty printing indents every level), and never
+ * returns more than `maxChars`; says whether it cut. Values past the probe's bounds are summarised, not stringified.
+ */
 export function previewJson(value: Json, maxChars: number, options: { pretty?: boolean } = {}): { text: string; truncated: boolean } {
+  if (!safeToStringify(value)) return { text: bounded(value, { left: maxChars }, FORMAT_DEPTH), truncated: true }
   let text: string
   try {
     text = JSON.stringify(value, null, options.pretty ? 2 : 0) ?? "null"
   } catch {
-    const state = { left: maxChars }
-    return { text: `${bounded(value, state, FORMAT_DEPTH)}`, truncated: true }
+    return { text: bounded(value, { left: maxChars }, FORMAT_DEPTH), truncated: true }
   }
   return text.length > maxChars ? { text: `${text.slice(0, maxChars)}…`, truncated: true } : { text, truncated: false }
 }
