@@ -4,6 +4,7 @@ import { workspaceUpdatesTablesExist } from "@/lib/feature-tables"
 import { isModuleEnabled } from "@/lib/modules/server"
 import { isOrgAdminRole, normalizeWorkspaceRole } from "@/lib/roles"
 import { isSubmitAnswersActionKey, parseDecisionAnswers, parsePacketQuestions, type TrackedDecisionAnswer, type TrackedDecisionAnswerInput } from "@/lib/tracked-decision-types"
+import { TOOL_APPROVAL_DECISION_CHANNEL, TOOL_APPROVAL_SURFACE_MESSAGE, isToolApprovalGate, type ToolApprovalDecisionChannel } from "@/lib/tool-approval/gate"
 
 export type DecisionActor = { kind: "SERVICE" } | { kind: "USER"; userId: string }
 
@@ -94,6 +95,8 @@ export async function recordDecision(input: {
   /** Per-question answers; required (one per question) when the option is Submit answers, rejected otherwise. */
   answers?: TrackedDecisionAnswerInput[]
   idempotencyKey: string
+  /** Capability token only lib/tool-approval/decide.ts holds: a TOOL_APPROVAL request can be decided through no other path. */
+  toolApprovalChannel?: ToolApprovalDecisionChannel
 }) {
   if (input.actor.kind !== "USER") {
     throw new DecisionError("HUMAN_ACTOR_REQUIRED", "An authenticated human must take this decision.")
@@ -117,6 +120,10 @@ export async function recordDecision(input: {
         include: { request: true, options: true },
       })
       if (!revision) throw new DecisionError("REVISION_NOT_FOUND", "Review revision not found.")
+      // An approval decided here would be recorded but never executed (and an admin would think it was). Dedicated surface only.
+      if (isToolApprovalGate(revision.request.gateType) && input.toolApprovalChannel !== TOOL_APPROVAL_DECISION_CHANNEL) {
+        throw new DecisionError("TOOL_APPROVAL_SURFACE_REQUIRED", TOOL_APPROVAL_SURFACE_MESSAGE)
+      }
       if (revision.fingerprint !== input.fingerprint) {
         throw new DecisionError("STALE_FINGERPRINT", "The review packet changed. Refresh before deciding.")
       }
@@ -161,7 +168,8 @@ export async function recordDecision(input: {
         },
       })
       await tx.reviewRequest.update({ where: { id: revision.requestId }, data: { state: "DECIDED", updatedAt: new Date() } })
-      if (capture && (await isModuleEnabled(revision.request.workspaceId, "workspace_updates"))) await recordWorkspaceUpdate(tx, { workspaceId: revision.request.workspaceId, entityType: "DECISION", entityId: revision.requestId, kind: "DECISION_RECORDED", actorType: "USER", actorId: actorUserId })
+      // Approvals stay out of the workspace-updates feed with the other generic decision readers.
+      if (capture && !isToolApprovalGate(revision.request.gateType) && (await isModuleEnabled(revision.request.workspaceId, "workspace_updates"))) await recordWorkspaceUpdate(tx, { workspaceId: revision.request.workspaceId, entityType: "DECISION", entityId: revision.requestId, kind: "DECISION_RECORDED", actorType: "USER", actorId: actorUserId })
       return decision
     })
   } catch (error) {

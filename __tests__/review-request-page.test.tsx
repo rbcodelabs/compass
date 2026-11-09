@@ -343,3 +343,57 @@ describe("review request page — multi-question decisions", () => {
     expect(screen.getByRole("link", { name: /create revised request/i })).toBeDefined()
   })
 })
+
+describe("review request page — TOOL_APPROVAL rows", () => {
+  afterEach(cleanup)
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    auth.mockResolvedValue({ user: { id: "user-1" } })
+    findWorkspace.mockResolvedValue(member)
+    findTaskLinks.mockResolvedValue([])
+    eligibleAssignees.mockResolvedValue([])
+    findArtifacts.mockResolvedValue([])
+    linkedArtifacts.mockResolvedValue([])
+  })
+
+  function toolApproval(role: "ADMIN" | "MEMBER") {
+    const base = reviewRequest("TRACKED_DECISION")
+    return {
+      ...base,
+      gateType: "TOOL_APPROVAL",
+      subjectType: "TOOL_APPROVAL",
+      currentRevision: {
+        ...base.currentRevision,
+        title: "Approve update_agent_github_repos",
+        summary: "Adds a repository",
+        packetJson: JSON.stringify({ schemaVersion: "tool-approval/v1", tool: "update_agent_github_repos", capabilityClass: "workspace.github_repos", workspaceId: "workspace-1", args: {}, before: ["a/b"], after: ["a/b", "a/c"] }),
+        options: [
+          { id: "o1", actionKey: "APPROVE", label: "Approve", outcomeClass: "APPROVE", continuationKey: "EXECUTE_TOOL_APPROVAL", description: null },
+          { id: "o2", actionKey: "REJECT", label: "Deny", outcomeClass: "REJECT", continuationKey: "NO_ACTION", description: null },
+        ],
+      },
+      workspace: { members: [{ id: "member-1", role }], organization: { members: [] } },
+    }
+  }
+
+  it("renders no decision buttons for an admin, and links to the dedicated approval page", async () => {
+    findFirst.mockResolvedValue(toolApproval("ADMIN"))
+    render(await ReviewRequestPage({ params: Promise.resolve({ orgSlug: "acme", workspaceSlug: "product", requestId: "request-1" }) }))
+    expect(screen.getByText("Tool approval")).toBeDefined()
+    expect(screen.queryAllByRole("button")).toHaveLength(0)
+    expect(screen.queryByText("Approve")).toBeNull()
+    expect(screen.queryByText("Deny")).toBeNull()
+    expect(screen.getByRole("link", { name: "Open the approval page" }).getAttribute("href")).toBe("/acme/product/approvals/request-1")
+    expect(screen.getByText(/update_agent_github_repos/)).toBeDefined()
+  })
+
+  it("renders no decision buttons for a non-admin member, and hides the before/after detail from them", async () => {
+    findFirst.mockResolvedValue(toolApproval("MEMBER"))
+    render(await ReviewRequestPage({ params: Promise.resolve({ orgSlug: "acme", workspaceSlug: "product", requestId: "request-1" }) }))
+    expect(screen.queryAllByRole("button")).toHaveLength(0)
+    expect(screen.getByRole("link", { name: "Open the approval page" })).toBeDefined()
+    expect(screen.queryByText(/"a\/c"/)).toBeNull()
+    expect(screen.getByText("Shown to workspace admins only.")).toBeDefined()
+  })
+})

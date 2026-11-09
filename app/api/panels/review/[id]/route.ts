@@ -5,6 +5,7 @@ import { isEntityId } from "@/lib/entity-links"
 import { canDecideReview, isOrgAdminRole } from "@/lib/roles"
 import { isChoiceActionKey, parseDecisionAnswers, parsePacketQuestions } from "@/lib/tracked-decision-types"
 import { parseTrackedDecisionPacket } from "@/components/decisions/decision-sources"
+import { excludeToolApprovals } from "@/lib/tool-approval/gate"
 
 /**
  * Detail-panel data source for a decision request. GET
@@ -24,7 +25,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   if (!isEntityId(id)) return NextResponse.json({ error: "Not found" }, { status: 404 })
 
   const request = await getPrisma().reviewRequest.findFirst({
-    where: { id, workspace: { slug: workspaceSlug, organization: { slug: orgSlug } } },
+    where: { id, ...excludeToolApprovals, workspace: { slug: workspaceSlug, organization: { slug: orgSlug } } },
     include: {
       currentRevision: { include: { options: { orderBy: { sortOrder: "asc" } }, decisions: { include: { option: true } } } },
       workspace: { select: { members: { where: { userId: session.user.id }, select: { role: true } }, organization: { select: { members: { where: { userId: session.user.id }, select: { role: true } } } } } },

@@ -188,6 +188,7 @@ import {
 import { linkEntitiesTool, linkSummariesForCaller, listLinksTool, unlinkEntitiesTool } from "@/lib/link-tool-handlers"
 import { PUBLIC_LINK_ENTITY_TYPES } from "@/lib/entity-types"
 import { decisionOptionsInputSchema, decisionQuestionsInputSchema } from "@/lib/decision-option-schema"
+import { interceptToolForApproval } from "@/lib/tool-approval/mcp-hook"
 import { applyRecordedDecision, closeDecisionNoAction, getDecision, getReviewRequest, listDecisions, listReviewRequests, requestDecision, requestReleaseAuthorization } from "@/lib/decision-tool-handlers"
 import { uiGetState, uiNavigate, uiScreenshot } from "@/lib/ui-control-tool-handlers"
 import { listReleaseRuns } from "@/lib/release-query-tool-handlers"
@@ -303,12 +304,18 @@ const _handler = createMcpHandler(
         await applyToolGate(name, actor, args, resolveOnce)
         // A service actor returns from the gate early; its handler still needs UUIDs.
         await resolveOnce()
-      }, () => withAnalyticsTool(name, () => withInterviewMutation(name, args, async () => {
-        const result = await handler(args, extra)
-        // RM-19: an agent turn's create/read/update of an opportunity, solution or task links the conversation to it. Never throws.
-        await linkAgentToolCall(name, args, result)
-        return result
-      }))))
+      }, async () => {
+        // TOOL_APPROVAL hook (lib/tool-approval): a tool that has opted in never reaches its handler from here; it files an approval
+        // request instead. Every other tool (the production registry is empty) gets null back and runs exactly as before.
+        const approval = await interceptToolForApproval({ toolName: name, actor, resolveArgs: resolveOnce })
+        if (approval) return approval
+        return withAnalyticsTool(name, () => withInterviewMutation(name, args, async () => {
+          const result = await handler(args, extra)
+          // RM-19: an agent turn's create/read/update of an opportunity, solution or task links the conversation to it. Never throws.
+          await linkAgentToolCall(name, args, result)
+          return result
+        }))
+      }))
     })
 
     register("get_current_identity", { title: "Current Identity", description: "Returns the authenticated caller and currently accessible workspaces.", inputSchema: {}, outputSchema: TOOL_OUTPUT_SCHEMA }, async () => {

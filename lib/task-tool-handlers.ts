@@ -25,6 +25,7 @@ import { allocateOneSeq } from "@/lib/work-item-sequence"
 import { agentConversationLinkTitles } from "@/lib/agent-conversation-link-titles"
 import { commentLinkTitles } from "@/lib/comment-link-titles"
 import { createTaskLink, deleteTaskLink } from "@/lib/task-link-writes"
+import { excludeToolApprovals } from "@/lib/tool-approval/gate"
 
 // Maps each TaskLinkedType to its Prisma model delegate name. Every target
 // table exposes a plain `title` column, so a single resolver works for all
@@ -68,7 +69,7 @@ async function resolveLinkTitles(
     // findMany({select: {id, title}}) path below. Handled separately.
     if (linkedType === "DECISION") {
       const rows = await prisma.reviewRequest.findMany({
-        where: { id: { in: ids }, workspaceId },
+        where: { id: { in: ids }, workspaceId, ...excludeToolApprovals },
         select: { id: true, currentRevision: { select: { title: true } } },
       })
       for (const row of rows) titleById.set(`DECISION:${row.id}`, row.currentRevision?.title ?? "Untitled decision")
@@ -555,7 +556,7 @@ export async function linkTask({
   // LINK_TARGET_MODEL and resolveLinkTitles above.
   let target: { id: string; title: string } | null
   if (linkedType === "DECISION") {
-    const row = await prisma.reviewRequest.findUnique({ where: { id: linkedId }, select: { id: true, currentRevision: { select: { title: true } } } })
+    const row = await prisma.reviewRequest.findFirst({ where: { id: linkedId, ...excludeToolApprovals }, select: { id: true, currentRevision: { select: { title: true } } } })
     target = row ? { id: row.id, title: row.currentRevision?.title ?? "Untitled decision" } : null
   } else {
     const modelName = LINK_TARGET_MODEL[linkedType]

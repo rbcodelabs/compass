@@ -1,6 +1,7 @@
 import getPrisma from "@/lib/db"
 import type { EntityLinkType } from "@/lib/entity-links"
 import type { ResolvedLabels } from "@/lib/thinking-model/labels"
+import { excludeToolApprovals } from "@/lib/tool-approval/gate"
 
 /**
  * The few fields a link card shows for one entity. Deliberately thin: a card in
@@ -117,7 +118,7 @@ export async function getEntitySummary(
     }
     case "review": {
       const r = await prisma.reviewRequest.findFirst({
-        where: { id, workspaceId },
+        where: { id, workspaceId, ...excludeToolApprovals },
         select: { id: true, state: true, currentRevision: { select: { title: true, summary: true } } },
       })
       return r && {

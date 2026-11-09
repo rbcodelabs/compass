@@ -60,6 +60,8 @@ import { describeModules, setWorkspaceModule } from "@/lib/modules/server"
 import { RoadmapPromotionConflict } from "@/lib/roadmap-promotion"
 import { thinkingModelForMcp } from "@/lib/thinking-model/mcp"
 import { allocateOneSeq, withSequenceTransaction } from "@/lib/work-item-sequence"
+import { excludeToolApprovals } from "@/lib/tool-approval/gate"
+import { restOperationIsApprovalGated } from "@/lib/tool-approval/rest-guard"
 
 export class RestNotFoundError extends Error {}
 export class RestForbiddenError extends Error {}
@@ -98,6 +100,7 @@ export async function executeRestRoute(route: RestRoute, input: Input): Promise<
     : actor.userId ? { actorType: "USER" as const, actorId: actor.userId } : { actorType: "SYSTEM" as const, actorId: null }
   const workspaceId = input.params.workspaceId
   await enforcePolicy(route.authorizationPolicy, actor, workspaceId, input.params.orgSlug)
+  if (restOperationIsApprovalGated(route.operationId)) throw new RestConflictError("This operation requires human approval and is only available through the MCP tool, which files an approval request.")
   const body = input.body ?? {}
   const id = input.params.id
 
@@ -577,7 +580,7 @@ export async function executeRestRoute(route: RestRoute, input: Input): Promise<
     case "requestDecision": { await assertDecisionReferences(prisma, workspaceId, body); return serialize(ensureTool(await requestDecision({ workspaceId, ...(body as unknown as Omit<Parameters<typeof requestDecision>[0], "workspaceId">), idempotencyKey: String(body.idempotencyKey ?? crypto.randomUUID()) }))) }
     case "listDecisions": return pagedToolCollection(`decisions:${workspaceId}:${input.query.status ?? ""}`, input.query, async (page, pageSize) => { const data = ensureTool(await listDecisions({ workspaceId, state: input.query.status as never, page, pageSize })) as { requests?: unknown[]; total?: number }; return { items: data.requests ?? [], total: data.total ?? 0 } })
     case "getDecision": { await assertReviewWorkspace(prisma, id, workspaceId); return serialize(ensureTool(await getDecision({ workspaceId, requestId: id }))) }
-    case "listReviewRequests": return listPage(`review-requests:${workspaceId}:${input.query.state ?? ""}`, input.query, (cursor, take) => prisma.reviewRequest.findMany({ where: { workspaceId, ...pick(input.query, ["state"]), ...cursorWhere(cursor) }, select: { id: true, workspaceId: true, gateType: true, subjectType: true, subjectId: true, state: true, createdAt: true, updatedAt: true }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take }))
+    case "listReviewRequests": return listPage(`review-requests:${workspaceId}:${input.query.state ?? ""}`, input.query, (cursor, take) => prisma.reviewRequest.findMany({ where: { workspaceId, ...excludeToolApprovals, ...pick(input.query, ["state"]), ...cursorWhere(cursor) }, select: { id: true, workspaceId: true, gateType: true, subjectType: true, subjectId: true, state: true, createdAt: true, updatedAt: true }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take }))
     case "getReviewRequest": { await assertReviewWorkspace(prisma, id, workspaceId); return serialize(ensureTool(await getReviewRequest({ requestId: id }))) }
     case "listSolutionPlanEntries": { await assertSolutionWorkspace(prisma, id, workspaceId); return listPage(`solution-plans:${workspaceId}:${id}`, input.query, (cursor, take) => prisma.solutionComment.findMany({ where: { solutionId: id, ...cursorWhere(cursor) }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take })) }
     case "createSolutionPlan": { await assertSolutionWorkspace(prisma, id, workspaceId); const agent = actor.purpose === "AGENT" || actor.purpose === "AGENT_TURN"; return serialize(ensureTool(await addSolutionPlan({ solutionId: id, body: String(body.body), authorName: await restActorName(prisma, actor, workspaceId), authorType: agent ? "AGENT" : "HUMAN", source: agent ? "MCP" : "UI" }))) }
@@ -992,7 +995,7 @@ async function assertSolutionWorkspace(prisma: Prisma, solutionId: string, works
   if (!(await prisma.solution.findFirst({ where: { id: solutionId, workspaceId }, select: { id: true } }))) throw new RestNotFoundError()
 }
 async function assertReviewWorkspace(prisma: Prisma, requestId: string, workspaceId: string) {
-  if (!(await prisma.reviewRequest.findFirst({ where: { id: requestId, workspaceId }, select: { id: true } }))) throw new RestNotFoundError()
+  if (!(await prisma.reviewRequest.findFirst({ where: { id: requestId, workspaceId, ...excludeToolApprovals }, select: { id: true } }))) throw new RestNotFoundError()
 }
 async function assertSolutionPlanWorkspace(prisma: Prisma, entryId: string, workspaceId: string) {
   if (!(await prisma.solutionComment.findFirst({ where: { id: entryId, solution: { workspaceId } }, select: { id: true } }))) throw new RestNotFoundError()

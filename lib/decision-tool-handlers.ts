@@ -7,6 +7,7 @@ import { findAgentById } from "@/lib/agent-ownership"
 import { ok, fail } from "@/lib/mcp-output"
 import { prepareReleaseRun, queueAuthorizedRelease, type ReleaseScope } from "@/lib/release-authorization"
 import { getReleaseSourceRevalidator } from "@/lib/github-release-source-revalidator"
+import { TOOL_APPROVAL_SURFACE_MESSAGE, excludeToolApprovals, isToolApprovalGate } from "@/lib/tool-approval/gate"
 import { applyTrackedDecision, createTrackedDecisionRequest, getTrackedDecision, listTrackedDecisions, recordDecisionNoAction, TrackedDecisionError, type TrackedDecisionOptionInput, type TrackedDecisionQuestionInput, type TrackedDecisionSourceInput, type TrackedSubjectType } from "@/lib/tracked-decisions"
 import { isChoiceActionKey, parseDecisionAnswers, parsePacketQuestions } from "@/lib/tracked-decision-types"
 import { CompassUrlNotConfiguredError, reviewRequestUrl, withUrlLine } from "@/lib/compass-url"
@@ -283,8 +284,9 @@ export async function requestReleaseAuthorization(scope: ReleaseScope) {
 }
 
 export async function getReviewRequest({ requestId }: { requestId: string }) {
-  const request = await getPrisma().reviewRequest.findUnique({
-    where: { id: requestId },
+  // Tool approvals are decided and shown only on their own surface; to this reader they do not exist.
+  const request = await getPrisma().reviewRequest.findFirst({
+    where: { id: requestId, ...excludeToolApprovals },
     include: { currentRevision: { include: { options: { orderBy: { sortOrder: "asc" } }, decisions: true } } },
   })
   if (!request) return fail(`Review request "${requestId}" not found.`)
@@ -300,7 +302,7 @@ export async function getReviewRequest({ requestId }: { requestId: string }) {
 
 export async function listReviewRequests({ workspaceId, state }: { workspaceId: string; state?: string }) {
   const rows = await getPrisma().reviewRequest.findMany({
-    where: { workspaceId, ...(state ? { state } : {}) },
+    where: { workspaceId, ...excludeToolApprovals, ...(state ? { state } : {}) },
     include: { currentRevision: { select: { title: true, fingerprint: true } } },
     orderBy: { updatedAt: "desc" },
   })
@@ -319,6 +321,8 @@ export async function applyRecordedDecision({ decisionId }: { decisionId: string
   const decision = await prisma.decisionRecord.findUnique({ where: { id: decisionId }, include: { revision: { include: { request: true } } } })
   if (!decision) return fail(`Decision "${decisionId}" not found.`)
   try {
+    // Approving a tool call executes it only through the approval page; applying it here would record a receipt for nothing.
+    if (isToolApprovalGate(decision.revision.request.gateType)) return fail(`${TOOL_APPROVAL_SURFACE_MESSAGE} Open the approval page in Compass to approve or deny it.`)
     if (decision.revision.request.gateType === "TRACKED_DECISION") {
       const receipt = await applyTrackedDecision(decision.id)
       return ok(`Decision applied.\nID: ${receipt.id}\nReceipt: ${receipt.receiptKey}\nStatus: ${receipt.status}`, receipt)

@@ -2,6 +2,7 @@ import getPrisma from "@/lib/db";
 import { agentEligibleInWorkspace, agentKind, type AgentRecord, agentOwner, findAgentById, findAgentsByIds, withAgentColumns } from "@/lib/agent-ownership";
 import { UNASSIGNED_ASSIGNEE_FILTER } from "@/lib/task-assignee-display";
 import type { TaskLinkRecordType } from "@/lib/types";
+import { excludeToolApprovals } from "@/lib/tool-approval/gate"
 
 export type TaskAssignee = { type: "USER" | "AGENT"; id: string } | null;
 export type ResolvedTaskAssignee = NonNullable<TaskAssignee> & { displayName: string; available: boolean; ownerName?: string; /** Agents only: a CLOUD agent runs when assigned; an EXTERNAL one is only queued. */ agentKind?: "EXTERNAL" | "CLOUD" };
@@ -105,7 +106,7 @@ export async function validateTaskLink(workspaceId: string, linkedType: TaskLink
     : linkedType === "KEY_RESULT" ? prisma.keyResult.findFirst({ where: { id: linkedId, objective: { workspaceId } } })
     : linkedType === "DOC" ? prisma.doc.findFirst({ where, select: { id: true } })
     : linkedType === "EXPERIMENT" ? prisma.experiment.findFirst({ where })
-    : linkedType === "DECISION" ? prisma.reviewRequest.findFirst({ where })
+    : linkedType === "DECISION" ? prisma.reviewRequest.findFirst({ where: { ...where, ...excludeToolApprovals } })
     // Any comment in the workspace is linkable (Doc comments and Discussion comments); the Comment row carries its own workspaceId.
     : linkedType === "AGENT_CONVERSATION" ? prisma.agentConversation.findFirst({ where, select: { id: true } })
     : linkedType === "COMMENT" ? prisma.comment.findFirst({ where: { id: linkedId, workspaceId }, select: { id: true } })
