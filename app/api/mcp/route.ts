@@ -201,6 +201,7 @@ import {
   listCustomFieldDefinitions,
   getCustomFieldValues,
   setCustomFieldValue,
+  listCustomFieldInheritanceRules,
 } from "@/lib/custom-field-tool-handlers"
 import {
   buildCustomFieldFilterConditions,
@@ -2765,6 +2766,24 @@ const _handler = createMcpHandler(
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       listCustomFieldDefinitions
+    )
+
+    register(
+      "list_custom_field_inheritance_rules",
+      {
+        title: "List Custom Field Inheritance Rules",
+        description:
+          "Lists a workspace's custom field inheritance rules: each says a roadmap item's field defaults from a field on the " +
+          "opportunity or solution it is linked to. Rules apply when an item is created with a link, when its link changes, and " +
+          "when the source value is set later; only to an empty target, never overwriting, and lower priority runs first. " +
+          "Each rule reports status active, disabled, or inactive (with the reason, e.g. options mismatch). Rules are created, " +
+          "reordered and deleted only in Settings → Custom Fields; this tool is read-only.",
+        inputSchema: {
+          workspaceId: z.string().uuid().describe("UUID of the workspace"),
+        },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      listCustomFieldInheritanceRules
     )
 
     register(

@@ -26,6 +26,8 @@ import { updateExperiment } from "@/lib/experiment-update-tool"
 import { handleAnalyticsTool } from "@/lib/analytics/tool-handlers"
 import * as analyticsService from "@/lib/analytics/service"
 import { getCustomFieldValues, setCustomFieldValue } from "@/lib/custom-field-tool-handlers"
+import { listInheritanceRules } from "@/lib/custom-field-inheritance-admin"
+import { customFieldInheritanceTableExists } from "@/lib/feature-tables"
 import { toCustomFieldDefinitionData } from "@/lib/custom-field-definitions"
 import type { CustomFieldValue } from "@/lib/types"
 import { linkEntitiesTool, listLinksTool, unlinkEntitiesTool } from "@/lib/link-tool-handlers"
@@ -489,6 +491,11 @@ export async function executeRestRoute(route: RestRoute, input: Input): Promise<
         orderBy: [{ objectType: "asc" }, { order: "asc" }, { id: "asc" }], take,
       }),
       async rows => rows.map(toCustomFieldDefinitionData))
+    case "listCustomFieldInheritanceRules": {
+      // Read-only and bounded (a handful of rules per workspace); a missing table reads as no rules.
+      const rules = (await customFieldInheritanceTableExists(prisma)) ? await listInheritanceRules(prisma, workspaceId) : []
+      return arrayPage(`custom-field-inheritance-rules:${workspaceId}`, input.query, rules.map(({ id, priority, enabled, status, inactiveReason, sourceObjectType, sourceFieldId, sourceFieldName, targetObjectType, targetFieldId, targetFieldName }) => ({ id, priority, enabled, status, inactiveReason, sourceObjectType, sourceFieldId, sourceFieldName, targetObjectType, targetFieldId, targetFieldName })))
+    }
     case "listCustomFieldValues": {
       const objectType = input.params.objectType, objectId = input.params.objectId
       await assertCustomObjectWorkspace(prisma, workspaceId, objectType, objectId)

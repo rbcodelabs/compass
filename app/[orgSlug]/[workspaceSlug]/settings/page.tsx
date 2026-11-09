@@ -6,6 +6,9 @@ import getPrisma from "@/lib/db";
 import { ManageFieldsPanel } from "@/components/custom-fields/manage-fields-panel";
 import { SharedOptionSetsPanel } from "@/components/custom-fields/shared-option-sets-panel";
 import { toCustomFieldDefinitionData } from "@/lib/custom-field-definitions";
+import { listInheritanceRules } from "@/lib/custom-field-inheritance-admin";
+import { customFieldInheritanceTableExists } from "@/lib/feature-tables";
+import { InheritanceRulesPanel } from "@/components/custom-fields/inheritance-rules-panel";
 import { parseSelectOptions } from "@/lib/shared-field-options";
 import { ManageSquadsPanel } from "@/components/squads/manage-squads-panel";
 import { ManageMembersPanel } from "@/components/settings/manage-members-panel";
@@ -153,6 +156,23 @@ export default async function SettingsPage({ params }: Props) {
   ]);
 
   const fields: CustomFieldDefinitionData[] = rawFields.map(toCustomFieldDefinitionData);
+
+  // A missing table (migration 113 not applied yet) reads as "no rules", never a broken page.
+  const inheritanceAvailable = await customFieldInheritanceTableExists(prisma);
+  const inheritanceRules = inheritanceAvailable
+    ? (await listInheritanceRules(prisma, workspace.id)).map((rule) => ({
+        id: rule.id,
+        priority: rule.priority,
+        enabled: rule.enabled,
+        status: rule.status,
+        inactiveReason: rule.inactiveReason,
+        sourceObjectType: rule.sourceObjectType,
+        sourceFieldId: rule.sourceFieldId,
+        sourceFieldName: rule.sourceFieldName,
+        targetFieldId: rule.targetFieldId,
+        targetFieldName: rule.targetFieldName,
+      }))
+    : [];
 
   const sharedOptionSets: SharedFieldOptionSetData[] = rawSharedOptionSets.map((set) => ({
     id: set.id,
@@ -352,6 +372,15 @@ export default async function SettingsPage({ params }: Props) {
           initialFields={fields}
           sharedOptionSets={sharedOptionSets}
         />
+        <div className="mt-8 border-t border-border pt-6">
+          <InheritanceRulesPanel
+            orgSlug={orgSlug}
+            workspaceSlug={workspaceSlug}
+            fields={fields}
+            rules={inheritanceRules}
+            available={inheritanceAvailable}
+          />
+        </div>
       </SettingsSection>
 
       <SettingsSection title="Scoring" description={`Choose which org-level scoring model this workspace uses to rank ${thinkingModel.labels.opportunity.plural} and ${thinkingModel.labels.solution.plural}. The two picks are independent of each other. Templates are managed by organization admins in Org Settings.`}>

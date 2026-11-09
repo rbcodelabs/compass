@@ -1819,6 +1819,36 @@ model CustomFieldValue {
   @@map("custom_field_values")
 }
 
+/// Workspace-scoped inheritance rule (ADR: Custom field inheritance rules, TASK-101): the target field on a
+/// ROADMAP_ITEM defaults from the source field on the OPPORTUNITY or SOLUTION the item is linked to. Insert-only
+/// and empty-target-only; applied by lib/custom-field-inheritance.ts. relationMode = "prisma" and DSQL mean there
+/// are no foreign keys: field ids are checked against workspaceId in application code, and deleting a field
+/// deletes its rules there too (nothing cascades). updatedAt is stamped in application code, not @updatedAt.
+model CustomFieldInheritanceRule {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId      String   @map("workspace_id") @db.Uuid
+  /// Phase 1: ROADMAP_ITEM only.
+  targetObjectType String   @map("target_object_type") @db.VarChar(50)
+  targetFieldId    String   @map("target_field_id") @db.Uuid
+  /// Phase 1: OPPORTUNITY (via opportunityId) or SOLUTION (via solutionId).
+  sourceObjectType String   @map("source_object_type") @db.VarChar(50)
+  sourceFieldId    String   @map("source_field_id") @db.Uuid
+  /// Lower runs first; the first rule yielding a non-empty value wins.
+  priority         Int      @default(0)
+  enabled          Boolean  @default(true)
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @default(now()) @map("updated_at")
+  createdById      String?  @map("created_by_id") @db.Uuid
+  updatedById      String?  @map("updated_by_id") @db.Uuid
+  /// UI or MCP.
+  source           String   @default("UI") @map("source") @db.VarChar(20)
+
+  @@unique([workspaceId, targetFieldId, priority], map: "idx_cfir_target_priority")
+  @@unique([workspaceId, targetFieldId, sourceFieldId], map: "idx_cfir_target_source")
+  @@index([workspaceId, targetObjectType], map: "idx_cfir_workspace_target_type")
+  @@map("custom_field_inheritance_rules")
+}
+
 // ─── Card Sorting ─────────────────────────────────────────────────────────────
 
 // A repeatable "propose moves on a factor" exercise. The factor is any SELECT

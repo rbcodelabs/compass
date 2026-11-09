@@ -9,12 +9,12 @@ import type { ModuleKey } from "@/lib/modules/registry"
  */
 export const DEFAULT_TEST_MODULES: Partial<Record<ModuleKey, boolean>> = { research_capture: true, pm_interview: true }
 
-type State = { modules: Partial<Record<ModuleKey, boolean>>; tables: { following: boolean; updates: boolean } }
+type State = { modules: Partial<Record<ModuleKey, boolean>>; tables: { following: boolean; updates: boolean; inheritance: boolean } }
 const KEY = Symbol.for("compass.test.modules")
 const holder = globalThis as unknown as Record<symbol, State | undefined>
 
 export function moduleTestState(): State {
-  return (holder[KEY] ??= { modules: { ...DEFAULT_TEST_MODULES }, tables: { following: false, updates: false } })
+  return (holder[KEY] ??= { modules: { ...DEFAULT_TEST_MODULES }, tables: { following: false, updates: false, inheritance: false } })
 }
 
 export function resetModuleTestState() {
@@ -27,6 +27,6 @@ export function setModules(overrides: Partial<Record<ModuleKey, boolean>>) {
 }
 
 /** Declare which feature tables "exist" (lib/feature-tables.ts) for this test. */
-export function setFeatureTables(tables: Partial<{ following: boolean; updates: boolean }>) {
+export function setFeatureTables(tables: Partial<{ following: boolean; updates: boolean; inheritance: boolean }>) {
   Object.assign(moduleTestState().tables, tables)
 }

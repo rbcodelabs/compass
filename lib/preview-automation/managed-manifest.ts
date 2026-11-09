@@ -252,7 +252,10 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   "113_doc_publishing": "a4b32cc07df478c2f228264697b039dbc42140e83519417180b7f43c81da5d0d",
   // Portal home template: two nullable VARCHAR(20) ADD COLUMNs on portal_home_layouts (draft_template, published_template); NULL = editorial. No default, backfill, index or FK.
   // Postcondition pinned in REVIEWED_MIGRATION_CODE_SHA256. Digest recorded from the shipped SQL after reading it.
-  "114_portal_home_template": "009701f53d716a8eb9ae81d0e208631a592c4b2b643ebf8811d75be566698421"
+  "114_portal_home_template": "009701f53d716a8eb9ae81d0e208631a592c4b2b643ebf8811d75be566698421",
+  // Custom field inheritance rules (TASK-101): one new table (custom_field_inheritance_rules) plus three ASYNC indexes, two unique; IF NOT EXISTS, no data writes, no FK.
+  // The 113 postcondition (columns, nullability, index validity/readiness) is pinned in REVIEWED_MIGRATION_CODE_SHA256. Digest recorded from the shipped SQL after reading it.
+  "113_custom_field_inheritance_rules": "7d92b8fae877505e117ea311c88dd56b3e08025ce38915b6a8617118c7fdb373"
 };
 
 /**
@@ -415,6 +418,10 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
   // The 114 postcondition (portal_home_layouts.draft_template / published_template exist, varchar, nullable); editing it re-reviews the migration.
   "114_portal_home_template": {
     "lib/migrations/portal-home-template.ts": "c0e5cd9b2c05e8da4dad6d79162458799ee2c7beeeaa0569cccfc31d988edaf0",
+  },
+  // The 113 postcondition (table shape plus valid, ready indexes with the expected columns and uniqueness); editing it re-reviews the migration.
+  "113_custom_field_inheritance_rules": {
+    "lib/migrations/custom-field-inheritance-rules.ts": "276075b4ed353da2eb3e5ade2746145449cab01fbcaf8863a3a844ff087658c2",
   },
 };
 

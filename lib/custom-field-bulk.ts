@@ -9,6 +9,7 @@
  * foreign object id can never surface another workspace's data.
  */
 
+import { writeCustomFieldValue } from "@/lib/custom-field-value-write"
 import { z } from "zod"
 import getPrisma from "@/lib/db"
 import { ok, fail } from "@/lib/mcp-output"
@@ -241,11 +242,7 @@ export async function setCustomFieldValues({
   } else {
     for (const objectId of found) {
       try {
-        await prisma.customFieldValue.upsert({
-          where: { fieldId_objectId: { fieldId, objectId } },
-          create: { fieldId, objectId, value: value as object },
-          update: { value: value as object, updatedAt: new Date() },
-        })
+        await writeCustomFieldValue(prisma, { workspaceId, objectType, objectId, fieldId, value })
         written.add(objectId)
       } catch {
         results.push({ objectId, ok: false, code: "WRITE_FAILED", error: "Could not save the value." })

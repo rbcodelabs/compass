@@ -1,7 +1,7 @@
 import { z } from "zod"
 import { MODULE_KEYS } from "@/lib/modules/registry"
 import {
-  assumptionSchema, checkInSchema, collectionOf, cursorQuery, customFieldDefinitionSchema, customFieldValueSchema,
+  assumptionSchema, checkInSchema, collectionOf, cursorQuery, customFieldDefinitionSchema, customFieldInheritanceRuleSchema, customFieldValueSchema,
   experimentResultSchema, experimentSchema, feedbackSchema, identitySchema, keyResultSchema, metricBindingSchema, metricObservationSchema, metricSchema,
   objectiveSchema, okrCycleSchema, scoreSchema, scoringMetricSchema, scoringModelSchema, squadSchema, typedLinkSchema,
   entityLinkRelationshipSchema, opportunityObjectiveRelationshipSchema, opportunitySchema, roadmapItemSchema, solutionKeyResultRelationshipSchema,
@@ -357,6 +357,7 @@ export const REST_ROUTES: readonly RestRoute[] = [
   read("getSquad", "/api/v1/workspaces/{workspaceId}/squads/{id}", "Get a squad", squadSchema, itemPath),
   write("PATCH", "updateSquad", "/api/v1/workspaces/{workspaceId}/squads/{id}", "Update a squad", squadSchema, itemPath, squadCreate.partial().strict()),
   read("listCustomFieldDefinitions", "/api/v1/workspaces/{workspaceId}/custom-field-definitions", "List custom-field definitions in configured display order", collectionOf(customFieldDefinitionSchema), workspacePath, cursorQuery.extend({ objectType: customObjectType.optional() }).strict()),
+  read("listCustomFieldInheritanceRules", "/api/v1/workspaces/{workspaceId}/custom-field-inheritance-rules", "List custom-field inheritance rules in evaluation order (read-only; rules are managed in Settings)", collectionOf(customFieldInheritanceRuleSchema), workspacePath, cursorQuery.strict()),
   read("listCustomFieldValues", "/api/v1/workspaces/{workspaceId}/custom-field-values/{objectType}/{objectId}", "List custom-field values in configured display order", collectionOf(customFieldValueSchema), customValuePath, cursorQuery.strict()),
   write("POST", "setCustomFieldValue", "/api/v1/workspaces/{workspaceId}/custom-field-values/{objectType}/{objectId}", "Set a custom-field value", customFieldValueSchema, customValuePath, customFieldValueCreate),
   read("listEntityLinks", "/api/v1/workspaces/{workspaceId}/entity-links", "List typed entity links", collectionOf(typedLinkSchema), workspacePath, entityLinksQuery),

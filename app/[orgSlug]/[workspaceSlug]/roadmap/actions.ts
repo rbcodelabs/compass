@@ -1,5 +1,6 @@
 "use server";
 
+import { applyInheritanceRules } from "@/lib/custom-field-inheritance";
 import { captureWorkspaceMutation } from "@/lib/workspace-update-mutations"
 import { workspaceMutationActor } from "@/lib/workspace-update-mutations"
 import { workspaceUpdatesAvailable, recordWorkspaceUpdate, retryUpdatesTransaction } from "@/lib/workspace-updates-capture"
@@ -102,7 +103,8 @@ export async function addRoadmapItem(
   });
   const sortOrder = lastItem ? lastItem.sortOrder + 1 : 0;
 
-  const item = await captureWorkspaceMutation(prisma, "roadmapItem", "create", "UI", undefined, async tx => tx.roadmapItem.create({ data: {
+  const item = await captureWorkspaceMutation(prisma, "roadmapItem", "create", "UI", undefined, async tx => {
+    const created = await tx.roadmapItem.create({ data: {
       workspaceId,
       ...(await allocateOneSeq(tx, workspaceId, "roadmapItem")),
       title: data.title,
@@ -116,7 +118,11 @@ export async function addRoadmapItem(
       startDate: data.startDate,
       endDate: data.endDate,
       isPrivate: data.isPrivate ?? false,
-    } }));
+    } });
+    // Same transaction as the create: a linked item starts with its empty fields filled from the opportunity / solution.
+    await applyInheritanceRules(tx, { workspaceId, targetObjectType: "ROADMAP_ITEM", targetId: created.id, links: { opportunityId: data.opportunityId ?? null, solutionId: data.solutionId ?? null } });
+    return created;
+  });
 
   revalidateRoadmap();
   return { ...item, horizon: data.horizon };
@@ -173,6 +179,7 @@ export async function editRoadmapItem(
       startDate: true,
       endDate: true,
       opportunityId: true,
+      solutionId: true,
       opportunity: { select: { id: true, title: true } },
     },
   });
@@ -219,10 +226,17 @@ export async function editRoadmapItem(
   if (data.isPrivate !== undefined) updateData.isPrivate = data.isPrivate;
   if (opportunityChanged) updateData.opportunityId = data.opportunityId;
 
-  const updated = await captureWorkspaceMutation(prisma, "roadmapItem", "update", "UI", current.id, tx => tx.roadmapItem.update({
-    where: { id: current.id },
-    data: updateData,
-  }));
+  const updated = await captureWorkspaceMutation(prisma, "roadmapItem", "update", "UI", current.id, async tx => {
+    const saved = await tx.roadmapItem.update({
+      where: { id: current.id },
+      data: updateData,
+    });
+    // Only a link that actually changed to a new non-null opportunity fills empty fields; unlinking and re-sending the same link do nothing.
+    if (opportunityChanged && data.opportunityId) {
+      await applyInheritanceRules(tx, { workspaceId, targetObjectType: "ROADMAP_ITEM", targetId: current.id, links: { opportunityId: data.opportunityId, solutionId: current.solutionId ?? null } });
+    }
+    return saved;
+  });
   revalidateRoadmap();
   return { ...updated, opportunity };
 }
@@ -267,7 +281,8 @@ export async function promoteToRoadmap(
   });
   const sortOrder = lastItem ? lastItem.sortOrder + 1 : 0;
 
-  const item = await captureWorkspaceMutation(prisma, "roadmapItem", "create", "UI", undefined, async tx => tx.roadmapItem.create({ data: {
+  const item = await captureWorkspaceMutation(prisma, "roadmapItem", "create", "UI", undefined, async tx => {
+    const created = await tx.roadmapItem.create({ data: {
       workspaceId,
       ...(await allocateOneSeq(tx, workspaceId, "roadmapItem")),
       title: solution.title,
@@ -279,7 +294,10 @@ export async function promoteToRoadmap(
       startDate: dates?.startDate,
       endDate: dates?.endDate,
       isPrivate: isPrivate ?? false,
-    } }));
+    } });
+    await applyInheritanceRules(tx, { workspaceId, targetObjectType: "ROADMAP_ITEM", targetId: created.id, links: { opportunityId: solutionOpportunityId ?? null, solutionId } });
+    return created;
+  });
 
   revalidateRoadmap();
   return { ...item, horizon };
