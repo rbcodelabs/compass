@@ -125,6 +125,41 @@ async function dragTo(page: Page, source: Locator, target: Locator) {
   await page.mouse.up();
 }
 
+
+/**
+ * Optional UI evidence: set INHERITANCE_SCREENSHOT_DIR (plus INHERITANCE_SCREENSHOT_LABEL, e.g. "commit abc1234 / 2026-11-08 / dev-builder
+ * functional e2e") and the Settings states are captured at desktop and mobile widths, each with a label strip burned into the image.
+ */
+const SHOT_DIR = process.env.INHERITANCE_SCREENSHOT_DIR;
+const VIEWPORTS = [
+  { name: "desktop", width: 1280, height: 900 },
+  { name: "mobile", width: 390, height: 844 },
+] as const;
+
+async function capture(page: Page, state: string) {
+  if (!SHOT_DIR) return;
+  const original = page.viewportSize();
+  for (const viewport of VIEWPORTS) {
+    await page.setViewportSize({ width: viewport.width, height: viewport.height });
+    const panel = page.getByTestId("inheritance-rules");
+    await panel.scrollIntoViewIfNeeded();
+    await page.evaluate(
+      ({ text }) => {
+        document.getElementById("shot-label")?.remove();
+        const strip = document.createElement("div");
+        strip.id = "shot-label";
+        strip.textContent = text;
+        strip.style.cssText = "position:fixed;left:0;right:0;bottom:0;z-index:99999;padding:4px 8px;font:11px monospace;background:#111;color:#fff";
+        document.body.appendChild(strip);
+      },
+      { text: `${process.env.INHERITANCE_SCREENSHOT_LABEL ?? "local"} / ${viewport.name} ${viewport.width}x${viewport.height} / ${state}` },
+    );
+    await page.screenshot({ path: `${SHOT_DIR}/inheritance-rules-${state}-${viewport.name}.png`, fullPage: false });
+    await page.evaluate(() => document.getElementById("shot-label")?.remove());
+  }
+  if (original) await page.setViewportSize(original);
+}
+
 const column = (page: Page, id: string) => page.locator(`[data-column-id="${id}"]`);
 const card = (page: Page, title: string) => page.locator('[data-slot="card"]').filter({ hasText: title });
 
@@ -145,6 +180,7 @@ test.describe.serial("Custom field inheritance rules", () => {
     await page.getByRole("option", { name: seeded.partnerName, exact: true }).click();
     await panel.getByLabel("Inherit from").click();
     await page.getByRole("option", { name: `${seeded.customerName} (opportunity)`, exact: true }).click();
+    await capture(page, "1-create-rule-form");
     await panel.getByTestId("inheritance-rule-save").click();
 
     const row = panel.getByTestId("inheritance-rule-0");
@@ -152,10 +188,12 @@ test.describe.serial("Custom field inheritance rules", () => {
     await expect(row).toContainText(seeded.customerName);
     await expect(panel.getByTestId("inheritance-rule-status-0")).toHaveText("Active");
     await expect.poll(() => rules(seeded.workspaceId, seeded.partnerFieldId)).toEqual([{ enabled: true, priority: 0, source_object_type: "OPPORTUNITY" }]);
+    await capture(page, "2-rule-list-active");
 
     await row.getByRole("switch").click();
     await expect(panel.getByTestId("inheritance-rule-status-0")).toHaveText("Disabled");
     await expect.poll(async () => (await rules(seeded.workspaceId, seeded.partnerFieldId))[0]?.enabled).toBe(false);
+    await capture(page, "3-rule-disabled");
 
     await row.getByRole("switch").click();
     await expect(panel.getByTestId("inheritance-rule-status-0")).toHaveText("Active");
