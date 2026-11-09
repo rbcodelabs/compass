@@ -119,6 +119,14 @@ test("gallery shows previews, filmstrip, placeholders, grouping and stays usable
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     await page.screenshot({ path: testInfo.outputPath("gallery-mobile-390.png") });
   } finally {
+    // The functional suite shares one workspace across specs in a run, so leave nothing behind: leftover LATER items broke
+    // roadmap-pinned-columns.spec.ts's column counts when both ran in the same invocation.
+    const like = `%${suffix}`;
+    await pool.query(`DELETE FROM "${S}".roadmap_items WHERE title LIKE $1`, [like]);
+    await pool.query(`DELETE FROM "${S}".artifact_links WHERE artifact_id IN (SELECT id FROM "${S}".artifacts WHERE title LIKE $1)`, [like]);
+    await pool.query(`DELETE FROM "${S}".artifact_revisions WHERE artifact_id IN (SELECT id FROM "${S}".artifacts WHERE title LIKE $1)`, [like]);
+    await pool.query(`DELETE FROM "${S}".artifacts WHERE title LIKE $1`, [like]);
+    await pool.query(`DELETE FROM "${S}".solutions WHERE title LIKE $1`, [like]);
     await pool.end();
   }
 });
