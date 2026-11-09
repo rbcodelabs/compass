@@ -721,6 +721,7 @@ Custom fields let a workspace tag Opportunities, Solutions, Experiments, Objecti
 | Tool | Description |
 |---|---|
 | `list_custom_field_definitions` | List a workspace's custom field definitions, optionally filtered to one object type; includes each field's type, whether it's required, and its effective options for SELECT/MULTI_SELECT (including options inherited from a shared option set) |
+| `list_custom_field_inheritance_rules` | (workspaceId) List the workspace's inheritance rules: a roadmap item field defaults from a field on the linked opportunity or solution when the item is created or linked, or when the source value is set later. Rules only fill an empty target, never overwrite, and lower priority runs first; each reports `active`, `disabled` or `inactive` (with the reason). Read-only: rules are managed only in Settings → Custom Fields. `add_to_roadmap`, `promote_to_roadmap` and `update_roadmap_item` report what they filled in `data.inheritedFields` |
 | `get_custom_field_values` | Read every custom field defined for an object's type, paired with that specific object's current value (or empty) |
 | `set_custom_field_value` | Set or clear one custom field's value on an object |
 | `set_custom_field_values` | Set or clear ONE field to ONE value on many objects of one type: up to 25 objects for agent callers (100 for human API keys), validated once, with a per-object result (`ok` or `NOT_FOUND`) |

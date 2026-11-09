@@ -1,3 +1,4 @@
+import { customFieldInheritanceTableExists } from "@/lib/feature-tables";
 import type { AppPrismaClient } from "@/lib/db";
 import { getArtifactStorage } from "@/lib/artifact-storage";
 import { deleteWorkspaceArtifacts } from "@/lib/artifacts";
@@ -180,6 +181,10 @@ export async function deleteWorkspaceCascade(prisma: AppPrismaClient, workspaceI
     await prisma.customFieldValue.deleteMany({
       where: { fieldId: { in: fieldIds } },
     });
+  }
+  // Inheritance rules name definitions by id (no FK), so they go with the workspace; a missing table (migration 113 not applied) has none.
+  if (await customFieldInheritanceTableExists()) {
+    await prisma.customFieldInheritanceRule.deleteMany({ where: { workspaceId } });
   }
   await prisma.customFieldDefinition.deleteMany({ where: { workspaceId } });
   // Shared option sets last: the delete guard only blocks while definitions
