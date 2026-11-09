@@ -16,7 +16,7 @@ describe("linkSummariesForCaller", () => {
   it("returns the additive summary for ordinary user and service actors", async () => {
     for (const actor of [{ purpose: "USER" }, { purpose: "SERVICE" }]) {
       h.actor = actor;
-      expect(Object.keys(await linkSummariesForCaller(WS_A.id, "EXPERIMENT", "exp-a"))).toEqual(["linkedStudies"]);
+      expect(Object.keys(await linkSummariesForCaller(WS_A.id, "EXPERIMENT", "exp-a"))).toEqual(["linkedStudies", "linkedArtifacts"]);
     }
   });
   it("gives participant, PM-interview and synthesis-claim contexts nothing", async () => {

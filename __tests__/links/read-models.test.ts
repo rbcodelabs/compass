@@ -25,6 +25,8 @@ describe("loadLinkSummaries", () => {
     link("exp-a", "study-a-archived");
     link("exp-a2", "study-a");
     expect(await loadLinkSummaries(tx(), { workspaceId: WS_A.id, entityType: "EXPERIMENT", entityId: "exp-a" })).toEqual({
+      // The experiment also carries the artifact summary (ARTIFACT_ATTACHED_TO_EXPERIMENT), empty here.
+      linkedArtifacts: [],
       linkedStudies: [
         { id: "study-a-archived", name: "A archived", studyType: "CUSTOMER_INTERVIEW", status: "ARCHIVED" },
         { id: "study-a", name: "A interviews", studyType: "CUSTOMER_INTERVIEW", status: "ACTIVE" },
@@ -47,7 +49,7 @@ describe("loadLinkSummaries", () => {
     link("exp-a", "study-a");
     vi.stubEnv("NODE_ENV", "production");
     setModules({ research_capture: false });
-    expect(await loadLinkSummaries(tx(), { workspaceId: WS_A.id, entityType: "EXPERIMENT", entityId: "exp-a" })).toEqual({});
+    expect(await loadLinkSummaries(tx(), { workspaceId: WS_A.id, entityType: "EXPERIMENT", entityId: "exp-a" })).toEqual({ linkedArtifacts: [] });
   });
 });
 

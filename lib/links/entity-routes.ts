@@ -6,6 +6,7 @@ import type { LinkableEntityType } from "@/lib/entity-types"
  */
 const ENTITY_PATHS: Partial<Record<LinkableEntityType, (id: string) => string>> = {
   EXPERIMENT: (id) => `experiments/${id}`,
+  ARTIFACT: (id) => `docs/artifacts/${id}`,
   RESEARCH_STUDY: (id) => `capture/studies/${id}`,
 }
 

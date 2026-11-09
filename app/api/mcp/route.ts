@@ -77,6 +77,8 @@ import {
   getArtifact,
   linkArtifactDecision,
   unlinkArtifactDecision,
+  linkArtifactExperiment,
+  unlinkArtifactExperiment,
   linkArtifact,
   listArtifacts,
   refreshArtifactFromV0,
@@ -3790,11 +3792,11 @@ const _handler = createMcpHandler(
     registerArtifactResources(server, getMcpActor)
 
     register("list_artifacts", {
-      title: "List Artifacts", description: "Lists HTML prototypes and external artifacts in a workspace.",
-      inputSchema: { workspaceId: z.string().uuid(), includeArchived: z.boolean().optional() }, outputSchema: TOOL_OUTPUT_SCHEMA,
+      title: "List Artifacts", description: "Lists HTML prototypes and external artifacts in a workspace. Pass experimentId to list only the Artifacts attached to that Experiment.",
+      inputSchema: { workspaceId: z.string().uuid(), includeArchived: z.boolean().optional(), experimentId: z.string().uuid().optional().describe("Only Artifacts attached to this Experiment (see link_artifact_to_experiment)") }, outputSchema: TOOL_OUTPUT_SCHEMA,
     }, listArtifacts)
     register("get_artifact", {
-      title: "Get Artifact", description: "Returns artifact metadata (including kind), immutable revision history, linked Solutions and Decisions without exposing private storage keys or HTML content. A SLIDE_DECK also returns its slides as { index, title, description } — index is the zero-based slideIndex add_comment accepts. To read the content itself, read the MCP resource artifact://{workspaceId}/{artifactId} (latest revision) or artifact://{workspaceId}/{artifactId}/{revisionId}. Content is paged: append ?offset=N&length=M (text: characters, max 90,000 per read; binary: bytes, offset a multiple of 3, max 60,000). A read without a range returns the first page; _meta.nextOffset (null when done) and _meta.hint say where to continue, so loop until nextOffset is null.",
+      title: "Get Artifact", description: "Returns artifact metadata (including kind), immutable revision history, linked Solutions, Decisions and Experiments without exposing private storage keys or HTML content. A SLIDE_DECK also returns its slides as { index, title, description } — index is the zero-based slideIndex add_comment accepts. To read the content itself, read the MCP resource artifact://{workspaceId}/{artifactId} (latest revision) or artifact://{workspaceId}/{artifactId}/{revisionId}. Content is paged: append ?offset=N&length=M (text: characters, max 90,000 per read; binary: bytes, offset a multiple of 3, max 60,000). A read without a range returns the first page; _meta.nextOffset (null when done) and _meta.hint say where to continue, so loop until nextOffset is null.",
       inputSchema: { artifactId: z.string().uuid() }, outputSchema: TOOL_OUTPUT_SCHEMA,
     }, getArtifact)
     const artifactUploadReceipt = z.string().min(1).optional().describe("Signed receipt from prepare_artifact_upload after the file was uploaded. Use instead of html so the document never passes through the conversation.")
@@ -3846,6 +3848,14 @@ const _handler = createMcpHandler(
       title: "Unlink Artifact from Decision", description: "Idempotently removes a live Artifact link from an ordinary tracked Decision without modifying its recorded outcome or frozen evidence.",
       inputSchema: { workspaceId: z.string().uuid(), artifactId: z.string().uuid(), requestId: z.string().uuid() }, outputSchema: TOOL_OUTPUT_SCHEMA,
     }, unlinkArtifactDecision)
+    register("link_artifact_to_experiment", {
+      title: "Link Artifact to Experiment", description: "Idempotently attaches an active Artifact to an Experiment in the same workspace (a prototype or deck the Test runs on or reports against). Linking changes neither record. Read the result with get_artifact (experiments), get_experiment (linkedArtifacts) or list_artifacts with experimentId.",
+      inputSchema: { workspaceId: z.string().uuid(), artifactId: z.string().uuid(), experimentId: z.string().uuid() }, outputSchema: TOOL_OUTPUT_SCHEMA,
+    }, linkArtifactExperiment)
+    register("unlink_artifact_from_experiment", {
+      title: "Unlink Artifact from Experiment", description: "Idempotently removes an Artifact-to-Experiment link, including for an archived Artifact. Neither record is changed or deleted.",
+      inputSchema: { workspaceId: z.string().uuid(), artifactId: z.string().uuid(), experimentId: z.string().uuid() }, outputSchema: TOOL_OUTPUT_SCHEMA,
+    }, unlinkArtifactExperiment)
     register("archive_artifact", {
       title: "Archive Artifact", description: "Archives an Artifact while preserving its links and immutable revision history.",
       inputSchema: { artifactId: z.string().uuid(), workspaceId: z.string().uuid() }, outputSchema: TOOL_OUTPUT_SCHEMA,

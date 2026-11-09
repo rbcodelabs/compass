@@ -181,6 +181,35 @@ describe("Decision Artifact mutation boundaries", () => {
   }
 })
 
+describe("Experiment Artifact mutation boundaries", () => {
+  for (const tool of ["link_artifact_to_experiment", "unlink_artifact_from_experiment"]) {
+    const args = { workspaceId: "ws-1", artifactId: "art_1", experimentId: "exp-1" }
+    it(`${tool} is an agent write needing the write scope`, () => {
+      expect(AGENT_TOOL_POLICY[tool]).toBe("WRITE")
+      expect(TOOL_SCOPES[tool]).toBe("mcp:write")
+      expect(RESEARCH_TOOL_ALLOWLIST.has(tool)).toBe(false)
+    })
+    for (const foreign of ["artifact", "experiment"] as const) {
+      it(`${tool} rejects a foreign ${foreign}`, async () => {
+        mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
+        mockPrisma.artifact.findUnique.mockResolvedValue({ workspaceId: foreign === "artifact" ? "ws-2" : "ws-1" })
+        mockPrisma.experiment.findUnique.mockResolvedValue({ workspaceId: foreign === "experiment" ? "ws-2" : "ws-1" })
+        await expect(applyToolGate(tool, MEMBER, args)).rejects.toThrow(/does not belong to workspace/)
+      })
+    }
+    it(`${tool} admits a member when both ends are in the declared workspace`, async () => {
+      mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
+      mockPrisma.artifact.findUnique.mockResolvedValue({ workspaceId: "ws-1" })
+      mockPrisma.experiment.findUnique.mockResolvedValue({ workspaceId: "ws-1" })
+      await expect(applyToolGate(tool, MEMBER, args)).resolves.toBeUndefined()
+    })
+    it(`${tool} denies a non-member`, async () => {
+      mockPrisma.workspace.findFirst.mockResolvedValue(null)
+      await expect(applyToolGate(tool, MEMBER, args)).rejects.toThrow(/not found or access denied/)
+    })
+  }
+})
+
 describe("apply_recorded_decision service-actor access", () => {
   // The tool's own registered description says "Service actors may apply but
   // cannot take decisions." — this asserts the policy actually matches that

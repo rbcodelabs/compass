@@ -6,6 +6,8 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest"
 const mocks = vi.hoisted(() => ({ refresh: vi.fn(), live: vi.fn(), mounts: vi.fn() }))
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: mocks.refresh }) }))
 vi.mock("@/hooks/use-live-refresh", () => ({ useLiveRefresh: mocks.live }))
+// The experiments section loads through a server action; these tests are about other parts of the page.
+vi.mock("@/components/links/linked-entities-section", () => ({ LinkedEntitiesSection: () => null }))
 vi.mock("@/app/[orgSlug]/[workspaceSlug]/docs/actions", () => ({}))
 vi.mock("@/components/docs/artifact-viewer", async () => {
   const React = await import("react")

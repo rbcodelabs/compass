@@ -42,6 +42,12 @@ async function loadSummaryRows(tx: Tx, type: LinkableEntityType, workspaceId: st
         select: { id: true, title: true, status: true },
         orderBy: [{ title: "asc" }, { id: "asc" }],
       })
+    case "ARTIFACT":
+      return tx.artifact.findMany({
+        where: { workspaceId, id: { in: ids } },
+        select: { id: true, title: true, status: true },
+        orderBy: [{ title: "asc" }, { id: "asc" }],
+      })
     case "RESEARCH_STUDY":
       return tx.researchStudy.findMany({
         where: { workspaceId, id: { in: ids }, studyType: { not: "PM_INTERVIEW" } },
@@ -54,7 +60,7 @@ async function loadSummaryRows(tx: Tx, type: LinkableEntityType, workspaceId: st
 }
 
 /** Entity types that have a summary loader; the registry contract test requires every spec's endpoint to be here. */
-export const SUMMARISED_ENTITY_TYPES: readonly LinkableEntityType[] = ["EXPERIMENT", "RESEARCH_STUDY"]
+export const SUMMARISED_ENTITY_TYPES: readonly LinkableEntityType[] = ["EXPERIMENT", "RESEARCH_STUDY", "ARTIFACT"]
 
 function titleOf(type: LinkableEntityType, row: Row): string {
   return String(type === "RESEARCH_STUDY" ? row.name : row.title)
@@ -102,6 +108,7 @@ export async function loadLinkSummaries(tx: Tx, input: { workspaceId: string; en
 const NOUNS: Partial<Record<LinkableEntityType, { singular: string; plural: string }>> = {
   EXPERIMENT: { singular: "experiment", plural: "experiments" },
   RESEARCH_STUDY: { singular: "research study", plural: "research studies" },
+  ARTIFACT: { singular: "artifact", plural: "artifacts" },
 }
 
 function nounsFor(type: LinkableEntityType) {

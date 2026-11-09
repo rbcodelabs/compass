@@ -367,6 +367,65 @@ const artifactSupportsDecision: LinkTypeDef = {
   compat: { mcpTools: ["link_artifact_to_decision", "unlink_artifact_from_decision"], restOps: ["linkArtifactDecision", "unlinkArtifactDecision"] },
 }
 
+// ── ARTIFACT_ATTACHED_TO_EXPERIMENT (native: no legacy table, no mirror, no read flag) ──
+
+/**
+ * An Artifact attached to an Experiment (a prototype or deck that a Test runs on or reports against). A native type: entity_links is
+ * the only store, the generic service writes it (lib/artifacts.ts wraps it for the tools), and every read comes straight from it.
+ * Same workspace, many-to-many, idempotent. Only an ACTIVE Artifact takes a NEW link, as for a Decision link; an archived Artifact
+ * keeps its existing links visible and removable, and an idempotent replay of an existing link still succeeds. Linking changes neither
+ * record: no status, revision or result is touched. Deleting either end removes its links and leaves the other.
+ */
+const artifactAttachedToExperiment: LinkTypeDef = {
+  key: "ARTIFACT_ATTACHED_TO_EXPERIMENT",
+  from: "ARTIFACT",
+  to: "EXPERIMENT",
+  direction: "directed",
+  cardinality: { from: "many", to: "many" },
+  labels: { forward: "Attached to", inverse: "Artifacts" },
+  duplicatePolicy: "idempotent",
+  authorize: defaultAuthorize,
+  async eligible({ tx, workspaceId, from, to }) {
+    const artifact = await tx.artifact.findFirst({ where: { id: from.id, workspaceId }, select: { status: true } })
+    if (!artifact) throw new TypedLinkError("Artifact not found.")
+    if (artifact.status === "ACTIVE") return
+    // An archived Artifact takes no NEW link, but replaying one that already exists stays a no-op success.
+    const existing = await tx.entityLink.findFirst({ where: { linkType: "ARTIFACT_ATTACHED_TO_EXPERIMENT", fromId: from.id, toId: to.id }, select: { id: true } })
+    if (!existing) throw new TypedLinkError("Archived artifacts cannot be linked to an experiment.", "INVALID")
+  },
+  async candidates({ tx, workspaceId, side, entityId, query, excludeIds, limit }) {
+    const text = query.trim().slice(0, 255)
+    const like = { contains: text, mode: "insensitive" as const }
+    if (side === "from") {
+      const artifact = await tx.artifact.findFirst({ where: { id: entityId, workspaceId }, select: { status: true } })
+      if (!artifact) return null
+      // An archived Artifact keeps its links visible and removable but takes no new one.
+      if (artifact.status !== "ACTIVE") return { canLink: false, items: [] }
+      const experiments = await tx.experiment.findMany({
+        where: { workspaceId, title: like, id: { notIn: [...excludeIds] } },
+        select: { id: true, title: true, status: true },
+        orderBy: [{ title: "asc" }, { id: "asc" }],
+        take: limit,
+      })
+      return { canLink: true, items: experiments.map((experiment) => ({ type: "EXPERIMENT" as const, id: experiment.id, title: experiment.title, status: experiment.status })) }
+    }
+    const artifacts = await tx.artifact.findMany({
+      where: { workspaceId, status: "ACTIVE", title: like, id: { notIn: [...excludeIds] } },
+      select: { id: true, title: true, status: true },
+      orderBy: [{ title: "asc" }, { id: "asc" }],
+      take: limit,
+    })
+    return { canLink: true, items: artifacts.map((artifact) => ({ type: "ARTIFACT" as const, id: artifact.id, title: artifact.title, status: artifact.status })) }
+  },
+  lifecycle: { onFromDeleted: "delete", onToDeleted: "delete", onArchive: "keep" },
+  summaries: {
+    onFrom: { field: "linkedExperiments", select: ["id", "title", "status"] },
+    onTo: { field: "linkedArtifacts", select: ["id", "title", "status"] },
+  },
+  restrictedContexts: "deny",
+  compat: { mcpTools: ["link_artifact_to_experiment", "unlink_artifact_from_experiment"], restOps: ["linkArtifactExperiment", "unlinkArtifactExperiment"] },
+}
+
 // ── TASK_REFERENCES (phase 7: mirror of the legacy task_links table) ────────
 
 /** Outside production the mirror is on so tests and E2E cover it; production needs COMPASS_ENTITY_LINKS_TASK_MIRROR=1 (fail-closed). */
@@ -495,6 +554,7 @@ const DEFINITIONS: readonly LinkTypeDef[] = [
   opportunityTargetsKeyResult,
   artifactAttachedToSolution,
   artifactSupportsDecision,
+  artifactAttachedToExperiment,
   taskReferences,
   docSpecifiesScope,
   conversationCreated,

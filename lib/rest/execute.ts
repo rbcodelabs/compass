@@ -23,6 +23,7 @@ import type { ToolResult } from "@/lib/mcp-output"
 import { deleteKeyResult, deleteObjective, updateKeyResult, updateObjective } from "@/lib/okr-tool-handlers"
 import { OKRHierarchyError, setObjectiveParentKeyResult } from "@/lib/okr-hierarchy"
 import { updateExperiment } from "@/lib/experiment-update-tool"
+import { getExperimentArtifactIds } from "@/lib/artifacts"
 import { handleAnalyticsTool } from "@/lib/analytics/tool-handlers"
 import * as analyticsService from "@/lib/analytics/service"
 import { getCustomFieldValues, setCustomFieldValue } from "@/lib/custom-field-tool-handlers"
@@ -41,7 +42,7 @@ import { deleteDocComment, getDocComment, reopenDocComment, resolveDocComment, u
 import { createDocCommentCore } from "@/lib/doc-comments"
 import { prepareDocImageUploadTool } from "@/lib/doc-image-tool-handlers"
 import { documentRevision } from "@/lib/document-service"
-import { archiveArtifact, createArtifact, getArtifact, linkArtifact, linkArtifactDecision, unlinkArtifact, unlinkArtifactDecision, updateArtifact } from "@/lib/artifact-tool-handlers"
+import { archiveArtifact, createArtifact, getArtifact, linkArtifact, linkArtifactDecision, linkArtifactExperiment, unlinkArtifact, unlinkArtifactDecision, unlinkArtifactExperiment, updateArtifact } from "@/lib/artifact-tool-handlers"
 import { getDecision, getReviewRequest, listDecisions, requestDecision, requestReleaseAuthorization } from "@/lib/decision-tool-handlers"
 import { addSolutionComment, addSolutionPlan, deleteSolutionComment, getSolutionComment, updateSolutionComment } from "@/lib/solution-comment-tool-handlers"
 import * as researchStudies from "@/lib/research-study-service"
@@ -567,7 +568,13 @@ export async function executeRestRoute(route: RestRoute, input: Input): Promise<
     case "resolveDocComment": { await assertDocCommentMutation(prisma, actor, id, workspaceId); return serialize(ensureTool(await resolveDocComment({ commentId: id }))) }
     case "reopenDocComment": { await assertDocCommentMutation(prisma, actor, id, workspaceId); return serialize(ensureTool(await reopenDocComment({ commentId: id }))) }
 
-    case "listArtifacts": return listPage(`artifacts:${workspaceId}:${Boolean(input.query.includeArchived)}`, input.query, (cursor, take) => prisma.artifact.findMany({ where: { workspaceId, ...(input.query.includeArchived ? {} : { status: "ACTIVE" }), ...cursorWhere(cursor) }, select: { id: true, workspaceId: true, title: true, description: true, sourceType: true, status: true, currentRevisionId: true, createdAt: true, updatedAt: true }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take }))
+    case "listArtifacts": {
+      // experimentId narrows to the Artifacts attached to that Experiment; a foreign or unknown experiment is a 404 like every other path id.
+      const experimentId = typeof input.query.experimentId === "string" ? input.query.experimentId : null
+      if (experimentId) await requireExperiment(prisma, workspaceId, experimentId)
+      const linkedIds = experimentId ? await getExperimentArtifactIds(prisma, workspaceId, experimentId) : null
+      return listPage(`artifacts:${workspaceId}:${Boolean(input.query.includeArchived)}:${experimentId ?? ""}`, input.query, (cursor, take) => prisma.artifact.findMany({ where: { workspaceId, ...(input.query.includeArchived ? {} : { status: "ACTIVE" }), ...(linkedIds ? { id: { in: linkedIds } } : {}), ...cursorWhere(cursor) }, select: { id: true, workspaceId: true, title: true, description: true, sourceType: true, status: true, currentRevisionId: true, createdAt: true, updatedAt: true }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take }))
+    }
     case "getArtifact": { await assertArtifactWorkspace(prisma, id, workspaceId); return serialize(ensureTool(await getArtifact({ artifactId: id }))) }
     case "createArtifact": return serialize(ensureTool(await createArtifact({ workspaceId, ...(body as unknown as Omit<Parameters<typeof createArtifact>[0], "workspaceId">) })))
     case "updateArtifact": { await assertArtifactWorkspace(prisma, id, workspaceId); ensureTool(await updateArtifact({ artifactId: id, workspaceId, ...body } as Parameters<typeof updateArtifact>[0])); return serialize(ensureTool(await getArtifact({ artifactId: id }))) }
@@ -576,6 +583,8 @@ export async function executeRestRoute(route: RestRoute, input: Input): Promise<
     case "unlinkArtifactSolution": { await assertArtifactWorkspace(prisma, id, workspaceId); await assertSolutionWorkspace(prisma, input.params.relatedId, workspaceId); ensureTool(await unlinkArtifact({ artifactId: id, solutionId: input.params.relatedId, workspaceId })); return undefined }
     case "linkArtifactDecision": { await assertArtifactWorkspace(prisma, id, workspaceId); await assertReviewWorkspace(prisma, String(body.requestId), workspaceId); return serialize(ensureTool(await linkArtifactDecision({ artifactId: id, requestId: String(body.requestId), workspaceId }))) }
     case "unlinkArtifactDecision": { await assertArtifactWorkspace(prisma, id, workspaceId); await assertReviewWorkspace(prisma, input.params.relatedId, workspaceId); ensureTool(await unlinkArtifactDecision({ artifactId: id, requestId: input.params.relatedId, workspaceId })); return undefined }
+    case "linkArtifactExperiment": { await assertArtifactWorkspace(prisma, id, workspaceId); await requireExperiment(prisma, workspaceId, String(body.experimentId)); return serialize(ensureTool(await linkArtifactExperiment({ artifactId: id, experimentId: String(body.experimentId), workspaceId }))) }
+    case "unlinkArtifactExperiment": { await assertArtifactWorkspace(prisma, id, workspaceId); await requireExperiment(prisma, workspaceId, input.params.relatedId); ensureTool(await unlinkArtifactExperiment({ artifactId: id, experimentId: input.params.relatedId, workspaceId })); return undefined }
 
     case "requestDecision": { await assertDecisionReferences(prisma, workspaceId, body); return serialize(ensureTool(await requestDecision({ workspaceId, ...(body as unknown as Omit<Parameters<typeof requestDecision>[0], "workspaceId">), idempotencyKey: String(body.idempotencyKey ?? crypto.randomUUID()) }))) }
     case "listDecisions": return pagedToolCollection(`decisions:${workspaceId}:${input.query.status ?? ""}`, input.query, async (page, pageSize) => { const data = ensureTool(await listDecisions({ workspaceId, state: input.query.status as never, page, pageSize })) as { requests?: unknown[]; total?: number }; return { items: data.requests ?? [], total: data.total ?? 0 } })

@@ -237,6 +237,7 @@ export function ExperimentPanel({
         <MarkdownContent className="text-foreground/80">{data.method}</MarkdownContent>
       </div>
 
+      <LinkedEntitiesSection orgSlug={orgSlug} workspaceSlug={workspaceSlug} title="Linked artifacts" target={{ linkType: "ARTIFACT_ATTACHED_TO_EXPERIMENT", entityType: "EXPERIMENT", entityId: experimentId }} />
       {data.researchCaptureEnabled && <LinkedEntitiesSection orgSlug={orgSlug} workspaceSlug={workspaceSlug} target={{ linkType: "EXPERIMENT_INFORMED_BY_STUDY", entityType: "EXPERIMENT", entityId: experimentId }} />}
 
       {/* Kill condition body (inactive experiments) */}
