@@ -127,18 +127,18 @@ export function InheritanceRulesPanel({ orgSlug, workspaceSlug, fields, rules, a
               const ruleName = `${rule.targetFieldName ?? "missing field"} from ${rule.sourceFieldName ?? "missing field"}`;
               const inactive = rule.status === "inactive";
               return (
-                <li key={rule.id} className="flex flex-col gap-2 px-4 py-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-3" data-testid={`inheritance-rule-${index}`}>
-                  <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 break-words">
+                <li key={rule.id} className="flex min-w-0 flex-col gap-2 px-4 py-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-3" data-testid={`inheritance-rule-${index}`}>
+                  <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 [overflow-wrap:anywhere]">
                     <span className="rounded bg-muted px-1.5 py-0.5 text-xs tabular-nums text-muted-foreground" title="Priority: lower runs first">
                       {rule.priority + 1}
                     </span>
-                    <span className="text-sm">
+                    <span className="min-w-0 max-w-full text-sm">
                       <span className="font-medium">{rule.targetFieldName ?? "(missing field)"}</span>
                       <span className="text-muted-foreground"> on roadmap items from </span>
                       <span className="font-medium">{rule.sourceFieldName ?? "(missing field)"}</span>
                       <span className="text-muted-foreground"> on {SOURCE_LABEL[rule.sourceObjectType] ?? rule.sourceObjectType}</span>
                     </span>
-                    <span className={`rounded px-1.5 py-0.5 text-xs ${STATUS_STYLE[rule.status]}`} data-testid={`inheritance-rule-status-${index}`}>
+                    <span className={`min-w-0 max-w-full rounded px-1.5 py-0.5 text-xs [overflow-wrap:anywhere] ${STATUS_STYLE[rule.status]}`} data-testid={`inheritance-rule-status-${index}`}>
                       {statusLabel(rule)}
                     </span>
                   </div>
