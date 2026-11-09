@@ -742,6 +742,24 @@ describe("agent turn route — detached runs", () => {
     expect(mockPrisma.agentMessage.create).not.toHaveBeenCalledWith({ data: expect.objectContaining({ role: "assistant" }) })
   })
 
+  it("logs exactly one credential-source line for the run, with the label, run id and workspace id and no key material", async () => {
+    sandbox()
+    const OAT = "sk-ant-oat01-FAKE-subscription-secret-8888"
+    vi.stubEnv("AGENT_MODEL_PROVIDER", "claude-subscription")
+    vi.stubEnv("CLAUDE_CODE_OAUTH_TOKEN", OAT)
+    const info = vi.spyOn(console, "info").mockImplementation(() => {})
+    try {
+      expect((await POST(req({ workspaceId: "ws-1", message: "hi" }))).status).toBe(202)
+      const lines = info.mock.calls.map((call) => String(call[0])).filter((line) => line.includes("agent-run credential source"))
+      expect(lines).toEqual([`agent-run credential source=claude-subscription runId=${RUN.id} workspaceId=ws-1`])
+      expect(JSON.stringify(info.mock.calls)).not.toContain(OAT)
+      expect(JSON.stringify(info.mock.calls)).not.toContain("sk-ant-test")
+    } finally {
+      info.mockRestore()
+      vi.unstubAllEnvs()
+    }
+  })
+
   it("materializes the docs and hands the worker a host-signed baseline manifest (ADR 0019)", async () => {
     mockPrisma.doc.findMany.mockResolvedValue([
       { id: "doc-1", title: "Vision", parentId: null, roadmapItemId: null, docType: "STANDARD", sortOrder: 0, createdAt: new Date(1), updatedAt: new Date(1) },

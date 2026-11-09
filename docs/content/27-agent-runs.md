@@ -75,6 +75,21 @@ looked at a conversation is yours alone: when a conversation is shared, your ope
 mark it Done for anyone else, and new activity after you looked makes it **New** for you again.
 The switch is remembered across visits.
 
+### Pin, collapse and reorder columns
+
+The board uses the same **dock** as the [Tasks board](/help/13-tasks#pin-collapse-and-reorder-columns-on-the-board) and the other status boards. On a wide screen (the medium breakpoint and up), any column can be **pinned**: it moves into one dock on the right, outside the scrolling area, so it stays put while the other columns scroll. Nothing is pinned until you pin it, so the board looks the same as before.
+
+The dock is **one slot**, however many columns you pin: a panel showing one pinned column, with a narrow rail of **tabs** at its right edge, one per pinned column (its name and conversation count). Pinning more columns adds tabs; it never makes the dock wider.
+
+- **Pin or unpin.** Use the pin button in a column's header (it appears when you hover the header) or **Pin to the right** / **Unpin** in the column's **⋯** menu. A pinned column becomes the active tab and the dock opens on it.
+- **Switch and collapse.** Click a tab to show that column. Click the active tab, or the **Collapse** button in the panel's header, to close the panel and leave only the tab rail. Arrow keys move between tabs; Enter or Space shows one.
+- **Reorder columns.** **Move left** / **Move right** in a column's **⋯** menu. A pinned column's place in that order is its place among the tabs.
+- **Empty columns.** A column that is hidden because it has no conversations has no tab either, but the pin is kept: its tab returns with its first conversation. **Working** and **New** are always shown.
+- **Cards.** Cards in the docked panel open their conversation exactly as before. The board is read-only, so a tab is not a drop target. The board's refresh never changes your layout or the tab you have open.
+- **Narrow screens.** Below the medium breakpoint nothing is docked: pinned columns appear in the scrolling board in their saved order, and the pin button is hidden. Your layout comes back when the screen is wide again.
+
+The layout is remembered **in this browser**, for each workspace. The board has no saved views, so it does not follow you to other devices.
+
 ## Sharing a conversation
 
 A conversation starts private to the person who began it. The owner, or anyone
@@ -181,6 +196,35 @@ With `opencode`, `AGENT_MODEL_PROVIDER`, `AGENT_MODEL_ID`, `ANTHROPIC_API_KEY` a
 `BEDROCK_API_KEY` are not read: a Bedrock selection is ignored (not an error), even
 an invalid one, and neither an Anthropic nor a Bedrock credential is ever passed to
 that harness. The blank-key check described above applies only to `claude`.
+
+### Choosing an agent's model (AI Gateway catalog)
+
+People who can create or edit cloud agents (Settings > Agents, and the workspace's
+Agents section) choose the agent's own model in the **Model** field. On a deployment
+that runs the `opencode` harness the field offers the full Vercel AI Gateway catalog,
+not just the short allowed list:
+
+- **Source and filter.** The public listing `https://ai-gateway.vercel.sh/v1/models`
+  (no credential is sent). Only entries with `type` `language` and the `tool-use` tag
+  are kept, because an agent run is a tool-calling loop.
+- **Picker.** A search box (name, id or provider), a provider filter, and a list grouped
+  by provider, showing each model's name and id. The curated models appear first as
+  "Recommended"; "System default" stays the first row.
+- **Cache and timeout.** The listing is fetched server-side and cached for about one
+  hour (Next.js `fetch` revalidation); each fetch has a two second timeout, and a failed
+  read is remembered for about a minute so an outage never stalls every page render.
+- **Fallback.** If the gateway cannot be read (error, timeout, bad response) the picker
+  shows the curated list with a short note, and saving accepts only curated models plus
+  an agent's already stored model. Editing an agent never clears its stored model.
+- **Validation.** The server action re-checks the chosen id against a fresh read of the
+  catalog (and the usual id shape rule); the browser's list is never trusted. Curated
+  models are accepted without a catalog fetch.
+- **Claude harness.** The Claude harness can only serve Claude model ids, so the catalog
+  is neither offered nor accepted there; the field keeps the curated list and says why.
+- **Chat is unchanged.** The chat's per-message **Model** menu above still offers only
+  the curated list. A turn for an agent whose own model is a catalog model runs on that
+  model (the agent's own model, second in the precedence order); the chat shows its
+  catalog name when the catalog is readable, otherwise the bare id.
 
 ## Deployment
 

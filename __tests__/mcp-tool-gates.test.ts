@@ -18,6 +18,7 @@ const mockPrisma = {
   organization: { findUnique: vi.fn() },
   organizationMember: { findFirst: vi.fn() },
   scoringModel: { findUnique: vi.fn() },
+  workspaceScoringConfig: { findFirst: vi.fn() },
   agentOrgAdminGrant: { findFirst: vi.fn() },
   opportunity: { findUnique: vi.fn(), findFirst: vi.fn(), update: vi.fn(), findMany: vi.fn() },
   objective: { findUnique: vi.fn(), findMany: vi.fn() },
@@ -180,6 +181,35 @@ describe("Decision Artifact mutation boundaries", () => {
   }
 })
 
+describe("Experiment Artifact mutation boundaries", () => {
+  for (const tool of ["link_artifact_to_experiment", "unlink_artifact_from_experiment"]) {
+    const args = { workspaceId: "ws-1", artifactId: "art_1", experimentId: "exp-1" }
+    it(`${tool} is an agent write needing the write scope`, () => {
+      expect(AGENT_TOOL_POLICY[tool]).toBe("WRITE")
+      expect(TOOL_SCOPES[tool]).toBe("mcp:write")
+      expect(RESEARCH_TOOL_ALLOWLIST.has(tool)).toBe(false)
+    })
+    for (const foreign of ["artifact", "experiment"] as const) {
+      it(`${tool} rejects a foreign ${foreign}`, async () => {
+        mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
+        mockPrisma.artifact.findUnique.mockResolvedValue({ workspaceId: foreign === "artifact" ? "ws-2" : "ws-1" })
+        mockPrisma.experiment.findUnique.mockResolvedValue({ workspaceId: foreign === "experiment" ? "ws-2" : "ws-1" })
+        await expect(applyToolGate(tool, MEMBER, args)).rejects.toThrow(/does not belong to workspace/)
+      })
+    }
+    it(`${tool} admits a member when both ends are in the declared workspace`, async () => {
+      mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
+      mockPrisma.artifact.findUnique.mockResolvedValue({ workspaceId: "ws-1" })
+      mockPrisma.experiment.findUnique.mockResolvedValue({ workspaceId: "ws-1" })
+      await expect(applyToolGate(tool, MEMBER, args)).resolves.toBeUndefined()
+    })
+    it(`${tool} denies a non-member`, async () => {
+      mockPrisma.workspace.findFirst.mockResolvedValue(null)
+      await expect(applyToolGate(tool, MEMBER, args)).rejects.toThrow(/not found or access denied/)
+    })
+  }
+})
+
 describe("apply_recorded_decision service-actor access", () => {
   // The tool's own registered description says "Service actors may apply but
   // cannot take decisions." — this asserts the policy actually matches that
@@ -293,6 +323,58 @@ describe("ADR 0020: AgentOrgAdminGrant for delegated scoring-model admin", () =>
     mockPrisma.agentOrgAdminGrant.findFirst.mockResolvedValue({ id: "grant-1", grantedByUserId: "grantor-1" })
     mockPrisma.organizationMember.findFirst.mockResolvedValue({ role: "MEMBER" })
     await expect(applyToolGate(tool, AGENT, argsFor(tool))).rejects.toThrow("Human administrator required.")
+  })
+
+  describe("set_workspace_scoring_model activates a brand-new (unattached) model", () => {
+    const ARGS = { workspaceId: "ws-1", scoringModelId: "model-new" }
+    beforeEach(() => {
+      // Never referenced by any WorkspaceScoringConfig, so the non-admin agent branch of assertScoringModelAccess cannot see it.
+      mockPrisma.workspaceScoringConfig.findFirst.mockResolvedValue(null)
+      mockPrisma.agentWorkspaceGrant.findMany.mockResolvedValue([])
+    })
+
+    it.each(["OPPORTUNITY", "SOLUTION"])("allows a granted agent to activate a same-org unattached model (%s)", async (entityType) => {
+      mockPrisma.agentOrgAdminGrant.findFirst.mockResolvedValue({ id: "grant-1", grantedByUserId: "grantor-1" })
+      mockPrisma.organizationMember.findFirst.mockResolvedValue({ role: "ADMIN" })
+      mockPrisma.scoringModel.findUnique.mockResolvedValue({ organizationId: "org-1" })
+      await expect(applyToolGate("set_workspace_scoring_model", AGENT, { ...ARGS, entityType })).resolves.toBeUndefined()
+    })
+
+    it("denies a granted agent a model from another organization", async () => {
+      mockPrisma.agentOrgAdminGrant.findFirst.mockResolvedValue({ id: "grant-1", grantedByUserId: "grantor-1" })
+      mockPrisma.organizationMember.findFirst.mockResolvedValue({ role: "ADMIN" })
+      mockPrisma.scoringModel.findUnique.mockResolvedValue({ organizationId: "org-other" })
+      await expect(applyToolGate("set_workspace_scoring_model", AGENT, ARGS)).rejects.toThrow("Scoring model not found or access denied.")
+    })
+
+    it("denies a granted agent a nonexistent model", async () => {
+      mockPrisma.agentOrgAdminGrant.findFirst.mockResolvedValue({ id: "grant-1", grantedByUserId: "grantor-1" })
+      mockPrisma.organizationMember.findFirst.mockResolvedValue({ role: "ADMIN" })
+      mockPrisma.scoringModel.findUnique.mockResolvedValue(null)
+      await expect(applyToolGate("set_workspace_scoring_model", AGENT, ARGS)).rejects.toThrow("Scoring model not found or access denied.")
+    })
+
+    it("denies an ungranted agent", async () => {
+      mockPrisma.agentOrgAdminGrant.findFirst.mockResolvedValue(null)
+      await expect(applyToolGate("set_workspace_scoring_model", AGENT, ARGS)).rejects.toThrow("Human administrator required.")
+    })
+
+    it("still allows a granted agent to clear the model (null)", async () => {
+      mockPrisma.agentOrgAdminGrant.findFirst.mockResolvedValue({ id: "grant-1", grantedByUserId: "grantor-1" })
+      mockPrisma.organizationMember.findFirst.mockResolvedValue({ role: "ADMIN" })
+      await expect(applyToolGate("set_workspace_scoring_model", AGENT, { ...ARGS, scoringModelId: null })).resolves.toBeUndefined()
+    })
+
+    it("leaves the human org admin path unchanged", async () => {
+      mockPrisma.workspaceMember.findFirst.mockResolvedValue(null)
+      mockPrisma.organizationMember.findFirst.mockResolvedValue({ role: "ADMIN" })
+      await expect(applyToolGate("set_workspace_scoring_model", { userId: "user-1" }, ARGS)).resolves.toBeUndefined()
+      expect(mockPrisma.agentOrgAdminGrant.findFirst).not.toHaveBeenCalled()
+    })
+
+    it("leaves the service key unchanged", async () => {
+      await expect(applyToolGate("set_workspace_scoring_model", { userId: null, purpose: "SERVICE" }, ARGS)).resolves.toBeUndefined()
+    })
   })
 
   // Raising a release-authorization request is an agent WRITE gated by workspace membership; the approval

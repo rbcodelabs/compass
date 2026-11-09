@@ -25,6 +25,7 @@ import { deleteMirroredComment, mirrorLegacySolutionComment, updateMirroredComme
 import { computeScore, validateMetricsForFormula, type ScoringMetricDef } from "@/lib/scoring";
 import { toCustomFieldDefinitionData } from "@/lib/custom-field-definitions";
 import { validateOpportunityFieldMove } from "@/lib/opportunity-field-board";
+import { applySubsetOrder } from "@/lib/discovery-board-ordering";
 import type {
   OpportunityStatus,
   SolutionStatus,
@@ -452,7 +453,45 @@ export async function moveOpportunity(
   revalidatePath(revalidatePathStr);
 }
 
-// ─── Reorder Opportunity (same-column sort) ───────────────────────────────────
+// ─── Reorder a status column (same-column sort) ───────────────────────────────
+
+/**
+ * Persists a reorder inside one status column. `orderedIds` are the cards the board shows in that column, in their new
+ * order (a squad or tag filter can make that a subset of the column). The WHOLE column is renumbered 0..n-1 in one
+ * transaction, the subset keeping the positions it occupied, so stored gaps and ties (which writing a single index
+ * leaves in place) cannot put the cards back in their old order when the page revalidates.
+ */
+export async function reorderOpportunitiesInColumn(
+  status: OpportunityStatus,
+  orderedIds: string[],
+  workspaceId: string,
+  revalidatePathStr: string
+) {
+  await requireProductWorkspace(workspaceId);
+  if (status === "ARCHIVED" || orderedIds.length === 0) throw new Error("Nothing to reorder");
+  const prisma = getPrisma();
+  const column = await prisma.opportunity.findMany({
+    where: { workspaceId, status },
+    orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }, { id: "asc" }],
+    select: { id: true, sortOrder: true },
+  });
+  const order = applySubsetOrder(column.map((row) => row.id), orderedIds);
+  // A card moved or archived elsewhere since the drag began: refuse rather than guess; the board refreshes to the truth.
+  if (!order) throw new Error("The column changed; refresh and try again");
+  const current = new Map(column.map((row) => [row.id, row.sortOrder]));
+  const changed = order.map((id, index) => ({ id, index })).filter(({ id, index }) => current.get(id) !== index);
+  if (changed.length > 0) {
+    const now = new Date();
+    await prisma.$transaction(async (tx) => {
+      for (const { id, index } of changed) {
+        await tx.opportunity.update({ where: { id, workspaceId, status }, data: { sortOrder: index, updatedAt: now } });
+      }
+    });
+  }
+  revalidatePath(revalidatePathStr);
+}
+
+// ─── Reorder Opportunity (single index; superseded by the column renumber above for the board) ──
 
 export async function reorderOpportunity(
   opportunityId: string,

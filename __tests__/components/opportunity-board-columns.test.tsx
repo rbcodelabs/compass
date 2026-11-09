@@ -6,7 +6,7 @@ import "@testing-library/jest-dom/vitest"
 const mocks = vi.hoisted(() => ({ replace: vi.fn(), params: new URLSearchParams() }))
 
 vi.mock("@/app/[orgSlug]/[workspaceSlug]/discovery/actions", () => ({
-  moveOpportunity: vi.fn(), reorderOpportunity: vi.fn(),
+  moveOpportunity: vi.fn(), reorderOpportunity: vi.fn(), reorderOpportunitiesInColumn: vi.fn(),
   createOpportunity: vi.fn(),
 }))
 vi.mock("@/app/[orgSlug]/saved-views-actions", () => ({
@@ -50,7 +50,10 @@ function renderBoard(props: Partial<React.ComponentProps<typeof OpportunityBoard
   render(<OpportunityBoard opportunitiesByStatus={BY_STATUS} orgSlug="acme" workspaceSlug="core" workspaceId="w1" {...props} />)
 }
 
+const LAYOUT_KEY = "compass:discovery-column-layout:w1"
+
 describe("OpportunityBoard column layout", () => {
+  beforeEach(() => window.localStorage.clear())
   afterEach(cleanup)
 
   it("renders Active first and Unreviewed last with no layout", () => {
@@ -58,8 +61,9 @@ describe("OpportunityBoard column layout", () => {
     expect(headings()).toEqual(["Active", "Prioritized", "Validating", "Exploring", "Unreviewed"])
   })
 
-  it("renders the resolved saved order, appending omitted statuses", () => {
-    const { visible } = resolveOpportunityColumns({ order: ["EXPLORING", "VALIDATING"], hidden: [] }, {})
+  it("renders the column order of the layout (the page's `columnOrder` only says which columns are shown)", () => {
+    window.localStorage.setItem(LAYOUT_KEY, JSON.stringify({ columnOrder: ["EXPLORING", "VALIDATING"], pinnedColumnIds: [] }))
+    const { visible } = resolveOpportunityColumns(undefined, {})
     renderBoard({ columnOrder: visible })
     expect(headings()).toEqual(["Exploring", "Validating", "Active", "Prioritized", "Unreviewed"])
   })
@@ -79,12 +83,12 @@ describe("OpportunityBoard column layout", () => {
 })
 
 describe("ColumnsPopover", () => {
-  beforeEach(() => { vi.clearAllMocks(); mocks.params = new URLSearchParams() })
+  beforeEach(() => { vi.clearAllMocks(); mocks.params = new URLSearchParams(); window.localStorage.clear() })
   afterEach(cleanup)
 
   const open = (layout: { order: string[]; hidden: string[] } | undefined, counts: Record<string, number>, savedViewId: string | null = null) => {
     const columns = resolveOpportunityColumns(layout, counts)
-    render(<ColumnsPopover savedViews={{ views: [], savedViewId }} columns={columns} countsByStatus={counts} />)
+    render(<ColumnsPopover workspaceId="w1" savedViews={{ views: [], savedViewId }} columns={columns} countsByStatus={counts} />)
     fireEvent.click(screen.getByTestId("columns-trigger"))
   }
   const lastHref = () => mocks.replace.mock.calls.at(-1)?.[0] as string
@@ -100,10 +104,21 @@ describe("ColumnsPopover", () => {
     expect(await screen.findByRole("checkbox", { name: "Show Exploring" })).toHaveAttribute("aria-disabled", "true")
   })
 
-  it("reorders with the move buttons through the order param", async () => {
+  it("reorders with the move buttons by writing the column layout, not the URL", async () => {
     open(undefined, {})
     fireEvent.click(await screen.findByRole("button", { name: "Move Exploring up" }))
-    expect(lastHref()).toBe("/acme/core/discovery?order=ACTIVE%2CPRIORITIZED%2CEXPLORING%2CVALIDATING%2CUNREVIEWED")
+    expect(mocks.replace).not.toHaveBeenCalled()
+    expect(JSON.parse(window.localStorage.getItem(LAYOUT_KEY)!).columnOrder).toEqual(["ACTIVE", "PRIORITIZED", "EXPLORING", "VALIDATING", "UNREVIEWED"])
+    const rows = [...document.querySelectorAll("[data-testid^=columns-row-]")].map((r) => r.getAttribute("data-testid"))
+    expect(rows).toEqual(["columns-row-ACTIVE", "columns-row-PRIORITIZED", "columns-row-EXPLORING", "columns-row-VALIDATING", "columns-row-UNREVIEWED"])
+  })
+
+  it("lists the columns in the layout's order", async () => {
+    window.localStorage.setItem(LAYOUT_KEY, JSON.stringify({ columnOrder: ["EXPLORING", "ACTIVE", "PRIORITIZED", "VALIDATING", "UNREVIEWED"], pinnedColumnIds: [] }))
+    open(undefined, {})
+    await screen.findByTestId("columns-row-ACTIVE")
+    const rows = [...document.querySelectorAll("[data-testid^=columns-row-]")].map((r) => r.getAttribute("data-testid"))
+    expect(rows).toEqual(["columns-row-EXPLORING", "columns-row-ACTIVE", "columns-row-PRIORITIZED", "columns-row-VALIDATING", "columns-row-UNREVIEWED"])
   })
 
   it("cannot move the first column up or the last down", async () => {
@@ -129,6 +144,7 @@ describe("ColumnsPopover", () => {
 })
 
 describe("OpportunityBoard live sync", () => {
+  beforeEach(() => window.localStorage.clear())
   afterEach(cleanup)
 
   const column = (title: string) => screen.getByRole("heading", { level: 3, name: new RegExp(`^${title}`) }).closest("section")!

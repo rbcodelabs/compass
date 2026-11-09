@@ -507,6 +507,7 @@ Association links between two entities are moving to one generic `entity_links` 
 | `linkType` | `fromId` (from) | `toId` (to) | Reads as |
 |---|---|---|---|
 | `EXPERIMENT_INFORMED_BY_STUDY` | an Experiment | a Research Study | the experiment is "Informed by" the study; the study "Informs" the experiment |
+| `ARTIFACT_ATTACHED_TO_EXPERIMENT` | an Artifact | an Experiment | the artifact is "Attached to" the experiment; the experiment lists its "Artifacts". Also written by `link_artifact_to_experiment`; unlike the other Artifact links it has no legacy table, needs no flag and is always enabled. An archived Artifact takes no new link |
 | `DOC_SPECIFIES_SCOPE` | a Doc | a Solution or an Opportunity (`toType` required) | the doc "Specifies" the scope; the scope is "Specified by" the doc. Written by `create_spec`; see [Specs and Discovery Plans](#specs-and-discovery-plans) |
 
 Rules for `EXPERIMENT_INFORMED_BY_STUDY`:
@@ -556,7 +557,7 @@ Deleting an Objective removes every link that names it, deleting a Key Result re
 | Tool | Description |
 |---|---|
 | `list_experiments` | Fetch experiments with optional status, squad, logged-result-presence, `updatedSince`, and recorded `endBefore` filters; summaries include dates, timestamps, result count/latest-result time, and stable Assumption/Solution/Opportunity IDs |
-| `get_experiment` | Return full details for a single experiment: hypothesis, method, kill condition, linked assumption, all logged results, conclusion, and `linkedStudies` (`{ id, name, studyType, status }`, from `EXPERIMENT_INFORMED_BY_STUDY` links; omitted when Research Capture is off or for scoped research contexts) |
+| `get_experiment` | Return full details for a single experiment: hypothesis, method, kill condition, linked assumption, all logged results, conclusion, and `linkedStudies` (`{ id, name, studyType, status }`, from `EXPERIMENT_INFORMED_BY_STUDY` links; omitted when Research Capture is off or for scoped research contexts) and `linkedArtifacts` (`{ id, title, status }`, from `ARTIFACT_ATTACHED_TO_EXPERIMENT` links; also omitted for scoped research contexts) |
 | `create_experiment` | Create a new experiment with hypothesis and method (starts in DESIGNING status) |
 | `log_experiment_result` | Record an observation or data point for a running experiment |
 | `conclude_experiment` | Conclude an experiment with PROCEED, KILL, ITERATE, or NOT_PURSUED (deliberately never run — e.g. the feature already shipped); automatically updates the linked Assumption's status (PROCEED → VALIDATED, KILL → INVALIDATED, ITERATE → UNTESTED, NOT_PURSUED → UNTESTED). NOT_PURSUED requires a `reason` and lands on its own terminal status distinct from KILLED, so a deliberate non-pursuit is never mistaken for an evidence-based kill |
@@ -979,8 +980,8 @@ Artifacts are first-class solution deliverables, separate from Markdown Docs. HT
 
 | Tool | Description |
 |---|---|
-| `list_artifacts` | List active Artifacts in a workspace; pass `includeArchived: true` to include archived records |
-| `get_artifact` | Return Artifact metadata, revision history, linked `solutions` and `decisions` without exposing private blob paths or uploaded HTML. Includes `kind` (`DOCUMENT` or `SLIDE_DECK`); a `SLIDE_DECK` also returns `slides` as `{ index, title, description }`, split from the current revision at read time |
+| `list_artifacts` | List active Artifacts in a workspace; pass `includeArchived: true` to include archived records, or `experimentId` to list only the Artifacts attached to that Experiment (see `link_artifact_to_experiment`) |
+| `get_artifact` | Return Artifact metadata, revision history, linked `solutions`, `decisions` and `experiments` (`{ id, title, status }`) without exposing private blob paths or uploaded HTML. Includes `kind` (`DOCUMENT` or `SLIDE_DECK`); a `SLIDE_DECK` also returns `slides` as `{ index, title, description }`, split from the current revision at read time |
 | `prepare_artifact_upload` | Prepare a signed, short-lived direct upload for one `.html` file up to 2 MiB; returns the upload pathname, client token, and an `uploadReceipt`. Use this instead of passing `html` inline so the document never enters the conversation |
 | `create_artifact` | Create `HTML_UPLOAD` from an `uploadReceipt` (preferred) or inline `html` plus an optional `.html` filename, `EXTERNAL_LINK` from an `http`/`https` `url` (Google Drive/Docs links are recognised and previewed read-only in the app; only the URL is stored), or `V0_CHAT` from a `https://v0.app/chat/<id>` `url` (read with the caller's own v0 connector grant; `title` may be empty to use the chat name). Optional `kind`: `DOCUMENT` (default) or `SLIDE_DECK`, which is allowed only for `HTML_UPLOAD` |
 | `refresh_artifact_from_v0` | Re-read a `V0_CHAT` Artifact from v0 and add a new revision only when v0 has a new version; returns `changed` |
@@ -989,6 +990,8 @@ Artifacts are first-class solution deliverables, separate from Markdown Docs. HT
 | `unlink_artifact_from_solution` | Remove an Artifact-to-Solution link |
 | `link_artifact_to_decision` | Idempotently link an active Artifact to an ordinary tracked Decision in the same workspace; takes `workspaceId`, `artifactId`, `requestId` and returns those IDs, `linkId`, and `created`. Live supporting material (ADR-0010), also mirrored into `entity_links` (`ARTIFACT_SUPPORTS_DECISION`) while the mirror flag is on; `link_entities` refuses that type |
 | `unlink_artifact_from_decision` | Idempotently remove a Decision link; takes `workspaceId`, `artifactId`, `requestId` and returns those IDs and `removed` |
+| `link_artifact_to_experiment` | Idempotently attach an active Artifact to an Experiment in the same workspace; takes `workspaceId`, `artifactId`, `experimentId` and returns those IDs, `linkId`, and `created`. A native `entity_links` link (`ARTIFACT_ATTACHED_TO_EXPERIMENT`, no legacy table), so `link_entities` accepts it too. An archived Artifact takes no new link; a foreign Artifact or Experiment is reported as not found. Read it back with `get_artifact` (`experiments`), `get_experiment` (`linkedArtifacts`) or `list_artifacts` with `experimentId` |
+| `unlink_artifact_from_experiment` | Idempotently remove an Artifact-to-Experiment link (also for an archived Artifact); takes `workspaceId`, `artifactId`, `experimentId` and returns those IDs and `removed` |
 | `archive_artifact` | Archive an Artifact while preserving its revision history and links |
 | `capture_screenshot` | Render an Artifact revision in a sandboxed headless browser and store the PNG as that revision's thumbnail, which the Artifact page then shows. Takes `workspaceId`, `artifactId`, and optional `revisionId` (default: the current revision), `fullPage`, and `viewport` (`width` 320–3840, `height` 240–2160). There is deliberately **no `url` input**. `EXTERNAL_LINK` revisions render the URL stored on the revision, so the tool cannot be used to render arbitrary pages. Google Drive/Docs links are refused, because the capture browser is not signed in to Google. A link behind Vercel Deployment Protection is captured with a bypass key: the static `MCP_BYPASS_SECRET` for Compass's own hosts, or, when `VERCEL_ACCESS_TOKEN` is configured (and optionally `VERCEL_TEAM_ID`), a one-capture key minted on the Vercel project serving the link and revoked as soon as the capture ends. A host that does not resolve to a project in that team gets no key, and a failure to mint one falls back to an unauthenticated capture. `HTML_UPLOAD` revisions render their stored HTML under the same Content-Security-Policy as the in-app preview, with every network request blocked. Returns `ID: <artifactId>` plus metadata only (`revisionId`, `width`, `height`, `byteSize`, `capturedAt`, `sourceUrl`, `httpStatus`; the last two are `null` for `HTML_UPLOAD`). It never returns the image or its storage key. Gate class: `WRITE` |
 | `create_feedback_source` | Create an [embedded-feedback](/help/24-embedded-feedback) source bound to an active Artifact and mint its first token. Takes `workspaceId`, `artifactId`, `name`, `allowedOrigins` and optional `authMode` (`INTERNAL_SSO` default, or `PORTAL`). Returns `sourceId`, the raw `token` **once**, `tokenPrefix`, a ready-to-paste `snippet`, and the stored `allowedOrigins`/`authMode`. Workspace member (same as `create_artifact`) |
@@ -1190,7 +1193,10 @@ so it silently stops working the moment that human is demoted or removed, with
 no separate revocation step required — and it is only ever created or revoked
 through that authenticated settings page, never through an MCP tool. An agent
 with no such grant is refused these tools exactly as before. Every call made
-under a grant is attributed to it in the agent's audit trail. See ADR 0020
+under a grant is attributed to it in the agent's audit trail. A granted agent
+can activate any scoring model of the workspace's own organization with
+`set_workspace_scoring_model`, including one it just created that no workspace
+uses yet, but never a model from another organization. See ADR 0020
 ("Explicit, Auditable Admin Grants for Delegated Agent Identities") in
 Compass Docs → Architecture Decisions.
 

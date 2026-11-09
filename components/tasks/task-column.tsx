@@ -6,7 +6,13 @@ import { TaskCard, type TaskCardData } from "./task-card";
 import { AddTaskForm } from "./add-task-form";
 import type { TaskStatus, MemberData } from "@/lib/types";
 import { TASK_STATUS_LABELS } from "@/lib/task-meta";
-import { BoardColumn, EmptyState } from "@/components/patterns";
+import {
+  BoardColumn,
+  EmptyState,
+  PINNED_COLUMN_BODY_CLASS,
+  PINNED_COLUMN_CLASS,
+  type BoardColumnLayoutControls,
+} from "@/components/patterns";
 
 // Labels come from `lib/task-meta.ts` so board columns, list rows and the task
 // detail page cannot drift apart; the accent and empty-state copy are
@@ -31,6 +37,10 @@ type Props = {
   members: MemberData[];
   onTaskAdded: (task: TaskCardData) => void;
   onCancel: (taskId: string) => void;
+  /** "pinned" is the dock's open panel: fixed width, no horizontal flex sizing. */
+  placement?: "scroller" | "pinned";
+  /** Pin / reorder / collapse controls in the column header (lib/board-layout.ts). */
+  layoutControls?: BoardColumnLayoutControls;
 };
 
 export function TaskColumn({
@@ -43,7 +53,10 @@ export function TaskColumn({
   members,
   onTaskAdded,
   onCancel,
+  placement = "scroller",
+  layoutControls,
 }: Props) {
+  const pinned = placement === "pinned";
   const { label, emptyText } = STATUS_CONFIG[status];
   const accent = ({ BACKLOG: "neutral", TODO: "info", IN_PROGRESS: "info", BLOCKED: "danger", IN_REVIEW: "warning", DONE: "success", CANCELLED: "neutral" } as const)[status];
   const taskIds = tasks.map((t) => t.id);
@@ -51,7 +64,18 @@ export function TaskColumn({
   const { setNodeRef, isOver } = useDroppable({ id: `column-${status}`, data: { status } });
 
   return (
-    <BoardColumn data-task-column={status} title={label} count={tasks.length} accent={accent} className="w-[calc(100cqw-1.5rem)] min-w-0 flex-none sm:w-[calc(100cqw-2rem)] md:w-72 md:min-w-[280px] md:flex-1 md:h-full" bodyRef={setNodeRef} bodyId={`task-column-${status}`} bodyClassName={`min-h-44 md:min-h-0 md:max-h-none md:flex-1 md:overflow-y-auto ${isOver ? "rounded-lg bg-primary/5 ring-2 ring-inset ring-ring/25" : ""}`} footer={<AddTaskForm workspaceId={workspaceId} status={status} revalidatePathStr={revalidatePathStr} members={members} onAdd={onTaskAdded} />}>
+    <BoardColumn
+      data-task-column={status}
+      title={label}
+      count={tasks.length}
+      accent={accent}
+      className={pinned ? PINNED_COLUMN_CLASS : "w-[calc(100cqw-1.5rem)] min-w-0 flex-none sm:w-[calc(100cqw-2rem)] md:w-72 md:min-w-[280px] md:flex-1 md:h-full"}
+      layoutControls={layoutControls}
+      bodyRef={setNodeRef}
+      bodyId={`task-column-${status}`}
+      bodyClassName={`${pinned ? PINNED_COLUMN_BODY_CLASS : "min-h-44 md:min-h-0 md:max-h-none md:flex-1 md:overflow-y-auto"} ${isOver ? "rounded-lg bg-primary/5 ring-2 ring-inset ring-ring/25" : ""}`}
+      footer={<AddTaskForm workspaceId={workspaceId} status={status} revalidatePathStr={revalidatePathStr} members={members} onAdd={onTaskAdded} />}
+    >
         <SortableContext items={taskIds} strategy={verticalListSortingStrategy}>
           {tasks.length === 0 ? (
             <EmptyState compact title={emptyText} className={isOver ? "border-border-interactive" : undefined} />

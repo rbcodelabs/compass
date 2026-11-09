@@ -268,6 +268,7 @@ export default async function ExperimentDetailPage({
           <MarkdownContent className="text-foreground/80">{experiment.method}</MarkdownContent>
         </section>
 
+        <LinkedEntitiesSection orgSlug={orgSlug} workspaceSlug={workspaceSlug} title="Linked artifacts" target={{ linkType: "ARTIFACT_ATTACHED_TO_EXPERIMENT", entityType: "EXPERIMENT", entityId: id }} />
         {researchCaptureEnabled && <LinkedEntitiesSection orgSlug={orgSlug} workspaceSlug={workspaceSlug} target={{ linkType: "EXPERIMENT_INFORMED_BY_STUDY", entityType: "EXPERIMENT", entityId: id }} />}
 
         {/* Kill condition shown again in body when not active (collapsed after conclusion) */}

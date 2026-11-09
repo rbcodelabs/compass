@@ -40,6 +40,8 @@ When upgrading an existing installation, point this credential at the private st
 
 Artifacts have stable identities and appear alongside Docs and Diagrams in the Library. They are not nested into the Page hierarchy. An Artifact can be linked to multiple Solutions, and a Solution can link to multiple Artifacts.
 
+Artifacts can also be attached to **Experiments**: the Artifact page has a **Linked experiments** section where you can choose an experiment to link or unlink, and the experiment shows the same relationship under **Linked artifacts** (see [Experiments](/help/03-experiments)). Archived Artifacts cannot be newly linked to an experiment, but existing links stay visible and removable.
+
 Artifacts can also be linked to ordinary **Decisions**. Open a Decision and use **Artifact to link** under **Linked to** to choose an active Artifact in the same workspace. The row opens its current preview and shows its current revision and archived status. The Artifact detail page lists reciprocal **Linked decisions**, where a workspace member can remove a link. Existing archived links stay visible and removable, but archived Artifacts cannot be newly linked.
 
 These relationships are **live supporting material, not frozen approval evidence**. Replacing an Artifact revision changes the current preview without reopening a Decision or changing its original subject, captured Sources, history, or recorded outcome. Links remain across Decision revisions. They are available on pending and decided ordinary Decisions, not legacy execution-authorization reviews. Only workspace members can edit the links; organization-admin-only Decision readers do not gain Artifact editing access.

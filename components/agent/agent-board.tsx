@@ -4,11 +4,23 @@
 import Link from "next/link"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { AlertCircle, CheckCircle2, Circle, Loader2, Sparkles } from "lucide-react"
-import { Board, BoardColumn, EmptyState } from "@/components/patterns"
 import {
+  Board,
+  BoardColumn,
+  BoardDock,
+  BOARD_FADE_END_TRACK_CLASS,
+  EmptyState,
+  PINNED_COLUMN_BODY_CLASS,
+  PINNED_COLUMN_CLASS,
+} from "@/components/patterns"
+import { useBoardDock } from "@/components/patterns/use-board-dock"
+import { useAgentBoardColumnLayout } from "@/components/agent/agent-board-column-layout"
+import {
+  BOARD_COLUMN_LABELS,
   bucketizeBoard,
   formatRelativeTime,
   type AgentBoardCard,
+  type AgentBoardColumn,
   type BoardColumnId,
 } from "@/lib/agent-board"
 import { cn } from "@/lib/utils"
@@ -118,6 +130,18 @@ export function AgentBoard({ workspaceId, basePath, initialCards, onOpenConversa
   }, [refresh])
 
   const columns = useMemo(() => bucketizeBoard(cards ?? []), [cards])
+  const columnById = useMemo(() => new Map<string, AgentBoardColumn>(columns.map((column) => [column.id, column])), [columns])
+
+  // Column layout (lib/board-layout.ts), browser-local. bucketizeBoard omits an empty column other than Working and New;
+  // such a column is simply not rendered (nor a dock tab) while the layout keeps its pin. Polls replace `cards`, never the
+  // layout, so a refresh cannot reset the order, the open tab or focus: the layout lives in its own store.
+  const containerRef = useRef<HTMLDivElement>(null)
+  const dock = useBoardDock({
+    controller: useAgentBoardColumnLayout(workspaceId),
+    renderedIds: columns.map((column) => column.id),
+    labelOf: (id) => BOARD_COLUMN_LABELS[id as BoardColumnId],
+    containerRef,
+  })
 
   if (cards === null) {
     return (
@@ -127,50 +151,78 @@ export function AgentBoard({ workspaceId, basePath, initialCards, onOpenConversa
     )
   }
 
+  function renderColumn(column: AgentBoardColumn, placement: "scroller" | "pinned") {
+    const pinned = placement === "pinned"
+    return (
+      <BoardColumn
+        key={column.id}
+        data-board-column={column.id}
+        title={column.label}
+        count={column.cards.length}
+        accent={COLUMN_ACCENT[column.id]}
+        layoutControls={dock.layoutControlsFor(column.id)}
+        // One column nearly fills the screen below md and the next peeks in (a scroll cue); from md they sit at a
+        // 280px minimum and the board scrolls once they no longer fit, instead of squashing.
+        className={pinned ? PINNED_COLUMN_CLASS : "w-[calc(100cqw-3.5rem)] min-w-0 flex-none sm:w-[calc(100cqw-4rem)] md:h-full md:w-72 md:min-w-[280px] md:flex-1"}
+        // py gives a card's shadow room inside the scroll box, so the first and last card are not clipped.
+        bodyClassName={pinned ? `${PINNED_COLUMN_BODY_CLASS} py-1` : "min-h-44 py-1 md:min-h-0 md:max-h-none md:flex-1 md:overflow-y-auto"}
+      >
+        {column.cards.length === 0 ? (
+          <EmptyState compact title={EMPTY_COPY[column.id]} />
+        ) : (
+          column.cards.map((card) => (
+            <BoardCard
+              key={card.id}
+              card={card}
+              column={column.id}
+              now={now}
+              href={`${basePath}/agent?c=${card.id}`}
+              onOpen={() => onOpenConversation(card.id)}
+            />
+          ))
+        )}
+      </BoardColumn>
+    )
+  }
+
+  const dockTabs = dock.dockTabsFor((id) => columnById.get(id)?.cards.length ?? 0)
+  const activeColumn = dock.dockOpen && dock.activeDockId ? columnById.get(dock.activeDockId) : undefined
+
   return (
-    <div data-testid="agent-board" className="flex min-h-0 flex-1 flex-col bg-surface-panel">
+    <div ref={containerRef} data-testid="agent-board" className="flex min-h-0 flex-1 flex-col bg-surface-panel">
       {failed && (
         <p role="status" className="shrink-0 px-4 pt-2 text-xs text-status-warning">
           Couldn&apos;t refresh just now. Showing the last update.
         </p>
       )}
-      <Board
-        label="Agent conversations by status"
-        // Same frame as the Tasks board: the board scrolls horizontally, and below md the page scrolls vertically.
-        className="block min-h-[24rem] flex-1 scroll-px-3 overflow-x-auto p-0 sm:scroll-px-4 md:overflow-y-hidden"
-      >
-        <div className="flex h-full w-max min-w-full items-stretch gap-3 px-3 pt-3 pb-3 sm:px-4 sm:pt-4 md:px-4 md:pt-3">
-          {columns.map((column) => (
-            <BoardColumn
-              key={column.id}
-              data-board-column={column.id}
-              title={column.label}
-              count={column.cards.length}
-              accent={COLUMN_ACCENT[column.id]}
-              // One column nearly fills the screen below md and the next peeks in (a scroll cue); from md they sit at a
-              // 280px minimum and the board scrolls once they no longer fit, instead of squashing.
-              className="w-[calc(100cqw-3.5rem)] min-w-0 flex-none sm:w-[calc(100cqw-4rem)] md:h-full md:w-72 md:min-w-[280px] md:flex-1"
-              // py gives a card's shadow room inside the scroll box, so the first and last card are not clipped.
-              bodyClassName="min-h-44 py-1 md:min-h-0 md:max-h-none md:flex-1 md:overflow-y-auto"
-            >
-              {column.cards.length === 0 ? (
-                <EmptyState compact title={EMPTY_COPY[column.id]} />
-              ) : (
-                column.cards.map((card) => (
-                  <BoardCard
-                    key={card.id}
-                    card={card}
-                    column={column.id}
-                    now={now}
-                    href={`${basePath}/agent?c=${card.id}`}
-                    onOpen={() => onOpenConversation(card.id)}
-                  />
-                ))
-              )}
-            </BoardColumn>
-          ))}
-        </div>
-      </Board>
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col md:flex-row">
+        <Board
+          label="Agent conversations by status"
+          fadeEnd={dock.dockedIds.length > 0}
+          // Same frame as the Tasks board: the board scrolls horizontally, and below md the page scrolls vertically.
+          className="block min-h-[24rem] flex-1 scroll-px-3 overflow-x-auto p-0 sm:scroll-px-4 md:overflow-y-hidden"
+        >
+          <div
+            className={cn(
+              "flex h-full w-max min-w-full items-stretch gap-3 px-3 pt-3 pb-3 sm:px-4 sm:pt-4 md:px-4 md:pt-3",
+              // Room for the scroller's tapered edge, so the last column at full scroll-end is not faded.
+              dock.dockedIds.length > 0 && BOARD_FADE_END_TRACK_CLASS,
+            )}
+          >
+            {dock.scrollerIds.map((id) => columnById.get(id)).filter((column): column is AgentBoardColumn => Boolean(column)).map((column) => renderColumn(column, "scroller"))}
+          </div>
+        </Board>
+        {/* The dock sits OUTSIDE the horizontal scroller, so it stays put while the rest scroll. The board is read-only: tabs are not drop targets. */}
+        {dockTabs.length > 0 ? (
+          <BoardDock
+            tabs={dockTabs}
+            activeId={dock.activeDockId}
+            collapsed={!dock.dockOpen}
+            onSelectTab={dock.selectDockTab}
+            panel={activeColumn ? renderColumn(activeColumn, "pinned") : null}
+          />
+        ) : null}
+      </div>
     </div>
   )
 }

@@ -7,6 +7,8 @@ const prisma = {
   artifactRevision: { findFirst: vi.fn(), create: vi.fn() },
   artifactLink: { findFirst: vi.fn(), findMany: vi.fn() },
   solution: { findMany: vi.fn() },
+  experiment: { findMany: vi.fn() },
+  entityLink: { findMany: vi.fn() },
   artifactBlobCleanup: { upsert: vi.fn() },
   $transaction: vi.fn(),
 }
@@ -27,6 +29,8 @@ beforeEach(() => {
   prisma.$transaction.mockImplementation(async (callback) => callback(prisma))
   prisma.artifactRevision.findFirst.mockResolvedValue(null)
   prisma.artifactLink.findMany.mockResolvedValue([])
+  prisma.entityLink.findMany.mockResolvedValue([])
+  prisma.experiment.findMany.mockResolvedValue([])
   storage.put.mockResolvedValue({ pathname: "artifacts/ws-1/art-1/rev-2.html" })
   storage.del.mockResolvedValue(undefined)
 })
@@ -81,6 +85,45 @@ describe("Artifact MCP output redaction", () => {
     const result = await getArtifact({ artifactId: "art-1" })
     expect(JSON.stringify(result)).not.toContain("private/")
     expect(JSON.stringify(result)).not.toContain("blobPathname")
+  })
+})
+
+describe("Artifact MCP experiment links", () => {
+  const link = { linkType: "ARTIFACT_ATTACHED_TO_EXPERIMENT", fromType: "ARTIFACT", fromId: "art-1", toType: "EXPERIMENT", toId: "exp-1", origin: "DIRECT" }
+
+  it("get_artifact returns the attached experiments (workspace-scoped) in structured data and text", async () => {
+    prisma.artifact.findUnique.mockResolvedValue({ id: "art-1", workspaceId: "ws-1", title: "Prototype", sourceType: "HTML_UPLOAD", status: "ACTIVE", currentRevision: null, revisions: [], links: [] })
+    prisma.entityLink.findMany.mockResolvedValue([link])
+    // The live-endpoint check and the display lookup both ask for the artifact / experiment rows in the workspace.
+    prisma.artifact.findMany.mockResolvedValue([{ id: "art-1", title: "Prototype" }])
+    prisma.experiment.findMany.mockResolvedValue([{ id: "exp-1", title: "Onboarding test", status: "RUNNING" }])
+    const result = await getArtifact({ artifactId: "art-1" })
+    expect(result.structuredContent).toMatchObject({ data: { experiments: [{ id: "exp-1", title: "Onboarding test", status: "RUNNING" }] } })
+    expect(result.content[0].text).toContain("Linked experiments: Onboarding test (exp-1)")
+    expect(prisma.entityLink.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ workspaceId: "ws-1", linkType: "ARTIFACT_ATTACHED_TO_EXPERIMENT" }) }))
+    expect(prisma.experiment.findMany).toHaveBeenLastCalledWith(expect.objectContaining({ where: { id: { in: ["exp-1"] }, workspaceId: "ws-1" } }))
+  })
+
+  it("get_artifact reports None and returns an empty list when nothing is attached", async () => {
+    prisma.artifact.findUnique.mockResolvedValue({ id: "art-1", workspaceId: "ws-1", title: "Prototype", sourceType: "HTML_UPLOAD", status: "ACTIVE", currentRevision: null, revisions: [], links: [] })
+    const result = await getArtifact({ artifactId: "art-1" })
+    expect(result.content[0].text).toContain("Linked experiments: None")
+    expect(result.structuredContent).toMatchObject({ data: { experiments: [] } })
+  })
+
+  it("list_artifacts with experimentId lists only the attached artifacts, and nothing when none are attached", async () => {
+    prisma.entityLink.findMany.mockResolvedValue([{ ...link, fromId: "art-2" }])
+    prisma.experiment.findMany.mockResolvedValue([{ id: "exp-1" }])
+    prisma.artifact.findMany.mockImplementation(async (args: { where: { id?: { in: string[] } } }) => (args.where.id ? [{ id: "art-2", title: "Two", kind: null }] : []))
+    const listed = await listArtifacts({ workspaceId: "ws-1", experimentId: "exp-1" })
+    expect(listed.structuredContent).toMatchObject({ data: { count: 1, items: [{ id: "art-2" }] } })
+    expect(prisma.artifact.findMany).toHaveBeenLastCalledWith(expect.objectContaining({ where: expect.objectContaining({ workspaceId: "ws-1", id: { in: ["art-2"] }, status: "ACTIVE" }) }))
+
+    prisma.entityLink.findMany.mockResolvedValue([])
+    prisma.artifact.findMany.mockClear()
+    const none = await listArtifacts({ workspaceId: "ws-1", experimentId: "exp-unknown" })
+    expect(none.structuredContent).toMatchObject({ data: { count: 0, items: [] } })
+    expect(prisma.artifact.findMany).not.toHaveBeenCalled()
   })
 })
 

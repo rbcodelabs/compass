@@ -91,7 +91,7 @@ test.describe("Scoring Models", () => {
       await page.waitForLoadState("networkidle");
 
       await page.getByRole("button", { name: "Add scoring model" }).click();
-      await page.getByLabel("Name").fill(modelName);
+      await page.locator("#scoring-model-name").fill(modelName);
       // Formula Type defaults to Weighted Sum — leave as-is.
 
       // First metric row (pre-populated by the form): Reach, POSITIVE.
@@ -240,7 +240,7 @@ test.describe("Scoring Models — invalid input", () => {
     await page.waitForLoadState("networkidle");
 
     await page.getByRole("button", { name: "Add scoring model" }).click();
-    await page.getByLabel("Name").fill(modelName);
+    await page.locator("#scoring-model-name").fill(modelName);
 
     await page.getByRole("combobox", { name: "Formula Type" }).click();
     await page.getByRole("option", { name: /Multiplicative/ }).click();
@@ -276,7 +276,7 @@ test.describe("Scoring Models — invalid input", () => {
     await page.waitForLoadState("networkidle");
 
     await page.getByRole("button", { name: "Add scoring model" }).click();
-    await page.getByLabel("Name").fill(modelName);
+    await page.locator("#scoring-model-name").fill(modelName);
 
     await page.locator("#create-metric-0-key").fill("reach");
     await page.locator("#create-metric-0-label").fill("Reach");

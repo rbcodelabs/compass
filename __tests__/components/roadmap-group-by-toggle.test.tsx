@@ -67,4 +67,59 @@ describe("RoadmapGroupByToggle", () => {
       "None",
     ])
   })
+
+  describe("icon-only trigger", () => {
+    it("shows no visible text, only an icon, and keeps its accessible name (both variants)", () => {
+      const { unmount } = render(<RoadmapGroupByToggle value="squad" customFieldOptions={[]} />)
+      const timeline = screen.getByLabelText("Group timeline by")
+      // The only text is the chevron glyph (a jsdom stand-in for the icon, hidden by CSS); no label, no value.
+      expect(timeline.textContent?.replace("▼", "")).toBe("")
+      expect(timeline.querySelector("[data-slot=select-value]")).toBeNull()
+      expect(timeline.querySelector("svg")).not.toBeNull()
+      unmount()
+      render(<RoadmapGroupByToggle variant="board" value="squad" customFieldOptions={[]} />)
+      const board = screen.getByLabelText("Group board by")
+      expect(board.textContent?.replace("▼", "")).toBe("")
+      expect(board.querySelector("svg")).not.toBeNull()
+    })
+
+    it("marks the trigger active, with a dot, only for a non-default grouping", () => {
+      const cases: Array<["timeline" | "board", string, boolean]> = [
+        ["timeline", "phase", false], ["timeline", "squad", true], ["timeline", "none", true],
+        ["board", "phase", false], ["board", "none", false], ["board", "squad", true], ["board", "field-1", true],
+      ]
+      for (const [variant, value, active] of cases) {
+        const { unmount } = render(<RoadmapGroupByToggle variant={variant} value={value} customFieldOptions={[{ id: "field-1", label: "Product Area" }]} />)
+        const trigger = screen.getByLabelText(variant === "board" ? "Group board by" : "Group timeline by")
+        expect(trigger.querySelector("[data-testid=group-by-active-dot]") !== null, `${variant}:${value}`).toBe(active)
+        expect(trigger.getAttribute("data-active") === "true", `${variant}:${value}`).toBe(active)
+        unmount()
+      }
+    })
+
+    it("names the current mode in a tooltip", async () => {
+      const cases: Array<["timeline" | "board", string, string]> = [
+        ["board", "phase", "No swimlanes"], ["board", "none", "No swimlanes"], ["board", "squad", "Swimlanes: Squad"],
+        ["board", "field-1", "Swimlanes: Product Area"], ["timeline", "phase", "Group by: Phase"],
+        ["timeline", "squad", "Group by: Squad"], ["timeline", "none", "Group by: None"], ["timeline", "field-1", "Group by: Product Area"],
+      ]
+      for (const [variant, value, text] of cases) {
+        const { unmount } = render(<RoadmapGroupByToggle variant={variant} value={value} customFieldOptions={[{ id: "field-1", label: "Product Area" }]} />)
+        const trigger = screen.getByLabelText(variant === "board" ? "Group board by" : "Group timeline by")
+        fireEvent.focus(trigger)
+        fireEvent.mouseEnter(trigger)
+        fireEvent.pointerEnter(trigger)
+        expect(await screen.findByText(text), `${variant}:${value}`).toBeInTheDocument()
+        unmount()
+      }
+    })
+
+    it("still opens a text list of options, and the board variant offers No swimlanes first", () => {
+      render(<RoadmapGroupByToggle variant="board" value="phase" customFieldOptions={[{ id: "field-1", label: "Product Area" }]} />)
+      fireEvent.click(screen.getByLabelText("Group board by"))
+      expect(screen.getAllByRole("option").map((option) => option.textContent)).toEqual(["No swimlanes", "Squad", "Product Area"])
+      selectOption(screen.getByRole("option", { name: "Squad" }))
+      expect(set).toHaveBeenLastCalledWith({ groupBy: "squad" })
+    })
+  })
 })

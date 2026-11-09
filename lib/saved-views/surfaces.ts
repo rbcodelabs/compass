@@ -7,6 +7,7 @@
 export const SAVED_VIEW_SURFACES = [
   "OPPORTUNITIES_BOARD",
   "SOLUTIONS_BOARD",
+  "TASKS_BOARD",
   "ROADMAP_WORKSPACE",
   "ROADMAP_ORG",
 ] as const
@@ -31,6 +32,7 @@ export type SurfaceConfig = {
 export const SURFACES: Readonly<Record<SavedViewSurface, SurfaceConfig>> = {
   OPPORTUNITIES_BOARD: { workspaceScoped: true, sharing: false, uniqueNames: true, label: "opportunities board" },
   SOLUTIONS_BOARD: { workspaceScoped: true, sharing: false, uniqueNames: true, label: "solutions board" },
+  TASKS_BOARD: { workspaceScoped: true, sharing: false, uniqueNames: true, label: "tasks board" },
   ROADMAP_WORKSPACE: { workspaceScoped: true, sharing: true, uniqueNames: false, label: "roadmap" },
   ROADMAP_ORG: { workspaceScoped: false, sharing: true, uniqueNames: false, label: "roadmap" },
 }

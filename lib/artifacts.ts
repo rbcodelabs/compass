@@ -381,6 +381,65 @@ export async function unlinkArtifactFromDecision(input: DecisionArtifactInput) {
   })
 }
 
+// ── Artifact <-> Experiment (native entity_links type: no legacy table, no mirror, reads straight from entity_links) ──────────────────
+// Thin wrappers over the generic service, so the registry owns every rule (same workspace, ACTIVE artifact for a NEW link, idempotent replay).
+// Both functions run in one retried link transaction, like the legacy writers above.
+
+const ARTIFACT_EXPERIMENT = "ARTIFACT_ATTACHED_TO_EXPERIMENT"
+const readCompareForExperiments = () => import("@/lib/links/read-compare")
+
+export async function linkArtifactToExperiment(input: {
+  artifactId: string; experimentId: string; workspaceId: string; createdById?: string | null; source?: Source
+}) {
+  return runTypedLinkTransaction(getPrisma(), async (tx) => {
+    const { linkEntities } = await entityLinkService()
+    const result = await linkEntities(tx, {
+      linkType: ARTIFACT_EXPERIMENT, fromId: input.artifactId, toId: input.experimentId, expectedWorkspaceId: input.workspaceId,
+      ctx: { source: input.source ?? "UI", createdById: input.createdById ?? null },
+    })
+    return { id: result.link.id, created: result.created }
+  })
+}
+
+export async function unlinkArtifactFromExperiment(input: { artifactId: string; experimentId: string; workspaceId: string }) {
+  return runTypedLinkTransaction(getPrisma(), async (tx) => {
+    const { unlinkEntities } = await entityLinkService()
+    const result = await unlinkEntities(tx, { linkType: ARTIFACT_EXPERIMENT, fromId: input.artifactId, toId: input.experimentId, expectedWorkspaceId: input.workspaceId })
+    return { removed: result.removed > 0 }
+  })
+}
+
+/** The Experiments an Artifact is attached to (ids, creation order; both ends must be live in the workspace). */
+export async function getArtifactExperimentIds(db: AppTransactionClient, workspaceId: string, artifactId: string): Promise<string[]> {
+  const links = await (await readCompareForExperiments()).readEntityLinksArtifactExperiment(db, workspaceId, { artifactIds: [artifactId] })
+  return links.map((link) => link.toId)
+}
+
+/** The Artifacts attached to an Experiment (ids, creation order), for the Experiment panel and the `experimentId` list filter. */
+export async function getExperimentArtifactIds(db: AppTransactionClient, workspaceId: string, experimentId: string): Promise<string[]> {
+  const links = await (await readCompareForExperiments()).readEntityLinksArtifactExperiment(db, workspaceId, { experimentIds: [experimentId] })
+  return links.map((link) => link.fromId)
+}
+
+/**
+ * The Artifacts attached to each of many Experiments in one batch (ids are chunked at 500 per query), for boards and galleries that
+ * would otherwise issue one query per card. Returns an entry only for an experiment that has at least one artifact; every list is
+ * de-duplicated, in creation order, and holds only Artifacts and Experiments that are live in `workspaceId`, so a foreign or dangling
+ * id yields nothing rather than leaking a link.
+ */
+export async function getExperimentsArtifactIds(db: AppTransactionClient, workspaceId: string, experimentIds: readonly string[]): Promise<Map<string, string[]>> {
+  const byExperiment = new Map<string, string[]>()
+  const ids = [...new Set(experimentIds)]
+  if (ids.length === 0) return byExperiment
+  const links = await (await readCompareForExperiments()).readEntityLinksArtifactExperiment(db, workspaceId, { experimentIds: ids })
+  for (const link of links) {
+    const list = byExperiment.get(link.toId) ?? []
+    if (!list.includes(link.fromId)) list.push(link.fromId)
+    byExperiment.set(link.toId, list)
+  }
+  return byExperiment
+}
+
 // Artifact link READS follow the ARTIFACT read-mode flag (lib/links/read-switch.ts): off = artifact_links (default), shadow = artifact_links
 // compared with entity_links, on = entity_links (artifact_links is still written, so the rollback is the flag). Same output shape and
 // ordering in every mode. The write paths above never come through here.

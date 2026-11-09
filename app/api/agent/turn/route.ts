@@ -38,6 +38,7 @@ import { NextRequest } from "next/server"
 import { auth } from "@/auth"
 import getPrisma from "@/lib/db"
 import { resolveWorkspaceAgentModel } from "@/lib/workspace-anthropic-key"
+import { agentRunCredentialSource, logAgentRunCredentialSource } from "@/lib/agent-credential-source"
 import { resolveAgentHandoffContext } from "@/lib/agent-context"
 import { resolveAgentPageContext } from "@/lib/agent-page-context"
 import { resolveConversationAccess } from "@/lib/agent-conversation-access"
@@ -559,6 +560,8 @@ export async function POST(request: NextRequest) {
       throw error
     }
     const { run, workerToken, sandboxName } = created
+    // One log line per run naming which credential pays for it (a closed label, never the key). Search "agent-run credential source".
+    logAgentRunCredentialSource({ runId: run.id, workspaceId, source: agentRunCredentialSource({ harness, model: resolved?.ok ? resolved : undefined }) })
 
     let apiKeyId: string | undefined
     try {

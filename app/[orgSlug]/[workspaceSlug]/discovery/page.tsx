@@ -19,6 +19,8 @@ import { OPPORTUNITY_PIPELINE_STATUSES } from "@/lib/opportunity-status";
 import type { OpportunityCardData } from "@/components/discovery/opportunity-card";
 import { DiscoverySavedViewsMenu } from "@/components/discovery/discovery-saved-views";
 import { ColumnsPopover } from "@/components/discovery/columns-popover";
+import { OpportunitiesColumnLayoutProvider } from "@/components/discovery/discovery-column-layout";
+import { legacyOrderToLayout } from "@/lib/discovery/board-layout";
 import {
   needsSavedViewExpansion,
   opportunitiesHref,
@@ -350,7 +352,24 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
   }
   const exportHref = `/api/discovery/export?${exportParams.toString()}`;
 
+  // Where the board's column layout starts. The layout is client state (see discovery-column-layout.tsx); it supersedes
+  // the older columns.status.order, which is still read: a selected view's own layout, else the layout its legacy order
+  // describes, and an explicit legacy ?order= link wins over a view that has no layout of its own. A legacy ?order= with
+  // no view starts the layout too (as a source of its own, so it is not mirrored to this browser's storage).
+  const urlOrder = typeof search.order === "string" ? boardState.display.columns.status?.order : undefined;
+  const layoutSource = selectedView && selectedState
+    ? {
+        id: selectedView.id,
+        version: selectedView.updatedAt,
+        columnLayout: selectedState.display.columnLayout ?? legacyOrderToLayout(urlOrder ?? selectedState.display.columns.status?.order),
+      }
+    : urlOrder && urlOrder.length > 0
+      ? { id: "url-order", version: urlOrder.join(","), columnLayout: legacyOrderToLayout(urlOrder) }
+      : null;
+
   return (
+    // The header (saved-views menu, Columns popover) and the board are siblings; they share the column layout through this provider.
+    <OpportunitiesColumnLayoutProvider workspaceId={workspace.id} savedView={layoutSource}>
     <WorkspacePage
       title={thinkingModel.labels.opportunity.plural}
       contentClassName={view === "board" ? "p-0 sm:p-0 md:p-0" : undefined}
@@ -376,6 +395,7 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
             )}
             {view === "board" && !groupField && (
               <ColumnsPopover
+                workspaceId={workspace.id}
                 savedViews={{ views: savedViews, savedViewId: selectedView?.id ?? null }}
                 columns={boardColumns}
                 countsByStatus={columnCounts}
@@ -450,6 +470,7 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
         </div>
       )}
     </WorkspacePage>
+    </OpportunitiesColumnLayoutProvider>
   );
 }
 

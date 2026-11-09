@@ -46,6 +46,8 @@ export const FAMILY_LINK_TYPES: Readonly<Record<LinkReadFamily, readonly string[
   TASK: [TASK_REFERENCES],
 })
 
+const ARTIFACT_EXPERIMENT = "ARTIFACT_ATTACHED_TO_EXPERIMENT"
+
 const ID_CAP = 20
 const ID_CHUNK = 500
 
@@ -335,6 +337,22 @@ export async function readEntityLinksArtifact(
     for (const request of requests) tracked.add(request.id)
   }
   return live.filter((link) => link.linkType !== ARTIFACT_DECISION || tracked.has(link.toId))
+}
+
+/**
+ * Artifact <-> Experiment (ARTIFACT_ATTACHED_TO_EXPERIMENT, a native type: no legacy twin, so nothing to compare against). Scope by artifact
+ * or by experiment ids. Rows are workspace-filtered, ids are chunked, and a link survives only while BOTH endpoints are live in the
+ * workspace, so a dangling or drifted row never shows. The order is creation order, ties broken by id.
+ */
+export async function readEntityLinksArtifactExperiment(
+  tx: Tx,
+  workspaceId: string,
+  scope: { artifactIds?: readonly string[]; experimentIds?: readonly string[] },
+): Promise<ComparableLink[]> {
+  const rows = scope.artifactIds
+    ? await entityLinkRows(tx, workspaceId, ARTIFACT_EXPERIMENT, { fromIds: scope.artifactIds })
+    : await entityLinkRows(tx, workspaceId, ARTIFACT_EXPERIMENT, { toIds: scope.experimentIds ?? [] })
+  return retainLiveEndpoints(tx, workspaceId, withoutOrigin(rows))
 }
 
 /**
