@@ -88,7 +88,7 @@ export function createInheritanceFakeDb(options: { permissive?: boolean } = {}) 
           if (args.skipDuplicates) continue
           throw new Error("unique violation")
         }
-        const row = { id: `gen-${++seq}`, ...data }
+        const row: Row = { id: `gen-${++seq}`, ...data }
         tables[model].push(row)
         written.push({ fieldId: row.fieldId, objectId: row.objectId })
       }
