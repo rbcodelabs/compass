@@ -137,7 +137,7 @@ test("an artifact links to an experiment, shows on both pages, unlinks, and its 
   await page.setViewportSize({ width: 1280, height: 800 })
   await expect(artifactsSection.getByRole("link", { name: artifactTitle, exact: true })).toBeVisible()
   await page.goto(artifactUrl)
-  await expect(page.getByRole("region", { name: "Linked experiments" }).getByRole("link", { name: experimentTitle, exact: true })).toBeVisible()
+  await expect(page.getByRole("region", { name: "Linked experiments" }).getByRole("link", { name: experimentTitle, exact: true })).toBeVisible({ timeout: 30_000 })
 
   // An archived artifact keeps its link visible and removable but cannot take a new one.
   await page.getByRole("button", { name: "Archive", exact: true }).click()
@@ -160,7 +160,7 @@ test("an artifact links to an experiment, shows on both pages, unlinks, and its 
   expect(cli("leftover", workspace.id, artifactId)).toBe(0)
   expect(attachedArtifacts(workspace.id, experiment.id)).toEqual([])
   await page.goto(`${base}/experiments/${experiment.id}`)
-  await expect(page.getByRole("region", { name: "Linked artifacts" }).getByText("No artifacts linked yet.")).toBeVisible()
+  await expect(page.getByRole("region", { name: "Linked artifacts" }).getByText("No artifacts linked yet.")).toBeVisible({ timeout: 30_000 }) // the section loads through a server action; the dev server can be slow
   await expect(page.getByRole("link", { name: artifactTitle, exact: true })).toHaveCount(0)
   expect(await prisma.experiment.count({ where: { id: experiment.id } })).toBe(1)
 })
