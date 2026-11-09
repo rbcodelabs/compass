@@ -26,7 +26,7 @@ export type LinkedEntitiesTarget = { linkType: string; entityType: string; entit
  * would accept.
  *
  * Props beyond the target: `title` overrides the registry label as the heading, `refreshKey` re-reads without blanking the view
- * (for example when the viewed record is archived in place), and `fullWidth` fills the container on pages whose cards are full width.
+ * (for example when the viewed record is archived in place), and `fullWidth` fills the container (and drops the panel background) on pages whose cards are full width.
  */
 export function LinkedEntitiesSection({ orgSlug, workspaceSlug, target, title, refreshKey, fullWidth }: { orgSlug: string; workspaceSlug: string; target: LinkedEntitiesTarget; /** Changing this reloads the section (e.g. the viewed record was archived, which changes whether it can take a new link). */ refreshKey?: string; /** Fill the container instead of capping at a readable column width (for pages whose other cards are full width). */ fullWidth?: boolean; /** Overrides the registry label as the heading (e.g. "Linked experiments"). */ title?: string }) {
   const [view, setView] = useState<LinkedEntitiesView | null>(null)
