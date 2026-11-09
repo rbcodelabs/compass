@@ -118,14 +118,14 @@ export function InheritanceRulesPanel({ orgSlug, workspaceSlug, fields, rules, a
       {available && rules.length === 0 && <p className="text-xs text-muted-foreground">No inheritance rules yet.</p>}
 
       {available && rules.length > 0 && (
-        <div className="overflow-x-auto rounded-xl border border-border" data-testid="inheritance-rules-list">
-          <ul className="min-w-[640px] divide-y divide-border">
+        <div className="rounded-xl border border-border" data-testid="inheritance-rules-list">
+          <ul className="divide-y divide-border">
             {rules.map((rule, index) => {
               const sameTarget = rules.filter((candidate) => candidate.targetFieldId === rule.targetFieldId);
               const position = sameTarget.findIndex((candidate) => candidate.id === rule.id);
               return (
-                <li key={rule.id} className="flex items-center justify-between gap-3 px-4 py-2.5" data-testid={`inheritance-rule-${index}`}>
-                  <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+                <li key={rule.id} className="flex flex-col gap-2 px-4 py-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-3" data-testid={`inheritance-rule-${index}`}>
+                  <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 break-words">
                     <span className="rounded bg-muted px-1.5 py-0.5 text-xs tabular-nums text-muted-foreground" title="Priority: lower runs first">
                       {rule.priority + 1}
                     </span>
@@ -230,7 +230,7 @@ export function InheritanceRulesPanel({ orgSlug, workspaceSlug, fields, rules, a
                   setSourceFieldId("");
                 }}
               >
-                <SelectTrigger id="inheritance-target" aria-label="Roadmap item field" data-testid="inheritance-target">
+                <SelectTrigger id="inheritance-target" aria-label="Roadmap item field" data-testid="inheritance-target" className="w-full min-w-0">
                   <SelectValue placeholder="Choose a field" />
                 </SelectTrigger>
                 <SelectContent>
@@ -245,7 +245,7 @@ export function InheritanceRulesPanel({ orgSlug, workspaceSlug, fields, rules, a
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="inheritance-source">Inherit from</Label>
               <Select value={sourceFieldId} onValueChange={(value) => setSourceFieldId(value ?? "")} disabled={!target}>
-                <SelectTrigger id="inheritance-source" aria-label="Inherit from" data-testid="inheritance-source">
+                <SelectTrigger id="inheritance-source" aria-label="Inherit from" data-testid="inheritance-source" className="w-full min-w-0">
                   <SelectValue placeholder={target ? "Choose a source field" : "Pick the roadmap item field first"} />
                 </SelectTrigger>
                 <SelectContent>
