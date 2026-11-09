@@ -24,6 +24,7 @@ const CONCLUSION_TONE: Record<Conclusion, string> = {
   NOT_PURSUED: "border-status-neutral/30 text-status-neutral",
 };
 
+// An experiment with no entry in `extras` (e.g. data still loading after a live refresh) renders as "nothing linked".
 const EMPTY_SET: GalleryArtifactSet = { artifacts: [], moreArtifacts: 0 };
 
 function GalleryCard({ experiment, artifacts, workspaceId, orgSlug, workspaceSlug }: { experiment: ExperimentGalleryItem; artifacts: GalleryArtifactSet; workspaceId: string; orgSlug: string; workspaceSlug: string }) {
