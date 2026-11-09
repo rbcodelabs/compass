@@ -110,6 +110,8 @@ describe("ToolApprovalCard", () => {
     fireEvent.click(approve)
     fireEvent.click(approve)
     fireEvent.click(screen.getByTestId("deny-button"))
+    await waitFor(() => expect(m.decide).toHaveBeenCalledTimes(1))
+    await new Promise((resolve) => setTimeout(resolve, 50))
     expect(m.decide).toHaveBeenCalledTimes(1)
     await act(async () => { finish({ ok: true, tone: "success", message: "done" }) })
   })

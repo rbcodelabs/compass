@@ -56,7 +56,7 @@ const DECISION_ERRORS: Record<string, string> = {
   HUMAN_ACTOR_REQUIRED: "A signed-in person must make this decision.",
 }
 
-/** Reason codes from recordDecision / decideToolApproval (a DecisionError or ToolApprovalError `code`) as a sentence. */
+/** Reason codes from the decision service (a DecisionError or ToolApprovalError `code`) as a sentence. */
 export function describeDecisionError(code: string | undefined): ApprovalActionResult {
   const known = code ? DECISION_ERRORS[code] : undefined
   if (code === "REQUEST_NOT_FOUND" || code === "OPTION_NOT_FOUND") return { ok: false, tone: "danger", message: "That approval could not be found." }

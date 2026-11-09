@@ -112,6 +112,8 @@ describe("runApprovalDecision: approve and deny", () => {
     [{ status: "REFUSED", reason: "TOOL_NOT_REGISTERED" }, "NOT_RUN", /not available for approval/],
   ])("maps executor outcome %j to a readable message", async (execution, state, pattern) => {
     m.decide.mockResolvedValue({ decision: { id: "d1" }, execution })
+    // The state reported back is the stored one, read after the attempt.
+    m.loadView.mockResolvedValueOnce(view("PENDING")).mockResolvedValue(view(state))
     const r = await runApprovalDecision(input())
     expect(r.ok).toBe(false)
     expect(r.state).toBe(state)

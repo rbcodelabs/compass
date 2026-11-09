@@ -53,7 +53,7 @@ describe("approval page: access", () => {
     expect(html).toContain("&quot;new&quot;")
     expect(html).toContain('data-testid="approve-button"')
     expect(html).toContain('data-testid="deny-button"')
-    expect(html).not.toMatch(/data-testid="approve-button"[^>]*disabled/)
+    expect(html).not.toMatch(/data-testid="approve-button"[^>]*\sdisabled(=|\s|>)/)
     expect(html).toContain("min-w-0")
   })
 

@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useState, useTransition } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import type { ApprovalActionResult } from "@/lib/tool-approval/messages"
@@ -34,35 +34,35 @@ export function ApprovalActions({
   const router = useRouter()
   const keys = useRef<Partial<Record<Action, string>>>({})
   const inFlight = useRef(false)
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
   const [result, setResult] = useState<ApprovalActionResult | null>(null)
   const disabled = pending || Boolean(disabledReason)
 
-  const click = (action: Action) => {
+  const click = async (action: Action) => {
     if (inFlight.current || disabledReason) return
     inFlight.current = true
+    setPending(true)
     keys.current[action] ??= newKey()
     const key = keys.current[action]!
-    startTransition(async () => {
-      try {
-        const outcome = await decide(action, key)
-        setResult(outcome)
-        onDecided?.(outcome)
-        router.refresh()
-      } catch {
-        setResult({ ok: false, tone: "danger", message: "The request did not complete. Refresh to see the current status; an approval is never run twice." })
-      } finally {
-        inFlight.current = false
-      }
-    })
+    try {
+      const outcome = await decide(action, key)
+      setResult(outcome)
+      onDecided?.(outcome)
+      router.refresh()
+    } catch {
+      setResult({ ok: false, tone: "danger", message: "The request did not complete. Refresh to see the current status; an approval is never run twice." })
+    } finally {
+      inFlight.current = false
+      setPending(false)
+    }
   }
 
   const size = compact ? "h-11 px-3 sm:h-8" : "h-11 px-4 sm:h-9"
   return (
     <div className="min-w-0 space-y-2">
       <div className="flex flex-wrap gap-2">
-        <Button type="button" className={size} disabled={disabled} onClick={() => click("APPROVE")} data-testid="approve-button">Approve</Button>
-        <Button type="button" variant="destructive" className={size} disabled={disabled} onClick={() => click("REJECT")} data-testid="deny-button">Deny</Button>
+        <Button type="button" className={size} disabled={disabled} onClick={() => void click("APPROVE")} data-testid="approve-button">Approve</Button>
+        <Button type="button" variant="destructive" className={size} disabled={disabled} onClick={() => void click("REJECT")} data-testid="deny-button">Deny</Button>
       </div>
       {disabledReason && <p className="text-xs text-text-subtle" data-testid="approval-disabled-reason">{disabledReason}</p>}
       <p role="status" aria-live="polite" data-testid="approval-result" className={cn("text-sm break-words [overflow-wrap:anywhere]", result ? TONE[result.tone] : "sr-only")}>

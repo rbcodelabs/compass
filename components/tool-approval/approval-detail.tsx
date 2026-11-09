@@ -36,7 +36,7 @@ const tone = {
 export function OutcomeBox({ view }: { view: ApprovalView }) {
   const { state, decision, receipt } = view
   return (
-    <section aria-label="Outcome" data-testid="approval-outcome" className={cn("min-w-0 space-y-2 rounded-lg border p-4 text-sm", tone[APPROVAL_STATES[state.key].tone])}>
+    <section aria-label="Result of this request" data-testid="approval-outcome" className={cn("min-w-0 space-y-2 rounded-lg border p-4 text-sm", tone[APPROVAL_STATES[state.key].tone])}>
       <p className="m-0 font-semibold">{state.label}</p>
       <p className="m-0 text-text-primary">{state.explanation}</p>
       {decision && (
