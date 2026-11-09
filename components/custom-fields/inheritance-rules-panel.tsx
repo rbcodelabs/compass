@@ -222,7 +222,7 @@ export function InheritanceRulesPanel({ orgSlug, workspaceSlug, fields, rules, a
               <Select
                 value={targetFieldId}
                 onValueChange={(value) => {
-                  setTargetFieldId(value);
+                  setTargetFieldId(value ?? "");
                   setSourceFieldId("");
                 }}
               >
@@ -240,7 +240,7 @@ export function InheritanceRulesPanel({ orgSlug, workspaceSlug, fields, rules, a
             </div>
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="inheritance-source">Inherit from</Label>
-              <Select value={sourceFieldId} onValueChange={setSourceFieldId} disabled={!target}>
+              <Select value={sourceFieldId} onValueChange={(value) => setSourceFieldId(value ?? "")} disabled={!target}>
                 <SelectTrigger id="inheritance-source" aria-label="Inherit from" data-testid="inheritance-source">
                   <SelectValue placeholder={target ? "Choose a source field" : "Pick the roadmap item field first"} />
                 </SelectTrigger>
