@@ -712,7 +712,7 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
     <div className="flex h-full min-h-0 min-w-0">
       <div data-slot="doc-editor-column" className="flex min-h-0 min-w-0 flex-1 flex-col">
       {/* Save indicator */}
-      <div data-testid="doc-save-status" data-state={saveStatus} className="mx-auto w-full max-w-4xl flex justify-end px-8 pt-3 min-h-7">
+      <div data-testid="doc-save-status" data-state={saveStatus} className="mx-auto w-full max-w-[764px] flex justify-end px-8 pt-3 min-h-7">
         {saveStatus === "saving" && <span className="text-xs text-text-subtle">Saving…</span>}
         {saveStatus === "saved" && <span className="text-xs text-text-subtle">Saved</span>}
         {justUpdated && !remote && <UpdatedJustNow />}
@@ -721,7 +721,7 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
       {remote && <RemoteUpdateBanner writer={remote.writer} onReload={handleReloadRemote} onKeepMine={handleKeepMine} />}
 
       {/* Icon + title on a single row */}
-      <div className="mx-auto w-full max-w-4xl flex items-center gap-2 px-4 pb-2 sm:px-8">
+      <div className="mx-auto w-full max-w-[764px] flex items-center gap-2 px-4 pb-2 sm:px-8">
         <DocsLibraryButton />
         {/* Icon picker */}
         <div className="relative shrink-0">
@@ -769,7 +769,7 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
 
       {/* Toolbar */}
       <div className="sticky top-0 z-10 border-b border-border-default bg-surface-panel/90 backdrop-blur-sm">
-        <div className="mx-auto flex w-full max-w-4xl items-center gap-1 px-4 py-1.5 sm:px-8">
+        <div className="mx-auto flex w-full max-w-[764px] items-center gap-1 px-4 py-1.5 sm:px-8">
         {/* Buttons scroll horizontally on narrow screens instead of wrapping to a
             second row (which used to eat viewport height) or shrinking to the
             point of being unreadable/untappable. */}
@@ -926,7 +926,7 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
 
       {/* Editor */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto">
-      <div className="mx-auto w-full max-w-4xl px-8 py-4">
+      <div className="mx-auto w-full max-w-[764px] px-8 py-4">
         {specHeader}
         {/* Properties — scrolls with the content instead of pinning the viewport */}
         <DocProperties
@@ -977,7 +977,7 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
         </div>
 
         <DocEmbedCardsProvider resolve={resolveEmbeds} editing={embedEditing}>
-          <EditorContent editor={editor} className="min-h-[400px] prose-custom" />
+          <EditorContent editor={editor} className="doc-prose prose-custom min-h-[400px]" />
         </DocEmbedCardsProvider>
         {!readOnly ? <CompassLinkPickerMenu editor={editor} controller={linkPickerController} orgSlug={orgSlug} workspaceSlug={workspaceSlug} /> : null}
         {specScopes && !readOnly ? <SpecSlashMenu editor={editor} controller={slashController} scopes={specScopes} creators={creators} /> : null}
