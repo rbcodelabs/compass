@@ -2,6 +2,7 @@
 
 import { Rows3 } from "lucide-react"
 import { useUrlState } from "@/hooks/use-url-state"
+import { useLabels } from "@/components/thinking-model/thinking-model-provider"
 import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 
@@ -22,13 +23,15 @@ export type RoadmapGroupByFieldOption = { id: string; label: string }
  */
 export function RoadmapGroupByToggle({ value, customFieldOptions, variant = "timeline" }: {
   /** "timeline" groups rows (Phase default); "board" groups swimlanes (no lanes default). */
-  variant?: "timeline" | "board";
+  variant?: "timeline" | "board" | "gallery";
   /** "phase" | "squad" | "none" | a groupable CustomFieldDefinition id. */
   value: string;
   customFieldOptions: RoadmapGroupByFieldOption[];
 }) {
   const { set } = useUrlState()
   const isBoard = variant === "board"
+  const isGallery = variant === "gallery"
+  const labels = useLabels()
   // On the board, Phase and None are the same thing: no swimlanes. "phase" is the
   // URL default (param omitted), so it doubles as the board's "None" item.
   const selected = isBoard && value === "none" ? "phase" : value
@@ -36,7 +39,8 @@ export function RoadmapGroupByToggle({ value, customFieldOptions, variant = "tim
   const optionLabel =
     selected === "squad" ? "Squad"
     : selected === "none" ? "None"
-    : selected === "phase" ? "Phase"
+    : selected === "status" ? `${labels.solution.singular} status`
+    : selected === "phase" ? (isGallery ? "Horizon" : "Phase")
     : (customFieldOptions.find((option) => option.id === selected)?.label ?? selected)
   const tooltip = isBoard
     ? (selected === "phase" ? "No swimlanes" : `Swimlanes: ${optionLabel}`)
@@ -50,7 +54,7 @@ export function RoadmapGroupByToggle({ value, customFieldOptions, variant = "tim
         <TooltipTrigger
           render={
             <SelectTrigger
-              aria-label={isBoard ? "Group board by" : "Group timeline by"}
+              aria-label={isGallery ? "Group gallery by" : isBoard ? "Group board by" : "Group timeline by"}
               data-slot="roadmap-group-by-trigger"
               data-active={active ? "true" : undefined}
               // Icon only: square, centred, and no chevron (the tooltip and the dot carry the state).
@@ -75,11 +79,12 @@ export function RoadmapGroupByToggle({ value, customFieldOptions, variant = "tim
         {isBoard ? (
           <SelectItem value="phase">No swimlanes</SelectItem>
         ) : (
-          <SelectItem value="phase">Phase</SelectItem>
+          <SelectItem value="phase">{isGallery ? "Horizon" : "Phase"}</SelectItem>
         )}
+        {isGallery && <SelectItem value="status">{labels.solution.singular} status</SelectItem>}
         <SelectItem value="squad">Squad</SelectItem>
         {!isBoard && <SelectItem value="none">None</SelectItem>}
-        {customFieldOptions.map((option) => (
+        {!isGallery && customFieldOptions.map((option) => (
           <SelectItem key={option.id} value={option.id}>{option.label}</SelectItem>
         ))}
       </SelectContent>
