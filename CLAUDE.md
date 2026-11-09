@@ -107,7 +107,7 @@ The generic recipe is the `proxmox-devbox` skill. These are the Compass-specific
 - **Node:** `engines` requires 22.x; the VM default is newer, so `fnm use 22` first.
 - **Sync size:** the checkout can hold ~50 GB in `.worktrees`, `.claude`, `.pnpm-store` and `.npm-cache`. Exclude all four (plus `node_modules`, `.next`, `.git`) from any rsync, or it hangs.
 - **Data:** run `npx tsx --env-file=.env.local scripts/seed-portal-demo.ts` to get a public roadmap at `/portal/demo/acme/roadmap`. It seeds no user, so authenticated pages won't work.
-- **Typecheck/E2E on the box:** `NODE_OPTIONS=--max-old-space-size=8192 npx tsc --noEmit`. The functional E2E needs a local `compass_e2e` database; a throwaway `postgres:16` container on `localhost:5440` works (`pnpm test:e2e:functional -- <spec>`). `launch-tiers.spec.ts` currently fails there on a trailing console-error check (four 404s), identically on `main`.
+- **Typecheck/E2E on the box:** `NODE_OPTIONS=--max-old-space-size=8192 npx tsc --noEmit`. The functional E2E needs a local `compass_e2e` database; a throwaway `postgres:16` container on `localhost:5440` works (`pnpm test:e2e:functional -- <spec>`). Start it with `podman run -d --rm ...` and tear it down with `podman rm -fv <name>` (the `-v` matters: a plain `rm -f` leaks the image's anonymous data volume, ~70 MB each). `launch-tiers.spec.ts` currently fails there on a trailing console-error check (four 404s), identically on `main`.
 
 ## Portal SSO Identify — resyncing a drifted customer secret
 
