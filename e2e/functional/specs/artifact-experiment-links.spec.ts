@@ -12,6 +12,27 @@ async function shoot(page: Page, testInfo: TestInfo, name: string) {
   await page.screenshot({ path: testInfo.outputPath(`${name}.png`), ...capture })
   if (process.env.ARTEXP_QA_DIR) await page.screenshot({ path: `${process.env.ARTEXP_QA_DIR}/${name}.png`, ...capture })
 }
+/**
+ * Holds every server action (the section's link reads) until released, so the LOADING state can be seen and captured.
+ * `visit` navigates; the screenshot is taken while the section still says "Loading links…".
+ */
+async function captureLoading(page: Page, testInfo: TestInfo, name: string, visit: () => Promise<void>) {
+  let release!: () => void
+  const gate = new Promise<void>((resolve) => { release = resolve })
+  await page.route("**/*", async (route) => {
+    const request = route.request()
+    if (request.method() === "POST" && request.headers()["next-action"]) await gate
+    await route.continue()
+  })
+  try {
+    await visit()
+    await expect(page.getByRole("status").filter({ hasText: "Loading links…" })).toBeVisible({ timeout: 60_000 })
+    await shoot(page, testInfo, name)
+  } finally {
+    release()
+    await page.unroute("**/*")
+  }
+}
 const attachedArtifacts = (workspaceId: string, experimentId: string) => cli("read", workspaceId, experimentId)
 
 /**
@@ -54,6 +75,20 @@ test("an artifact links to an experiment, shows on both pages, unlinks, and its 
   await page.waitForURL(/\/docs\/artifacts\/[0-9a-f-]+$/)
   const artifactUrl = page.url()
   const artifactId = artifactUrl.split("/").at(-1)!
+
+  // Empty and loading states at 390px: the experiment panel (opened over the board) and the artifact page.
+  await page.setViewportSize({ width: 390, height: 844 })
+  const panelUrl = `${base}/experiments?detail=${encodeURIComponent(`experiment:${experiment.id}`)}`
+  await captureLoading(page, testInfo, "experiment-panel-linked-artifacts-loading-mobile", () => page.goto(panelUrl).then(() => undefined))
+  const panelSection = page.getByRole("region", { name: "Linked artifacts" })
+  await expect(panelSection.getByText("No artifacts linked yet.")).toBeVisible({ timeout: 60_000 })
+  await panelSection.scrollIntoViewIfNeeded()
+  await shoot(page, testInfo, "experiment-panel-linked-artifacts-empty-mobile")
+  await captureLoading(page, testInfo, "artifact-linked-experiments-loading-mobile", () => page.goto(artifactUrl).then(() => undefined))
+  await expect(page.getByRole("region", { name: "Linked experiments" }).getByText("No experiments linked yet.")).toBeVisible()
+  await page.getByRole("region", { name: "Linked experiments" }).scrollIntoViewIfNeeded()
+  await shoot(page, testInfo, "artifact-linked-experiments-empty-mobile")
+  await page.setViewportSize({ width: 1280, height: 800 })
 
   // Link from the artifact page.
   const experimentsSection = page.getByRole("region", { name: "Linked experiments" })
