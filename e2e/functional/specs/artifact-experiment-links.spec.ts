@@ -30,7 +30,8 @@ async function captureLoading(page: Page, testInfo: TestInfo, name: string, sect
     await shoot(page, testInfo, name)
   } finally {
     release()
-    await page.unroute("**/*")
+    // Let the held requests finish instead of aborting them when the route goes away.
+    await page.unrouteAll({ behavior: "wait" })
   }
 }
 const attachedArtifacts = (workspaceId: string, experimentId: string) => cli("read", workspaceId, experimentId)
