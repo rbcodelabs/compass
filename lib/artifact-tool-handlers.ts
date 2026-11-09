@@ -12,7 +12,11 @@ import {
   linkArtifactToSolution,
   linkArtifactToDecision,
   unlinkArtifactFromDecision,
+  linkArtifactToExperiment,
+  unlinkArtifactFromExperiment,
   getArtifactDecisions,
+  getArtifactExperimentIds,
+  getExperimentArtifactIds,
   getArtifactSolutionIds,
   replaceExternalArtifactRevision,
   replaceHtmlArtifactRevision,
@@ -47,9 +51,13 @@ async function artifactUrlResolver(workspaceId: string): Promise<(artifactId: st
   } catch { return () => null }
 }
 
-export async function listArtifacts({ workspaceId, includeArchived = false }: { workspaceId: string; includeArchived?: boolean }) {
-  const artifacts = await getPrisma().artifact.findMany({
-    where: { workspaceId, ...(includeArchived ? {} : { status: "ACTIVE" }) },
+export async function listArtifacts({ workspaceId, includeArchived = false, experimentId }: { workspaceId: string; includeArchived?: boolean; experimentId?: string }) {
+  const prisma = getPrisma()
+  // Filtering by Experiment resolves the linked ids first (workspace-scoped, both ends live), then lists only those; an unknown or foreign
+  // experiment simply has no artifacts.
+  const linkedIds = experimentId ? await getExperimentArtifactIds(prisma, workspaceId, experimentId) : undefined
+  const artifacts = linkedIds && linkedIds.length === 0 ? [] : await prisma.artifact.findMany({
+    where: { workspaceId, ...(includeArchived ? {} : { status: "ACTIVE" }), ...(linkedIds ? { id: { in: linkedIds } } : {}) },
     include: { currentRevision: { select: { revisionNumber: true, filename: true, externalUrl: true } }, _count: { select: { revisions: true, links: true } } },
     orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
   })
@@ -66,6 +74,8 @@ export async function getArtifact({ artifactId }: { artifactId: string }) {
   const solutionIds = await getArtifactSolutionIds(prisma, artifact.workspaceId, artifact.id)
   const solutions = solutionIds.length ? await prisma.solution.findMany({ where: { id: { in: solutionIds }, workspaceId: artifact.workspaceId }, select: { id: true, title: true } }) : []
   const decisions = await getArtifactDecisions(artifact.workspaceId, artifact.id)
+  const experimentIds = await getArtifactExperimentIds(prisma, artifact.workspaceId, artifact.id)
+  const experiments = experimentIds.length ? await prisma.experiment.findMany({ where: { id: { in: experimentIds }, workspaceId: artifact.workspaceId }, select: { id: true, title: true, status: true }, orderBy: [{ title: "asc" }, { id: "asc" }] }) : []
   // Blob pathnames are private storage keys, not caller-facing data. thumbnailPathname
   // is stripped for exactly the same reason blobPathname always has been — it was added
   // by migration 077 and would otherwise ride out through this spread unnoticed. The
@@ -81,7 +91,7 @@ export async function getArtifact({ artifactId }: { artifactId: string }) {
   const slideLine = slides ? `\nSlides: ${slides.length}${slides.map((slide) => `\n  ${slide.index}: ${slide.title ?? "(untitled)"}`).join("")}` : ""
   const url = (await artifactUrlResolver(artifact.workspaceId))(artifact.id)
   const text = [`# ${artifact.title}`, `ID: ${artifact.id}`, ...(url ? [`URL: ${url}`] : []), `Type: ${artifact.sourceType}`, `Kind: ${kind}`, `Status: ${artifact.status}`, `Current revision: ${artifact.currentRevision?.revisionNumber ?? "None"}`, `Linked solutions: ${solutions.map((solution) => `${solution.title} (${solution.id})`).join(", ") || "None"}`].join("\n")
-  return ok(`${text}\nLinked decisions: ${decisions.map((decision) => `${decision.title} (${decision.id})`).join(", ") || "None"}${slideLine}`, { ...artifact, kind, url, ...(slides ? { slides } : {}), currentRevision: artifact.currentRevision ? { ...artifact.currentRevision, blobPathname: undefined, thumbnailPathname: undefined } : null, revisions: safeRevisions, solutions, decisions, links: undefined })
+  return ok(`${text}\nLinked decisions: ${decisions.map((decision) => `${decision.title} (${decision.id})`).join(", ") || "None"}\nLinked experiments: ${experiments.map((experiment) => `${experiment.title} (${experiment.id})`).join(", ") || "None"}${slideLine}`, { ...artifact, kind, url, ...(slides ? { slides } : {}), currentRevision: artifact.currentRevision ? { ...artifact.currentRevision, blobPathname: undefined, thumbnailPathname: undefined } : null, revisions: safeRevisions, solutions, decisions, experiments, links: undefined })
 }
 
 export async function prepareArtifactUploadTool(input: { workspaceId: string; filename: string; fileSize: number }) {
@@ -262,5 +272,19 @@ export async function unlinkArtifactDecision(input: { workspaceId: string; artif
   try {
     const result = await unlinkArtifactFromDecision(input)
     return ok(`Artifact unlinked from Decision.\nID: ${input.artifactId}`, { ...input, ...result })
+  } catch (error) { return fail(error instanceof Error ? error.message : "Could not unlink artifact") }
+}
+
+export async function linkArtifactExperiment(input: { workspaceId: string; artifactId: string; experimentId: string }) {
+  try {
+    const link = await linkArtifactToExperiment({ ...input, createdById: isAgentIdentityActor(getMcpActor()) ? null : getMcpActor().userId, source: "MCP" })
+    return ok(`Artifact linked to Experiment.\nID: ${input.artifactId}`, { ...input, linkId: link.id, created: link.created })
+  } catch (error) { return fail(error instanceof Error ? error.message : "Could not link artifact") }
+}
+
+export async function unlinkArtifactExperiment(input: { workspaceId: string; artifactId: string; experimentId: string }) {
+  try {
+    const result = await unlinkArtifactFromExperiment(input)
+    return ok(`Artifact unlinked from Experiment.\nID: ${input.artifactId}`, { ...input, ...result })
   } catch (error) { return fail(error instanceof Error ? error.message : "Could not unlink artifact") }
 }

@@ -157,7 +157,7 @@ The API key is stored in the Vercel project settings and in `.env.local` as `MCP
 | `link_solution_to_key_result` | `workspaceId, solutionId, keyResultId`. Idempotent (`created:false` on repeat). The solution keeps its single parent opportunity. Always use this tool for solution-to-key-result links: the generic `link_entities` refuses `SOLUTION_TARGETS_KEY_RESULT`, which is only a flagged mirror of these links |
 | `unlink_solution_from_key_result` | Same inputs. `removed:1`, or `removed:0` when none |
 | `list_links` | `workspaceId` plus exactly one of `opportunityId`, `objectiveId`, `solutionId`, `keyResultId`; `limit` (1-100, default 50) and `cursor`. Returns `{ items, count, nextCursor }`, oldest first; page until `nextCursor` is null (a page can be short without being the last). Opportunity-objective items report `origin` DIRECT or LEGACY. Generic mode: `workspaceId`, `entityType` + `entityId`, optional `linkType` (not combinable with the four ids); items are `kind:"entity_link"` with `side`, `label`, `from`, `to` |
-| `link_entities` | `workspaceId, linkType, fromId, toId` (`toType` only for multi-target types). Creates a registry-backed link; today `EXPERIMENT_INFORMED_BY_STUDY` (Experiment `fromId` -> customer-interview or usability-test Research Study `toId`, not archived, research capture enabled). Idempotent (`created:false` on repeat). Text ends with `ID: <link uuid>` |
+| `link_entities` | `workspaceId, linkType, fromId, toId` (`toType` only for multi-target types). Creates a registry-backed link; today `EXPERIMENT_INFORMED_BY_STUDY` (Experiment `fromId` -> customer-interview or usability-test Research Study `toId`, not archived, research capture enabled) and `ARTIFACT_ATTACHED_TO_EXPERIMENT` (Artifact `fromId` -> Experiment `toId`, Artifact not archived; prefer `link_artifact_to_experiment`). Idempotent (`created:false` on repeat). Text ends with `ID: <link uuid>` |
 | `unlink_entities` | `workspaceId, linkType, fromId, toId`. `removed:1`, or `removed:0` when none. Only `fromId` is checked, so a link to a deleted study is still removable |
 | `add_solution` | Propose a solution under an opportunity |
 | `create_opportunities` | Bulk-create up to 25 opportunities; per-item results; pass `clientId` per item so retries are safe |
@@ -253,7 +253,7 @@ requests a decision, persist its request ID, report `AWAITING_DECISION`, and sto
 | Tool | Description |
 |---|---|
 | `list_experiments` | Filter by status and/or squad; recency-filterable (also accepts `endBefore`) |
-| `get_experiment` | Full details: hypothesis, method, kill condition, results, and `linkedStudies` when Research Capture is enabled (link them with `link_entities`, type `EXPERIMENT_INFORMED_BY_STUDY`) |
+| `get_experiment` | Full details: hypothesis, method, kill condition, results, and `linkedStudies` when Research Capture is enabled (link them with `link_entities`, type `EXPERIMENT_INFORMED_BY_STUDY`) and `linkedArtifacts` (attach them with `link_artifact_to_experiment`) |
 | `create_experiment` | Create in DESIGNING status; link to an assumption |
 | `log_experiment_result` | Record an observation with optional metric + value |
 | `conclude_experiment` | PROCEED / KILL / ITERATE → auto-updates linked assumption status |
@@ -454,7 +454,7 @@ captures a v0 chat as an Artifact. `title` may be empty to use the chat name.
   `V0_PREVIEW_HOST` / `V0_PREVIEW_TICKET_KEY`), the Artifact falls back to a link
   card rather than an embedded preview.
 
-**Linking an Artifact.** Always use `link_artifact_to_solution` / `unlink_artifact_from_solution` and `link_artifact_to_decision` / `unlink_artifact_from_decision`; the generic `link_entities` refuses `ARTIFACT_ATTACHED_TO_SOLUTION` and `ARTIFACT_SUPPORTS_DECISION`, which are only flagged mirrors of those links in `entity_links`. A Decision link is live supporting material (it names the Artifact, not a revision, and implies nothing about what an approval covered) and is accepted only for tracked Decisions.
+**Linking an Artifact.** Use `link_artifact_to_solution` / `unlink_artifact_from_solution`, `link_artifact_to_decision` / `unlink_artifact_from_decision` and `link_artifact_to_experiment` / `unlink_artifact_from_experiment`. The generic `link_entities` refuses `ARTIFACT_ATTACHED_TO_SOLUTION` and `ARTIFACT_SUPPORTS_DECISION` only: those two are flagged mirrors of the legacy artifact link table, so write them through the per-type tools. `ARTIFACT_ATTACHED_TO_EXPERIMENT` is a native generic link (no legacy table), so `link_entities` / `unlink_entities` / `list_links` accept it too, though the dedicated tools are the thin, documented path. A Decision link is live supporting material (it names the Artifact, not a revision, and implies nothing about what an approval covered) and is accepted only for tracked Decisions. An archived Artifact takes no new Decision or Experiment link, but existing links stay removable. Read links back with `get_artifact` (`solutions`, `decisions`, `experiments`), `get_experiment` (`linkedArtifacts`) or `list_artifacts` with `experimentId`.
 
 #### Feedback
 
@@ -487,7 +487,7 @@ A workspace admin picks a **thinking model** in Settings: `CLASSIC` (the default
 - A solution has exactly one parent opportunity and cannot be moved to another; `link_solution_to_key_result` only adds Key Results it aims at.
 - Humans can make the same links in the app on the Opportunity-first and Torres models: the opportunity's Objectives box and composer Objectives field, and the Solution panel's **Linked Key Results** picker (Key Result panels list **Linked Solutions**, read-only). On Classic there is no such UI, so links there come from you (the tools) and show on Canvas only when `origin` is `DIRECT`. Tool and UI writes are the same data.
 - Cycle-less Objectives link like any other: the cycle is never part of a link or its permission.
-- `link_entities` / `unlink_entities` / generic `list_links` are the registry-backed links (one `entity_links` table; the pairs above still use their own tables and tools). The only registered type so far is `EXPERIMENT_INFORMED_BY_STUDY`; PM-interview studies are never linkable and archived studies take no new links but existing ones stay removable.
+- `link_entities` / `unlink_entities` / generic `list_links` are the registry-backed links (one `entity_links` table; the pairs above still use their own tables and tools). The registered types you can write here are `EXPERIMENT_INFORMED_BY_STUDY` and `ARTIFACT_ATTACHED_TO_EXPERIMENT`; PM-interview studies are never linkable and archived studies take no new links but existing ones stay removable.
 - `list_links` is read-only; the other four need write scope. Deleting an Objective or Key Result removes its links after the delete (a failed cleanup does not fail the delete; a leftover link is hidden from reads).
 
 ---
