@@ -1,7 +1,7 @@
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto"
 import type { ArtifactStorage } from "@/lib/artifact-storage"
 import { MAX_ARTIFACT_HTML_BYTES } from "@/lib/artifacts"
-import { createDirectUploadToken } from "@/lib/storage/direct-upload"
+import { createDirectUpload } from "@/lib/storage/direct-upload"
 
 /**
  * Direct-upload path for HTML artifacts.
@@ -60,13 +60,13 @@ export async function prepareArtifactUpload(input: { workspaceId: string; filena
   const uploadId = randomUUID()
   const pathname = stagingPathname(input.workspaceId, uploadId)
   const expiresAt = now + DIRECT_UPLOAD_TTL_MS
-  const clientToken = await createDirectUploadToken({
+  const credential = await createDirectUpload({
     store: "private", pathname, allowedContentTypes: ["text/html"], maxBytes: input.fileSize,
-    validUntil: expiresAt, allowOverwrite: false,
+    validUntil: expiresAt, ttlSeconds: DIRECT_UPLOAD_TTL_MS / 1000, allowOverwrite: false,
   })
   const payload: ArtifactUploadReceiptPayload = { version: 1, uploadId, workspaceId: input.workspaceId, pathname, filename: input.filename, fileSize: input.fileSize, expiresAt }
   const encoded = Buffer.from(JSON.stringify(payload)).toString("base64url")
-  return { uploadId, pathname, clientToken, receipt: `${encoded}.${sign(encoded)}`, filename: input.filename, fileType: "text/html", fileSize: input.fileSize, expiresAt, access: "private" as const }
+  return { uploadId, pathname, ...credential, receipt: `${encoded}.${sign(encoded)}`, filename: input.filename, fileType: "text/html", fileSize: input.fileSize, expiresAt, access: "private" as const }
 }
 
 export function verifyArtifactUploadReceipt(receipt: string, workspaceId: string, now = Date.now()): ArtifactUploadReceiptPayload {
