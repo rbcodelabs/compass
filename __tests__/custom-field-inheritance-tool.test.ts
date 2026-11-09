@@ -46,7 +46,7 @@ describe("list_custom_field_inheritance_rules", () => {
   it("flags a rule whose options have drifted as inactive with the reason", async () => {
     mockPrisma.customFieldDefinition.findMany.mockResolvedValue([field("src", "OPPORTUNITY", "Customer", opts("a", "z")), field("dst", "ROADMAP_ITEM", "Partner")])
     const result = await listCustomFieldInheritanceRules({ workspaceId: "ws-1" })
-    expect(result.structuredContent.data.items[0]).toMatchObject({ status: "inactive", inactiveReason: expect.stringMatching(/options mismatch/i) })
+    expect((result.structuredContent as unknown as { data: { items: unknown[] } }).data.items[0]).toMatchObject({ status: "inactive", inactiveReason: expect.stringMatching(/options mismatch/i) })
   })
 
   it("returns an empty list, not an error, while the table does not exist", async () => {
