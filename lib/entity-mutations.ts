@@ -10,6 +10,7 @@
  * keeps the surface deliberately small — the panel is for quick edits, not a
  * general-purpose entity editor.
  */
+import { applyInheritanceRules } from "@/lib/custom-field-inheritance";
 import getPrisma from "@/lib/db";
 import { captureWorkspaceMutation } from "@/lib/workspace-update-mutations";
 import { getHumanActivityPrisma } from "@/lib/analytics/activity";
@@ -245,9 +246,10 @@ export async function updateEntityField(
   const mutationClient = _actor.kind === "USER" ? getHumanActivityPrisma() : getPrisma();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const model = (mutationClient as any)[config.model];
+  // A roadmap item's current links are read in the same lookup so the opportunity-link path below can tell a real change.
   const exists = await model.findFirst({
     where: entityScopeWhere(type, id, workspaceId),
-    select: { id: true },
+    select: type === "roadmapItem" ? { id: true, opportunityId: true, solutionId: true } : { id: true },
   });
   if (!exists) return { ok: false, status: 404, error: "Not found" };
 
@@ -285,7 +287,13 @@ export async function updateEntityField(
     await captureWorkspaceMutation(mutationClient, type, "update", { actorType: _actor.kind === "USER" ? "USER" : "SYSTEM", actorId: _actor.id }, id, async tx => {
       // The editable model has already been selected and validated above.
       const delegate = tx[config.model as typeof type] as unknown as { update(args: { where: { id: string }; data: Record<string, unknown> }): Promise<{ id: string }> };
-      return delegate.update({ where: { id }, data });
+      const saved = await delegate.update({ where: { id }, data });
+      // The roadmap detail panel links an opportunity through this generic path: fill the item's empty fields from it, in the same
+      // transaction. Only a link that changed to a new non-null value counts (unlinking and re-sending the same link do nothing).
+      if (type === "roadmapItem" && field === "opportunityId" && typeof value === "string" && value !== exists.opportunityId) {
+        await applyInheritanceRules(tx, { workspaceId, targetObjectType: "ROADMAP_ITEM", targetId: id, links: { opportunityId: value, solutionId: exists.solutionId ?? null } });
+      }
+      return saved;
     });
   } else await model.update({ where: { id }, data });
   if (solutionBefore) {

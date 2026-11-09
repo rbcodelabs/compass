@@ -123,6 +123,9 @@ export function InheritanceRulesPanel({ orgSlug, workspaceSlug, fields, rules, a
             {rules.map((rule, index) => {
               const sameTarget = rules.filter((candidate) => candidate.targetFieldId === rule.targetFieldId);
               const position = sameTarget.findIndex((candidate) => candidate.id === rule.id);
+              // Unique accessible names per row: the same target can have several rules, so name the source too.
+              const ruleName = `${rule.targetFieldName ?? "missing field"} from ${rule.sourceFieldName ?? "missing field"}`;
+              const inactive = rule.status === "inactive";
               return (
                 <li key={rule.id} className="flex flex-col gap-2 px-4 py-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-3" data-testid={`inheritance-rule-${index}`}>
                   <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 break-words">
@@ -141,16 +144,17 @@ export function InheritanceRulesPanel({ orgSlug, workspaceSlug, fields, rules, a
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
                     <Switch
-                      checked={rule.enabled}
-                      disabled={pending}
-                      aria-label={`${rule.enabled ? "Disable" : "Enable"} rule for ${rule.targetFieldName ?? "field"}`}
+                      // An inactive rule (type or options drifted) is skipped whatever its stored flag says, so it never shows as on.
+                      checked={rule.enabled && !inactive}
+                      disabled={pending || inactive}
+                      aria-label={inactive ? `Rule ${ruleName} is inactive` : `${rule.enabled ? "Disable" : "Enable"} rule ${ruleName}`}
                       onCheckedChange={(enabled) => run(() => setInheritanceRuleEnabledAction(orgSlug, workspaceSlug, rule.id, enabled))}
                     />
                     <button
                       type="button"
                       className="text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
                       disabled={pending || position === 0}
-                      aria-label="Raise priority"
+                      aria-label={`Raise priority of rule ${ruleName}`}
                       onClick={() => run(() => moveInheritanceRuleAction(orgSlug, workspaceSlug, rule.id, "up"))}
                     >
                       <ArrowUpIcon className="size-4" />
@@ -159,7 +163,7 @@ export function InheritanceRulesPanel({ orgSlug, workspaceSlug, fields, rules, a
                       type="button"
                       className="text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
                       disabled={pending || position === sameTarget.length - 1}
-                      aria-label="Lower priority"
+                      aria-label={`Lower priority of rule ${ruleName}`}
                       onClick={() => run(() => moveInheritanceRuleAction(orgSlug, workspaceSlug, rule.id, "down"))}
                     >
                       <ArrowDownIcon className="size-4" />
@@ -168,7 +172,7 @@ export function InheritanceRulesPanel({ orgSlug, workspaceSlug, fields, rules, a
                       type="button"
                       className="text-muted-foreground transition-colors hover:text-destructive disabled:opacity-40"
                       disabled={pending}
-                      aria-label={`Delete rule for ${rule.targetFieldName ?? "field"}`}
+                      aria-label={`Delete rule ${ruleName}`}
                       onClick={() => run(() => deleteInheritanceRuleAction(orgSlug, workspaceSlug, rule.id))}
                     >
                       <TrashIcon className="size-4" />

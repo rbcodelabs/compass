@@ -14,6 +14,8 @@ export { checkRuleCompatibility }
 
 type Db = AppPrismaClient | AppTransactionClient
 
+export const MAX_RULE_PRIORITY = 1000
+
 export class InheritanceRuleError extends Error {
   constructor(message: string) {
     super(message)
@@ -55,6 +57,10 @@ export async function createInheritanceRule(
   input: { workspaceId: string; targetFieldId: string; sourceFieldId: string; priority?: number; actorUserId?: string | null; source?: "UI" | "MCP" },
 ) {
   const { workspaceId, targetFieldId, sourceFieldId } = input
+  // Reordering parks a rule at -1 for a moment, so priorities stay inside a sane non-negative range.
+  if (input.priority !== undefined && (!Number.isInteger(input.priority) || input.priority < 0 || input.priority > MAX_RULE_PRIORITY)) {
+    throw new InheritanceRuleError(`Priority must be a whole number from 0 to ${MAX_RULE_PRIORITY}`)
+  }
   // A foreign or missing field is indistinguishable from the caller's side: nothing about other workspaces leaks.
   const definitions = await loadDefinitions(db, workspaceId, [targetFieldId, sourceFieldId])
   const target = definitions.get(targetFieldId)

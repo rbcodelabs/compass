@@ -60,7 +60,7 @@ Rules apply when a roadmap item is created with a link, when an existing item is
 - An existing value is never overwritten, including an explicit "No" or 0.
 - Changing or clearing the source value afterwards does not change or clear the roadmap item's value; there is no ongoing sync.
 - Unlinking does nothing, and re-linking does not rewrite a value that was inherited earlier.
-- A source value that is set on an Opportunity linked to more than 500 roadmap items fills the first 500; the rest are skipped and noted in the server log.
+- A source value set on an Opportunity or Solution fills at most 500 linked, active roadmap items with an empty field per write; the rest are noted in the server log and picked up by the next write for that source (items that are already filled take no slot). Archived items are never filled.
 
 Agents can read the rules with `list_custom_field_inheritance_rules`, and `add_to_roadmap`, `promote_to_roadmap` and `update_roadmap_item` report what they filled in `inheritedFields`. Rules can only be created, reordered or deleted in Settings.
 

@@ -235,7 +235,7 @@ test.describe.serial("Custom field inheritance rules", () => {
   test("Settings: delete the rule", async ({ page, base }) => {
     await page.goto(`${base}/settings`);
     const panel = page.getByTestId("inheritance-rules");
-    await panel.getByRole("button", { name: `Delete rule for ${seeded.partnerName}` }).click();
+    await panel.getByRole("button", { name: `Delete rule ${seeded.partnerName} from ${seeded.customerName}` }).click();
     await expect(panel.getByText(seeded.partnerName)).toHaveCount(0);
     await expect.poll(() => rules(seeded.workspaceId, seeded.partnerFieldId)).toEqual([]);
   });
