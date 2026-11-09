@@ -25,9 +25,7 @@ import {
 import type {
   CustomFieldDefinitionData,
   CustomFieldObjectType,
-  CustomFieldType,
   CustomFieldValue,
-  SelectOption,
 } from "@/lib/types"
 
 /** Every CustomFieldObjectType maps onto exactly one already-gated WorkspaceEntityType. */
