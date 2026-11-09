@@ -24,6 +24,27 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => mocks.search.current,
 }))
 
+// The real Select is a popup widget driven by pointer events; the E2E spec drives it. Here a flat stand-in keeps the
+// assertion on what the toggle does with the chosen value.
+vi.mock("@/components/ui/select", async () => {
+  const React = await import("react")
+  const Ctx = React.createContext<(value: string) => void>(() => {})
+  return {
+    Select: ({ onValueChange, children }: { onValueChange: (value: string) => void; children: React.ReactNode }) => <Ctx.Provider value={onValueChange}>{children}</Ctx.Provider>,
+    SelectTrigger: ({ children, ...props }: React.ComponentProps<"button">) => <button role="combobox" {...props}>{children}</button>,
+    SelectContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+    SelectItem: ({ value, children }: { value: string; children: React.ReactNode }) => {
+      const choose = React.useContext(Ctx)
+      return <button role="option" onClick={() => choose(value)}>{children}</button>
+    },
+  }
+})
+vi.mock("@/components/ui/tooltip", () => ({
+  Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  TooltipTrigger: ({ render }: { render: React.ReactElement }) => render,
+  TooltipContent: () => null,
+}))
+
 import { ExperimentsGallery } from "@/components/experiments/experiments-gallery"
 import { ExperimentsViewToggle } from "@/components/experiments/experiments-view-toggle"
 import { ExperimentsGroupByToggle } from "@/components/experiments/experiments-group-by-toggle"
