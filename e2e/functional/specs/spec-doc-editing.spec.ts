@@ -47,10 +47,19 @@ async function createSpecFromSolution(page: Page, base: string, stamp: number) {
 
 /**
  * Embed cards load lazily, once within 200px of the viewport (doc-embed-cards.tsx). After a reload the page starts at the top, so a
- * card near the end of a long document is not rendered until it is scrolled to. Scroll the end of the document into view first.
+ * card near the end of a long document is not rendered until it is scrolled to. Scroll through the document first so every card near the viewport at some point loads.
  */
-async function scrollDocEndIntoView(page: Page) {
-  await page.locator(".ProseMirror").evaluate((el) => (el.lastElementChild ?? el).scrollIntoView({ block: "end" }));
+async function revealEmbeds(page: Page) {
+  await page.locator(".ProseMirror").waitFor();
+  await page.locator(".ProseMirror").evaluate(async (el) => {
+    const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+    for (const child of Array.from(el.children)) {
+      child.scrollIntoView({ block: "center" });
+      await frame();
+    }
+    (el.lastElementChild ?? el).scrollIntoView({ block: "end" });
+    await frame();
+  });
 }
 
 /** The markdown the editor currently holds (after a reload: exactly what is stored, since nothing has been edited). */
@@ -150,8 +159,7 @@ test.describe("Spec docs: editing", () => {
     await expect(status).toHaveAttribute("data-state", "saved", { timeout: 20_000 });
 
     await page.reload();
-    await expect(page.locator(".ProseMirror")).toBeVisible();
-    await scrollDocEndIntoView(page);
+    await revealEmbeds(page);
     await expect(page.getByRole("group", { name: `Assumption: ${assumptionTitle}` })).toBeVisible({ timeout: 15_000 });
     const withAssumption = await editorMarkdown(page);
     expect(withAssumption.match(new RegExp(`compass://assumption/`, "g")) ?? []).toHaveLength(1);
@@ -169,6 +177,7 @@ test.describe("Spec docs: editing", () => {
 
     // 4. The doc now shows the unavailable placeholder, with Remove. Removing it takes only the embed paragraph out.
     await page.goto(docUrl);
+    await revealEmbeds(page);
     const placeholder = page.locator(`${EMBED_CARD}[data-state="unavailable"]`);
     await expect(placeholder).toBeVisible({ timeout: 15_000 });
     await expect(placeholder).toContainText("Record unavailable");
@@ -177,6 +186,7 @@ test.describe("Spec docs: editing", () => {
     await expect(status).toHaveAttribute("data-state", "saved", { timeout: 20_000 });
 
     await page.reload();
+    await revealEmbeds(page);
     await expect(page.getByRole("group", { name: `Solution: ${renamed}` })).toBeVisible({ timeout: 15_000 });
     await expect(placeholder).toHaveCount(0);
     expect(await editorMarkdown(page)).not.toContain("compass://assumption/");
