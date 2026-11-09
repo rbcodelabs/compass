@@ -93,7 +93,7 @@ describe.skipIf(!databaseUrl)("custom field inheritance rules migration on plain
       const { readFileSync } = await import("node:fs")
       const sql = readFileSync(`${process.cwd()}/prisma/migrations/${NAME}/migration.sql`, "utf-8").replace(/\bINDEX ASYNC\b/gi, "INDEX")
       await client.query(`SET search_path TO "${schema}"`)
-      for (const statement of sql.split(";").map((s) => s.replace(/--.*$/gm, "").trim()).filter(Boolean)) await client.query(statement)
+      for (const statement of sql.replace(/--.*$/gm, "").split(";").map((s) => s.trim()).filter(Boolean)) await client.query(statement)
       await assertCustomFieldInheritanceRulesMigration(client, schema)
     } finally {
       client.release()
