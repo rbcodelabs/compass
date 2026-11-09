@@ -47,6 +47,16 @@ The dock is **one slot**, however many columns you pin: a panel showing one pinn
 
 The layout is remembered **in this browser**, for each workspace. The Experiments board has no saved views, so it does not follow you to other devices.
 
+## Gallery View
+
+Toggle to **Gallery** beside **Board** at the top of the Experiments page (or open `?view=gallery`) to browse experiments as large, image-first cards. Each card shows a screenshot of an Artifact [linked to the experiment](#linking-artifacts), with the experiment's title, status, hypothesis, squad and, once it is concluded, its conclusion beneath it.
+
+- **Several artifacts.** When an experiment has more than one Artifact, a small filmstrip of up to three thumbnails sits on the preview (plus a **+N** count for the rest). Hover, focus or click a thumbnail to swap the preview. Newest artifacts come first, and the card opens on the newest one that has a screenshot. Archived artifacts are not shown.
+- **No preview yet.** If an Artifact is linked but has no screenshot, the card shows a placeholder with **Capture preview** (HTML uploads and external links) to take one. v0 chats cannot be screenshotted and link to the artifact instead.
+- **Nothing linked.** An experiment with no linked Artifact still appears, with a hatched placeholder that tells you to open the experiment and link an artifact from its panel.
+- **Group by** — Status (default, in the Board's column order; experiments marked Not Pursued, which the Board has no column for, get a Not Pursued group after them), Squad, Conclusion, or None. Group headings are collapsible and show counts. The grouping lives in the URL (`?groupBy=`), and switching back to Board drops it.
+- Click a card to open the usual experiment panel. The squad filter works in Gallery like on the Board, and the Gallery refreshes live when experiments change. Linking or unlinking an artifact, or capturing a screenshot, from another browser shows up on your next reload. The Gallery is read-only: to change a status or the order, switch back to Board. Your Board column layout (pinned columns, dock) is kept while you look at the Gallery.
+
 ## Creating an Experiment
 
 Click **New Experiment** on the Experiments page, or click **Test this assumption →** next to any untested assumption in Discovery's OST Tree view — that pre-fills the assumption picker below so you don't have to hunt for it. Either one opens the experiment composer in the right-hand panel. On wide screens it docks beside the board; on narrow screens it opens as a full-width sheet. Fill in:
