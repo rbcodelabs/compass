@@ -16,7 +16,7 @@ async function shoot(page: Page, testInfo: TestInfo, name: string) {
  * Holds every server action (the section's link reads) until released, so the LOADING state can be seen and captured.
  * `visit` navigates; the screenshot is taken while the section still says "Loading links…".
  */
-async function captureLoading(page: Page, testInfo: TestInfo, name: string, visit: () => Promise<void>) {
+async function captureLoading(page: Page, testInfo: TestInfo, name: string, section: string, visit: () => Promise<void>) {
   let release!: () => void
   const gate = new Promise<void>((resolve) => { release = resolve })
   await page.route("**/*", async (route) => {
@@ -26,7 +26,7 @@ async function captureLoading(page: Page, testInfo: TestInfo, name: string, visi
   })
   try {
     await visit()
-    await expect(page.getByRole("status").filter({ hasText: "Loading links…" })).toBeVisible({ timeout: 60_000 })
+    await expect(page.getByRole("region", { name: section }).getByRole("status").filter({ hasText: "Loading links…" })).toBeVisible({ timeout: 60_000 })
     await shoot(page, testInfo, name)
   } finally {
     release()
@@ -79,12 +79,12 @@ test("an artifact links to an experiment, shows on both pages, unlinks, and its 
   // Empty and loading states at 390px: the experiment panel (opened over the board) and the artifact page.
   await page.setViewportSize({ width: 390, height: 844 })
   const panelUrl = `${base}/experiments?detail=${encodeURIComponent(`experiment:${experiment.id}`)}`
-  await captureLoading(page, testInfo, "experiment-panel-linked-artifacts-loading-mobile", () => page.goto(panelUrl).then(() => undefined))
+  await captureLoading(page, testInfo, "experiment-panel-linked-artifacts-loading-mobile", "Linked artifacts", () => page.goto(panelUrl).then(() => undefined))
   const panelSection = page.getByRole("region", { name: "Linked artifacts" })
   await expect(panelSection.getByText("No artifacts linked yet.")).toBeVisible({ timeout: 60_000 })
   await panelSection.scrollIntoViewIfNeeded()
   await shoot(page, testInfo, "experiment-panel-linked-artifacts-empty-mobile")
-  await captureLoading(page, testInfo, "artifact-linked-experiments-loading-mobile", () => page.goto(artifactUrl).then(() => undefined))
+  await captureLoading(page, testInfo, "artifact-linked-experiments-loading-mobile", "Linked experiments", () => page.goto(artifactUrl).then(() => undefined))
   await expect(page.getByRole("region", { name: "Linked experiments" }).getByText("No experiments linked yet.")).toBeVisible()
   await page.getByRole("region", { name: "Linked experiments" }).scrollIntoViewIfNeeded()
   await shoot(page, testInfo, "artifact-linked-experiments-empty-mobile")
