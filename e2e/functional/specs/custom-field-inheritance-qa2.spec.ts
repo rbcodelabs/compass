@@ -240,8 +240,7 @@ test.describe("Inheritance rules QA pass 2", () => {
     }
   });
 
-  test("A2. DEFECT: a long unbroken option name in the inactive reason overflows the row on mobile", async ({ page, base }) => {
-    test.fail(true, "the status badge span does not break long unbroken tokens; it escapes the row at 390px");
+  test("A2. a long unbroken option name in the inactive reason wraps inside the row on mobile", async ({ page, base }) => {
     const stamp = Date.now();
     const target = await field(ws, "ROADMAP_ITEM", `QA2 LongTarget ${stamp}`, "SELECT", opts("a"));
     const source = await field(ws, "OPPORTUNITY", `QA2 LongSource ${stamp}`, "SELECT", opts("a", "zzz_long_option_name_that_the_target_does_not_have"));
