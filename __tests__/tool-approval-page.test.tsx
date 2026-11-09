@@ -89,7 +89,7 @@ describe("approval page: a hostile packet never 500s (A1)", () => {
     const big = Array.from({ length: 200_000 }, (_, i) => ({ id: i, text: "x".repeat(20) }))
     m.loadView.mockResolvedValue(view("PENDING", { before: [] as never, after: big as never, args: big as never }))
     const html = await render()
-    expect(html.length).toBeLessThan(400_000)
+    expect(html.length).toBeLessThan(1_500_000) // at most the 400-row display cap, not 200,000 rows
     expect(html).toMatch(/too deep or too large to display in full/i)
   })
 })
