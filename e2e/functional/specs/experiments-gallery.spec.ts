@@ -216,6 +216,13 @@ test("experiments gallery: previews, filmstrip, placeholders, grouping, filter, 
     await page.keyboard.press("Escape");
     expect(await noHorizontalOverflow()).toBe(true);
   } finally {
+    // The functional suite shares one workspace across specs in a run, so leave nothing behind.
+    const like = `%${suffix}`;
+    await pool.query(`DELETE FROM "${S}".entity_links WHERE link_type = 'ARTIFACT_ATTACHED_TO_EXPERIMENT' AND from_id IN (SELECT id FROM "${S}".artifacts WHERE title LIKE $1)`, [like]);
+    await pool.query(`DELETE FROM "${S}".artifact_revisions WHERE artifact_id IN (SELECT id FROM "${S}".artifacts WHERE title LIKE $1)`, [like]);
+    await pool.query(`DELETE FROM "${S}".artifacts WHERE title LIKE $1`, [like]);
+    await pool.query(`DELETE FROM "${S}".experiments WHERE title LIKE $1`, [like]);
+    await pool.query(`DELETE FROM "${S}".squads WHERE name LIKE $1`, [like]);
     await pool.end();
   }
 });
