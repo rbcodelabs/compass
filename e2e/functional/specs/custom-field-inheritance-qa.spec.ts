@@ -270,7 +270,7 @@ test.describe("Inheritance rules QA", () => {
     await expect.poll(priorityOrder).toEqual([solOk, sol2, oppOk]);
 
     // h. Stale tab: another tab already created the rule this tab is about to create -> friendly error, no crash.
-    await row("OppOk").getByRole("button", { name: `Delete rule for ${nameOf("Target")}` }).click();
+    await row("OppOk").getByRole("button", { name: `Delete rule ${nameOf("Target")} from ${nameOf("OppOk")}` }).click();
     await expect(row("OppOk")).toHaveCount(0);
     expect((await rulesFor(target)).map((rule) => rule.priority)).toEqual([0, 1]);
     await panel.getByTestId("inheritance-rule-add").click();
