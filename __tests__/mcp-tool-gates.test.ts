@@ -767,6 +767,12 @@ describe("applyToolGate", () => {
         .rejects.toThrow(/not found or access denied/)
     })
 
+    it("list_custom_field_inheritance_rules is workspace-member gated", async () => {
+      mockPrisma.workspace.findFirst.mockResolvedValue(null)
+      await expect(applyToolGate("list_custom_field_inheritance_rules", MEMBER, { workspaceId: "ws-1" }))
+        .rejects.toThrow(/not found or access denied/)
+    })
+
     it.each(["get_custom_field_values", "set_custom_field_value"])(
       "%s denies a non-member of the object's workspace",
       async (tool) => {

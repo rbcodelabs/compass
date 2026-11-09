@@ -104,3 +104,18 @@ describe("group_by_custom_field route registration metadata", () => {
     expect(schema.safeParse({ workspaceId: validUuid }).success).toBe(false)
   })
 })
+
+describe("list_custom_field_inheritance_rules route registration metadata", () => {
+  it("registers exactly a required workspaceId and is the only inheritance-rule tool (rules are managed in Settings only)", () => {
+    const tool = registeredTools.list_custom_field_inheritance_rules
+    expect(tool).toBeDefined()
+    expect(Object.keys(tool.inputSchema)).toEqual(["workspaceId"])
+
+    const schema = z.object(tool.inputSchema)
+    expect(schema.safeParse({ workspaceId: validUuid }).success).toBe(true)
+    expect(schema.safeParse({ workspaceId: "not-a-uuid" }).success).toBe(false)
+    expect(schema.safeParse({}).success).toBe(false)
+
+    expect(Object.keys(registeredTools).filter((name) => /inheritance/i.test(name))).toEqual(["list_custom_field_inheritance_rules"])
+  })
+})
