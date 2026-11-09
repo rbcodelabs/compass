@@ -96,6 +96,7 @@ describe("LinkedEntitiesSection for artifact -> experiment", () => {
       render(<LinkedEntitiesSection orgSlug="acme" workspaceSlug="compass" target={target} title="Linked experiments" />)
       const status = screen.getByRole("status")
       expect(status.textContent).toBe("Loading links…")
+      expect(screen.queryByText(/linked to this record/)).toBeNull() // no "Items…" placeholder copy while the noun is unknown
       finish({ ok: true, view: view(true) })
       await waitFor(() => expect(status.textContent).toBe(""))
       expect(screen.getByRole("status")).toBe(status) // the same node: never unmounted

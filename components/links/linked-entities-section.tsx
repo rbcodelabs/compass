@@ -102,11 +102,12 @@ export function LinkedEntitiesSection({ orgSlug, workspaceSlug, target, title, r
   for (const item of view?.linked ?? []) titleCounts.set(item.title, (titleCounts.get(item.title) ?? 0) + 1)
   const unlinkLabel = (item: { id: string; title: string }) => (titleCounts.get(item.title) ?? 0) > 1 ? `Unlink ${item.title} (${item.id.slice(0, 8)})` : `Unlink ${item.title}`
 
-  return <section role="region" aria-labelledby={headingId} data-link-type={linkType} className={`flex flex-col gap-3 rounded-lg border bg-surface-panel p-4${fullWidth ? "" : " max-w-3xl"}`}>
+  return <section role="region" aria-labelledby={headingId} data-link-type={linkType} className={`flex flex-col gap-3 rounded-lg border p-4${fullWidth ? "" : " max-w-3xl bg-surface-panel"}`}>
     <div>
       {/* tabIndex -1: focus lands here after an unlink removes the row that had it. */}
       <h2 id={headingId} ref={headingRef} tabIndex={-1} aria-label={title ? undefined : `${heading} ${plural}`} className="text-base font-semibold outline-none">{heading}</h2>
-      <p className="text-xs text-muted-foreground">{capitalize(plural)} linked to this record. Linking doesn&apos;t change either record.</p>
+      {/* Only once loaded: before that the noun is unknown and would read "Items…" then change. */}
+      {view && <p className="text-xs text-muted-foreground">{capitalize(plural)} linked to this record. Linking doesn&apos;t change either record.</p>}
     </div>
     {/* Always mounted: a live region that appears together with its text is often not announced. */}
     <p role="status" className={statusText ? "text-sm text-muted-foreground" : "sr-only"}>{statusText}</p>
