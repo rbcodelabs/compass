@@ -1,17 +1,24 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
-import { loadApprovalView, loadRecentApprovals, RECENT_APPROVALS_LIMIT } from "@/lib/tool-approval/view"
-import { EFFECT_PACKET_SCHEMA_VERSION } from "@/lib/tool-approval/packet"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+
+const m = vi.hoisted(() => ({ isAdmin: vi.fn() }))
+vi.mock("@/lib/agent-ownership", () => ({ isWorkspaceAdminUser: m.isAdmin }))
+
+import { loadApprovalRequester, loadApprovalView, loadRecentApprovals, RECENT_APPROVALS_LIMIT } from "@/lib/tool-approval/view"
+import { EFFECT_PACKET_SCHEMA_VERSION, fingerprintOf } from "@/lib/tool-approval/packet"
+import { setToolApprovalRegistryForTest, type ToolApprovalSpec } from "@/lib/tool-approval/registry"
 
 const WS = "22222222-2222-4222-8222-222222222222"
 const REQ = "33333333-3333-4333-8333-333333333333"
 const NOW = new Date("2026-11-09T12:00:00Z")
 const packet = { schemaVersion: EFFECT_PACKET_SCHEMA_VERSION, tool: "set_workspace_description", capabilityClass: "workspace.description", workspaceId: WS, args: { workspaceId: WS, description: "new" }, before: "old", after: "new" }
 
+const spec: ToolApprovalSpec = { toolName: "set_workspace_description", capabilityClass: "workspace.description", describe: () => ({ title: "t", summary: "s" }), readBefore: () => null, computeAfter: () => null, execute: async () => null }
+
 function row(over: Record<string, unknown> = {}, revision: Record<string, unknown> = {}) {
   return {
-    id: REQ, seqPrefix: null, seqNumber: 12, state: "PENDING", requestedById: null, requestedByAgentId: "agent-1", createdAt: new Date("2026-11-09T10:00:00Z"),
+    id: REQ, workspaceId: WS, decisionCycle: 1, seqPrefix: null, seqNumber: 12, state: "PENDING", requestedById: null, requestedByAgentId: "agent-1", createdAt: new Date("2026-11-09T10:00:00Z"),
     workspace: { slug: "product", organization: { slug: "acme" } },
-    currentRevision: { title: "Set description", summary: "S", packetJson: JSON.stringify(packet), supersededAt: null, expiresAt: new Date("2026-11-10T10:00:00Z"), decisions: [], ...revision },
+    currentRevision: { revisionNumber: 1, fingerprint: fingerprintOf(REQ, 1, 1, packet), title: "Set description", summary: "S", packetJson: JSON.stringify(packet), supersededAt: null, expiresAt: new Date("2026-11-10T10:00:00Z"), decisions: [], ...revision },
     ...over,
   }
 }
@@ -21,7 +28,10 @@ const decided = (outcomeClass: string, application: Record<string, unknown> | nu
 })
 
 let prisma: { reviewRequest: { findFirst: ReturnType<typeof vi.fn>; findMany: ReturnType<typeof vi.fn> }; user: { findMany: ReturnType<typeof vi.fn> } }
+afterEach(() => setToolApprovalRegistryForTest(null))
 beforeEach(() => {
+  setToolApprovalRegistryForTest({ [spec.toolName]: spec })
+  m.isAdmin.mockResolvedValue(true)
   prisma = { reviewRequest: { findFirst: vi.fn().mockResolvedValue(row()), findMany: vi.fn().mockResolvedValue([row()]) }, user: { findMany: vi.fn().mockResolvedValue([{ id: "admin-1", name: "Ada Admin", email: "ada@example.com" }]) } }
 })
 
@@ -91,6 +101,60 @@ describe("loadApprovalView", () => {
     expect((await loadApprovalView(prisma as never, { requestId: REQ, workspaceId: WS, now: NOW }))!.requestedBy).toBe("person")
     prisma.reviewRequest.findFirst.mockResolvedValue(row({ requestedByAgentId: null, requestedById: null }))
     expect((await loadApprovalView(prisma as never, { requestId: REQ, workspaceId: WS, now: NOW }))!.requestedBy).toBe("service")
+  })
+})
+
+describe("an approval the executor would refuse never reads as running (B1)", () => {
+  const approvedNoReceipt = (over: Record<string, unknown> = {}, revision: Record<string, unknown> = {}) =>
+    row({ state: "DECIDED", ...over }, { decisions: [{ ...decided("APPROVE", null), decidedAt: new Date(NOW.getTime() - 500) }], ...revision })
+  const stateOf = async () => (await loadApprovalView(prisma as never, { requestId: REQ, workspaceId: WS, now: NOW }))!.state.key
+
+  it("reads APPLYING only when the executor could still claim it (registered, intact, approver still admin, in time)", async () => {
+    prisma.reviewRequest.findFirst.mockResolvedValue(approvedNoReceipt())
+    expect(await stateOf()).toBe("APPLYING")
+  })
+  it("a demoted approver: Approved, not run", async () => {
+    prisma.reviewRequest.findFirst.mockResolvedValue(approvedNoReceipt())
+    m.isAdmin.mockResolvedValue(false)
+    expect(await stateOf()).toBe("NOT_RUN")
+    expect(m.isAdmin).toHaveBeenCalledWith(expect.anything(), "admin-1", WS)
+  })
+  it("a tool whose capability class changed since the request: Approved, not run", async () => {
+    prisma.reviewRequest.findFirst.mockResolvedValue(approvedNoReceipt())
+    setToolApprovalRegistryForTest({ [spec.toolName]: { ...spec, capabilityClass: "something.else" } })
+    expect(await stateOf()).toBe("NOT_RUN")
+  })
+  it("a tool that is no longer registered: Approved, not run", async () => {
+    prisma.reviewRequest.findFirst.mockResolvedValue(approvedNoReceipt())
+    setToolApprovalRegistryForTest({})
+    expect(await stateOf()).toBe("NOT_RUN")
+  })
+  it("an altered stored request (fingerprint no longer matches): Approved, not run", async () => {
+    prisma.reviewRequest.findFirst.mockResolvedValue(approvedNoReceipt({}, { fingerprint: "0".repeat(64) }))
+    expect(await stateOf()).toBe("NOT_RUN")
+  })
+  it("a request that expired before the executor ran, or a packet for another workspace: Approved, not run", async () => {
+    prisma.reviewRequest.findFirst.mockResolvedValue(approvedNoReceipt({}, { expiresAt: new Date(NOW.getTime() - 1000) }))
+    expect(await stateOf()).toBe("NOT_RUN")
+    prisma.reviewRequest.findFirst.mockResolvedValue(approvedNoReceipt({ workspaceId: "99999999-9999-4999-8999-999999999999" }))
+    expect(await stateOf()).toBe("NOT_RUN")
+  })
+  it("does not ask who the approver is unless an approved call has no receipt", async () => {
+    await loadApprovalView(prisma as never, { requestId: REQ, workspaceId: WS, now: NOW })
+    expect(m.isAdmin).not.toHaveBeenCalled()
+  })
+})
+
+describe("loadApprovalRequester", () => {
+  it("reads who raised a tool approval, scoped by id, workspace and gate", async () => {
+    prisma.reviewRequest.findFirst.mockResolvedValue({ requestedById: "u1", requestedByAgentId: "a1" })
+    expect(await loadApprovalRequester(prisma as never, { requestId: REQ, workspaceId: WS })).toEqual({ userId: "u1", agentId: "a1" })
+    expect(prisma.reviewRequest.findFirst.mock.calls[0][0].where).toEqual({ id: REQ, workspaceId: WS, gateType: "TOOL_APPROVAL" })
+  })
+  it("is null for a malformed id or no row", async () => {
+    expect(await loadApprovalRequester(prisma as never, { requestId: "x", workspaceId: WS })).toBeNull()
+    prisma.reviewRequest.findFirst.mockResolvedValue(null)
+    expect(await loadApprovalRequester(prisma as never, { requestId: REQ, workspaceId: WS })).toBeNull()
   })
 })
 

@@ -18,6 +18,7 @@ const connection = vi.hoisted(() => ({ prisma: null as AppPrismaClient | null })
 vi.mock("@/lib/db", () => ({ default: () => connection.prisma }))
 
 import { runApprovalDecision } from "@/app/[orgSlug]/[workspaceSlug]/approvals/decision-core"
+import { addApprovalUpdateToConversation } from "@/lib/tool-approval/conversation"
 import { conversationUpdateText } from "@/lib/tool-approval/messages"
 import { setToolApprovalRegistryForTest, type ToolApprovalSpec } from "@/lib/tool-approval/registry"
 import { requestToolApproval } from "@/lib/tool-approval/request"
@@ -33,7 +34,7 @@ describe.skipIf(!databaseUrl)("tool approval surfaces (real PostgreSQL)", () => 
   let created = false
   let workspaceId: string
   let otherWorkspaceId: string
-  const u = {} as Record<"admin" | "member" | "outsider", string>
+  const u = {} as Record<"admin" | "member" | "outsider" | "demotee", string>
   const executeSpy = vi.fn()
 
   const spec: ToolApprovalSpec = {
@@ -50,8 +51,8 @@ describe.skipIf(!databaseUrl)("tool approval surfaces (real PostgreSQL)", () => 
     },
   }
 
-  const pending = async (description: string, inWorkspace = workspaceId) => {
-    const out = await requestToolApproval({ toolName: TOOL, args: { workspaceId: inWorkspace, description }, requester: { userId: null, agentId: randomUUID() } })
+  const pending = async (description: string, inWorkspace = workspaceId, requester: { userId: string | null; agentId: string | null } = { userId: null, agentId: randomUUID() }) => {
+    const out = await requestToolApproval({ toolName: TOOL, args: { workspaceId: inWorkspace, description }, requester })
     if (out.status !== "APPROVAL_REQUIRED") throw new Error(`expected APPROVAL_REQUIRED, got ${out.status}`)
     return out
   }
@@ -79,10 +80,11 @@ describe.skipIf(!databaseUrl)("tool approval surfaces (real PostgreSQL)", () => 
     ])
     workspaceId = ws.id
     otherWorkspaceId = ws2.id
-    for (const key of ["admin", "member", "outsider"] as const) u[key] = (await prisma.user.create({ data: { email: `${key}-${randomUUID().slice(0, 6)}@localhost.dev`, name: key } })).id
+    for (const key of ["admin", "member", "outsider", "demotee"] as const) u[key] = (await prisma.user.create({ data: { email: `${key}-${randomUUID().slice(0, 6)}@localhost.dev`, name: key } })).id
     await prisma.workspaceMember.create({ data: { workspaceId, userId: u.admin, role: "ADMIN" } })
     await prisma.workspaceMember.create({ data: { workspaceId, userId: u.member, role: "MEMBER" } })
     await prisma.workspaceMember.create({ data: { workspaceId: otherWorkspaceId, userId: u.admin, role: "ADMIN" } })
+    await prisma.workspaceMember.create({ data: { workspaceId, userId: u.demotee, role: "ADMIN" } })
   }, 180_000)
 
   afterAll(async () => {
@@ -266,13 +268,65 @@ describe.skipIf(!databaseUrl)("tool approval surfaces (real PostgreSQL)", () => 
     expect(times.length).toBeGreaterThan(0)
   })
 
+  describe("a refused approval never reads as running (B1)", () => {
+    const recordApproval = async (requestId: string, revisionId: string, actorUserId: string) => {
+      const revision = await prisma.reviewRevision.findUniqueOrThrow({ where: { id: revisionId } })
+      const option = await prisma.reviewOption.findFirstOrThrow({ where: { revisionId, actionKey: "APPROVE" } })
+      await prisma.decisionRecord.create({ data: { workspaceId, requestId, revisionId, fingerprint: revision.fingerprint, optionId: option.id, actorUserId, actorRole: "ADMIN", idempotencyKey: `ta-${randomUUID()}` } })
+      await prisma.reviewRequest.update({ where: { id: requestId }, data: { state: "DECIDED" } })
+    }
+
+    it("a REGISTERED tool whose capability changed after the request: the click, the view and the conversation all say Approved, not run, and nothing says running", async () => {
+      const requester = { userId: u.admin, agentId: randomUUID() }
+      const out = await pending("refused-mismatch", workspaceId, requester)
+      const conversationId = (await prisma.agentConversation.create({ data: { workspaceId, userId: u.admin, title: "chat" } })).id
+      await prisma.agentRun.create({ data: { conversationId, workspaceId, userId: u.admin, agentId: requester.agentId, workerTokenHash: randomUUID().replaceAll("-", "") + randomUUID().replaceAll("-", ""), deadlineAt: new Date(Date.now() + 3600_000) } })
+      setToolApprovalRegistryForTest({ [TOOL]: { ...spec, capabilityClass: "workspace.description.v2" } })
+      const r = await click(out.requestId, { conversationId })
+      expect(r).toMatchObject({ ok: false, state: "NOT_RUN" })
+      expect(executeSpy).not.toHaveBeenCalled()
+      expect((await view(out.requestId))!.state.key).toBe("NOT_RUN")
+      const rows = await prisma.agentMessage.findMany({ where: { conversationId } })
+      expect(rows).toHaveLength(1)
+      expect(rows[0].content).toContain("Approved, not run")
+      expect(rows[0].content).not.toMatch(/running|is running/i)
+    })
+
+    it("an approver who was demoted before the executor ran reads Approved, not run at once (no spinner)", async () => {
+      const out = await pending("demoted-approver")
+      await recordApproval(out.requestId, out.revisionId, u.demotee)
+      expect((await view(out.requestId))!.state.key).toBe("APPLYING") // still an admin: the executor could claim it
+      await prisma.workspaceMember.updateMany({ where: { workspaceId, userId: u.demotee }, data: { role: "MEMBER" } })
+      expect((await view(out.requestId))!.state.key).toBe("NOT_RUN")
+      await prisma.workspaceMember.updateMany({ where: { workspaceId, userId: u.demotee }, data: { role: "ADMIN" } })
+    })
+
+    it("an unfinished approval stays unannounced to the conversation until it is final", async () => {
+      const requester = { userId: u.admin, agentId: randomUUID() }
+      const out = await pending("still-applying", workspaceId, requester)
+      await recordApproval(out.requestId, out.revisionId, u.admin)
+      const conversationId = (await prisma.agentConversation.create({ data: { workspaceId, userId: u.admin, title: "chat" } })).id
+      await prisma.agentRun.create({ data: { conversationId, workspaceId, userId: u.admin, agentId: requester.agentId, workerTokenHash: randomUUID().replaceAll("-", "") + randomUUID().replaceAll("-", ""), deadlineAt: new Date(Date.now() + 3600_000) } })
+      const v = (await view(out.requestId))!
+      expect(v.state.key).toBe("APPLYING")
+      expect(await addApprovalUpdateToConversation(prisma, { conversationId, workspaceId, userId: u.admin, view: v })).toBe("not_terminal")
+      expect(await prisma.agentMessage.count({ where: { conversationId } })).toBe(0)
+    })
+  })
+
   describe("telling the agent conversation", () => {
-    const conversation = async (userId: string) => (await prisma.agentConversation.create({ data: { workspaceId, userId, title: "chat" } })).id
+    const conversation = async (userId: string, agentId?: string) => {
+      const id = (await prisma.agentConversation.create({ data: { workspaceId, userId, title: "chat" } })).id
+      if (agentId) await prisma.agentRun.create({ data: { conversationId: id, workspaceId, userId, agentId, workerTokenHash: randomUUID().replaceAll("-", "") + randomUUID().replaceAll("-", ""), deadlineAt: new Date(Date.now() + 3600_000) } })
+      return id
+    }
+    const asAgent = () => ({ userId: u.admin, agentId: randomUUID() })
     const messages = (conversationId: string) => prisma.agentMessage.findMany({ where: { conversationId }, orderBy: { createdAt: "asc" } })
 
     it("approve adds one fixed-template user message the next turn will load, authored by the admin; a replay adds none", async () => {
-      const out = await pending("conv-approve")
-      const conversationId = await conversation(u.admin)
+      const requester = asAgent()
+      const out = await pending("conv-approve", workspaceId, requester)
+      const conversationId = await conversation(u.admin, requester.agentId)
       const key = `ta-${randomUUID()}`
       await click(out.requestId, { conversationId, idempotencyKey: key })
       await click(out.requestId, { conversationId, idempotencyKey: key })
@@ -283,8 +337,9 @@ describe.skipIf(!databaseUrl)("tool approval surfaces (real PostgreSQL)", () => 
     })
 
     it("deny tells the conversation it was denied", async () => {
-      const out = await pending("conv-deny")
-      const conversationId = await conversation(u.admin)
+      const requester = asAgent()
+      const out = await pending("conv-deny", workspaceId, requester)
+      const conversationId = await conversation(u.admin, requester.agentId)
       await click(out.requestId, { conversationId, action: "REJECT" })
       const rows = await messages(conversationId)
       expect(rows).toHaveLength(1)
@@ -292,17 +347,67 @@ describe.skipIf(!databaseUrl)("tool approval surfaces (real PostgreSQL)", () => 
     })
 
     it("a conversation the clicker cannot access receives nothing", async () => {
-      const out = await pending("conv-foreign")
-      const someoneElses = await conversation(u.member)
+      const requester = { userId: u.member, agentId: randomUUID() }
+      const out = await pending("conv-foreign", workspaceId, requester)
+      const someoneElses = await conversation(u.member, requester.agentId)
       await click(out.requestId, { conversationId: someoneElses })
       expect(await messages(someoneElses)).toHaveLength(0)
     })
 
     it("a refused click (member) writes nothing to the conversation", async () => {
-      const out = await pending("conv-refused")
-      const conversationId = await conversation(u.member)
+      const requester = { userId: u.member, agentId: randomUUID() }
+      const out = await pending("conv-refused", workspaceId, requester)
+      const conversationId = await conversation(u.member, requester.agentId)
       await click(out.requestId, { userId: u.member, conversationId })
       expect(await messages(conversationId)).toHaveLength(0)
+    })
+
+    it("A9: a conversation the clicker can access but that never ran the requesting agent receives nothing (fails closed)", async () => {
+      const out = await pending("conv-unrelated", workspaceId, asAgent())
+      const conversationId = await conversation(u.admin) // no run by the requesting agent
+      await click(out.requestId, { conversationId })
+      expect(await messages(conversationId)).toHaveLength(0)
+    })
+
+    it("A9: a conversation with a run by a different agent receives nothing", async () => {
+      const out = await pending("conv-other-agent", workspaceId, asAgent())
+      const conversationId = await conversation(u.admin, randomUUID())
+      await click(out.requestId, { conversationId })
+      expect(await messages(conversationId)).toHaveLength(0)
+    })
+
+    it("A9: a service-key request (no user, no agent) is never told to any conversation", async () => {
+      const out = await pending("conv-service", workspaceId, { userId: null, agentId: null })
+      const conversationId = await conversation(u.admin, randomUUID())
+      await click(out.requestId, { conversationId })
+      expect(await messages(conversationId)).toHaveLength(0)
+    })
+
+    it("A2: concurrent writers of the same outcome produce exactly one message", async () => {
+      const requester = asAgent()
+      const out = await pending("conv-race", workspaceId, requester)
+      const conversationId = await conversation(u.admin, requester.agentId)
+      await click(out.requestId)
+      const v = (await view(out.requestId))!
+      const results = await Promise.all(Array.from({ length: 6 }, () => addApprovalUpdateToConversation(prisma, { conversationId, workspaceId, userId: u.admin, view: v })))
+      expect(results.filter((r) => r === "added")).toHaveLength(1)
+      expect(results.filter((r) => r === "duplicate")).toHaveLength(5)
+      expect(await messages(conversationId)).toHaveLength(1)
+    })
+
+    it("B1: the later poll path tells the conversation once the final state is observed, and not before", async () => {
+      const requester = asAgent()
+      const out = await pending("conv-late", workspaceId, requester)
+      const conversationId = await conversation(u.admin, requester.agentId)
+      // The click returned while the run was still unfinished (no conversation passed): nothing was told.
+      await click(out.requestId)
+      expect(await messages(conversationId)).toHaveLength(0)
+      // The card's later poll observes the final state and asks for the once-only message.
+      const v = (await view(out.requestId))!
+      expect(v.state.key).toBe("APPLIED")
+      expect(await addApprovalUpdateToConversation(prisma, { conversationId, workspaceId, userId: u.admin, view: v })).toBe("added")
+      expect(await addApprovalUpdateToConversation(prisma, { conversationId, workspaceId, userId: u.admin, view: v })).toBe("duplicate")
+      expect(await messages(conversationId)).toHaveLength(1)
     })
   })
 })

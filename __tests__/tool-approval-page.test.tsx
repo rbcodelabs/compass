@@ -75,6 +75,25 @@ describe("approval page: access", () => {
   })
 })
 
+describe("approval page: a hostile packet never 500s (A1)", () => {
+  const nest = (levels: number, leaf: unknown) => { let v: unknown = leaf; for (let i = 0; i < levels; i += 1) v = { a: v }; return v }
+
+  it("renders a 10,000-level packet with the too-large row and a bounded arguments block", async () => {
+    m.loadView.mockResolvedValue(view("PENDING", { before: nest(10_000, 1) as never, after: nest(10_000, 2) as never, args: nest(10_000, 3) as never }))
+    const html = await render()
+    expect(html).toMatch(/too deep or too large to display in full/i)
+    expect(html).toContain('data-testid="approve-button"')
+  })
+
+  it("renders a very large argument list cut to a bounded size", async () => {
+    const big = Array.from({ length: 200_000 }, (_, i) => ({ id: i, text: "x".repeat(20) }))
+    m.loadView.mockResolvedValue(view("PENDING", { before: [] as never, after: big as never, args: big as never }))
+    const html = await render()
+    expect(html.length).toBeLessThan(400_000)
+    expect(html).toMatch(/too deep or too large to display in full/i)
+  })
+})
+
 describe("approval page: every state", () => {
   const terminal: ApprovalStateKey[] = ["APPLIED", "DENIED", "EXPIRED", "STALE", "FAILED", "UNKNOWN_OUTCOME", "BLOCKED", "NOT_RUN", "SUPERSEDED"]
   it.each(terminal)("%s shows its label and explanation and no Approve / Deny buttons", async (key) => {

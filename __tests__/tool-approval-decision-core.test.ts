@@ -112,8 +112,8 @@ describe("runApprovalDecision: approve and deny", () => {
     [{ status: "REFUSED", reason: "TOOL_NOT_REGISTERED" }, "NOT_RUN", /not available for approval/],
   ])("maps executor outcome %j to a readable message", async (execution, state, pattern) => {
     m.decide.mockResolvedValue({ decision: { id: "d1" }, execution })
-    // The state reported back is the stored one, read after the attempt.
-    m.loadView.mockResolvedValueOnce(view("PENDING")).mockResolvedValue(view(state))
+    // The stored view is deliberately wrong (the old 2-minute heuristic would say APPLYING): the executor's own answer wins.
+    m.loadView.mockResolvedValueOnce(view("PENDING")).mockResolvedValue(view("APPLYING"))
     const r = await runApprovalDecision(input())
     expect(r.ok).toBe(false)
     expect(r.state).toBe(state)
@@ -147,11 +147,39 @@ describe("runApprovalDecision: errors", () => {
 })
 
 describe("runApprovalDecision: telling the conversation", () => {
-  it("adds the outcome to the named conversation from the stored state", async () => {
+  it("adds the final outcome to the named conversation", async () => {
     m.loadView.mockResolvedValueOnce(view("PENDING")).mockResolvedValueOnce(view("APPLIED"))
     await runApprovalDecision(input({ conversationId: CONV }))
     expect(m.addUpdate).toHaveBeenCalledTimes(1)
     expect(m.addUpdate).toHaveBeenCalledWith(expect.anything(), { conversationId: CONV, workspaceId: WS, userId: USER, view: expect.objectContaining({ state: { key: "APPLIED" } }) })
+  })
+
+  it("B1: a refused executor outcome is told as Approved-not-run even when the stored view still says APPLYING", async () => {
+    m.decide.mockResolvedValue({ decision: { id: "d1" }, execution: { status: "REFUSED", reason: "APPROVER_NOT_ADMIN_NOW" } })
+    m.loadView.mockResolvedValueOnce(view("PENDING")).mockResolvedValue(view("APPLYING"))
+    const r = await runApprovalDecision(input({ conversationId: CONV }))
+    expect(r.state).toBe("NOT_RUN")
+    expect(m.addUpdate).toHaveBeenCalledTimes(1)
+    expect(m.addUpdate.mock.calls[0][1].view.state.key).toBe("NOT_RUN")
+  })
+
+  it.each([
+    [{ status: "BLOCKED", receiptId: "r", floors: ["x"] }, "BLOCKED"],
+    [{ status: "STALE", receiptId: "r" }, "STALE"],
+    [{ status: "FAILED", receiptId: "r", error: "e" }, "FAILED"],
+  ])("B1: executor outcome %j is told as %s, from the outcome", async (execution, expected) => {
+    m.decide.mockResolvedValue({ decision: { id: "d1" }, execution })
+    m.loadView.mockResolvedValueOnce(view("PENDING")).mockResolvedValue(view("APPLYING"))
+    await runApprovalDecision(input({ conversationId: CONV }))
+    expect(m.addUpdate.mock.calls[0][1].view.state.key).toBe(expected)
+  })
+
+  it("B1: while the stored state is still APPLYING and the click gave no final answer, the conversation is NOT told 'running'", async () => {
+    m.decide.mockResolvedValue({ decision: { id: "d1" }, execution: { status: "ALREADY_APPLIED", receiptStatus: "PENDING" } })
+    m.loadView.mockResolvedValueOnce(view("PENDING")).mockResolvedValue(view("APPLYING"))
+    const r = await runApprovalDecision(input({ conversationId: CONV }))
+    expect(r.state).toBe("APPLYING")
+    expect(m.addUpdate).not.toHaveBeenCalled()
   })
 
   it("does not tell the conversation while the request is still pending (a refused click) or when none is named or the id is bad", async () => {

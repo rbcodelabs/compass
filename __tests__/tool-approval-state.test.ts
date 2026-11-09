@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest"
-import { APPLYING_WINDOW_MS, APPROVAL_STATES, deriveApprovalState, type ApprovalStateInput, type ApprovalStateKey } from "@/lib/tool-approval/state"
-import { conversationUpdateText, describeDecisionError, describeExecution, safeToolName } from "@/lib/tool-approval/messages"
+import { APPLYING_WINDOW_MS, APPROVAL_STATES, NO_RECEIPT_WINDOW_MS, deriveApprovalState, type ApprovalStateInput, type ApprovalStateKey } from "@/lib/tool-approval/state"
+import { conversationUpdateText, describeDecisionError, describeExecution, isApprovalUpdateMessage, safeToolName } from "@/lib/tool-approval/messages"
 
 const now = new Date("2026-11-09T12:00:00Z")
 const ago = (ms: number) => new Date(now.getTime() - ms)
-const base: ApprovalStateInput = { requestState: "PENDING", revisionSupersededAt: null, revisionExpiresAt: new Date(now.getTime() + 3_600_000), decision: null, receipt: null, toolRegistered: true, now }
+const base: ApprovalStateInput = { requestState: "PENDING", revisionSupersededAt: null, revisionExpiresAt: new Date(now.getTime() + 3_600_000), decision: null, receipt: null, runnable: true, now }
 const approved = (decidedAgo = 60 * 60 * 1000) => ({ outcomeClass: "APPROVE", decidedAt: ago(decidedAgo) })
 const state = (over: Partial<ApprovalStateInput>) => deriveApprovalState({ ...base, ...over }).key
 
@@ -16,6 +16,8 @@ describe("deriveApprovalState: every state", () => {
     ["SUPERSEDED", { revisionSupersededAt: ago(1000) }],
     ["DENIED", { requestState: "DECIDED", decision: { outcomeClass: "REJECT", decidedAt: ago(1000) } }],
     ["APPLYING", { requestState: "DECIDED", decision: approved(1000) }],
+    ["APPLYING", { requestState: "DECIDED", decision: approved(NO_RECEIPT_WINDOW_MS - 1000) }],
+    ["NOT_RUN", { requestState: "DECIDED", decision: approved(NO_RECEIPT_WINDOW_MS + 1000) }],
     ["APPLYING", { requestState: "DECIDED", decision: approved(), receipt: { status: "PENDING", updatedAt: ago(1000) } }],
     ["UNKNOWN_OUTCOME", { requestState: "DECIDED", decision: approved(), receipt: { status: "PENDING", updatedAt: ago(APPLYING_WINDOW_MS + 1000) } }],
     ["APPLIED", { requestState: "DECIDED", decision: approved(), receipt: { status: "APPLIED", updatedAt: ago(1000) } }],
@@ -23,7 +25,7 @@ describe("deriveApprovalState: every state", () => {
     ["STALE", { requestState: "DECIDED", decision: approved(), receipt: { status: "STALE", updatedAt: ago(1000) } }],
     ["BLOCKED", { requestState: "DECIDED", decision: approved(), receipt: { status: "BLOCKED", updatedAt: ago(1000) } }],
     ["NOT_RUN", { requestState: "DECIDED", decision: approved() }],
-    ["NOT_RUN", { requestState: "DECIDED", decision: approved(1000), toolRegistered: false }],
+    ["NOT_RUN", { requestState: "DECIDED", decision: approved(1000), runnable: false }],
     ["UNKNOWN_OUTCOME", { requestState: "DECIDED", decision: approved(), receipt: { status: "SOMETHING_NEW", updatedAt: ago(1000) } }],
   ]
   it.each(cases)("%s", (expected, over) => expect(state(over)).toBe(expected))
@@ -41,6 +43,15 @@ describe("deriveApprovalState: every state", () => {
   it("the unknown-outcome wording tells an operator to check and says it will not be retried", () => {
     expect(APPROVAL_STATES.UNKNOWN_OUTCOME.explanation).toMatch(/operator/i)
     expect(APPROVAL_STATES.UNKNOWN_OUTCOME.explanation).toMatch(/not be retried/i)
+  })
+})
+
+describe("no receipt: a refusal must not read as running (B1)", () => {
+  it("the window for 'about to claim a receipt' is seconds, not minutes", () => {
+    expect(NO_RECEIPT_WINDOW_MS).toBeLessThanOrEqual(15_000)
+  })
+  it("an approval the executor would refuse (not runnable) is Approved, not run immediately", () => {
+    expect(state({ requestState: "DECIDED", decision: approved(500), runnable: false })).toBe("NOT_RUN")
   })
 })
 
@@ -93,5 +104,15 @@ describe("conversationUpdateText is a fixed template", () => {
   })
   it("says NOT performed for every non-applied terminal state", () => {
     for (const key of ["DENIED", "EXPIRED", "STALE", "BLOCKED", "NOT_RUN", "SUPERSEDED"] as const) expect(conversationUpdateText({ state: key, requestId: id, displayId: null, tool: "t" })).toMatch(/NOT performed/)
+  })
+})
+
+describe("isApprovalUpdateMessage (A8)", () => {
+  const id = "11111111-2222-4333-8444-555555555555"
+  it("recognises the injected message so the chat can label it as system-generated", () => {
+    expect(isApprovalUpdateMessage(conversationUpdateText({ state: "DENIED", requestId: id, displayId: "DEC-1", tool: "t" }))).toBe(true)
+  })
+  it("does not match ordinary text", () => {
+    for (const text of ["hello", "Approval update", " [Approval update] x", ""]) expect(isApprovalUpdateMessage(text), text).toBe(false)
   })
 })

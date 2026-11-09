@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { MAX_DISPLAY_VALUE_CHARS, diffJson, formatValue } from "@/lib/tool-approval/diff"
+import { COMPACT_ROW_LIMIT, MAX_DIFF_DEPTH, MAX_DIFF_NODES, MAX_DISPLAY_VALUE_CHARS, diffJson, formatValue, previewJson, reviewableInCard } from "@/lib/tool-approval/diff"
 
 const kinds = (before: unknown, after: unknown) => diffJson(before as never, after as never).changed.map((r) => `${r.kind}:${r.path}`)
 
@@ -72,5 +72,110 @@ describe("diffJson", () => {
 
   it("keeps HTML-looking text as plain text in the row (escaping is the renderer's job)", () => {
     expect(diffJson({ n: "<b>x</b>" }, { n: "<img src=x onerror=alert(1)>" }).changed[0]).toMatchObject({ before: '"<b>x</b>"', after: '"<img src=x onerror=alert(1)>"' })
+  })
+})
+
+
+const deep = (levels: number, leaf: unknown = 1) => {
+  let value: unknown = leaf
+  for (let i = 0; i < levels; i += 1) value = { a: value }
+  return value
+}
+
+describe("diffJson: keys are own properties only (B2)", () => {
+  const own = (text: string) => JSON.parse(text) as never
+
+  it("a key that only exists on Object.prototype is added, not walked as if both sides had it", () => {
+    for (const key of ["constructor", "toString", "hasOwnProperty", "valueOf", "isPrototypeOf"]) {
+      expect(kinds({}, { [key]: 1 }), key).toEqual([`added:${key}`])
+      expect(kinds({ [key]: 1 }, {}), key).toEqual([`removed:${key}`])
+      expect(kinds({ [key]: 1 }, { [key]: 2 }), key).toEqual([`changed:${key}`])
+    }
+  })
+
+  it("an own __proto__ key (created by JSON.parse) diffs like any other key", () => {
+    expect(kinds(own('{"__proto__":{"x":1}}'), own("{}"))).toEqual(["removed:__proto__.x"])
+    expect(kinds(own("{}"), own('{"__proto__":{"x":1}}'))).toEqual(["added:__proto__.x"])
+    expect(kinds(own('{"__proto__":{"x":1}}'), own('{"__proto__":{"x":2}}'))).toEqual(["changed:__proto__.x"])
+  })
+
+  it("does not pollute Object.prototype or the result objects", () => {
+    diffJson(own('{"__proto__":{"polluted":"yes"},"constructor":{"prototype":{"polluted2":"yes"}}}'), own("{}"))
+    diffJson(own("{}"), own('{"__proto__":{"polluted":"yes"}}'))
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined()
+    expect(({} as Record<string, unknown>).polluted2).toBeUndefined()
+    expect(Object.keys(Object.prototype)).toEqual([])
+  })
+})
+
+describe("diffJson: depth and size caps (A1)", () => {
+  it("10,000 levels of nesting never throw: the walk stops at the depth cap and says so", () => {
+    const result = diffJson(deep(10_000, 1) as never, deep(10_000, 2) as never)
+    expect(result.incomplete).toBe(true)
+    const truncated = result.changed.filter((row) => row.kind === "truncated")
+    expect(truncated.length).toBeGreaterThan(0)
+    expect(truncated[0].path.split(".").length).toBeLessThanOrEqual(MAX_DIFF_DEPTH + 1)
+    expect(result.changed.length).toBeLessThan(10)
+  })
+
+  it("a shape change against a very deep value formats without overflowing the stack", () => {
+    const result = diffJson(deep(10_000) as never, "flat" as never)
+    expect(result.changed).toHaveLength(1)
+    expect(result.changed[0].before!.length).toBeLessThan(3000)
+  })
+
+  it("a huge list of objects is cut at the node budget with one truncated row", () => {
+    const big = Array.from({ length: 50_000 }, (_, i) => ({ id: i, name: `n${i}` }))
+    const started = Date.now()
+    const result = diffJson([] as never, big as never)
+    expect(Date.now() - started).toBeLessThan(2000)
+    expect(result.incomplete).toBe(true)
+    expect(result.changed.length).toBeLessThanOrEqual(MAX_DIFF_NODES + 1)
+    expect(result.changed.some((row) => row.kind === "truncated")).toBe(true)
+  })
+
+  it("a huge list of plain values is compared in linear time and still cut", () => {
+    const before = Array.from({ length: 100_000 }, (_, i) => i)
+    const after = Array.from({ length: 100_000 }, (_, i) => i + 1)
+    const started = Date.now()
+    const result = diffJson({ n: before } as never, { n: after } as never)
+    expect(Date.now() - started).toBeLessThan(3000)
+    expect(result.incomplete).toBe(true)
+  })
+
+  it("a small value is complete", () => {
+    expect(diffJson({ a: 1 }, { a: 2 }).incomplete).toBe(false)
+  })
+})
+
+describe("previewJson", () => {
+  it("returns the text and whether it was cut", () => {
+    expect(previewJson({ a: 1 }, 100)).toEqual({ text: '{"a":1}', truncated: false })
+    const cut = previewJson({ a: "x".repeat(500) }, 50)
+    expect(cut.truncated).toBe(true)
+    expect(cut.text.length).toBeLessThanOrEqual(80)
+  })
+  it("never throws on a value too deep to stringify", () => {
+    const result = previewJson(deep(10_000) as never, 1000)
+    expect(result.truncated).toBe(true)
+  })
+  it("pretty prints when asked", () => {
+    expect(previewJson({ a: 1 }, 100, { pretty: true }).text).toBe('{\n  "a": 1\n}')
+  })
+})
+
+describe("reviewableInCard (A3)", () => {
+  it("is ok when every change and the arguments are shown", () => {
+    expect(reviewableInCard({ a: 1 } as never, { a: 2 } as never, { x: 1 } as never)).toEqual({ ok: true })
+  })
+  it("is not ok when more than the compact limit of changes would be hidden", () => {
+    const after = Object.fromEntries(Array.from({ length: COMPACT_ROW_LIMIT + 1 }, (_, i) => [`k${i}`, i]))
+    const r = reviewableInCard({} as never, after as never, {} as never)
+    expect(r.ok).toBe(false)
+    expect(r.reason).toMatch(/not all changes are shown/i)
+  })
+  it("is not ok when the diff was cut or the arguments are too long to show", () => {
+    expect(reviewableInCard(deep(100) as never, deep(100, 2) as never, {} as never).ok).toBe(false)
+    expect(reviewableInCard({ a: 1 } as never, { a: 2 } as never, { big: "x".repeat(9000) } as never)).toMatchObject({ ok: false, reason: expect.stringMatching(/arguments/i) })
   })
 })

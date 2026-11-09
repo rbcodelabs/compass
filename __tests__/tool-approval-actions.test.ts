@@ -6,12 +6,14 @@ const m = vi.hoisted(() => ({
   run: vi.fn(),
   isAdmin: vi.fn(),
   loadView: vi.fn(),
+  addUpdate: vi.fn(),
   prisma: {} as Record<string, Record<string, ReturnType<typeof vi.fn>>>,
 }))
 vi.mock("@/auth", () => ({ auth: m.auth }))
 vi.mock("next/cache", () => ({ revalidatePath: m.revalidatePath }))
 vi.mock("@/lib/db", () => ({ default: () => m.prisma }))
 vi.mock("@/lib/agent-ownership", () => ({ isWorkspaceAdminUser: m.isAdmin }))
+vi.mock("@/lib/tool-approval/conversation", () => ({ addApprovalUpdateToConversation: m.addUpdate }))
 vi.mock("@/app/[orgSlug]/[workspaceSlug]/approvals/decision-core", () => ({ runApprovalDecision: m.run }))
 vi.mock("@/lib/tool-approval/view", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/lib/tool-approval/view")>()), loadApprovalView: m.loadView }))
 
@@ -28,6 +30,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   m.auth.mockResolvedValue({ user: { id: USER } })
   m.run.mockResolvedValue({ ok: true, tone: "success", message: "done" })
+  m.addUpdate.mockResolvedValue("added")
   m.prisma = { workspace: { findFirst: vi.fn().mockResolvedValue({ id: WS }) } }
 })
 
@@ -103,5 +106,40 @@ describe("getApprovalCardAction", () => {
   it("an organization admin who is not a workspace member can read the card", async () => {
     m.prisma.workspace.findFirst.mockResolvedValue({ members: [], organization: { members: [{ role: "ADMIN" }] } })
     expect(await getApprovalCardAction({ workspaceId: WS, requestId: REQ })).not.toBeNull()
+  })
+})
+
+describe("getApprovalCardAction tells the conversation about a final state it observes (B1)", () => {
+  const CONVERSATION = "44444444-4444-4444-8444-444444444444"
+  const view = (key: string, terminal: boolean) => ({ requestId: REQ, displayId: "DEC-3", path: "/p", tool: "t", capabilityClass: "c", title: "T", summary: "S", args: {}, before: 1, after: 2, state: { key, terminal }, requestedBy: "agent", createdAt: "2026-11-09T00:00:00.000Z", expiresAt: null, decision: null, receipt: null })
+  beforeEach(() => {
+    m.prisma.workspace.findFirst.mockResolvedValue({ members: [{ id: "m" }], organization: { members: [] } })
+    m.isAdmin.mockResolvedValue(true)
+  })
+
+  it("an admin's poll that first sees a final state asks for the once-only message, as the signed-in user", async () => {
+    m.loadView.mockResolvedValue(view("APPLIED", true))
+    await getApprovalCardAction({ workspaceId: WS, requestId: REQ, conversationId: CONVERSATION })
+    expect(m.addUpdate).toHaveBeenCalledTimes(1)
+    expect(m.addUpdate).toHaveBeenCalledWith(expect.anything(), { conversationId: CONVERSATION, workspaceId: WS, userId: USER, view: expect.objectContaining({ requestId: REQ, state: expect.objectContaining({ key: "APPLIED" }) }) })
+  })
+
+  it.each([
+    ["a non-final state", () => m.loadView.mockResolvedValue(view("APPLYING", false)), CONVERSATION],
+    ["no conversation named", () => m.loadView.mockResolvedValue(view("APPLIED", true)), undefined],
+    ["a malformed conversation id", () => m.loadView.mockResolvedValue(view("APPLIED", true)), "nope"],
+    ["a non-admin viewer", () => { m.loadView.mockResolvedValue(view("APPLIED", true)); m.isAdmin.mockResolvedValue(false) }, CONVERSATION],
+  ])("does not for %s", async (_name, arrange, conversationId) => {
+    arrange()
+    await getApprovalCardAction({ workspaceId: WS, requestId: REQ, conversationId } as never)
+    expect(m.addUpdate).not.toHaveBeenCalled()
+  })
+
+  it("a failure to write the message never fails the card", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined)
+    m.loadView.mockResolvedValue(view("APPLIED", true))
+    m.addUpdate.mockRejectedValue(new Error("db down"))
+    expect(await getApprovalCardAction({ workspaceId: WS, requestId: REQ, conversationId: CONVERSATION })).not.toBeNull()
+    log.mockRestore()
   })
 })

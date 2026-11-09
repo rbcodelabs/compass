@@ -70,4 +70,18 @@ describe("EffectDiff", () => {
     expect(html("a", "b")).toContain("(value)")
     expect(html({ v: { a: 1 } }, { v: "flat" })).toContain("Changed")
   })
+
+  it("shows an explicit row, not a crash, for values too deep or too large to display in full", () => {
+    let deepValue: unknown = 1
+    for (let i = 0; i < 10_000; i += 1) deepValue = { a: deepValue }
+    const out = html(deepValue, { a: 1 })
+    expect(out).toContain("Too large to show")
+    expect(out).toMatch(/too deep or too large to display in full/i)
+  })
+
+  it("says when the diff was cut and where to read the rest", () => {
+    const big = Array.from({ length: 5000 }, (_, i) => ({ id: i }))
+    const out = html([], big, { moreHref: "/o/w/approvals/x" })
+    expect(out).toMatch(/too deep or too large to display in full/i)
+  })
 })
