@@ -45,7 +45,7 @@ export const MODEL_BUCKETS: Readonly<Record<string, ExportBucket>> = Object.from
   ...list(
     "TIERED",
     `AgentConversation AgentConversationParticipant AgentMessage PortfolioCapacityPlan
-     PortfolioCapacityReservation ReleaseRun ReleaseRunTask`
+     PortfolioCapacityReservation ReleaseRun ReleaseRunTask CustomFieldInheritanceRule`
   ),
   ...list(
     "SECRET",
