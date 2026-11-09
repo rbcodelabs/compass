@@ -58,7 +58,6 @@ const GENERIC_DELEGATE_WRITERS: Record<string, { hooked: boolean; reason: string
   "lib/entity-detail.ts": { hooked: false, reason: "read-only: findMany by model name for panel lookups, never writes" },
   "lib/task-tool-handlers.ts": { hooked: false, reason: "task rows only (modelName is a task-link target lookup); never writes a roadmap item" },
   "lib/workspace-update-mutations.ts": { hooked: false, reason: "reads the row a mutation just wrote for update capture; the writes stay in the callers the other scans cover" },
-  "lib/analytics/activity.ts": { hooked: false, reason: "wraps a delegate for activity capture; the caller's write is covered by the other scans" },
 }
 
 const VALUE_WRITE_SITES: Record<string, { writes: number; hooked: boolean; reason?: string }> = {
