@@ -20,9 +20,9 @@ export type SeededToolApproval = { requestId: string; marker: string; title: str
 
 export async function seedToolApprovalWith(
   workspaceId: string,
-  opts: { before?: Json; after?: Json; args?: Json; titleSuffix?: string; expiresAt?: Date } = {},
+  opts: { marker?: string; before?: Json; after?: Json; args?: Json; titleSuffix?: string; expiresAt?: Date } = {},
 ): Promise<SeededToolApproval> {
-  const marker = randomUUID().slice(0, 8)
+  const marker = opts.marker ?? randomUUID().slice(0, 8)
   const title = `QA-TITLE-${marker} ${opts.titleSuffix ?? "Set workspace description"}`
   const summary = `QA-SUMMARY-${marker} Changes the workspace description.`
   const argText = `QA-ARGS-${marker}`
@@ -46,7 +46,7 @@ export async function seedRichToolApproval(workspaceId: string): Promise<SeededT
   const marker = randomUUID().slice(0, 8)
   const before: Json = { name: `QA-NAME-${marker}`, labels: ["alpha", "beta", "gamma"], limits: { maxItems: 10, burst: true }, owner: { email: "a@example.com" } }
   const after: Json = { name: `QA-NAME-${marker}-renamed`, labels: ["alpha", "gamma", "delta"], limits: { maxItems: 25, burst: true, region: "eu" } , owner: null }
-  return seedToolApprovalWith(workspaceId, { before, after, args: { workspaceId, patch: after }, titleSuffix: "Update workspace settings" })
+  return seedToolApprovalWith(workspaceId, { marker, before, after, args: { workspaceId, patch: after }, titleSuffix: "Update workspace settings" })
 }
 
 /** Long strings, a very long unbroken token and HTML-looking text: nothing may widen the page or render as markup. */
