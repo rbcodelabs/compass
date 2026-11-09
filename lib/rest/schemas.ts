@@ -190,6 +190,11 @@ export const customFieldDefinitionSchema = z.object({
   sharedOptionSetId: uuid.nullable(), sharedOptionSetName: z.string().nullable(), required: z.boolean(), order: z.number().int(),
 })
 export const customFieldValueSchema = customFieldDefinitionSchema.extend({ currentValue: z.unknown().nullable() })
+export const customFieldInheritanceRuleSchema = z.object({
+  id: uuid, priority: z.number().int(), enabled: z.boolean(), status: z.enum(["active", "disabled", "inactive"]), inactiveReason: z.string().nullable(),
+  sourceObjectType: z.string(), sourceFieldId: uuid, sourceFieldName: z.string().nullable(),
+  targetObjectType: z.string(), targetFieldId: uuid, targetFieldName: z.string().nullable(),
+})
 
 export const taskLinkSchema = z.object({
   id: uuid,

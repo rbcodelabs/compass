@@ -25,6 +25,8 @@ import { createRoadmapItemsFromSolutions } from "@/lib/roadmap/create-from-solut
 import { addCalendarDays } from "@/lib/roadmap-timeline/calendar-geometry"
 import { durationDaysFor } from "@/lib/roadmap/scheduling"
 import { allocateOneSeq } from "@/lib/work-item-sequence"
+import { applyInheritanceRules, type InheritedField } from "@/lib/custom-field-inheritance"
+import { inheritedFieldsText } from "@/lib/custom-field-inheritance-report"
 
 export function roadmapCreateData(input: Parameters<typeof createRoadmapItem>[0], sortOrder: number) {
   return {
@@ -45,14 +47,21 @@ export async function createRoadmapItem(input: {
   if (!workspace) return fail(`Workspace "${input.workspaceId}" not found.`)
   if (input.solutionId) return createFromSolution(prisma, workspace, input as typeof input & { solutionId: string })
   const lastItem = await prisma.roadmapItem.findFirst({ where: { workspaceId: input.workspaceId, horizon: input.horizon, status: "ACTIVE" }, orderBy: { sortOrder: "desc" }, select: { sortOrder: true } })
-  const item = await captureWorkspaceMutation(prisma, "roadmapItem", "create", workspaceMutationSource(input.source), undefined, async tx => tx.roadmapItem.create({ data: { ...roadmapCreateData(input, lastItem ? lastItem.sortOrder + 1 : 0), ...(await allocateOneSeq(tx, input.workspaceId, "roadmapItem")) } }))
+  // The callback can replay on a rolled-back attempt: only the attempt that commits leaves its result behind.
+  let inherited: InheritedField[] = []
+  const item = await captureWorkspaceMutation(prisma, "roadmapItem", "create", workspaceMutationSource(input.source), undefined, async tx => {
+    const created = await tx.roadmapItem.create({ data: { ...roadmapCreateData(input, lastItem ? lastItem.sortOrder + 1 : 0), ...(await allocateOneSeq(tx, input.workspaceId, "roadmapItem")) } })
+    inherited = (await applyInheritanceRules(tx, { workspaceId: input.workspaceId, targetObjectType: "ROADMAP_ITEM", targetId: created.id, links: { opportunityId: created.opportunityId ?? null, solutionId: created.solutionId ?? null } })).applied
+    return created
+  })
   const format = (date: Date) => new Intl.DateTimeFormat("en-US", { timeZone: "UTC" }).format(date)
   return ok(withUrlLine(
     `**Roadmap item created** (${input.horizon})\nID: ${item.id}${displayLine("roadmapItem", item)}\nTitle: ${item.title}` +
       (item.isPrivate ? "\nPrivate: yes (hidden from public portal)" : "") +
-      (item.startDate || item.endDate ? `\nDates: ${item.startDate ? format(item.startDate) : "?"} – ${item.endDate ? format(item.endDate) : "?"}` : ""),
+      (item.startDate || item.endDate ? `\nDates: ${item.startDate ? format(item.startDate) : "?"} – ${item.endDate ? format(item.endDate) : "?"}` : "") +
+      inheritedFieldsText(inherited),
     safeEntityUrl({ orgSlug: workspace.organization?.slug, workspaceSlug: workspace.slug, type: "roadmapItem", id: item.id, displayId: displayIdFromRow("roadmapItem", item) }),
-  ), { id: item.id, displayId: displayIdFromRow("roadmapItem", item), title: item.title, horizon: item.horizon, isPrivate: item.isPrivate, solutionId: item.solutionId, keyResultId: item.keyResultId, opportunityId: item.opportunityId, squadId: item.squadId, startDate: item.startDate, endDate: item.endDate })
+  ), { id: item.id, displayId: displayIdFromRow("roadmapItem", item), title: item.title, horizon: item.horizon, isPrivate: item.isPrivate, solutionId: item.solutionId, keyResultId: item.keyResultId, opportunityId: item.opportunityId, squadId: item.squadId, startDate: item.startDate, endDate: item.endDate, inheritedFields: inherited })
 }
 
 function actingUserId(): string | null {
@@ -96,13 +105,15 @@ async function createFromSolution(
   const item = itemId ? await prisma.roadmapItem.findUnique({ where: { id: itemId } }) : null
   if (!item) return fail("Roadmap item could not be created.")
   const created = result.created.length > 0
+  const inherited = result.created[0]?.inheritedFields ?? []
   const format = (date: Date) => new Intl.DateTimeFormat("en-US", { timeZone: "UTC" }).format(date)
   return ok(withUrlLine(
     `**${created ? "Roadmap item created" : "Solution is already on the roadmap"}** (${item.horizon})\nID: ${item.id}${displayLine("roadmapItem", item)}\nTitle: ${item.title}` +
       (item.isPrivate ? "\nPrivate: yes (hidden from public portal)" : "") +
-      (item.startDate || item.endDate ? `\nDates: ${item.startDate ? format(item.startDate) : "?"} – ${item.endDate ? format(item.endDate) : "?"}` : ""),
+      (item.startDate || item.endDate ? `\nDates: ${item.startDate ? format(item.startDate) : "?"} – ${item.endDate ? format(item.endDate) : "?"}` : "") +
+      inheritedFieldsText(inherited),
     safeEntityUrl({ orgSlug: workspace.organization?.slug, workspaceSlug: workspace.slug, type: "roadmapItem", id: item.id, displayId: displayIdFromRow("roadmapItem", item) }),
-  ), { id: item.id, displayId: displayIdFromRow("roadmapItem", item), title: item.title, horizon: item.horizon, isPrivate: item.isPrivate, solutionId: item.solutionId, keyResultId: item.keyResultId, opportunityId: item.opportunityId, squadId: item.squadId, startDate: item.startDate, endDate: item.endDate, created })
+  ), { id: item.id, displayId: displayIdFromRow("roadmapItem", item), title: item.title, horizon: item.horizon, isPrivate: item.isPrivate, solutionId: item.solutionId, keyResultId: item.keyResultId, opportunityId: item.opportunityId, squadId: item.squadId, startDate: item.startDate, endDate: item.endDate, created, inheritedFields: inherited })
 }
 
 export async function promoteSolutionToRoadmap(input: {
@@ -152,11 +163,11 @@ export async function promoteSolutionToRoadmap(input: {
   const created = result.created[0]
   const item = created && (await prisma.roadmapItem.findUnique({ where: { id: created.id } }))
   if (!item) return fail("Solution not found.")
-  return ok("Solution promoted to roadmap.", promotionData(item, solution.opportunity.title, true))
+  return ok("Solution promoted to roadmap." + inheritedFieldsText(created.inheritedFields), promotionData(item, solution.opportunity.title, true, created.inheritedFields))
 }
 
-function promotionData(item: { id: string; title: string; horizon: string; isPrivate: boolean; solutionId: string | null; opportunityId: string | null; squadId: string | null; startDate: Date | null; endDate: Date | null }, opportunityTitle: string, created: boolean) {
-  return { id: item.id, title: item.title, horizon: item.horizon, isPrivate: item.isPrivate, solutionId: item.solutionId, opportunityId: item.opportunityId, opportunityTitle, squadId: item.squadId, startDate: item.startDate, endDate: item.endDate, created }
+function promotionData(item: { id: string; title: string; horizon: string; isPrivate: boolean; solutionId: string | null; opportunityId: string | null; squadId: string | null; startDate: Date | null; endDate: Date | null }, opportunityTitle: string, created: boolean, inheritedFields: InheritedField[] = []) {
+  return { id: item.id, title: item.title, horizon: item.horizon, isPrivate: item.isPrivate, solutionId: item.solutionId, opportunityId: item.opportunityId, opportunityTitle, squadId: item.squadId, startDate: item.startDate, endDate: item.endDate, created, inheritedFields }
 }
 
 export async function updateRoadmapItem(input: {
@@ -166,7 +177,7 @@ export async function updateRoadmapItem(input: {
   source?: ProgrammaticSource
 }) {
   const prisma = getPrisma()
-  const item = await prisma.roadmapItem.findUnique({ where: { id: input.itemId }, select: { id: true, workspaceId: true } })
+  const item = await prisma.roadmapItem.findUnique({ where: { id: input.itemId }, select: { id: true, workspaceId: true, opportunityId: true, solutionId: true } })
   if (!item) return fail(`Roadmap item "${input.itemId}" not found.`)
   if (input.horizon === "LAUNCHING" || input.horizon === "LAUNCHED") {
     if (!(await isModuleEnabled(item.workspaceId, "launch_workflow"))) return fail(LAUNCH_WORKFLOW_DISABLED_MESSAGE)
@@ -187,7 +198,20 @@ export async function updateRoadmapItem(input: {
   if (input.endDate !== undefined) data.endDate = input.endDate ? new Date(input.endDate) : null
   // A hand-edited schedule stops the item following its solution (migration 075).
   if (input.startDate !== undefined || input.endDate !== undefined || input.horizon !== undefined) data.scheduleEditedAt = new Date()
-  const updated = await captureWorkspaceMutation(prisma, "roadmapItem", "update", workspaceMutationSource(input.source), input.itemId, (tx) => tx.roadmapItem.update({ where: { id: input.itemId }, data }))
+  // Inheritance runs only when a link actually changed to a new non-null value: re-sending the same link and unlinking do nothing.
+  const linkChanged = (input.opportunityId != null && input.opportunityId !== item.opportunityId) || (input.solutionId != null && input.solutionId !== item.solutionId)
+  let inherited: InheritedField[] = []
+  const updated = await captureWorkspaceMutation(prisma, "roadmapItem", "update", workspaceMutationSource(input.source), input.itemId, async (tx) => {
+    inherited = []
+    const saved = await tx.roadmapItem.update({ where: { id: input.itemId }, data })
+    if (linkChanged) {
+      inherited = (await applyInheritanceRules(tx, {
+        workspaceId: item.workspaceId, targetObjectType: "ROADMAP_ITEM", targetId: input.itemId,
+        links: { opportunityId: input.opportunityId !== undefined ? input.opportunityId : item.opportunityId, solutionId: input.solutionId !== undefined ? input.solutionId : item.solutionId },
+      })).applied
+    }
+    return saved
+  })
   const formatUtcDate = (date: Date) => new Intl.DateTimeFormat("en-US", { timeZone: "UTC" }).format(date)
   return ok(
     `**Roadmap item updated**\nID: ${updated.id}\nTitle: ${updated.title}\n` +
@@ -196,8 +220,9 @@ export async function updateRoadmapItem(input: {
       (updated.solutionId ? `\nLinked Solution: ${updated.solutionId}` : "") +
       (updated.startDate || updated.endDate
         ? `\nDates: ${updated.startDate ? formatUtcDate(updated.startDate) : "?"} – ${updated.endDate ? formatUtcDate(updated.endDate) : "?"}`
-        : ""),
-    { id: updated.id, title: updated.title, horizon: updated.horizon, status: updated.status, isPrivate: updated.isPrivate, solutionId: updated.solutionId, startDate: updated.startDate, endDate: updated.endDate },
+        : "") +
+      inheritedFieldsText(inherited),
+    { id: updated.id, title: updated.title, horizon: updated.horizon, status: updated.status, isPrivate: updated.isPrivate, solutionId: updated.solutionId, startDate: updated.startDate, endDate: updated.endDate, inheritedFields: inherited },
   )
 }
 

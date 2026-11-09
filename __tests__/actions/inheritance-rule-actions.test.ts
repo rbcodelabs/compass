@@ -35,6 +35,7 @@ vi.mock("@/lib/custom-field-inheritance-admin", async (importOriginal) => ({
   deleteInheritanceRulesForField: m.removeForField,
 }))
 
+import { InheritanceRuleError } from "@/lib/custom-field-inheritance-admin"
 import {
   createInheritanceRuleAction,
   deleteFieldDefinition,
@@ -98,9 +99,15 @@ describe("inheritance rule actions scope everything to the resolved workspace", 
     expect(m.remove).toHaveBeenCalledWith(expect.anything(), "ws-1", "rule-1")
   })
 
-  it("surfaces a rejected rule (foreign field, mismatch) as an error, not a silent success", async () => {
-    m.create.mockRejectedValue(new Error("Field not found"))
-    await expect(createInheritanceRuleAction("org", "ws", { targetFieldId: "t", sourceFieldId: "s" })).rejects.toThrow("Field not found")
+  it("returns a rejected rule (foreign field, mismatch) as { ok: false, error }, never a silent success, and does not revalidate", async () => {
+    m.create.mockRejectedValue(new InheritanceRuleError("Field not found"))
+    await expect(createInheritanceRuleAction("org", "ws", { targetFieldId: "t", sourceFieldId: "s" })).resolves.toEqual({ ok: false, error: "Field not found" })
+    expect(m.revalidatePath).not.toHaveBeenCalled()
+  })
+
+  it("rethrows an unexpected failure instead of hiding it", async () => {
+    m.create.mockRejectedValue(new Error("connection reset"))
+    await expect(createInheritanceRuleAction("org", "ws", { targetFieldId: "t", sourceFieldId: "s" })).rejects.toThrow("connection reset")
   })
 })
 
