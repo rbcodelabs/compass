@@ -4,6 +4,7 @@ import { ToolApprovalError } from "@/lib/tool-approval/errors"
 import { canonicalJson } from "@/lib/tool-approval/packet"
 import { getToolApprovalSpec } from "@/lib/tool-approval/registry"
 import { requestToolApproval } from "@/lib/tool-approval/request"
+import { restBypassProblem } from "@/lib/tool-approval/rest-guard"
 
 const show = (value: unknown): string => {
   const text = canonicalJson(value) ?? "null"
@@ -24,6 +25,9 @@ export async function interceptToolForApproval(input: {
 }): Promise<ToolResult | null> {
   if (!getToolApprovalSpec(input.toolName)) return null
   const notDone = { executed: false }
+  if (restBypassProblem(input.toolName)) {
+    return fail("Approval is unavailable for this action right now. It was NOT performed.", { status: "APPROVAL_UNAVAILABLE", ...notDone })
+  }
   try {
     const outcome = await requestToolApproval({
       toolName: input.toolName,
@@ -55,8 +59,8 @@ export async function interceptToolForApproval(input: {
       expiresAt: outcome.expiresAt?.toISOString() ?? null, reused: outcome.reused,
     })
   } catch (error) {
-    if (error instanceof ToolApprovalError && error.code === "TOO_MANY_PENDING") {
-      return fail(`${error.message} The action was NOT performed.`, { status: "TOO_MANY_PENDING", ...notDone })
+    if (error instanceof ToolApprovalError && (error.code === "TOO_MANY_PENDING" || error.code === "REQUESTER_LIMIT")) {
+      return fail(`${error.message} The action was NOT performed.`, { status: error.code, ...notDone })
     }
     // Log the failure class only: args and state may carry data the caller must not echo into logs.
     console.error("Tool approval could not be requested", { tool: input.toolName, error: error instanceof Error ? error.name : "unknown", code: (error as { code?: string }).code })

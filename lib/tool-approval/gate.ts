@@ -18,14 +18,6 @@ export function isToolApprovalGate(gateType: string | null | undefined): boolean
   return gateType === TOOL_APPROVAL_GATE
 }
 
-/**
- * Capability token for recordDecision on a TOOL_APPROVAL request. Only lib/tool-approval/decide.ts imports it, so a
- * generic surface (server action, REST, MCP) cannot record a decision that nothing would ever execute. A module-private
- * Symbol (not Symbol.for) cannot be forged from outside this module graph.
- */
-export const TOOL_APPROVAL_DECISION_CHANNEL: unique symbol = Symbol("tool-approval-decision-channel")
-export type ToolApprovalDecisionChannel = typeof TOOL_APPROVAL_DECISION_CHANNEL
-
 /** The dedicated approval surface (built in A3). */
 export function toolApprovalPath(orgSlug: string, workspaceSlug: string, requestId: string): string {
   return `/${orgSlug}/${workspaceSlug}/approvals/${requestId}`

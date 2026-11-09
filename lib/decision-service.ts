@@ -4,7 +4,8 @@ import { workspaceUpdatesTablesExist } from "@/lib/feature-tables"
 import { isModuleEnabled } from "@/lib/modules/server"
 import { isOrgAdminRole, normalizeWorkspaceRole } from "@/lib/roles"
 import { isSubmitAnswersActionKey, parseDecisionAnswers, parsePacketQuestions, type TrackedDecisionAnswer, type TrackedDecisionAnswerInput } from "@/lib/tracked-decision-types"
-import { TOOL_APPROVAL_DECISION_CHANNEL, TOOL_APPROVAL_SURFACE_MESSAGE, isToolApprovalGate, type ToolApprovalDecisionChannel } from "@/lib/tool-approval/gate"
+import { TOOL_APPROVAL_SURFACE_MESSAGE, isToolApprovalGate } from "@/lib/tool-approval/gate"
+import { isToolApprovalChannel, type ToolApprovalDecisionChannel } from "@/lib/tool-approval/channel"
 
 export type DecisionActor = { kind: "SERVICE" } | { kind: "USER"; userId: string }
 
@@ -121,7 +122,7 @@ export async function recordDecision(input: {
       })
       if (!revision) throw new DecisionError("REVISION_NOT_FOUND", "Review revision not found.")
       // An approval decided here would be recorded but never executed (and an admin would think it was). Dedicated surface only.
-      if (isToolApprovalGate(revision.request.gateType) && input.toolApprovalChannel !== TOOL_APPROVAL_DECISION_CHANNEL) {
+      if (isToolApprovalGate(revision.request.gateType) && !isToolApprovalChannel(input.toolApprovalChannel)) {
         throw new DecisionError("TOOL_APPROVAL_SURFACE_REQUIRED", TOOL_APPROVAL_SURFACE_MESSAGE)
       }
       if (revision.fingerprint !== input.fingerprint) {

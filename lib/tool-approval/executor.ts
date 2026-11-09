@@ -2,6 +2,7 @@ import getPrisma, { type AppPrismaClient } from "@/lib/db"
 import { isWorkspaceAdminUser } from "@/lib/agent-ownership"
 import { runWithMcpActor } from "@/lib/mcp-authz"
 import { EXECUTE_TOOL_APPROVAL_CONTINUATION, TOOL_APPROVAL_GATE } from "@/lib/tool-approval/gate"
+import { sanitizeError, sanitizeText } from "@/lib/tool-approval/sanitize"
 import { fingerprintOf, parseEffectPacket, receiptKeyOf, sameJson, toJsonValue, type Json } from "@/lib/tool-approval/packet"
 import { getToolApprovalSpec, type ToolApprovalContext, type ToolApprovalExecuteContext } from "@/lib/tool-approval/registry"
 
@@ -9,7 +10,7 @@ import { getToolApprovalSpec, type ToolApprovalContext, type ToolApprovalExecute
 export const TOOL_APPROVAL_EXECUTION_WINDOW_MS = 15 * 60 * 1000
 
 export type RefusalReason =
-  | "NO_DECISION" | "WRONG_GATE" | "NOT_CURRENT" | "NOT_AN_APPROVAL" | "PACKET_INVALID" | "FINGERPRINT_MISMATCH"
+  | "NO_DECISION" | "WRONG_GATE" | "NOT_CURRENT" | "OPTION_MISMATCH" | "NOT_AN_APPROVAL" | "PACKET_INVALID" | "FINGERPRINT_MISMATCH"
   | "WORKSPACE_MISMATCH" | "TOOL_NOT_REGISTERED" | "TOOL_MISMATCH" | "APPROVER_NOT_ADMIN_NOW" | "EXPIRED" | "APPROVAL_STALE"
 
 export type ExecuteOutcome =
@@ -19,32 +20,30 @@ export type ExecuteOutcome =
   | { status: "STALE"; receiptId: string }
   /** A hard floor blocks the call regardless of approval. Nothing ran. */
   | { status: "BLOCKED"; receiptId: string; floors: string[] }
+  /** Another run already finished this decision (APPLIED, FAILED, STALE or BLOCKED). Never run again. */
   | { status: "ALREADY_APPLIED"; receiptStatus: string }
+  /**
+   * A receipt exists but is still PENDING: either an executor is running right now or one died mid-run, so whether the tool
+   * ran is unknown. Not a success and not retriable; an operator must inspect the target and the receipt.
+   */
+  | { status: "UNKNOWN_OUTCOME"; receiptStatus: "PENDING"; needsOperator: true }
   | { status: "REFUSED"; reason: RefusalReason }
+
+async function existingReceiptOutcome(prisma: AppPrismaClient, decisionId: string): Promise<ExecuteOutcome> {
+  const row = await prisma.decisionApplication.findUnique({ where: { receiptKey: receiptKeyOf(decisionId) }, select: { status: true } })
+  const status = row?.status ?? "PENDING"
+  return status === "PENDING" ? { status: "UNKNOWN_OUTCOME", receiptStatus: "PENDING", needsOperator: true } : { status: "ALREADY_APPLIED", receiptStatus: status }
+}
 
 /**
  * Receipt-first, one terminal outcome per decision. Once a decision passes static verification a DecisionApplication row is
  * claimed (unique receiptKey) BEFORE anything else happens, so two racing executors yield exactly one winner. The row ends as
- * APPLIED, FAILED, STALE or BLOCKED and never returns to PENDING. Retry semantics: none. A FAILED/STALE/BLOCKED (or crashed,
- * still PENDING) receipt is final; running the call again requires a brand-new approval request and decision.
- */
-export function sanitizeError(error: unknown): string {
-  const raw = error instanceof Error ? `${error.name}: ${error.message}` : "Error: execution failed"
-  return raw
-    .split("\n")[0]
-    .replace(/Bearer\s+\S+/gi, "[redacted]")
-    .replace(/\b(?:sk|pk|rk|ghp|gho|ghs|xox[abp])[-_][A-Za-z0-9_-]{8,}/g, "[redacted]")
-    .replace(/[A-Za-z0-9+/_=-]{32,}/g, "[redacted]")
-    .replace(/(?:\/[\w.@-]+){2,}(?::\d+){0,2}/g, "[path]")
-    .slice(0, 300)
-}
-
-async function receiptStatusOf(prisma: AppPrismaClient, decisionId: string): Promise<string> {
-  const row = await prisma.decisionApplication.findUnique({ where: { receiptKey: receiptKeyOf(decisionId) }, select: { status: true } })
-  return row?.status ?? "PENDING"
-}
-
-/**
+ * APPLIED, FAILED, STALE or BLOCKED and never returns to PENDING. Retry semantics: none. A FAILED/STALE/BLOCKED receipt is final;
+ * running the call again requires a brand-new approval request and decision. A receipt left PENDING (a crash, or a run still in
+ * flight) is reported as UNKNOWN_OUTCOME and likewise never re-run automatically.
+ *
+ * Note this makes the claim atomic, not the tool's own before-check and write: see ToolApprovalSpec.execute.
+ *
  * Runs the approved tool call for ONE decision. The decision id is the only input and nothing else is trusted: the packet, the
  * tool, the workspace and the approver all come from the database and are re-verified now. See ExecuteOutcome for results.
  */
@@ -59,6 +58,7 @@ export async function executeApprovedToolCall(decisionId: string): Promise<Execu
   const request = revision.request
   if (request.gateType !== TOOL_APPROVAL_GATE) return refuse("WRONG_GATE")
   if (request.state !== "DECIDED" || request.currentRevisionId !== revision.id || revision.supersededAt) return refuse("NOT_CURRENT")
+  if (decision.option.revisionId !== revision.id) return refuse("OPTION_MISMATCH")
   if (decision.option.outcomeClass !== "APPROVE" || decision.option.continuationKey !== EXECUTE_TOOL_APPROVAL_CONTINUATION) return refuse("NOT_AN_APPROVAL")
 
   let storedPacket: unknown
@@ -77,7 +77,7 @@ export async function executeApprovedToolCall(decisionId: string): Promise<Execu
 
   const receiptKey = receiptKeyOf(decision.id)
   if (await prisma.decisionApplication.findUnique({ where: { receiptKey }, select: { id: true } })) {
-    return { status: "ALREADY_APPLIED", receiptStatus: await receiptStatusOf(prisma, decision.id) }
+    return existingReceiptOutcome(prisma, decision.id)
   }
 
   let receiptId: string
@@ -88,7 +88,7 @@ export async function executeApprovedToolCall(decisionId: string): Promise<Execu
     })).id
   } catch (error) {
     // A racing executor claimed it first: it owns the outcome, this one must do nothing.
-    if ((error as { code?: string }).code === "P2002") return { status: "ALREADY_APPLIED", receiptStatus: await receiptStatusOf(prisma, decision.id) }
+    if ((error as { code?: string }).code === "P2002") return existingReceiptOutcome(prisma, decision.id)
     throw error
   }
   const settle = (status: string, extra: { lastError?: string; appliedAt?: Date } = {}) =>
@@ -97,12 +97,13 @@ export async function executeApprovedToolCall(decisionId: string): Promise<Execu
   const baseContext: ToolApprovalContext = { workspaceId: request.workspaceId, prisma, requestedByUserId: request.requestedById, requestedByAgentId: request.requestedByAgentId }
   const args = packet.args as Record<string, unknown>
   try {
-    const liveBefore = toJsonValue(await spec.readBefore(args, baseContext))
-    const floors = (await spec.floors?.(args, liveBefore, baseContext)) ?? []
+    const rawBefore = toJsonValue(await spec.readBefore(args, baseContext))
+    const floors = ((await spec.floors?.(args, rawBefore, baseContext)) ?? []).map(sanitizeText)
     if (floors.length) {
       await settle("BLOCKED", { lastError: floors.join("; ").slice(0, 500) })
       return { status: "BLOCKED", receiptId, floors }
     }
+    const liveBefore = spec.redact ? toJsonValue(spec.redact("before", rawBefore)) : rawBefore
     if (!sameJson(liveBefore, packet.before)) {
       await settle("STALE", { lastError: "The state changed after approval." })
       return { status: "STALE", receiptId }

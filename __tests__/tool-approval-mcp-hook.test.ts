@@ -35,7 +35,9 @@ await import("@/app/api/mcp/route")
 
 import { getToolApprovalSpec, registeredToolApprovalNames, setToolApprovalRegistryForTest, type ToolApprovalSpec } from "@/lib/tool-approval/registry"
 import { interceptToolForApproval } from "@/lib/tool-approval/mcp-hook"
-import { restOperationIsApprovalGated } from "@/lib/tool-approval/rest-guard"
+import { restBypassProblem, restOperationIsApprovalGated } from "@/lib/tool-approval/rest-guard"
+import { executeRestRoute, RestConflictError } from "@/lib/rest/execute"
+import { REST_ROUTES } from "@/lib/rest/registry"
 
 const TOOL = "get_current_identity"
 const WS = "11111111-1111-4111-8111-111111111111"
@@ -164,6 +166,31 @@ describe("an opted-in tool never reaches its handler", () => {
     // Reached its own handler (which reads the organization), untouched by the approval hook.
     expect(mockPrisma.organization.findUnique).toHaveBeenCalled()
     expect(requestMock.requestToolApproval).not.toHaveBeenCalled()
+  })
+
+  it("a REQUESTER_LIMIT refusal is reported like a full queue", async () => {
+    const { ToolApprovalError } = await import("@/lib/tool-approval/errors")
+    requestMock.requestToolApproval.mockRejectedValueOnce(new ToolApprovalError("REQUESTER_LIMIT", "This caller already has 5 approvals waiting."))
+    expect((await as({ userId: null, purpose: "SERVICE" })).structuredContent).toMatchObject({ ok: false, data: { status: "REQUESTER_LIMIT", executed: false } })
+  })
+
+  it("a tool whose REST parity entry names an alternative route fails closed, since REST could bypass the hook", async () => {
+    expect(restBypassProblem("TaskCreate")).toMatch(/alternative/)
+    expect(restBypassProblem(TOOL)).toBeNull()
+    expect(restBypassProblem("not_in_manifest")).toBeNull()
+    setToolApprovalRegistryForTest({ TaskCreate: { ...spec, toolName: "TaskCreate" } })
+    const result = await interceptToolForApproval({ toolName: "TaskCreate", actor: { userId: null, purpose: "SERVICE" }, resolveArgs: async () => ({}) })
+    expect(result?.structuredContent).toMatchObject({ ok: false, data: { status: "APPROVAL_UNAVAILABLE", executed: false } })
+    expect(requestMock.requestToolApproval).not.toHaveBeenCalled()
+  })
+
+  it("executeRestRoute refuses a gated operation before it reaches any handler or database access", async () => {
+    const route = REST_ROUTES.find((candidate) => candidate.operationId === "getCurrentIdentity")!
+    expect(route).toBeDefined()
+    await expect(runWithMcpActor({ userId: null, purpose: "SERVICE" } as never, () => executeRestRoute(route, { params: {}, query: {}, body: undefined }))).rejects.toBeInstanceOf(RestConflictError)
+    expect(Object.values(mockPrisma).flatMap((model) => Object.values(model)).every((fn) => fn.mock.calls.length === 0)).toBe(true)
+    setToolApprovalRegistryForTest({})
+    await runWithMcpActor({ userId: null, purpose: "SERVICE" } as never, () => executeRestRoute(route, { params: {}, query: {}, body: undefined })).catch((e) => expect(e).not.toBeInstanceOf(RestConflictError))
   })
 
   it("REST cannot be used to bypass the hook for an opted-in tool", () => {

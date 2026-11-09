@@ -23,7 +23,7 @@ import { decideToolApproval } from "@/lib/tool-approval/decide"
 import { executeApprovedToolCall } from "@/lib/tool-approval/executor"
 import { fingerprintOf, type EffectPacket } from "@/lib/tool-approval/packet"
 import { setToolApprovalRegistryForTest, type ToolApprovalSpec } from "@/lib/tool-approval/registry"
-import { listPendingToolApprovals, MAX_PENDING_TOOL_APPROVALS, requestToolApproval } from "@/lib/tool-approval/request"
+import { listPendingToolApprovals, MAX_PENDING_PER_REQUESTER, MAX_PENDING_TOOL_APPROVALS, requestToolApproval } from "@/lib/tool-approval/request"
 
 const databaseUrl = process.env.TOOL_APPROVAL_DATABASE_URL
 const TOOL = "set_workspace_description"
@@ -58,7 +58,7 @@ describe.skipIf(!databaseUrl)("tool approval core (real PostgreSQL)", () => {
   const service = { userId: null, agentId: null }
   const agent = () => ({ userId: u.member, agentId: randomUUID() })
   const call = (description: string, over: { workspaceId?: string; requester?: { userId: string | null; agentId: string | null } } = {}) =>
-    requestToolApproval({ toolName: TOOL, args: { workspaceId: over.workspaceId ?? workspaceId, description }, requester: over.requester ?? service })
+    requestToolApproval({ toolName: TOOL, args: { workspaceId: over.workspaceId ?? workspaceId, description }, requester: over.requester ?? { userId: null, agentId: randomUUID() } })
   const pending = async (description: string, over: Parameters<typeof call>[1] = {}) => {
     const outcome = await call(description, over)
     if (outcome.status !== "APPROVAL_REQUIRED") throw new Error(`expected APPROVAL_REQUIRED, got ${outcome.status}`)
@@ -103,7 +103,11 @@ describe.skipIf(!databaseUrl)("tool approval core (real PostgreSQL)", () => {
   })
 
   const useSpec = () => { setToolApprovalRegistryForTest({ [TOOL]: spec }); executeSpy.mockClear() }
-  afterEach(() => { vi.useRealTimers(); useSpec() })
+  afterEach(async () => {
+    vi.useRealTimers(); vi.restoreAllMocks(); useSpec()
+    // Keep the shared workspace under its pending caps between tests.
+    await prisma.reviewRequest.updateMany({ where: { workspaceId, gateType: "TOOL_APPROVAL", state: "PENDING" }, data: { state: "SUPERSEDED" } })
+  })
   useSpec()
 
   describe("requesting approval (the MCP hook's core)", () => {
@@ -173,10 +177,51 @@ describe.skipIf(!databaseUrl)("tool approval core (real PostgreSQL)", () => {
 
     it("caps pending approvals per workspace but still reuses an existing pending call at the cap", async () => {
       const capWorkspace = (await prisma.workspace.create({ data: { organizationId: orgId, slug: `cap-${randomUUID().slice(0, 6)}`, name: "Cap" } })).id
-      for (let i = 0; i < MAX_PENDING_TOOL_APPROVALS; i += 1) await pending(`cap-${i}`, { workspaceId: capWorkspace })
+      const agents = Array.from({ length: MAX_PENDING_TOOL_APPROVALS / MAX_PENDING_PER_REQUESTER }, () => ({ userId: null, agentId: randomUUID() }))
+      for (let i = 0; i < MAX_PENDING_TOOL_APPROVALS; i += 1) await pending(`cap-${i}`, { workspaceId: capWorkspace, requester: agents[Math.floor(i / MAX_PENDING_PER_REQUESTER)] })
       await expect(call("one-too-many", { workspaceId: capWorkspace })).rejects.toMatchObject({ code: "TOO_MANY_PENDING" })
-      expect(await call("cap-3", { workspaceId: capWorkspace })).toMatchObject({ status: "APPROVAL_REQUIRED", reused: true })
+      expect(await call("cap-3", { workspaceId: capWorkspace, requester: agents[0] })).toMatchObject({ status: "APPROVAL_REQUIRED", reused: true })
       expect(await call("other-workspace-unaffected")).toMatchObject({ status: "APPROVAL_REQUIRED" })
+    })
+
+    it("caps pending approvals per requesting agent so one caller cannot fill the workspace queue", async () => {
+      const greedy = { userId: u.member, agentId: randomUUID() }
+      for (let i = 0; i < MAX_PENDING_PER_REQUESTER; i += 1) await pending(`greedy-${i}`, { requester: greedy })
+      await expect(call("greedy-over", { requester: greedy })).rejects.toMatchObject({ code: "REQUESTER_LIMIT" })
+      expect(await call("greedy-0", { requester: greedy })).toMatchObject({ status: "APPROVAL_REQUIRED", reused: true })
+      expect(await call("polite", { requester: { userId: u.member, agentId: randomUUID() } })).toMatchObject({ status: "APPROVAL_REQUIRED", reused: false })
+      // A user (no agent) and the service key are counted separately from every agent.
+      for (let i = 0; i < MAX_PENDING_PER_REQUESTER; i += 1) await pending(`user-${i}`, { requester: { userId: u.admin, agentId: null } })
+      await expect(call("user-over", { requester: { userId: u.admin, agentId: null } })).rejects.toMatchObject({ code: "REQUESTER_LIMIT" })
+      for (let i = 0; i < MAX_PENDING_PER_REQUESTER; i += 1) await pending(`svc-${i}`, { requester: service })
+      await expect(call("svc-over", { requester: service })).rejects.toMatchObject({ code: "REQUESTER_LIMIT" })
+    })
+
+    it("creates nothing when the workspace does not exist (no orphan pending row)", async () => {
+      const ghost = randomUUID()
+      await expect(call("ghost", { workspaceId: ghost })).rejects.toMatchObject({ code: "WORKSPACE_REQUIRED" })
+      expect(await prisma.reviewRequest.count({ where: { workspaceId: ghost } })).toBe(0)
+    })
+
+    it("a decision that lands between finding the stale request and superseding it is not dropped, and no duplicate pending request appears", async () => {
+      await setDescription("race-v1")
+      const first = await pending("race-supersede")
+      await setDescription("race-v2")
+      const realUpdateMany = prisma.reviewRequest.updateMany.bind(prisma.reviewRequest)
+      let decided: Awaited<ReturnType<typeof approve>> | null = null
+      vi.spyOn(prisma.reviewRequest, "updateMany").mockImplementationOnce(((args: never) =>
+        approve(first.requestId).then((result) => { decided = result; return realUpdateMany(args) })) as never)
+      const second = await pending("race-supersede")
+      expect(decided).not.toBeNull()
+      expect(decided!.decision.actorRole).toBe("ADMIN")
+      expect(decided!.execution).toMatchObject({ status: "STALE" }) // the world moved, so the approval is honoured as STALE, not silently lost
+      const old = await prisma.reviewRequest.findUniqueOrThrow({ where: { id: first.requestId }, include: { currentRevision: true } })
+      expect(old.state).toBe("DECIDED")
+      expect(old.currentRevision!.supersededAt).toBeNull()
+      expect(second.requestId).not.toBe(first.requestId)
+      expect(second.before).toBe("race-v2")
+      const live = await prisma.reviewRequest.count({ where: { workspaceId, gateType: "TOOL_APPROVAL", state: "PENDING", subjectId: (await prisma.reviewRequest.findUniqueOrThrow({ where: { id: second.requestId } })).subjectId } })
+      expect(live).toBe(1)
     })
 
     it("a floor violation at request time blocks without creating a request", async () => {
@@ -298,11 +343,12 @@ describe.skipIf(!databaseUrl)("tool approval core (real PostgreSQL)", () => {
       const decision = await recordDecision({
         actor: { kind: "USER", userId: u.admin }, revisionId: revision.id, fingerprint: revision.fingerprint,
         optionId: revision.options.find((o) => o.actionKey === "APPROVE")!.id, idempotencyKey: randomUUID(),
-        toolApprovalChannel: (await import("@/lib/tool-approval/gate")).TOOL_APPROVAL_DECISION_CHANNEL,
+        toolApprovalChannel: (await import("@/lib/tool-approval/channel")).TOOL_APPROVAL_DECISION_CHANNEL,
       })
       const results = await Promise.all([executeApprovedToolCall(decision.id), executeApprovedToolCall(decision.id), executeApprovedToolCall(decision.id)])
       expect(results.filter((r) => r.status === "EXECUTED")).toHaveLength(1)
-      expect(results.filter((r) => r.status === "ALREADY_APPLIED")).toHaveLength(2)
+      // A loser either sees the finished receipt or the winner's still-PENDING one; neither may look like a second success.
+      expect(results.filter((r) => r.status === "ALREADY_APPLIED" || r.status === "UNKNOWN_OUTCOME")).toHaveLength(2)
       expect(executeSpy).toHaveBeenCalledTimes(1)
       expect(await prisma.decisionApplication.count({ where: { decisionId: decision.id } })).toBe(1)
     })
@@ -314,7 +360,7 @@ describe.skipIf(!databaseUrl)("tool approval core (real PostgreSQL)", () => {
       const decision = await recordDecision({
         actor: { kind: "USER", userId: u.demotee }, revisionId: revision.id, fingerprint: revision.fingerprint,
         optionId: revision.options.find((o) => o.actionKey === "APPROVE")!.id, idempotencyKey: randomUUID(),
-        toolApprovalChannel: (await import("@/lib/tool-approval/gate")).TOOL_APPROVAL_DECISION_CHANNEL,
+        toolApprovalChannel: (await import("@/lib/tool-approval/channel")).TOOL_APPROVAL_DECISION_CHANNEL,
       })
       await prisma.workspaceMember.update({ where: { workspaceId_userId: { workspaceId, userId: u.demotee } }, data: { role: "MEMBER" } })
       expect(await executeApprovedToolCall(decision.id)).toMatchObject({ status: "REFUSED", reason: "APPROVER_NOT_ADMIN_NOW" })
@@ -330,7 +376,7 @@ describe.skipIf(!databaseUrl)("tool approval core (real PostgreSQL)", () => {
       const decision = await recordDecision({
         actor: { kind: "USER", userId: u.admin }, revisionId: revision.id, fingerprint: revision.fingerprint,
         optionId: revision.options.find((o) => o.actionKey === "APPROVE")!.id, idempotencyKey: randomUUID(),
-        toolApprovalChannel: (await import("@/lib/tool-approval/gate")).TOOL_APPROVAL_DECISION_CHANNEL,
+        toolApprovalChannel: (await import("@/lib/tool-approval/channel")).TOOL_APPROVAL_DECISION_CHANNEL,
       })
       return { out, revision, decision }
     }
@@ -412,8 +458,9 @@ describe.skipIf(!databaseUrl)("tool approval core (real PostgreSQL)", () => {
 
     it("a floor that appears between approval and execution hard-blocks", async () => {
       const { decision } = await approveWithoutExecuting("floor-later")
-      setToolApprovalRegistryForTest({ [TOOL]: { ...spec, floors: () => ["now forbidden"] } })
-      expect(await executeApprovedToolCall(decision.id)).toMatchObject({ status: "BLOCKED", floors: ["now forbidden"] })
+      setToolApprovalRegistryForTest({ [TOOL]: { ...spec, floors: () => ["now forbidden: Bearer sk-live-abcdefghijklmnopqrstuvwxyz0123456789"] } })
+      expect(await executeApprovedToolCall(decision.id)).toMatchObject({ status: "BLOCKED", floors: ["now forbidden: [redacted]"] })
+      expect((await prisma.decisionApplication.findFirstOrThrow({ where: { decisionId: decision.id } })).lastError).toBe("now forbidden: [redacted]")
       expect(executeSpy).not.toHaveBeenCalled()
       expect((await prisma.decisionApplication.findFirstOrThrow({ where: { decisionId: decision.id } })).status).toBe("BLOCKED")
       expect(await executeApprovedToolCall(decision.id)).toMatchObject({ status: "ALREADY_APPLIED", receiptStatus: "BLOCKED" })
@@ -434,6 +481,69 @@ describe.skipIf(!databaseUrl)("tool approval core (real PostgreSQL)", () => {
     })
   })
 
+  describe("executor hardening", () => {
+    const approveQuietly = async (value: string) => {
+      const out = await pending(value)
+      const revision = await prisma.reviewRevision.findFirstOrThrow({ where: { requestId: out.requestId }, include: { options: true } })
+      const decision = await recordDecision({
+        actor: { kind: "USER", userId: u.admin }, revisionId: revision.id, fingerprint: revision.fingerprint,
+        optionId: revision.options.find((o) => o.actionKey === "APPROVE")!.id, idempotencyKey: randomUUID(),
+        toolApprovalChannel: (await import("@/lib/tool-approval/channel")).TOOL_APPROVAL_DECISION_CHANNEL,
+      })
+      return { out, revision, decision }
+    }
+
+    it("a receipt stuck in PENDING is reported as UNKNOWN_OUTCOME needing an operator, never as a success-looking ALREADY_APPLIED", async () => {
+      const { out, decision } = await approveQuietly("stuck")
+      await prisma.decisionApplication.create({ data: { decisionId: decision.id, continuationKey: "EXECUTE_TOOL_APPROVAL", targetType: "TOOL_APPROVAL", targetId: out.requestId, status: "PENDING", receiptKey: `tool-approval:${decision.id}:v1`, attemptCount: 1, updatedAt: new Date() } })
+      expect(await executeApprovedToolCall(decision.id)).toEqual({ status: "UNKNOWN_OUTCOME", receiptStatus: "PENDING", needsOperator: true })
+      expect(executeSpy).not.toHaveBeenCalled()
+    })
+
+    it("decideToolApproval surfaces the same UNKNOWN_OUTCOME when a replay meets a stuck receipt", async () => {
+      const out = await pending("stuck-replay")
+      const key = randomUUID()
+      const first = await approve(out.requestId, u.admin, { key })
+      await prisma.decisionApplication.update({ where: { receiptKey: `tool-approval:${first.decision.id}:v1` }, data: { status: "PENDING" } })
+      const replay = await approve(out.requestId, u.admin, { key })
+      expect(replay.execution).toMatchObject({ status: "UNKNOWN_OUTCOME", needsOperator: true })
+    })
+
+    it("a decision whose option belongs to a different revision is refused", async () => {
+      const { decision } = await approveQuietly("option-owner")
+      const other = await pending("option-other")
+      const otherRevision = await prisma.reviewRevision.findFirstOrThrow({ where: { requestId: other.requestId }, include: { options: true } })
+      await prisma.decisionRecord.update({ where: { id: decision.id }, data: { optionId: otherRevision.options.find((o) => o.actionKey === "APPROVE")!.id } })
+      expect(await executeApprovedToolCall(decision.id)).toMatchObject({ status: "REFUSED", reason: "OPTION_MISMATCH" })
+      expect(executeSpy).not.toHaveBeenCalled()
+    })
+
+    it("redact() keeps secrets out of the stored packet and the returned result, and the redacted before still matches at execution", async () => {
+      const seen = vi.fn()
+      const strip = (value: unknown): unknown => {
+        if (Array.isArray(value)) return value.map(strip)
+        if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).filter(([k]) => k !== "apiToken" && k !== "internalToken").map(([k, v]) => [k, strip(v)]))
+        return value
+      }
+      setToolApprovalRegistryForTest({ [TOOL]: {
+        ...spec,
+        readBefore: async (args, ctx) => ({ description: (await ctx.prisma.workspace.findUnique({ where: { id: String(args.workspaceId) }, select: { description: true } }))?.description ?? null, internalToken: "hidden-internal-one" }),
+        computeAfter: (args) => ({ description: args.description, internalToken: "hidden-internal-one" }),
+        redact: (_kind, value) => strip(value) as never,
+        execute: async (args, ctx) => { seen(args); await ctx.prisma.workspace.update({ where: { id: String(args.workspaceId) }, data: { description: args.description as string } }); return { ok: true } },
+      } })
+      const out = await requestToolApproval({ toolName: TOOL, args: { workspaceId, description: "redacted-run", apiToken: "hidden-api-two" }, requester: { userId: null, agentId: randomUUID() } })
+      if (out.status !== "APPROVAL_REQUIRED") throw new Error("expected approval")
+      expect(JSON.stringify(out)).not.toMatch(/hidden-internal-one|hidden-api-two/)
+      const stored = (await prisma.reviewRevision.findFirstOrThrow({ where: { requestId: out.requestId } })).packetJson
+      expect(stored).not.toMatch(/hidden-internal-one|hidden-api-two/)
+      const { execution } = await approve(out.requestId)
+      expect(execution).toMatchObject({ status: "EXECUTED" })
+      expect(seen.mock.calls[0][0]).toEqual({ workspaceId, description: "redacted-run" })
+      expect(await description()).toBe("redacted-run")
+    })
+  })
+
   describe("generic review surfaces and readers", () => {
     it("the tracked-decision apply path and the apply_recorded_decision tool refuse an approval and write no receipt", async () => {
       const out = await pending("apply-generic")
@@ -441,7 +551,7 @@ describe.skipIf(!databaseUrl)("tool approval core (real PostgreSQL)", () => {
       const decision = await recordDecision({
         actor: { kind: "USER", userId: u.admin }, revisionId: revision.id, fingerprint: revision.fingerprint,
         optionId: revision.options.find((o) => o.actionKey === "APPROVE")!.id, idempotencyKey: randomUUID(),
-        toolApprovalChannel: (await import("@/lib/tool-approval/gate")).TOOL_APPROVAL_DECISION_CHANNEL,
+        toolApprovalChannel: (await import("@/lib/tool-approval/channel")).TOOL_APPROVAL_DECISION_CHANNEL,
       })
       await expect(applyTrackedDecision(decision.id)).rejects.toMatchObject({ code: "DECISION_MISMATCH" })
       const tool = await applyRecordedDecision({ decisionId: decision.id })

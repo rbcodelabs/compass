@@ -18,7 +18,6 @@ import { isChoiceActionKey, parseDecisionAnswers, parsePacketQuestions } from "@
 import { resolveThinkingModel } from "@/lib/thinking-model/resolve"
 import { DecisionAnswerList, DecisionQuestionList } from "@/components/decisions/decision-answers"
 import { TOOL_APPROVAL_SURFACE_MESSAGE, isToolApprovalGate, toolApprovalPath } from "@/lib/tool-approval/gate"
-import { parseEffectPacket } from "@/lib/tool-approval/packet"
 
 function parsePacket(raw: string): Record<string, unknown> {
   try { return JSON.parse(raw) as Record<string, unknown> } catch { return {} }
@@ -86,8 +85,6 @@ export default async function ReviewRequestPage({ params, searchParams }: { para
   const isPolicyActivation = request.gateType === "NOW_POLICY_ACTIVATION"
   const isTracked = request.gateType === "TRACKED_DECISION"
   const isToolApproval = isToolApprovalGate(request.gateType)
-  const toolPacket = isToolApproval ? parseEffectPacket(revision.packetJson) : null
-  const preview = (value: unknown) => { const text = JSON.stringify(value, null, 2) ?? "null"; return text.length > 2000 ? `${text.slice(0, 2000)}…` : text }
   const trackedPacket = isTracked ? parseTrackedDecisionPacket(revision.packetJson) : null
   // The Building-investment gate is retired alongside NOW commitment and native
   // policy activation. Historical rows still render read-only for audit; no new
@@ -95,6 +92,21 @@ export default async function ReviewRequestPage({ params, searchParams }: { para
   const isRetired = request.gateType === "NOW_COMMITMENT" || isPolicyActivation || isInvestment
   const canDecide = canDecideReview(request.workspace.members[0]?.role, request.workspace.organization.members[0]?.role)
   const canEditArtifacts = request.workspace.members.length > 0
+  if (isToolApproval) {
+    // Nothing about an approval (title, summary, arguments) is shown on this generic page: members get a 404, admins a pointer to
+    // the dedicated approval page, which is the only place that can decide it.
+    if (!canDecide) notFound()
+    return (
+      <main className="mx-auto w-full min-w-0 max-w-3xl space-y-6 overflow-x-hidden p-4 sm:p-6">
+        <p className="text-sm text-muted-foreground">Tool approval</p>
+        <section className="space-y-2 rounded-lg border p-4 text-sm">
+          <strong>This approval is decided on its own page.</strong>
+          <p className="text-muted-foreground">{TOOL_APPROVAL_SURFACE_MESSAGE}</p>
+          <a className="font-medium text-primary underline" href={toolApprovalPath(orgSlug, workspaceSlug, request.id)}>Open the approval page</a>
+        </section>
+      </main>
+    )
+  }
   const artifacts = isTracked ? await getDecisionArtifacts(request.workspaceId, requestId) : []
   const availableArtifacts = isTracked && canEditArtifacts ? await prisma.artifact.findMany({
     where: { workspaceId: request.workspaceId, status: "ACTIVE", id: { notIn: artifacts.map((artifact) => artifact.id) } },
@@ -122,7 +134,7 @@ export default async function ReviewRequestPage({ params, searchParams }: { para
   return (
     <main className="mx-auto w-full min-w-0 max-w-3xl space-y-6 overflow-x-hidden p-4 sm:p-6">
       <div>
-        <p className="text-sm text-muted-foreground">{isToolApproval ? "Tool approval" : isTracked ? "Decision" : isRelease ? "Legacy system decision · Release authorization" : isRevocation ? "Legacy system decision · Building investment revocation" : isInvestment ? "Legacy system decision · Building investment" : isPolicyActivation ? "Legacy system decision · Native policy activation" : "Legacy system decision · NOW commitment"}</p>
+        <p className="text-sm text-muted-foreground">{isTracked ? "Decision" : isRelease ? "Legacy system decision · Release authorization" : isRevocation ? "Legacy system decision · Building investment revocation" : isInvestment ? "Legacy system decision · Building investment" : isPolicyActivation ? "Legacy system decision · Native policy activation" : "Legacy system decision · NOW commitment"}</p>
         <h1 className="break-words [overflow-wrap:anywhere] text-2xl font-semibold">{revision.title}</h1>
         <DecisionSummary tracked={isTracked} summary={revision.summary} />
       </div>
@@ -136,16 +148,7 @@ export default async function ReviewRequestPage({ params, searchParams }: { para
             <DecisionLongForm content={trackedPacket?.context ?? revision.summary} />
           </div>
         </div> : <DecisionDetailsGrid>
-          {isToolApproval ? <>
-            <dt>Tool</dt><dd className="font-mono">{toolPacket?.tool ?? "Unreadable packet"}</dd>
-            <dt>Capability</dt><dd className="font-mono">{toolPacket?.capabilityClass}</dd>
-            {canDecide
-              ? <>
-                <dt>Current</dt><dd><pre className="whitespace-pre-wrap break-words font-mono text-xs">{preview(toolPacket?.before)}</pre></dd>
-                <dt>Proposed</dt><dd><pre className="whitespace-pre-wrap break-words font-mono text-xs">{preview(toolPacket?.after)}</pre></dd>
-              </>
-              : <><dt>Changes</dt><dd className="text-muted-foreground">Shown to workspace admins only.</dd></>}
-          </> : isRelease ? <>
+          {isRelease ? <>
             <dt>Repository</dt><dd>{packet.repositoryOwner}/{packet.repositoryName}</dd>
             <dt>Pull request</dt><dd>#{packet.pullRequestNumber}</dd>
             <dt>Reviewed commit</dt><dd className="break-all font-mono">{packet.headSha}</dd>
@@ -189,12 +192,6 @@ export default async function ReviewRequestPage({ params, searchParams }: { para
           <DecisionLongForm className="text-foreground" content={decided.rationale} />
           {isTracked && decided.option.outcomeClass === "REQUEST_CHANGES" && <a className="inline-block font-medium text-primary underline" href={`/${orgSlug}/${workspaceSlug}/decisions/new?reviseRequestId=${request.id}`}>Create revised request</a>}
           {isTracked && decided.option.outcomeClass === "APPROVE" && <SendToAgentPicker orgSlug={orgSlug} workspaceSlug={workspaceSlug} entityType="decision" entityId={request.id} className="inline-block font-medium text-primary underline">Send to agent</SendToAgentPicker>}
-        </section>
-      ) : isToolApproval ? (
-        <section className="space-y-2 rounded-lg border p-4 text-sm">
-          <strong>This approval is decided on its own page.</strong>
-          <p className="text-muted-foreground">{TOOL_APPROVAL_SURFACE_MESSAGE}</p>
-          <a className="font-medium text-primary underline" href={toolApprovalPath(orgSlug, workspaceSlug, request.id)}>Open the approval page</a>
         </section>
       ) : isTracked && canDecide ? (
         <DecisionActions workspaceId={request.workspaceId} revisionId={revision.id} fingerprint={revision.fingerprint} options={revision.options.map((option) => ({ id: option.id, label: option.label, outcomeClass: option.outcomeClass, actionKey: option.actionKey, description: option.description }))} questions={questions} />

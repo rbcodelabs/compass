@@ -377,23 +377,17 @@ describe("review request page — TOOL_APPROVAL rows", () => {
     }
   }
 
-  it("renders no decision buttons for an admin, and links to the dedicated approval page", async () => {
+  it("shows an admin only a notice and a link: no buttons, and none of the approval's title, summary or arguments", async () => {
     findFirst.mockResolvedValue(toolApproval("ADMIN"))
-    render(await ReviewRequestPage({ params: Promise.resolve({ orgSlug: "acme", workspaceSlug: "product", requestId: "request-1" }) }))
+    const { container } = render(await ReviewRequestPage({ params: Promise.resolve({ orgSlug: "acme", workspaceSlug: "product", requestId: "request-1" }) }))
     expect(screen.getByText("Tool approval")).toBeDefined()
     expect(screen.queryAllByRole("button")).toHaveLength(0)
-    expect(screen.queryByText("Approve")).toBeNull()
-    expect(screen.queryByText("Deny")).toBeNull()
     expect(screen.getByRole("link", { name: "Open the approval page" }).getAttribute("href")).toBe("/acme/product/approvals/request-1")
-    expect(screen.getAllByText(/update_agent_github_repos/).length).toBeGreaterThan(0)
+    expect(container.textContent).not.toMatch(/update_agent_github_repos|Adds a repository|a\/c/)
   })
 
-  it("renders no decision buttons for a non-admin member, and hides the before/after detail from them", async () => {
+  it("404s a non-admin member before rendering anything", async () => {
     findFirst.mockResolvedValue(toolApproval("MEMBER"))
-    render(await ReviewRequestPage({ params: Promise.resolve({ orgSlug: "acme", workspaceSlug: "product", requestId: "request-1" }) }))
-    expect(screen.queryAllByRole("button")).toHaveLength(0)
-    expect(screen.getByRole("link", { name: "Open the approval page" })).toBeDefined()
-    expect(screen.queryByText(/"a\/c"/)).toBeNull()
-    expect(screen.getByText("Shown to workspace admins only.")).toBeDefined()
+    await expect(ReviewRequestPage({ params: Promise.resolve({ orgSlug: "acme", workspaceSlug: "product", requestId: "request-1" }) })).rejects.toThrow("NEXT_NOT_FOUND")
   })
 })

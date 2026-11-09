@@ -28,7 +28,16 @@ export type ToolApprovalArgs = Record<string, unknown>
  * - `floors`        optional hard limits. Any returned reason blocks the call, at request time and again at execution time,
  *                   no matter who approved it.
  * - `execute`       performs the real write: the same code path the tool's handler used before it opted in. Runs only from
- *                   executeApprovedToolCall, as the approving admin, after every re-verification passes.
+ * the executor, as the approving admin, after every re-verification passes.
+ *
+ * - `redact`        optional. Applied to the packet's args, before and after (and therefore to everything shown to admins, stored,
+ *                   fingerprinted and returned over MCP). The executor re-applies it to the live before-state before comparing,
+ *                   and execute() receives the REDACTED args: use it to drop incidental sensitive fields, never fields execute needs.
+ *
+ * Do not opt in a tool that takes secrets as arguments: args, before and after are persisted verbatim and shown to admins.
+ * execute() must make its own before-check and write atomic (a compare-and-set in one transaction) and must re-validate that
+ * every entity it references belongs to the workspace: the approver's authority is not the requester's, and the executor's
+ * single before-read does not make the write itself atomic.
  *
  * All values crossing the boundary must be JSON-serialisable.
  */
@@ -41,6 +50,7 @@ export type ToolApprovalSpec = {
   computeAfter(args: ToolApprovalArgs, before: Json): unknown
   floors?(args: ToolApprovalArgs, before: Json, ctx: ToolApprovalContext): Promise<string[]> | string[]
   execute(args: ToolApprovalArgs, ctx: ToolApprovalExecuteContext): Promise<unknown>
+  redact?(kind: "args" | "before" | "after", value: Json): Json
 }
 
 /**

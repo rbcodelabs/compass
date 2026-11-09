@@ -1079,6 +1079,14 @@ Add one entry to the registry in `lib/tool-approval/registry.ts` (empty in produ
 - `computeAfter(args, before)`: the state the call would leave behind.
 - `floors(args, before, ctx)` (optional): reasons the call must be refused no matter who approves it.
 - `execute(args, ctx)`: the real write, the same code path the tool used before it opted in.
+- `redact(kind, value)` (optional): drops incidental sensitive fields from the packet's `args`, `before` and `after`, and so from everything stored, shown to admins and returned over MCP. `execute` receives the redacted `args`, and the executor applies it to the live before-state before comparing, so never redact a field `execute` needs.
+
+The contract has four rules that the platform cannot enforce for you:
+
+1. **No secrets in arguments.** Arguments, before and after are stored verbatim and shown to admins. Do not opt in a tool that takes a credential; `redact` is a safety net, not a licence.
+2. **`execute` is a compare-and-set.** The executor re-reads `before` once and compares it, but that check and your write are not one atomic step. Make the write conditional on the state you read (an `updateMany` with the before-values in its `where`, in one transaction) and treat zero rows changed as a failure.
+3. **Re-validate every referenced entity.** The approver's authority is not the requester's. `readBefore` and `execute` must check that each id in the arguments belongs to the workspace, instead of trusting that whoever asked could see it.
+4. **Hard limits go in `floors`.** They run at request time and again at execution, regardless of who approved.
 
 The MCP `register()` wrapper (`app/api/mcp/route.ts`) then intercepts the tool after its authorization gate; the REST executor refuses the matching REST operation. Any other entry point that calls the handler directly (an in-app agent, a job) does not pass through either guard and must be checked before a tool opts in.
 

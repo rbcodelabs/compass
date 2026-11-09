@@ -178,6 +178,16 @@ describe("Updates source links and visibility", () => {
     ).toEqual([]);
   });
 
+  it("never resolves a TOOL_APPROVAL request into a title or link", async () => {
+    const { models, tx } = database();
+    await resolveUpdateSources(tx, "workspace", [event("DECISION", "approval-id")], "/org/workspace");
+    expect(models.reviewRequest.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ workspaceId: "workspace", gateType: { not: "TOOL_APPROVAL" } }),
+      }),
+    );
+  });
+
   it("scopes every direct source query and nested discovery relation to the current workspace", async () => {
     const { models, tx } = database();
     await resolveUpdateSources(

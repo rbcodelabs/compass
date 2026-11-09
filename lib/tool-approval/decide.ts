@@ -1,7 +1,8 @@
 import getPrisma from "@/lib/db"
 import { recordDecision } from "@/lib/decision-service"
 import { ToolApprovalError } from "@/lib/tool-approval/errors"
-import { EXECUTE_TOOL_APPROVAL_CONTINUATION, TOOL_APPROVAL_DECISION_CHANNEL, TOOL_APPROVAL_GATE } from "@/lib/tool-approval/gate"
+import { TOOL_APPROVAL_DECISION_CHANNEL } from "@/lib/tool-approval/channel"
+import { EXECUTE_TOOL_APPROVAL_CONTINUATION, TOOL_APPROVAL_GATE } from "@/lib/tool-approval/gate"
 import { executeApprovedToolCall, type ExecuteOutcome } from "@/lib/tool-approval/executor"
 
 /**
