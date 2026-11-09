@@ -263,9 +263,11 @@ test.describe("Inheritance rules QA", () => {
       await expect(row("SolOk").getByTestId(/inheritance-rule-status-/)).toHaveText("Active");
     }
     // Tab order inside a row: switch -> raise -> lower -> delete.
+    await expect(sw).toBeEnabled();
+    await expect(row("SolOk").getByRole("button", { name: /^Raise priority/ })).toBeEnabled();
     await sw.focus();
     await page.keyboard.press("Tab");
-    await expect(row("SolOk").getByRole("button", { name: "Raise priority" })).toBeFocused();
+    await expect(row("SolOk").getByRole("button", { name: /^Raise priority/ })).toBeFocused();
     await page.keyboard.press("Enter");
     await expect.poll(priorityOrder).toEqual([solOk, sol2, oppOk]);
 
@@ -354,6 +356,11 @@ test.describe("Inheritance rules QA", () => {
 
     // The link is saved; the inherited field should now be filled in the same request.
     await expect.poll(partnerValue, { timeout: 8_000 }).toBe("acme");
+    await sql(`DELETE FROM "${S}".custom_field_inheritance_rules WHERE target_field_id=$1`, [partner]);
+    await sql(`DELETE FROM "${S}".custom_field_values WHERE field_id IN ($1,$2)`, [partner, customer]);
+    await sql(`DELETE FROM "${S}".roadmap_items WHERE id = $1`, [item.id]);
+    await sql(`DELETE FROM "${S}".opportunities WHERE id = $1`, [opportunity.id]);
+    await sql(`DELETE FROM "${S}".custom_field_definitions WHERE id IN ($1,$2)`, [partner, customer]);
   });
 
   test("4. console errors, page errors and the Next dev overlay: /settings vs other pages", async ({ page, base }, testInfo) => {

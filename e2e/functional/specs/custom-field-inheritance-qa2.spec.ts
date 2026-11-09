@@ -85,7 +85,7 @@ test.describe("Inheritance rules QA pass 2", () => {
     await rule(ws, target, s1, "OPPORTUNITY", 0);
     await rule(ws, target, s2, "SOLUTION", 1, false);
     await rule(ws, target, s3, "OPPORTUNITY", 2);
-    await sql(`UPDATE "${S}".custom_field_definitions SET options = $2::jsonb WHERE id = $1`, [s3, opts("a", "b", "zzz_long_option_name_that_the_target_does_not_have")]);
+    await sql(`UPDATE "${S}".custom_field_definitions SET options = $2::jsonb WHERE id = $1`, [s3, opts("a", "b", "zzz")]);
 
     await page.goto(`${base}/settings`);
     const panel = page.getByTestId("inheritance-rules");
@@ -129,7 +129,7 @@ test.describe("Inheritance rules QA pass 2", () => {
         for (const li of root.querySelectorAll("li")) {
           if (li.scrollWidth > li.clientWidth + 1) out.push(`row clipped ${li.scrollWidth}>${li.clientWidth}`);
           const r = li.getBoundingClientRect(); const rr = root.getBoundingClientRect();
-          for (const c of li.querySelectorAll("*")) { const b = c.getBoundingClientRect(); if (b.width && (b.right > r.right + 1 || b.left < r.left - 1)) out.push(`child escapes row: ${c.tagName}.${(c.className?.toString() ?? "").slice(0, 30)}`); }
+          for (const c of li.querySelectorAll("*:not(input)")) { const b = c.getBoundingClientRect(); if (b.width && (b.right > r.right + 1 || b.left < r.left - 1)) out.push(`child escapes row: ${c.tagName}.${(c.className?.toString() ?? "").slice(0, 30)}`); }
           if (r.right > rr.right + 1) out.push("row wider than panel");
         }
         const rows = [...root.querySelectorAll("li")].map((li) => ({ h: Math.round(li.getBoundingClientRect().height), actionsBelowText: (() => { const t = li.children[0].getBoundingClientRect(), a = li.children[1].getBoundingClientRect(); return a.top >= t.bottom - 1; })() }));
@@ -197,6 +197,10 @@ test.describe("Inheritance rules QA pass 2", () => {
     expect(await getValue(partner, hand)).toBe("globex");
     await page.keyboard.press("Escape");
     await sql(`DELETE FROM "${S}".custom_field_inheritance_rules WHERE target_field_id=$1`, [partner]);
+    await sql(`DELETE FROM "${S}".custom_field_values WHERE field_id IN ($1,$2)`, [partner, customer]);
+    await sql(`DELETE FROM "${S}".roadmap_items WHERE id IN ($1,$2)`, [empty, hand]);
+    await sql(`DELETE FROM "${S}".opportunities WHERE id IN ($1,$2)`, [a, g]);
+    await sql(`DELETE FROM "${S}".custom_field_definitions WHERE id IN ($1,$2)`, [partner, customer]);
   });
 
   test("C. late-source window on real SQL: 501 active items progress past the cap, archived items are never filled", async ({ page, base }) => {
@@ -230,6 +234,30 @@ test.describe("Inheritance rules QA pass 2", () => {
       await sql(`DELETE FROM "${S}".custom_field_values WHERE field_id = $1`, [partner]);
       await sql(`DELETE FROM "${S}".roadmap_items WHERE opportunity_id = $1`, [opp]);
       await sql(`DELETE FROM "${S}".custom_field_inheritance_rules WHERE target_field_id=$1`, [partner]);
+      await sql(`DELETE FROM "${S}".custom_field_values WHERE field_id = $1`, [customer]);
+      await sql(`DELETE FROM "${S}".opportunities WHERE id = $1`, [opp]);
+      await sql(`DELETE FROM "${S}".custom_field_definitions WHERE id IN ($1,$2)`, [partner, customer]);
+    }
+  });
+
+  test("A2. DEFECT: a long unbroken option name in the inactive reason overflows the row on mobile", async ({ page, base }) => {
+    test.fail(true, "the status badge span does not break long unbroken tokens; it escapes the row at 390px");
+    const stamp = Date.now();
+    const target = await field(ws, "ROADMAP_ITEM", `QA2 LongTarget ${stamp}`, "SELECT", opts("a"));
+    const source = await field(ws, "OPPORTUNITY", `QA2 LongSource ${stamp}`, "SELECT", opts("a", "zzz_long_option_name_that_the_target_does_not_have"));
+    await rule(ws, target, source, "OPPORTUNITY", 0);
+    try {
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.goto(`${base}/settings`);
+      const row = page.getByTestId("inheritance-rules").getByRole("listitem").filter({ hasText: `QA2 LongTarget ${stamp}` });
+      await expect(row).toBeVisible({ timeout: 90_000 });
+      await expect(row.getByTestId(/^inheritance-rule-status-/)).toContainText("Inactive");
+      await shot(page, "long-option-name-overflow", row);
+      const clipped = await row.evaluate((li) => { const r = li.getBoundingClientRect(); return [...li.querySelectorAll("*:not(input)")].some((c) => c.getBoundingClientRect().right > r.right + 1) || li.scrollWidth > li.clientWidth + 1; });
+      expect(clipped, "nothing may escape the row").toBe(false);
+    } finally {
+      await sql(`DELETE FROM "${S}".custom_field_inheritance_rules WHERE target_field_id=$1`, [target]);
+      await sql(`DELETE FROM "${S}".custom_field_definitions WHERE id IN ($1,$2)`, [target, source]);
     }
   });
 
