@@ -14,8 +14,13 @@ async function openDoc(page: Page, base: string) {
   await page.goto(`${base}/docs`);
   await page.waitForLoadState("networkidle");
   await clickNewDoc(page);
+  // The new document's editor can remount just after the URL changes; wait until it has settled and is empty before typing, or the
+  // typed text lands in an editor that is then replaced.
+  await page.waitForLoadState("networkidle");
   const editor = page.locator(".ProseMirror");
   await expect(editor).toBeVisible({ timeout: 10_000 });
+  await expect(editor.locator("p.is-editor-empty")).toBeVisible();
+  await page.waitForTimeout(500);
   // Start from a known empty body.
   await editor.click();
   await page.keyboard.press("ControlOrMeta+A");
