@@ -9,11 +9,11 @@ import { test, expect } from "../fixtures/index";
 import { clickNewDoc } from "../fixtures/docs";
 
 async function openDoc(page: Page, base: string) {
-  // /docs opens an existing document (the seeded baseline) when there is one, and the tests below run one at a time so two editors
-  // never share it concurrently; otherwise create one through the Library.
+  // Always create a fresh doc. /docs redirects to the shared seeded baseline doc, and other specs run in parallel and edit it, which
+  // surfaces as a save conflict here.
   await page.goto(`${base}/docs`);
   await page.waitForLoadState("networkidle");
-  if (!/\/docs\/[0-9a-f-]+$/.test(new URL(page.url()).pathname)) await clickNewDoc(page);
+  await clickNewDoc(page);
   const editor = page.locator(".ProseMirror");
   await expect(editor).toBeVisible({ timeout: 10_000 });
   // Start from a known empty body.
