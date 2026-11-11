@@ -14,12 +14,14 @@ export async function clickNewDoc(page: Page): Promise<void> {
   await page.getByTestId("library-create-menu").click();
   await page.getByRole("menuitem", { name: "New doc" }).click();
   await page.waitForURL((url) => url.href !== before && /\/docs\/[0-9a-f-]+$/.test(url.pathname), { timeout: 15_000 });
-  // The rail may be an overlay drawer that covers the page (phone width); close it so the editor and its controls are reachable. A
-  // docked rail has nothing to uncover, so this is best effort: the toggle first, then Escape.
-  const overlay = page.locator('aside[data-mode="overlay"][aria-label="Library"]');
-  if (await overlay.isVisible().catch(() => false)) {
-    await page.getByTestId("library-toggle").click({ timeout: 3_000, force: true }).catch(() => {});
-    if (await overlay.isVisible().catch(() => false)) await page.keyboard.press("Escape");
-    await overlay.waitFor({ state: "hidden", timeout: 3_000 }).catch(() => {});
+  // Close the Library rail again so the editor and its controls are reachable: a phone-width overlay drawer covers the page, and a
+  // docked rail narrows the editor and puts its resize handle over it. Toggle first (works in both modes), then Escape for a drawer
+  // that is still showing. Best effort: nothing here should fail the calling spec.
+  const toggleNow = page.getByTestId("library-toggle");
+  if ((await toggleNow.getAttribute("aria-pressed").catch(() => null)) === "true") {
+    await toggleNow.click({ timeout: 3_000, force: true }).catch(() => {});
   }
+  const overlay = page.locator('aside[data-mode="overlay"][aria-label="Library"]');
+  if (await overlay.isVisible().catch(() => false)) await page.keyboard.press("Escape");
+  await overlay.waitFor({ state: "hidden", timeout: 3_000 }).catch(() => {});
 }
