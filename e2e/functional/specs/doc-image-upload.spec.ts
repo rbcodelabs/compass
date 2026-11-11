@@ -1,5 +1,6 @@
 import { request as playwrightRequest } from "@playwright/test"
 import { test, expect } from "../fixtures/index"
+import { clickNewDoc } from "../fixtures/docs";
 
 const ONE_PIXEL_PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
@@ -11,7 +12,7 @@ test.describe("Doc image upload privacy", () => {
     await page.goto(`${base}/docs`)
     await page.waitForLoadState("networkidle")
     const previousDocUrl = page.url()
-    await page.getByRole("button", { name: "New" }).click()
+    await clickNewDoc(page)
     await page.waitForURL(
       url => url.href !== previousDocUrl && /\/docs\/[0-9a-f-]+$/.test(url.pathname),
       { timeout: 15_000 }
