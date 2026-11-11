@@ -12,6 +12,7 @@
  * rows are currently seeded there, so this spec self-seeds a fresh doc.
  */
 import { test, expect } from "../fixtures/index";
+import { clickNewDoc } from "../fixtures/docs";
 
 test.describe("Doc Version History", () => {
   test(
@@ -26,7 +27,7 @@ test.describe("Doc Version History", () => {
       await page.goto(`${base}/docs`);
       await page.waitForLoadState("networkidle");
 
-      await page.getByRole("button", { name: "New" }).click();
+      await clickNewDoc(page)
       await page.waitForURL(/\/docs\/[0-9a-f-]+$/, { timeout: 15_000 });
 
       const editor = page.locator(".ProseMirror");

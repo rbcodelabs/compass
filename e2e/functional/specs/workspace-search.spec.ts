@@ -1,4 +1,5 @@
 import { expect, test } from "../fixtures/index"
+import { clickNewDoc } from "../fixtures/docs";
 
 test.describe("Workspace search", () => {
   test("searches every supported title type, navigates, and isolates workspaces", async ({ page, base }) => {
@@ -8,7 +9,7 @@ test.describe("Workspace search", () => {
     const searchDocTitle = `E2E Baseline Workspace Search Doc ${Date.now()}`
     await page.goto(`${base}/docs`)
     await page.waitForLoadState("networkidle")
-    await page.getByRole("button", { name: "New" }).click()
+    await clickNewDoc(page)
     await page.waitForURL(/\/docs\/[0-9a-f-]+$/, { timeout: 15_000 })
     const titleInput = page.getByPlaceholder("Untitled")
     await expect(titleInput).toBeVisible({ timeout: 10_000 })

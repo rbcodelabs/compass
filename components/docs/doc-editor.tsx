@@ -1,7 +1,7 @@
 "use client";
 
 import { createPortal } from "react-dom";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useEditor, EditorContent, type Editor } from "@tiptap/react";
 import { type MarkdownStorage } from "tiptap-markdown";
 import {
@@ -36,7 +36,10 @@ import { DocEmbedCardsProvider, type EmbedEditing } from "@/components/docs/doc-
 import { createSlashController } from "@/components/docs/spec-slash-extension";
 import { LinkPickerController } from "@/components/docs/compass-link-picker-extension";
 import { CompassLinkPickerMenu } from "@/components/docs/compass-link-picker";
-import { SpecSlashMenu, defaultRecordCreators, type RecordCreators, type SlashScope } from "@/components/docs/spec-slash-menu";
+import { SpecSlashMenu, commandsForScopes, defaultRecordCreators, type RecordCreators, type SlashScope } from "@/components/docs/spec-slash-menu";
+import { BlockSlashMenu } from "@/components/docs/block-slash-menu";
+import { DocBubbleMenu } from "@/components/docs/doc-bubble-menu";
+import { DocBlockHandle } from "@/components/docs/doc-block-handle";
 import { patchEntityField } from "@/components/panels/panel-parts";
 import { createDocumentSaveQueue } from "@/lib/document-save-queue";
 import { DocProperties, type DocMetadata } from "@/components/docs/doc-properties";
@@ -225,7 +228,9 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
   const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
   const [pendingAnchor, setPendingAnchor] = useState<PendingAnchor | null>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
-  const commentAnchorRef = useRef<HTMLDivElement>(null);
+  // Where the comment popover opens: the rect of whichever control started the comment (bubble or toolbar button), captured at click
+  // time because the bubble hides as soon as the composer takes focus.
+  const commentAnchorRect = useRef<DOMRect | null>(null);
 
   // The new-comment popover is a body-level, viewport-fixed panel (so no ancestor can be its containing block or
   // clip it) laid out as a flex column: the editor, picker and task fields scroll in the middle while the action
@@ -233,8 +238,7 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
   // every width, and recomputed whenever the viewport changes. It sits above the bottom nav (z 45 vs 40).
   useLayoutEffect(() => {
     const el = popoverRef.current;
-    const anchor = commentAnchorRef.current;
-    if (!pendingAnchor || !el || !anchor) return;
+    if (!pendingAnchor || !el) return;
     const place = () => {
       const vv = window.visualViewport;
       const vw = vv?.width ?? window.innerWidth;
@@ -243,8 +247,8 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
       const oy = vv?.offsetTop ?? 0;
       const margin = 8;
       const width = Math.min(352, vw - margin * 2);
-      const rect = anchor.getBoundingClientRect();
-      // Prefer opening under the toolbar button, but never so low that fewer than ~240px remain.
+      const rect = commentAnchorRect.current ?? new DOMRect(ox + margin, oy + margin, 0, 0);
+      // Prefer opening under the control that started it, but never so low that fewer than ~240px remain.
       const top = Math.max(oy + margin, Math.min(rect.bottom + 4, oy + vh - 240 - margin));
       const left = Math.min(Math.max(rect.left, ox + margin), ox + vw - width - margin);
       el.style.top = `${top}px`;
@@ -287,13 +291,28 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
   const lastTypedAt = useRef(0);
   const queueState = useRef<"saving" | "saved" | "error" | "idle">("idle");
   const reconcileRef = useRef<() => void>(() => {});
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
+  const setScrollNode = useCallback((el: HTMLDivElement | null) => { scrollRef.current = el; setScrollEl(el); }, []);
+  const contentRef = useRef<HTMLDivElement | null>(null);
+  const compact = useCompactEditing();
+  // "Saved" is a confirmation, not a status: it shows briefly after a save settles and then gets out of the way.
+  const [savedVisible, setSavedVisible] = useState(false);
   const lastSavedTitle = useRef(doc.title);
   const shownMetadata = useRef(JSON.stringify(doc.metadata ?? null));
 
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingContent = useRef<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showSavedBriefly = useCallback((saved: boolean) => {
+    if (savedTimer.current) clearTimeout(savedTimer.current);
+    savedTimer.current = null;
+    setSavedVisible(saved);
+    if (saved) savedTimer.current = setTimeout(() => setSavedVisible(false), 2500);
+  }, []);
+  useEffect(() => () => { if (savedTimer.current) clearTimeout(savedTimer.current); }, []);
 
   const saveQueue = useMemo(() => createDocumentSaveQueue<SaveChange>({
     revision: doc.revision,
@@ -314,6 +333,7 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
     },
     onState: (state) => {
       queueState.current = state;
+      showSavedBriefly(state === "saved");
       // A save settling is the moment a held-back server copy can be judged (our own revision is now known, or the save conflicted).
       if (state !== "saving") queueMicrotask(() => reconcileRef.current());
       setSaveStatus(state === "saved" && pendingContent.current !== null ? "saving" : state);
@@ -372,6 +392,9 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
 
   // The "/" menu exists only for spec docs; the controller is shared between the editor plugin and the menu component.
   const slashController = useMemo(() => createSlashController(), []);
+  const blockSlashController = useMemo(() => createSlashController(), []);
+  // A spec doc with scopes keeps its record menu on "/"; every other doc gets the block menu.
+  const blockSlashEnabled = !readOnly && !(specScopes && commandsForScopes(specScopes).length > 0);
   const linkPickerController = useMemo(() => new LinkPickerController(), []);
   const creators = useMemo(
     () => recordCreators ?? defaultRecordCreators({ orgSlug, workspaceSlug, revalidatePathStr }),
@@ -386,7 +409,7 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
   );
 
   const editor = useEditor({
-    extensions: createDocEditorExtensions(initialAnchorData, { slash: specScopes ? slashController : undefined, linkPicker: linkPickerController }),
+    extensions: createDocEditorExtensions(initialAnchorData, { slash: specScopes ? slashController : undefined, blockSlash: blockSlashController, linkPicker: linkPickerController }),
     content: doc.content ?? "",
     onUpdate: ({ editor }) => {
       const markdown = (editor.storage as unknown as { markdown: MarkdownStorage }).markdown.getMarkdown();
@@ -611,10 +634,11 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
 
   // ── Comment handlers ────────────────────────────────────────────────────────
 
-  function handleStartComment() {
+  function handleStartComment(anchorRect: DOMRect | null = null) {
     if (!editor) return;
     const anchor = captureAnchor(editor);
     if (!anchor) return;
+    commentAnchorRect.current = anchorRect;
     setPendingAnchor(anchor);
   }
 
@@ -715,29 +739,64 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
   return (
     <div className="flex h-full min-h-0 min-w-0">
       <div data-slot="doc-editor-column" className="flex min-h-0 min-w-0 flex-1 flex-col">
-      {/* Library button + save indicator */}
-      <div className={cn(DOC_COLUMN, "flex items-center justify-between gap-2 px-8 pt-3 min-h-10")}>
+      {/* Quiet page header: the library on the left, then save state and the page-level actions. */}
+      <div className={cn(DOC_COLUMN, "flex min-h-12 items-center justify-between gap-2 px-4 pt-3 sm:px-8")}>
         <DocsLibraryButton />
-        <div className="flex min-w-0 items-center justify-end gap-3">
-        <div data-testid="doc-save-status" data-state={saveStatus} className="flex min-h-7 items-center justify-end">
-          {saveStatus === "saving" && <span className="text-xs text-text-subtle">Saving…</span>}
-          {saveStatus === "saved" && <span className="text-xs text-text-subtle">Saved</span>}
-          {justUpdated && !remote && <UpdatedJustNow />}
-          {saveError && !remote && <span role="alert" className="text-xs text-status-danger">{saveError} <button type="button" className="underline" onClick={() => { void saveQueue.retry(); }}>Retry save</button></span>}
-        </div>
-        {(followAction || decisionAction) && <div className="flex shrink-0 items-center gap-1.5">{followAction}{decisionAction}</div>}
+        <div className="flex min-w-0 items-center justify-end gap-0.5">
+          <div data-testid="doc-save-status" data-state={saveStatus} aria-live="polite" className="mr-1 flex min-h-7 items-center justify-end">
+            {saveStatus === "saving" && <span className="text-xs text-text-subtle">Saving…</span>}
+            {saveStatus === "saved" && savedVisible && <span className="text-xs text-text-subtle">Saved</span>}
+            {justUpdated && !remote && <UpdatedJustNow />}
+            {saveError && !remote && <span role="alert" className="text-xs text-status-danger">{saveError} <button type="button" className="underline" onClick={() => { void saveQueue.retry(); }}>Retry save</button></span>}
+          </div>
+          {publishAction}
+          {/* Open comments sidebar */}
+          <ToolbarButton onClick={() => setActiveDocPanel("comments")} title="Comments" quiet>
+            <span className="relative flex items-center justify-center">
+              <MessageSquare className="w-4 h-4" />
+              {openCommentCount > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 min-w-3.5 h-3.5 px-0.5 flex items-center justify-center rounded-full text-[9px] font-semibold bg-status-info-surface text-status-info">
+                  {openCommentCount}
+                </span>
+              )}
+            </span>
+          </ToolbarButton>
+          <ToolbarButton onClick={() => setActiveDocPanel("history")} title="Version history" quiet>
+            <History className="w-4 h-4" />
+          </ToolbarButton>
+          <div className="relative shrink-0">
+            <ToolbarButton onClick={() => setShowSaveVersionInput((v) => !v)} title="Save named version" quiet>
+              <BookmarkPlus className="w-4 h-4" />
+            </ToolbarButton>
+            {showSaveVersionInput && (
+              <div className="absolute right-0 z-20 mt-1 p-2 bg-surface-card border border-border-default rounded-lg shadow-md flex items-center gap-1.5">
+                <input
+                  type="text"
+                  autoFocus
+                  placeholder="Label (optional)"
+                  className="w-40 text-sm border border-border-default rounded px-2 py-1 outline-none focus:ring-1 focus:ring-border-focus"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleSaveVersion(e.currentTarget.value);
+                    if (e.key === "Escape") setShowSaveVersionInput(false);
+                  }}
+                  disabled={isSavingVersion}
+                />
+              </div>
+            )}
+          </div>
+          {(followAction || decisionAction) && <div className="flex shrink-0 items-center gap-1.5 pl-1.5">{followAction}{decisionAction}</div>}
         </div>
       </div>
       {remote && <RemoteUpdateBanner writer={remote.writer} onReload={handleReloadRemote} onKeepMine={handleKeepMine} />}
 
-      {publishAction}
 
-      {/* Toolbar */}
-      <div className="sticky top-0 z-10 border-b border-border-default bg-surface-panel/90 backdrop-blur-sm">
+      {/* Compact toolbar: only on touch and narrow screens, where there is no hover and the native selection UI takes over. Desktop
+          formats through the selection bubble and the "/" menu. */}
+      {compact && (
+      <div className="sticky top-0 z-10 border-y border-border-default bg-surface-panel/90 backdrop-blur-sm">
         <div className={cn(DOC_COLUMN, "flex items-center gap-1 px-4 py-1.5 sm:px-8")}>
-        {/* Buttons scroll horizontally on narrow screens instead of wrapping to a
-            second row (which used to eat viewport height) or shrinking to the
-            point of being unreadable/untappable. */}
+        {/* Buttons scroll horizontally on narrow screens instead of wrapping to a second row (which used to eat viewport height) or
+            shrinking to the point of being unreadable/untappable. */}
         <div className="flex flex-1 min-w-0 items-center gap-0.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         <ToolbarButton
           onClick={() => editor.chain().focus().toggleBold().run()}
@@ -802,82 +861,46 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
           <ImageIcon className="w-4 h-4" />
         </ToolbarButton>
         </div>
-        {/* Comment/history/version controls stay outside the scroll strip above —
-            their popovers are absolutely positioned and would get clipped by an
-            overflow-x-auto ancestor, so they're pinned here instead of scrolling. */}
+        {/* Comment on the current selection (outside the scroll strip so it is never clipped). */}
         <div className="w-px h-5 bg-border-default mx-1 shrink-0" />
-        {/* Comment on the current selection */}
-        <div className="relative shrink-0" ref={commentAnchorRef}>
+        <div className="relative shrink-0">
           <ToolbarButton
-            onClick={handleStartComment}
+            onClick={(event) => handleStartComment(event?.currentTarget.getBoundingClientRect() ?? null)}
             disabled={selectionEmpty}
             title={selectionEmpty ? "Select text to comment" : "Comment on selection"}
           >
             <MessageSquarePlus className="w-4 h-4" />
           </ToolbarButton>
-          {pendingAnchor && (
-            <PortalToBody>
-            <div
-              ref={popoverRef}
-              className="fixed z-[45] flex flex-col p-3 bg-surface-card border border-border-default rounded-lg shadow-md"
-              data-testid="new-comment-popover"
-              onKeyDown={(e) => {
-                if (e.key === "Escape") setPendingAnchor(null);
-              }}
-            >
-              <DocCommentComposer
-                options={mentionOptions}
-                confirmedAgentIds={confirmedAgentIds}
-                docTitle={title}
-                anchorText={pendingAnchor.anchorText}
-                placeholder="Add a comment…"
-                ariaLabel="Comment"
-                idleLabel="Comment"
-                autoFocus
-                onSubmit={handleSubmitComment}
-                onCancel={() => setPendingAnchor(null)}
-              />
-            </div>
-            </PortalToBody>
-          )}
-        </div>
-        {/* Open comments sidebar */}
-        <ToolbarButton onClick={() => setActiveDocPanel("comments")} title="Comments">
-          <span className="relative flex items-center justify-center">
-            <MessageSquare className="w-4 h-4" />
-            {openCommentCount > 0 && (
-              <span className="absolute -top-1.5 -right-1.5 min-w-3.5 h-3.5 px-0.5 flex items-center justify-center rounded-full text-[9px] font-semibold bg-status-info-surface text-status-info">
-                {openCommentCount}
-              </span>
-            )}
-          </span>
-        </ToolbarButton>
-        <div className="w-px h-5 bg-border-default mx-1 shrink-0" />
-        <ToolbarButton onClick={() => setActiveDocPanel("history")} title="Version history">
-          <History className="w-4 h-4" />
-        </ToolbarButton>
-        <div className="relative shrink-0">
-          <ToolbarButton onClick={() => setShowSaveVersionInput((v) => !v)} title="Save named version">
-            <BookmarkPlus className="w-4 h-4" />
-          </ToolbarButton>
-          {showSaveVersionInput && (
-            <div className="absolute z-10 mt-1 p-2 bg-surface-card border border-border-default rounded-lg shadow-md flex items-center gap-1.5">
-              <input
-                type="text"
-                autoFocus
-                placeholder="Label (optional)"
-                className="w-40 text-sm border border-border-default rounded px-2 py-1 outline-none focus:ring-1 focus:ring-border-focus"
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") handleSaveVersion(e.currentTarget.value);
-                  if (e.key === "Escape") setShowSaveVersionInput(false);
-                }}
-                disabled={isSavingVersion}
-              />
-            </div>
-          )}
         </div>
         </div>
       </div>
+      )}
+
+      {pendingAnchor && (
+        <PortalToBody>
+          <div
+            ref={popoverRef}
+            className="fixed z-[45] flex flex-col p-3 bg-surface-card border border-border-default rounded-lg shadow-md"
+            data-testid="new-comment-popover"
+            onKeyDown={(e) => {
+              if (e.key === "Escape") setPendingAnchor(null);
+            }}
+          >
+            <DocCommentComposer
+              options={mentionOptions}
+              confirmedAgentIds={confirmedAgentIds}
+              docTitle={title}
+              anchorText={pendingAnchor.anchorText}
+              placeholder="Add a comment…"
+              ariaLabel="Comment"
+              idleLabel="Comment"
+              autoFocus
+              onSubmit={handleSubmitComment}
+              onCancel={() => setPendingAnchor(null)}
+            />
+          </div>
+        </PortalToBody>
+      )}
 
       {/* Hidden file input */}
       <input
@@ -889,7 +912,7 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
       />
 
       {/* Editor */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto">
+      <div ref={setScrollNode} className="flex-1 overflow-y-auto">
         {/* Icon above a large serif title */}
         <div className={cn(DOC_COLUMN, "px-8 pt-8 pb-3 sm:pt-14")}>
           {/* Icon picker */}
@@ -990,8 +1013,15 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
         </div>
 
         <DocEmbedCardsProvider resolve={resolveEmbeds} editing={embedEditing}>
-          <EditorContent editor={editor} className="doc-prose prose-custom min-h-[400px]" />
+          <div ref={contentRef} className="relative">
+            <EditorContent editor={editor} className="doc-prose prose-custom min-h-[400px]" />
+            {!compact && !readOnly ? <DocBlockHandle editor={editor} containerRef={contentRef} /> : null}
+          </div>
         </DocEmbedCardsProvider>
+        {!compact && !readOnly && scrollEl ? (
+          <DocBubbleMenu editor={editor} scrollTarget={scrollEl} suppressed={pendingAnchor !== null} onComment={handleStartComment} />
+        ) : null}
+        <BlockSlashMenu editor={editor} controller={blockSlashController} onPickImage={handleImageButtonClick} enabled={blockSlashEnabled} />
         {!readOnly ? <CompassLinkPickerMenu editor={editor} controller={linkPickerController} orgSlug={orgSlug} workspaceSlug={workspaceSlug} /> : null}
         {specScopes && !readOnly ? <SpecSlashMenu editor={editor} controller={slashController} scopes={specScopes} creators={creators} /> : null}
       </div>
@@ -1038,6 +1068,25 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
         onFocusComment={handleFocusComment}
       />
     </div>
+  );
+}
+
+const COMPACT_QUERY = "(max-width: 767px), (pointer: coarse)";
+
+/**
+ * True on touch devices and narrow viewports, which have no hover and a native selection UI of their own: the editor shows a compact
+ * toolbar there, and the selection bubble and block handle (both pointer-driven) stay off. Server and first render say false.
+ */
+function useCompactEditing(): boolean {
+  return useSyncExternalStore(
+    (notify) => {
+      if (typeof window === "undefined" || typeof window.matchMedia !== "function") return () => {};
+      const query = window.matchMedia(COMPACT_QUERY);
+      query.addEventListener("change", notify);
+      return () => query.removeEventListener("change", notify);
+    },
+    () => typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia(COMPACT_QUERY).matches,
+    () => false,
   );
 }
 
@@ -1092,12 +1141,15 @@ function ToolbarButton({
   isActive,
   title,
   disabled,
+  quiet,
 }: {
   children: React.ReactNode;
-  onClick: () => void;
+  onClick: (event?: React.MouseEvent<HTMLButtonElement>) => void;
   isActive?: boolean;
   title?: string;
   disabled?: boolean;
+  /** Page-level header actions: subtler at rest so the page, not the chrome, holds the eye. */
+  quiet?: boolean;
 }) {
   return (
     <button
@@ -1109,7 +1161,9 @@ function ToolbarButton({
         "w-7 h-7 shrink-0 flex items-center justify-center rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed",
         isActive
           ? "bg-primary/10 text-primary"
-          : "text-text-secondary hover:bg-surface-inset hover:text-text-primary"
+          : quiet
+            ? "text-text-subtle hover:bg-surface-inset hover:text-text-primary"
+            : "text-text-secondary hover:bg-surface-inset hover:text-text-primary"
       )}
     >
       {children}
