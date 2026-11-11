@@ -201,7 +201,7 @@ export async function linkTask(
   const prisma = getPrisma();
   const task = await requireTask(taskId);
   await validateTaskLink(task.workspaceId, linkedType, linkedId);
-  // Idempotent: a repeat returns the existing link.
+  // Idempotent: a repeat returns the existing link (entity_links for associations, task_links for residual kinds).
   const link = await createTaskLink(prisma, { taskId, linkedType, linkedId, workspaceId: task.workspaceId });
 
   revalidatePath(revalidatePathStr);
