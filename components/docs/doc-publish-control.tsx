@@ -38,7 +38,6 @@ export function DocPublishControl({ docId, orgSlug, workspaceSlug, initialPublis
   const [copied, setCopied] = useState(false)
   const [infoOpen, setInfoOpen] = useState(false)
   const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const labelId = useId()
   const infoId = useId()
 
   const disabledReason = !publishable
@@ -94,7 +93,7 @@ export function DocPublishControl({ docId, orgSlug, workspaceSlug, initialPublis
       checked={published}
       disabled={pending || disabledReason !== null}
       onCheckedChange={(next) => void toggle(next === true)}
-      aria-labelledby={labelId}
+      aria-label="Publish to portal"
       data-testid="doc-publish-switch"
     />
   )
@@ -106,9 +105,7 @@ export function DocPublishControl({ docId, orgSlug, workspaceSlug, initialPublis
           <Tooltip>
             <TooltipTrigger render={<span tabIndex={disabledReason ? 0 : -1} className="inline-flex items-center gap-1.5" />}>
               {switchEl}
-              <span id={labelId} className="text-xs font-medium text-text-secondary">
-                Publish<span className="sr-only"> to portal</span>
-              </span>
+              <span className="text-xs font-medium text-text-secondary">Publish</span>
             </TooltipTrigger>
             {disabledReason ? <TooltipContent>{disabledReason}</TooltipContent> : null}
           </Tooltip>
