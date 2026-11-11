@@ -105,7 +105,7 @@ export function DocPublishControl({ docId, orgSlug, workspaceSlug, initialPublis
           <Tooltip>
             <TooltipTrigger render={<span tabIndex={disabledReason ? 0 : -1} className="inline-flex items-center gap-1.5" />}>
               {switchEl}
-              <span className="text-xs font-medium text-text-secondary">Publish</span>
+              <span className="text-xs font-medium text-text-secondary max-sm:sr-only">Publish</span>
             </TooltipTrigger>
             {disabledReason ? <TooltipContent>{disabledReason}</TooltipContent> : null}
           </Tooltip>
@@ -113,12 +113,12 @@ export function DocPublishControl({ docId, orgSlug, workspaceSlug, initialPublis
         {published ? (
           <span className="inline-flex items-center gap-1 text-xs font-medium text-status-success" data-testid="doc-publish-badge">
             <Check className="size-3" aria-hidden />
-            <span>Published</span>
+            <span className="max-sm:sr-only">Published</span>
             <span className="sr-only"> to portal</span>
           </span>
         ) : (
           <span className="text-xs text-text-subtle" data-testid="doc-publish-badge">
-            <span aria-hidden>{disabledReason && !publishable ? "Not publishable" : "Draft"}</span>
+            <span aria-hidden className="max-sm:hidden">{disabledReason && !publishable ? "Not publishable" : "Draft"}</span>
             <span className="sr-only">{disabledReason && !publishable ? "Not publishable" : "Not published · Draft"}</span>
           </span>
         )}
@@ -129,14 +129,14 @@ export function DocPublishControl({ docId, orgSlug, workspaceSlug, initialPublis
           aria-expanded={infoOpen}
           aria-controls={infoId}
           onClick={() => setInfoOpen((open) => !open)}
-          className="inline-flex size-6 items-center justify-center rounded-md text-text-subtle hover:bg-muted hover:text-text-primary focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+          className="inline-flex size-6 items-center justify-center rounded-md max-sm:hidden text-text-subtle hover:bg-muted hover:text-text-primary focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
         >
           <Info className="size-3.5" aria-hidden />
         </button>
         {published ? (
           <Button type="button" variant="ghost" size="xs" onClick={() => void copyLink()} data-testid="doc-publish-copy" aria-label="Copy public link">
             {copied ? <Check aria-hidden /> : <Link2 aria-hidden />}
-            {copied ? "Copied" : "Copy link"}
+            <span className="max-sm:sr-only">{copied ? "Copied" : "Copy link"}</span>
           </Button>
         ) : null}
       </div>
