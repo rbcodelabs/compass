@@ -21,6 +21,7 @@ import { createDocCommentCore, deleteDocCommentCore, type CommentAnchorFields } 
 import { mentionRoles, uniqueMentions, type MentionRef } from "@/lib/comment-mentions"
 import { eligibleTaskAssignees, resolveTaskAssignees } from "@/lib/task-assignment"
 import { createWorkspaceTask } from "@/lib/task-create"
+import { getTasksLinkedToResidual } from "@/lib/task-links-read"
 import { startRunForAssignedTask, type AgentRunOutcome } from "@/lib/agent-task-trigger"
 import { displayIdFromRow } from "@/lib/work-item-ids"
 import { runAfterCommit } from "@/lib/following-commit"
@@ -102,13 +103,12 @@ export function toCard(task: {
 /** Task card per comment id (one task per comment; the earliest link wins if data ever has more). */
 export async function loadCommentTaskCards(workspaceId: string, commentIds: string[]): Promise<Record<string, CommentTaskCardData>> {
   if (commentIds.length === 0) return {}
-  // Stays on task_links (not the TASK read flip): COMMENT links are legacy-only by design and never mirrored to entity_links.
-  const links = await getPrisma().taskLink.findMany({
-    where: { linkedType: "COMMENT", linkedId: { in: commentIds }, task: { workspaceId } },
-    include: { task: true },
-    orderBy: { createdAt: "asc" },
-  })
-  const tasks = await resolveTaskAssignees(workspaceId, links.map(link => link.task))
+  // COMMENT is a residual link kind (not an association), so it lives only in task_links (see lib/task-link-writes.ts).
+  const prisma = getPrisma()
+  const links = await getTasksLinkedToResidual(prisma, { workspaceId, linkedType: "COMMENT", linkedIds: commentIds })
+  if (links.length === 0) return {}
+  const rows = await prisma.task.findMany({ where: { workspaceId, id: { in: [...new Set(links.map(link => link.taskId))] } } })
+  const tasks = await resolveTaskAssignees(workspaceId, rows)
   const byTask = new Map(tasks.map(task => [task.id, task]))
   const cards: Record<string, CommentTaskCardData> = {}
   for (const link of links) {

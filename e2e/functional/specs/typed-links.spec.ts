@@ -5,8 +5,8 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 
 /**
  * Typed links between Opportunities, Objectives, Key Results and Solutions (ADR Phase 2), end to end over the
- * real MCP endpoint, route, gates and database: the new link tools, the legacy `link_opportunity_to_kr` dual
- * write, the additive reads, tenant isolation for a user who is a member of TWO workspaces, and explicit link
+ * real MCP endpoint, route, gates and database: the new link tools, the `link_opportunity_to_kr` pointer write
+ * (an entity_links row plus the LEGACY objective link derived from it), the additive reads, tenant isolation for a user who is a member of TWO workspaces, and explicit link
  * cleanup when a parent is deleted. Cleanup of the synthetic fixture is by id; nothing of the shared fixture
  * workspace is touched.
  */
@@ -75,10 +75,10 @@ test.describe.serial("typed links", () => {
       [objA1, wsA, cycleA, objA2, objB, wsB, cycleB],
     );
     await pool.query("INSERT INTO compass_dev.key_results (id,objective_id,title,target) VALUES ($1,$2,'KR A1',1), ($3,$4,'KR A2',1), ($5,$6,'KR B',1)", [krA1, objA1, krA2, objA2, krB, objB]);
-    // oppLegacyOnly is a raw row exactly as the code before typed links wrote it: a legacy pointer and no link row.
+    // oppLegacyOnly starts unlinked; its test points it at a Key Result through the tool.
     await pool.query(
-      "INSERT INTO compass_dev.opportunities (id,workspace_id,title,linked_key_result_id) VALUES ($1,$2,'Opportunity A1',NULL), ($3,$2,'Opportunity A2',NULL), ($4,$2,'Legacy-only opportunity',$5), ($6,$7,'Opportunity B',NULL)",
-      [oppA1, wsA, oppA2, oppLegacyOnly, krA1, oppB, wsB],
+      "INSERT INTO compass_dev.opportunities (id,workspace_id,title) VALUES ($1,$2,'Opportunity A1'), ($3,$2,'Opportunity A2'), ($4,$2,'Pointer-only opportunity'), ($5,$6,'Opportunity B')",
+      [oppA1, wsA, oppA2, oppLegacyOnly, oppB, wsB],
     );
   });
 
@@ -87,8 +87,7 @@ test.describe.serial("typed links", () => {
     try {
       // Synthetic rows only, by id. Link rows go first: no foreign keys reach them.
       const workspaces = [wsA, wsB, wsC];
-      await pool.query("DELETE FROM compass_dev.opportunity_objective_links WHERE workspace_id=ANY($1::uuid[])", [workspaces]);
-      await pool.query("DELETE FROM compass_dev.solution_key_result_links WHERE workspace_id=ANY($1::uuid[])", [workspaces]);
+      await pool.query("DELETE FROM compass_dev.entity_links WHERE workspace_id=ANY($1::uuid[])", [workspaces]);
       await pool.query("DELETE FROM compass_dev.solutions WHERE workspace_id=ANY($1::uuid[])", [workspaces]);
       await pool.query("DELETE FROM compass_dev.opportunities WHERE workspace_id=ANY($1::uuid[])", [workspaces]);
       await pool.query("DELETE FROM compass_dev.key_results WHERE objective_id=ANY($1::uuid[])", [[objA1, objA2, objB]]);
@@ -104,14 +103,18 @@ test.describe.serial("typed links", () => {
     }
   });
 
-  test("a legacy-only seeded row still reads correctly: the key result from the column, no link inferred", async ({ request }) => {
+  test("an unlinked opportunity has no key result; once pointed at one, get and list read it from the pointer", async ({ request }) => {
+    const before = await opportunity(request, oppLegacyOnly);
+    expect(before.linkedKeyResult).toBeNull();
+    expect(before.linkedKeyResultId).toBeNull();
+    succeeded(await tool(request, "link_opportunity_to_kr", { opportunityId: oppLegacyOnly, keyResultId: krA1 }));
     const data = await opportunity(request, oppLegacyOnly);
     expect(data.linkedKeyResult).toMatchObject({ id: krA1, title: "KR A1" });
-    expect(data.linkedObjectives).toEqual([]);
+    expect(data.linkedKeyResultId).toBe(krA1);
     const listed = (succeeded(await tool(request, "list_opportunities", { workspaceId: wsA })).items as Array<Record<string, unknown>>).find((o) => o.id === oppLegacyOnly)!;
     expect(listed.linkedKeyResult).toMatchObject({ title: "KR A1", objective: "Objective A1" });
-    expect(listed.linkedObjectives).toEqual([]);
-    expect(await links(request, wsA, { opportunityId: oppLegacyOnly })).toEqual([]);
+    // The Objective link is the one derived from the pointer.
+    expect(await links(request, wsA, { opportunityId: oppLegacyOnly })).toEqual([expect.objectContaining({ origin: "LEGACY", objectiveId: objA1 })]);
   });
 
   test("link_opportunity_to_objective links, shows in get_opportunity and list_opportunities, and is idempotent", async ({ request }) => {
@@ -124,7 +127,7 @@ test.describe.serial("typed links", () => {
     const listed = (succeeded(await tool(request, "list_opportunities", { workspaceId: wsA })).items as Array<Record<string, unknown>>).find((o) => o.id === oppA1)!;
     expect(listed.linkedObjectives).toEqual([{ id: objA1, title: "Objective A1" }]);
     expect(await links(request, wsA, { opportunityId: oppA1 })).toEqual([expect.objectContaining({ kind: "opportunity_objective", objectiveId: objA1, origin: "DIRECT" })]);
-    expect(await links(request, wsA, { objectiveId: objA1 })).toEqual([expect.objectContaining({ opportunityId: oppA1 })]);
+    expect(await links(request, wsA, { objectiveId: objA1 })).toEqual(expect.arrayContaining([expect.objectContaining({ opportunityId: oppA1, origin: "DIRECT" })]));
   });
 
   test("the legacy tool creates a LEGACY link, follows a change, and a clear removes it", async ({ request }) => {
@@ -144,7 +147,7 @@ test.describe.serial("typed links", () => {
     expect(await links(request, wsA, { opportunityId: oppA2 })).toEqual([]);
   });
 
-  test("create_opportunity with a keyResultId writes the column and the link; a DIRECT link added over a LEGACY pair survives a clear", async ({ request }) => {
+  test("create_opportunity with a keyResultId writes the pointer and the link; a DIRECT link added over a LEGACY pair survives a clear", async ({ request }) => {
     const created = succeeded(await tool(request, "create_opportunity", { workspaceId: wsA, title: "Created with a key result", keyResultId: krA2 }));
     const id = String(created.id);
     expect(created.linkedKeyResultId).toBe(krA2);
@@ -216,7 +219,7 @@ test.describe.serial("typed links", () => {
     succeeded(await tool(request, "delete_objective", { objectiveId: objA2 }));
     expect((await opportunity(request, oppA1)).linkedObjectives).toEqual([{ id: objA1, title: "Objective A1" }]);
     denied(await tool(request, "list_links", { workspaceId: wsA, objectiveId: objA2 }));
-    const left = await pool.query("SELECT count(*)::int AS n FROM compass_dev.opportunity_objective_links WHERE objective_id=$1", [objA2]);
+    const left = await pool.query("SELECT count(*)::int AS n FROM compass_dev.entity_links WHERE link_type='OPPORTUNITY_TARGETS_OBJECTIVE' AND to_id=$1", [objA2]);
     expect(left.rows[0].n).toBe(0);
   });
 });

@@ -313,21 +313,12 @@ describe("scoring", () => {
 });
 
 describe("artifacts", () => {
-  // The entity_links mirror (ADR phase 6) has its own tests; this block pins the legacy writes against a hand-written fake.
-  beforeEach(() => { vi.stubEnv("COMPASS_ENTITY_LINKS_ARTIFACT_MIRROR", "0"); });
-  afterEach(() => { vi.unstubAllEnvs(); });
-  const artifacts = () => ({
-    artifact: { findFirst: async ({ where }: { where: { id: string; workspaceId: string } }) => (where.id === "art-a" && where.workspaceId === WS_A.id ? { id: "art-a", workspaceId: WS_A.id } : null) },
-    artifactLink: { findFirst: async () => null, create: async ({ data }: { data: Record<string, unknown> }) => ({ id: "link-1", ...data }) },
-  });
-
+  // The tenant fake models artifacts and entity_links (the only artifact link store), so the real endpoint checks run.
   it.each(["sol-b", "sol-null"])("linking A's artifact to %s is rejected", async (solutionId) => {
-    fake.extra = artifacts();
     await expect(linkArtifactToSolution({ artifactId: "art-a", solutionId, workspaceId: WS_A.id })).rejects.toThrow("Artifact and Solution must exist in the same workspace");
   });
 
   it("linking within workspace A works", async () => {
-    fake.extra = artifacts();
     await expect(linkArtifactToSolution({ artifactId: "art-a", solutionId: "sol-a", workspaceId: WS_A.id })).resolves.toMatchObject({ created: true, linkedId: "sol-a" });
   });
 });

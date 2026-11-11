@@ -71,8 +71,6 @@ const mockReviewRequest = { findMany: vi.fn(), updateMany: vi.fn(), deleteMany: 
 const mockPortfolioCapacityReservation = { deleteMany: vi.fn() };
 const mockPortfolioCapacityPlan = { deleteMany: vi.fn() };
 const mockResearchDelete = { deleteMany: vi.fn(), updateMany: vi.fn() };
-const mockOpportunityObjectiveLink = { findMany: vi.fn(), deleteMany: vi.fn() };
-const mockSolutionKeyResultLink = { findMany: vi.fn(), deleteMany: vi.fn() };
 const mockEntityLink = { findMany: vi.fn(), deleteMany: vi.fn() };
 const mockResearchStudy = { findMany: vi.fn(), deleteMany: vi.fn(), updateMany: vi.fn() };
 
@@ -186,8 +184,6 @@ const mockPrisma = {
   researchParticipantToken: mockResearchDelete,
   researchSynthesis: mockResearchDelete,
   researchStudy: mockResearchStudy,
-  opportunityObjectiveLink: mockOpportunityObjectiveLink,
-  solutionKeyResultLink: mockSolutionKeyResultLink,
   entityLink: mockEntityLink,
 };
 
@@ -270,8 +266,6 @@ beforeEach(() => {
     mockFeedbackSourceToken,
     mockCapabilityPack,
     mockCapabilityPackVersion,
-    mockOpportunityObjectiveLink,
-    mockSolutionKeyResultLink,
     mockEntityLink,
     mockResearchStudy,
   ]) {
@@ -309,8 +303,6 @@ beforeEach(() => {
     mockEvidence.deleteMany,
     mockOpportunity.deleteMany,
     mockOpportunityScore.deleteMany,
-    mockOpportunityObjectiveLink.deleteMany,
-    mockSolutionKeyResultLink.deleteMany,
     mockEntityLink.deleteMany,
     mockResearchStudy.deleteMany,
     mockSolutionScore.deleteMany,
@@ -448,6 +440,7 @@ describe("deleteOrganization", () => {
       where: { workspaceId: "ws-1" },
       data: { assumptionId: null },
     });
+    // The frozen artifact_links rows would Restrict the Artifact delete, so they are removed here (entity_links go with the workspace sweep).
     expect(mockArtifactLink.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" } });
     expect(mockArtifact.updateMany).toHaveBeenCalledWith({
       where: { workspaceId: "ws-1" },
@@ -463,21 +456,19 @@ describe("deleteOrganization", () => {
     });
     expect(mockCapabilityPack.deleteMany).toHaveBeenCalledWith({ where: { id: { in: ["pack-1"] } } });
 
-    // ── Typed links: swept by workspace, then by endpoint id, before the rows they name go ──
-    expect(mockOpportunityObjectiveLink.findMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" }, select: { id: true }, take: 500 });
-    expect(mockSolutionKeyResultLink.findMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" }, select: { id: true }, take: 500 });
-    // By endpoint id: drained by LINK id (find up to 500, delete by id), so the parent ids go into the find, not a bulk delete.
+    // ── entity_links is the only link store: swept by workspace, then by endpoint id (drained by LINK id: find up to 500, delete by id), before the rows they name go ──
     const drain = { select: { id: true }, take: 500 };
-    expect(mockOpportunityObjectiveLink.findMany).toHaveBeenCalledWith({ where: { opportunityId: { in: ["opp-1"] } }, ...drain });
-    expect(mockOpportunityObjectiveLink.findMany).toHaveBeenCalledWith({ where: { objectiveId: { in: ["obj-1"] } }, ...drain });
-    expect(mockSolutionKeyResultLink.findMany).toHaveBeenCalledWith({ where: { solutionId: { in: ["sol-1"] } }, ...drain });
-    expect(mockSolutionKeyResultLink.findMany).toHaveBeenCalledWith({ where: { keyResultId: { in: ["kr-1"] } }, ...drain });
-    const firstFind = (m: typeof mockOpportunityObjectiveLink) => m.findMany.mock.invocationCallOrder[0];
-    expect(firstFind(mockOpportunityObjectiveLink)).toBeLessThan(mockOpportunity.deleteMany.mock.invocationCallOrder[0]);
-    expect(firstFind(mockSolutionKeyResultLink)).toBeLessThan(mockSolution.deleteMany.mock.invocationCallOrder[0]);
-    expect(mockOpportunityObjectiveLink.findMany.mock.invocationCallOrder.at(-1)).toBeLessThan(mockObjective.deleteMany.mock.invocationCallOrder[0]);
+    const endpointSweep = (type: string, id: string) => ({ where: { OR: [{ fromType: type, fromId: { in: [id] } }, { toType: type, toId: { in: [id] } }] }, ...drain });
+    expect(mockEntityLink.findMany).toHaveBeenCalledWith(endpointSweep("OPPORTUNITY", "opp-1"));
+    expect(mockEntityLink.findMany).toHaveBeenCalledWith(endpointSweep("OBJECTIVE", "obj-1"));
+    expect(mockEntityLink.findMany).toHaveBeenCalledWith(endpointSweep("SOLUTION", "sol-1"));
+    expect(mockEntityLink.findMany).toHaveBeenCalledWith(endpointSweep("KEY_RESULT", "kr-1"));
+    const sweepOrder = (type: string) => mockEntityLink.findMany.mock.invocationCallOrder[mockEntityLink.findMany.mock.calls.findIndex((call) => JSON.stringify(call[0]).includes(`"fromType":"${type}"`))];
+    expect(sweepOrder("OPPORTUNITY")).toBeLessThan(mockOpportunity.deleteMany.mock.invocationCallOrder[0]);
+    expect(sweepOrder("SOLUTION")).toBeLessThan(mockSolution.deleteMany.mock.invocationCallOrder[0]);
+    expect(sweepOrder("OBJECTIVE")).toBeLessThan(mockObjective.deleteMany.mock.invocationCallOrder[0]);
 
-    // ── Generic entity links: swept by workspace first, then by endpoint (both directions) before the experiment / study go ──
+    // ── Experiment / study endpoints are swept too, before those rows go ──
     expect(mockEntityLink.findMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" }, select: { id: true }, take: 500 });
     expect(mockEntityLink.findMany).toHaveBeenCalledWith({
       where: { OR: [{ fromType: "EXPERIMENT", fromId: { in: ["exp-1"] } }, { toType: "EXPERIMENT", toId: { in: ["exp-1"] } }] }, ...drain,

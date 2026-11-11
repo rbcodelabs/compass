@@ -463,14 +463,15 @@ export async function seedTasksAndLinks(
   for (const l of taskLinkDefs) {
     const exists = await one(
       exec,
-      `SELECT id FROM "${schema}".task_links WHERE task_id = $1 AND linked_type = $2 AND linked_id = $3`,
+      `SELECT id FROM "${schema}".entity_links WHERE link_type = 'TASK_REFERENCES' AND from_id = $1 AND to_type = $2 AND to_id = $3`,
       [taskIds[l.taskIdx], l.linkedType, l.linkedId]
     );
     if (exists) continue;
     await one(
       exec,
-      `INSERT INTO "${schema}".task_links (task_id, linked_type, linked_id) VALUES ($1,$2,$3) RETURNING id`,
-      [taskIds[l.taskIdx], l.linkedType, l.linkedId]
+      `INSERT INTO "${schema}".entity_links (workspace_id, link_type, from_type, from_id, to_type, to_id, origin, source, created_at, updated_at)
+       VALUES ($1, 'TASK_REFERENCES', 'TASK', $2, $3, $4, 'DIRECT', 'UI', NOW(), NOW()) RETURNING id`,
+      [workspaceId, taskIds[l.taskIdx], l.linkedType, l.linkedId]
     );
   }
 

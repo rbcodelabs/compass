@@ -41,8 +41,8 @@ test.describe.serial("Link authoring (Phase 4B)", () => {
     pool.query(`UPDATE ${S}.workspaces SET thinking_model = $1, thinking_model_labels = NULL WHERE id = $2`, [key, ids.workspace]);
 
   /** Count only: raw SQL may read-count and delete link rows here, never insert or update them. */
-  async function count(table: "solution_key_result_links" | "opportunity_objective_links", where: string, params: unknown[]) {
-    const result = await pool.query(`SELECT count(*)::int AS n FROM ${S}.${table} WHERE workspace_id = $1 AND ${where}`, [ids.workspace, ...params]);
+  async function count(linkType: "SOLUTION_TARGETS_KEY_RESULT" | "OPPORTUNITY_TARGETS_OBJECTIVE" | "OPPORTUNITY_TARGETS_KEY_RESULT", where: string, params: unknown[]) {
+    const result = await pool.query(`SELECT count(*)::int AS n FROM ${S}.entity_links WHERE workspace_id = $1 AND link_type = '${linkType}' AND ${where}`, [ids.workspace, ...params]);
     return result.rows[0].n as number;
   }
 
@@ -64,8 +64,7 @@ test.describe.serial("Link authoring (Phase 4B)", () => {
     if (!pool) return;
     try {
       // Everything here is synthetic and addressed by its own ids / workspace id. Link rows go first.
-      await pool.query(`DELETE FROM ${S}.solution_key_result_links WHERE workspace_id = $1`, [ids.workspace]);
-      await pool.query(`DELETE FROM ${S}.opportunity_objective_links WHERE workspace_id = $1`, [ids.workspace]);
+      await pool.query(`DELETE FROM ${S}.entity_links WHERE workspace_id = $1`, [ids.workspace]);
       await pool.query(`DELETE FROM ${S}.solutions WHERE workspace_id = $1`, [ids.workspace]);
       await pool.query(`DELETE FROM ${S}.opportunities WHERE workspace_id = $1`, [ids.workspace]);
       await pool.query(`DELETE FROM ${S}.key_results WHERE id = $1`, [ids.kr]);
@@ -88,14 +87,14 @@ test.describe.serial("Link authoring (Phase 4B)", () => {
     await expect(picker).toBeVisible({ timeout: 30_000 });
     await expect(page.getByText("Linked Success metrics")).toBeVisible();
     await expect(picker).toContainText("No success metrics linked.");
-    expect(await count("solution_key_result_links", "solution_id = $2", [ids.solution])).toBe(0);
+    expect(await count("SOLUTION_TARGETS_KEY_RESULT", "from_id = $2", [ids.solution])).toBe(0);
 
     await picker.getByRole("button", { name: "Choose success metrics" }).click();
     await page.getByRole("menuitemcheckbox", { name: new RegExp(`${tag} metric`) }).click();
     await expect(picker.getByRole("listitem")).toContainText(`${tag} metric`, { timeout: 15_000 });
 
     // The write is a typed link stamped with the solution's workspace and the UI source.
-    expect(await count("solution_key_result_links", "solution_id = $2 AND key_result_id = $3 AND source = 'UI'", [ids.solution, ids.kr])).toBe(1);
+    expect(await count("SOLUTION_TARGETS_KEY_RESULT", "from_id = $2 AND to_id = $3 AND source = 'UI'", [ids.solution, ids.kr])).toBe(1);
   });
 
   test("TORRES_OST: the Success metric panel lists the linked solution, read-only", async ({ page }) => {
@@ -131,21 +130,21 @@ test.describe.serial("Link authoring (Phase 4B)", () => {
       .poll(async () => (await pool.query(`SELECT id FROM ${S}.opportunities WHERE workspace_id = $1 AND title = $2`, [ids.workspace, composedTitle])).rowCount, { timeout: 30_000 })
       .toBe(1);
     composedOpp = (await pool.query(`SELECT id FROM ${S}.opportunities WHERE workspace_id = $1 AND title = $2`, [ids.workspace, composedTitle])).rows[0].id;
-    // One DIRECT link, from the same create, stamped with the opportunity's workspace; the legacy pointer is untouched.
-    expect(await count("opportunity_objective_links", "opportunity_id = $2 AND objective_id = $3 AND origin = 'DIRECT' AND source = 'UI'", [composedOpp, ids.objective])).toBe(1);
-    const pointer = await pool.query(`SELECT linked_key_result_id FROM ${S}.opportunities WHERE id = $1`, [composedOpp]);
-    expect(pointer.rows[0].linked_key_result_id).toBeNull();
+    // One DIRECT link, from the same create, stamped with the opportunity's workspace; no Key Result pointer is created.
+    expect(await count("OPPORTUNITY_TARGETS_OBJECTIVE", "from_id = $2 AND to_id = $3 AND origin = 'DIRECT' AND source = 'UI'", [composedOpp, ids.objective])).toBe(1);
+    expect(await count("OPPORTUNITY_TARGETS_KEY_RESULT", "from_id = $2", [composedOpp])).toBe(0);
   });
 
-  test("linking through the legacy key result combobox dual-writes exactly one LEGACY link", async ({ page }) => {
-    // CLASSIC: link the other opportunity through the legacy key result combobox (the dual-write creates a LEGACY link).
+  test("linking through the key result combobox writes the pointer and exactly one derived LEGACY link", async ({ page }) => {
+    // CLASSIC: link the other opportunity through the key result combobox (the pointer write derives a LEGACY objective link).
     await setModel(null);
     await page.goto(`${base}/discovery/${ids.legacyOpp}`);
     await page.waitForLoadState("networkidle");
     await page.getByText("Link to key result").click();
     await page.getByRole("option", { name: new RegExp(`${tag} metric`) }).click();
     await expect(page.getByText("change KR")).toBeVisible({ timeout: 15_000 });
-    expect(await count("opportunity_objective_links", "opportunity_id = $2 AND origin = 'LEGACY'", [ids.legacyOpp])).toBe(1);
+    expect(await count("OPPORTUNITY_TARGETS_OBJECTIVE", "from_id = $2 AND origin = 'LEGACY'", [ids.legacyOpp])).toBe(1);
+    expect(await count("OPPORTUNITY_TARGETS_KEY_RESULT", "from_id = $2 AND to_id = $3", [ids.legacyOpp, ids.kr])).toBe(1);
   });
 
   test("CLASSIC: no picker, no linked-solutions list, no composer field", async ({ page }) => {
@@ -184,6 +183,6 @@ test.describe.serial("Link authoring (Phase 4B)", () => {
     await picker.getByRole("button", { name: "Choose success metrics" }).click();
     await page.getByRole("menuitemcheckbox", { name: new RegExp(`${tag} metric`) }).click();
     await expect(picker).toContainText("No success metrics linked.", { timeout: 15_000 });
-    expect(await count("solution_key_result_links", "solution_id = $2", [ids.solution])).toBe(0);
+    expect(await count("SOLUTION_TARGETS_KEY_RESULT", "from_id = $2", [ids.solution])).toBe(0);
   });
 });

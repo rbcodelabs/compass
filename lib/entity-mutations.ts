@@ -256,7 +256,7 @@ export async function updateEntityField(
     ? await model.findFirst({ where: { id }, select: { status: true, title: true } }) as { status: string; title: string } | null
     : null;
 
-  // The legacy pointer is dual-written: the column and its LEGACY Opportunity<->Objective link commit together.
+  // The Key Result pointer and its derived LEGACY Opportunity<->Objective link commit together.
   if (type === "opportunity" && field === "linkedKeyResultId") {
     try {
       await captureWorkspaceMutation(

@@ -28,6 +28,7 @@ describe("legacy/shared Doc comment atomic compatibility", () => {
     mocks.missingSharedUpdate.value = false
     mocks.failSharedCreate.value = false
     mocks.failLegacyDelete.value = false
+    mocks.tx.taskLink.deleteMany.mockResolvedValue({ count: 0 })
     mocks.tx.doc.findUnique.mockResolvedValue({ id: "doc-1", workspaceId: "workspace-1" })
     mocks.tx.docComment.create.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => {
       state.createdLegacy = true

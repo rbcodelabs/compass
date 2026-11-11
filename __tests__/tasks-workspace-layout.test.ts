@@ -184,7 +184,7 @@ describe("Tasks dashboard workspace layout", () => {
       expect(page).toContain("...(squadFilter ? { squadId: squadFilter } : {})");
       expect(page).toContain("...parseAssigneeFilter(assigneeFilter)");
       expect(page).toContain("...(priorityFilter ? { priority: priorityFilter } : {})");
-      expect(page).toContain("prisma.taskLink.findMany({ where: { taskId: { in: taskIds } }");
+      expect(page).toContain("getTaskLinks(prisma, rawTasks.map(");
       expect(page).toContain("prisma.task.groupBy({");
       expect(page).not.toContain("_count: { select: { subtasks: true } }");
     });

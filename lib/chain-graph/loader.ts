@@ -1,8 +1,7 @@
 /**
  * The only file in lib/chain-graph that touches the database, and it does so only through getCanvasOverview: every query
  * there is workspace-scoped (where: { workspaceId }, or the Objective/Solution relation filter for Key Results and
- * Assumptions) and link rows are read through the per-family read-flag seam, so this loader is correct before and after
- * the entity_links read flip with no change. Callers must have resolved workspace access first (page: session +
+ * Assumptions) and link rows are read from entity_links by the typed-link readers. Callers must have resolved workspace access first (page: session +
  * resolveWorkspaceAccess); `workspaceId` must never come from the client.
  */
 import type { AppPrismaClient } from "@/lib/db"

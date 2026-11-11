@@ -9,8 +9,6 @@
  * therefore: the parent is deleted FIRST and its links drained AFTER, so a refused delete keeps every link.
  */
 import { randomUUID } from "node:crypto";
-import { readdirSync } from "node:fs";
-import path from "node:path";
 import { Pool } from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PrismaClient } from "@prisma/client";
@@ -27,7 +25,7 @@ vi.mock("@/auth", () => ({ auth: vi.fn().mockResolvedValue({ user: { id: "user-1
 vi.mock("@/lib/workspace", () => ({ getWorkspace: vi.fn() }));
 vi.mock("@/lib/okr-hierarchy", () => ({ getEligibleParentKeyResults: vi.fn(), setObjectiveParentKeyResult: vi.fn() }));
 
-import { applyMigrations } from "@/lib/migrations/runner";
+import { replayAllMigrations } from "./helpers/replay-migrations";
 import { deleteKeyResult as deleteKeyResultAction, deleteObjective as deleteObjectiveAction } from "@/app/[orgSlug]/[workspaceSlug]/okrs/actions";
 import { deleteKeyResult as deleteKeyResultTool, deleteObjective as deleteObjectiveTool } from "@/lib/okr-tool-handlers";
 import { integrationDatabaseUrl } from "@/__tests__/helpers/integration-database"
@@ -52,16 +50,9 @@ describe.skipIf(!databaseUrl)("key result and objective deletes against a real P
     if (!["localhost", "127.0.0.1"].includes(url.hostname) || url.pathname !== "/compass_e2e") throw new Error("Requires the local compass_e2e database");
     process.env.DATABASE_URL = databaseUrl;
     await pool.query(`CREATE SCHEMA "${schema}"`);
-    // Every table the Restrict / SetNull emulation of these deletes reads exists: the early simple migrations, then 068 and 071.
-    const names = readdirSync(path.join(process.cwd(), "prisma/migrations"), { withFileTypes: true })
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => entry.name)
-      .filter((name) => name < "039" || name === "064_solution_scoring" || name === "068_workspace_id_on_solution_objective" || name === "071_typed_link_tables")
-      .sort();
-    for (const name of names) {
-      const applied = await applyMigrations(pool, schema, name);
-      expect(applied.status, `${name}: ${JSON.stringify(await applied.json())}`).toBe(200);
-    }
+    // Every migration, so each table the Restrict / SetNull emulation of these deletes reads exists with its current columns.
+    const replay = await replayAllMigrations(pool, schema);
+    expect(replay.status, JSON.stringify(await replay.json())).toBe(200);
     const { PrismaClient: Client } = await import("@prisma/client");
     const { PrismaPg } = await import("@prisma/adapter-pg");
     const client = new Client({ adapter: new PrismaPg(pool, { schema }), log: [{ emit: "event", level: "query" }] });
@@ -81,25 +72,32 @@ describe.skipIf(!databaseUrl)("key result and objective deletes against a real P
   });
 
   beforeEach(async () => {
-    for (const table of ["opportunity_objective_links", "solution_key_result_links", "check_ins", "solutions", "opportunities", "key_results", "objectives", "okr_cycles"]) {
+    for (const table of ["entity_links", "check_ins", "solutions", "opportunities", "key_results", "objectives", "okr_cycles"]) {
       await q(`DELETE FROM {S}.${table}`);
     }
     [cycle, obj, supporting, kr, oppPointing, oppDirectOnly, sol] = Array.from({ length: 7 }, () => randomUUID());
     await q(`INSERT INTO {S}.okr_cycles (id, workspace_id, title, start_date, end_date) VALUES ($1,$2,'c','2026-01-01','2026-03-31')`, [cycle, WS]);
     await q(`INSERT INTO {S}.objectives (id, workspace_id, cycle_id, title) VALUES ($1,$2,$3,'obj'), ($4,$2,$3,'supporting')`, [obj, WS, cycle, supporting]);
     await q(`INSERT INTO {S}.key_results (id, objective_id, title, target) VALUES ($1,$2,'kr',1)`, [kr, obj]);
-    await q(`INSERT INTO {S}.opportunities (id, workspace_id, title, linked_key_result_id) VALUES ($1,$2,'points at kr',$3), ($4,$2,'direct only',NULL)`, [oppPointing, WS, kr, oppDirectOnly]);
+    await q(`INSERT INTO {S}.opportunities (id, workspace_id, title) VALUES ($1,$2,'points at kr'), ($3,$2,'direct only')`, [oppPointing, WS, oppDirectOnly]);
     await q(`INSERT INTO {S}.solutions (id, workspace_id, opportunity_id, title) VALUES ($1,$2,$3,'sol')`, [sol, WS, oppPointing]);
-    // The links the dual-write would have made: a LEGACY one for the pointer, a DIRECT one the user made, a solution link.
-    await q(`INSERT INTO {S}.opportunity_objective_links (workspace_id, opportunity_id, objective_id, origin) VALUES ($1,$2,$3,'LEGACY'), ($1,$4,$3,'DIRECT')`, [WS, oppPointing, obj, oppDirectOnly]);
-    await q(`INSERT INTO {S}.solution_key_result_links (workspace_id, solution_id, key_result_id) VALUES ($1,$2,$3)`, [WS, sol, kr]);
+    // The links the writers make: the Key Result pointer and its derived LEGACY objective link, a DIRECT link the user made, a solution link.
+    await q(
+      `INSERT INTO {S}.entity_links (workspace_id, link_type, from_type, from_id, to_type, to_id, origin, source, created_at, updated_at) VALUES
+         ($1,'OPPORTUNITY_TARGETS_KEY_RESULT','OPPORTUNITY',$2,'KEY_RESULT',$3,'LEGACY','UI',now(),now()),
+         ($1,'OPPORTUNITY_TARGETS_OBJECTIVE','OPPORTUNITY',$2,'OBJECTIVE',$4,'LEGACY','UI',now(),now()),
+         ($1,'OPPORTUNITY_TARGETS_OBJECTIVE','OPPORTUNITY',$5,'OBJECTIVE',$4,'DIRECT','UI',now(),now()),
+         ($1,'SOLUTION_TARGETS_KEY_RESULT','SOLUTION',$6,'KEY_RESULT',$3,'DIRECT','UI',now(),now())`,
+      [WS, oppPointing, kr, obj, oppDirectOnly, sol],
+    );
     statements.length = 0;
   });
 
   const counts = async () => ({
-    legacy: await one(`SELECT count(*)::int AS n FROM {S}.opportunity_objective_links WHERE origin = 'LEGACY'`),
-    direct: await one(`SELECT count(*)::int AS n FROM {S}.opportunity_objective_links WHERE origin = 'DIRECT'`),
-    solution: await one(`SELECT count(*)::int AS n FROM {S}.solution_key_result_links`),
+    pointer: await one(`SELECT count(*)::int AS n FROM {S}.entity_links WHERE link_type = 'OPPORTUNITY_TARGETS_KEY_RESULT'`),
+    legacy: await one(`SELECT count(*)::int AS n FROM {S}.entity_links WHERE link_type = 'OPPORTUNITY_TARGETS_OBJECTIVE' AND origin = 'LEGACY'`),
+    direct: await one(`SELECT count(*)::int AS n FROM {S}.entity_links WHERE link_type = 'OPPORTUNITY_TARGETS_OBJECTIVE' AND origin = 'DIRECT'`),
+    solution: await one(`SELECT count(*)::int AS n FROM {S}.entity_links WHERE link_type = 'SOLUTION_TARGETS_KEY_RESULT'`),
   });
   const krExists = async () => (await one(`SELECT count(*)::int AS n FROM {S}.key_results WHERE id = $1`, [kr])) === 1;
 
@@ -118,54 +116,54 @@ describe.skipIf(!databaseUrl)("key result and objective deletes against a real P
     await q(`INSERT INTO {S}.check_ins (id, key_result_id, value) VALUES (gen_random_uuid(), $1, 1)`, [kr]);
     await expect(deleteKeyResultAction(kr, "/p")).rejects.toThrow();
     expect(await krExists()).toBe(true);
-    expect(await counts()).toEqual({ legacy: 1, direct: 1, solution: 1 });
+    expect(await counts()).toEqual({ pointer: 1, legacy: 1, direct: 1, solution: 1 });
   });
 
   it("UI deleteKeyResult REFUSED by a supporting objective throws and every link survives", async () => {
     await q(`UPDATE {S}.objectives SET parent_key_result_id = $1 WHERE id = $2`, [kr, supporting]);
     await expect(deleteKeyResultAction(kr, "/p")).rejects.toThrow();
     expect(await krExists()).toBe(true);
-    expect(await counts()).toEqual({ legacy: 1, direct: 1, solution: 1 });
+    expect(await counts()).toEqual({ pointer: 1, legacy: 1, direct: 1, solution: 1 });
   });
 
-  // TODO(integration-ci): schema is built from an early-migration subset that lacks the work-item seq_prefix columns the generated Prisma client now selects (adding 092_work_item_ids needs review_requests and its prerequisites), found when enabling in CI
-  it.skip("UI deleteKeyResult that goes through: the key result and the pointer go, then the LEGACY and solution links; the DIRECT link stays", async () => {
+  it("UI deleteKeyResult that goes through: the key result goes, then the pointer, the LEGACY link and the solution link; the DIRECT link stays", async () => {
     await deleteKeyResultAction(kr, "/p");
     expect(await krExists()).toBe(false);
-    expect(await one(`SELECT count(*)::int AS n FROM {S}.opportunities WHERE id = $1 AND linked_key_result_id IS NULL`, [oppPointing])).toBe(1);
-    expect(await counts()).toEqual({ legacy: 0, direct: 1, solution: 0 });
+    expect(await counts()).toEqual({ pointer: 0, legacy: 0, direct: 1, solution: 0 });
   });
 
-  // TODO(integration-ci): schema is built from an early-migration subset that lacks the work-item seq_prefix columns the generated Prisma client now selects (adding 092_work_item_ids needs review_requests and its prerequisites), found when enabling in CI
-  it.skip("MCP deleteKeyResult (which clears check-ins and supporting objectives itself) removes the key result, then the LEGACY and solution links", async () => {
+  it("MCP deleteKeyResult (which clears check-ins and supporting objectives itself) removes the key result, then the pointer, the LEGACY link and the solution link", async () => {
     await q(`INSERT INTO {S}.check_ins (id, key_result_id, value) VALUES (gen_random_uuid(), $1, 1)`, [kr]);
     const result = await deleteKeyResultTool({ keyResultId: kr });
     expect(result.structuredContent.ok).toBe(true);
-    expect(result.structuredContent.data).toMatchObject({ deleted: true, removedOpportunityLinks: 1, removedSolutionLinks: 1 });
+    expect(result.structuredContent.data).toMatchObject({ deleted: true, unlinkedOpportunities: 1, removedOpportunityLinks: 1, removedSolutionLinks: 1 });
     expect(await krExists()).toBe(false);
-    expect(await counts()).toEqual({ legacy: 0, direct: 1, solution: 0 });
+    expect(await counts()).toEqual({ pointer: 0, legacy: 0, direct: 1, solution: 0 });
   });
 
-  // TODO(integration-ci): schema is built from an early-migration subset that lacks the work-item seq_prefix columns the generated Prisma client now selects (adding 092_work_item_ids needs review_requests and its prerequisites), found when enabling in CI
-  it.skip("an objective that still has key results is refused (UI and MCP) and keeps its links; once childless its links go, in passes of at most 500 links", async () => {
+  it("an objective that still has key results is refused (UI and MCP) and keeps its links; once childless its links go, in passes of at most 500 links", async () => {
     await expect(deleteObjectiveAction(obj, "/p")).rejects.toThrow();
     const refused = await deleteObjectiveTool({ objectiveId: obj });
     expect(refused.structuredContent.ok).toBe(false);
-    expect(await counts()).toEqual({ legacy: 1, direct: 1, solution: 1 });
+    expect(await counts()).toEqual({ pointer: 1, legacy: 1, direct: 1, solution: 1 });
 
     await deleteKeyResultAction(kr, "/p");
     await q(
       `INSERT INTO {S}.opportunities (id, workspace_id, title) SELECT gen_random_uuid(), $1, 'bulk ' || g FROM generate_series(1, 1203) g`,
       [WS],
     );
-    await q(`INSERT INTO {S}.opportunity_objective_links (workspace_id, opportunity_id, objective_id, origin) SELECT $1, o.id, $2, 'LEGACY' FROM {S}.opportunities o WHERE o.title LIKE 'bulk %'`, [WS, obj]);
-    expect(await one(`SELECT count(*)::int AS n FROM {S}.opportunity_objective_links WHERE objective_id = $1`, [obj])).toBe(1204);
+    await q(
+      `INSERT INTO {S}.entity_links (workspace_id, link_type, from_type, from_id, to_type, to_id, origin, source, created_at, updated_at)
+       SELECT $1, 'OPPORTUNITY_TARGETS_OBJECTIVE', 'OPPORTUNITY', o.id, 'OBJECTIVE', $2, 'LEGACY', 'UI', now(), now() FROM {S}.opportunities o WHERE o.title LIKE 'bulk %'`,
+      [WS, obj],
+    );
+    expect(await one(`SELECT count(*)::int AS n FROM {S}.entity_links WHERE to_type = 'OBJECTIVE' AND to_id = $1`, [obj])).toBe(1204);
 
     statements.length = 0;
     await deleteObjectiveAction(obj, "/p");
     expect(await one(`SELECT count(*)::int AS n FROM {S}.objectives WHERE id = $1`, [obj])).toBe(0);
-    expect(await one(`SELECT count(*)::int AS n FROM {S}.opportunity_objective_links WHERE objective_id = $1`, [obj])).toBe(0);
-    const linkDeletes = statements.filter((s) => /DELETE FROM/.test(s.query) && /opportunity_objective_links/.test(s.query));
+    expect(await one(`SELECT count(*)::int AS n FROM {S}.entity_links WHERE to_type = 'OBJECTIVE' AND to_id = $1`, [obj])).toBe(0);
+    const linkDeletes = statements.filter((s) => /DELETE FROM/.test(s.query) && /entity_links/.test(s.query));
     expect(linkDeletes.length).toBeGreaterThanOrEqual(3);
     for (const statement of linkDeletes) {
       // Prisma repeats the id list in the DELETE (the original filter AND the ids it just selected), so the DISTINCT bound values are the ids per statement.
@@ -173,21 +171,14 @@ describe.skipIf(!databaseUrl)("key result and objective deletes against a real P
     }
   });
 
-  // TODO(integration-ci): schema is built from an early-migration subset that lacks the work-item seq_prefix columns the generated Prisma client now selects (adding 092_work_item_ids needs review_requests and its prerequisites), found when enabling in CI
-  it.skip("if the post-delete drain fails (link table unavailable) the key result is still gone and the user sees success, not an error", async () => {
-    const log = vi.spyOn(console, "error").mockImplementation(() => {});
-    await q(`ALTER TABLE {S}.solution_key_result_links RENAME TO solution_key_result_links_hidden`);
+  it("with the link table unavailable the delete fails before anything is touched: the pointers are read first, so no key result is deleted with its links left behind", async () => {
+    await q(`ALTER TABLE {S}.entity_links RENAME TO entity_links_hidden`);
     try {
-      await expect(deleteKeyResultAction(kr, "/p")).resolves.toBeUndefined();
-      expect(await krExists()).toBe(false);
-      expect(log.mock.calls.map(([line]) => JSON.parse(String(line)))).toEqual(
-        expect.arrayContaining([expect.objectContaining({ event: "typed_links.cleanup_failed", surface: "ui.deleteKeyResult.solution" })]),
-      );
+      await expect(deleteKeyResultAction(kr, "/p")).rejects.toThrow();
+      expect(await krExists()).toBe(true);
     } finally {
-      await q(`ALTER TABLE {S}.solution_key_result_links_hidden RENAME TO solution_key_result_links`);
-      log.mockRestore();
+      await q(`ALTER TABLE {S}.entity_links_hidden RENAME TO entity_links`);
     }
-    // The leftover is a link to a deleted key result: hidden from reads (endpoint join) and reported by linkIntegrity.directDangling.
-    expect((await counts()).solution).toBe(1);
+    expect(await counts()).toEqual({ pointer: 1, legacy: 1, direct: 1, solution: 1 });
   });
 });

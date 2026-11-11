@@ -23,6 +23,7 @@ import {
   type SlotRange,
 } from "@/lib/roadmap/scheduling";
 import { allocateOneSeq } from "@/lib/work-item-sequence"
+import { getOpportunityKeyResultPointers } from "@/lib/typed-links"
 
 type CaptureSource = Parameters<typeof captureWorkspaceMutation>[3];
 export type RoadmapCreateHorizon = ScheduleHorizon | "SHIPPED";
@@ -136,7 +137,7 @@ export async function createRoadmapItemsFromSolutions(
   const [solutions, activeLinked, dated, squads] = await Promise.all([
     prisma.solution.findMany({
       where: { id: { in: solutionIds }, workspaceId },
-      select: { id: true, title: true, opportunityId: true, opportunity: { select: { id: true, squadId: true, linkedKeyResultId: true } } },
+      select: { id: true, title: true, opportunityId: true, opportunity: { select: { id: true, squadId: true } } },
     }),
     prisma.roadmapItem.findMany({
       where: { workspaceId, status: "ACTIVE", solutionId: { in: solutionIds } },
@@ -149,6 +150,8 @@ export async function createRoadmapItemsFromSolutions(
     prisma.squad.findMany({ where: { workspaceId }, select: { id: true } }),
   ]);
   const solutionsById = new Map(solutions.map((solution) => [solution.id, solution]));
+  // Default Key Result of each opportunity, from its entity_links pointer.
+  const keyResultPointers = await getOpportunityKeyResultPointers(prisma, workspaceId, solutions.map((solution) => solution.opportunity));
   const activeBySolution = new Map(activeLinked.map((item) => [item.solutionId as string, item.id]));
   const squadIds = new Set(squads.map((squad) => squad.id));
 
@@ -216,7 +219,7 @@ export async function createRoadmapItemsFromSolutions(
             sortOrder: last ? last.sortOrder + 1 : 0,
             solutionId: solution.id,
             opportunityId: request.opportunityId === undefined ? solution.opportunity.id : request.opportunityId,
-            keyResultId: request.keyResultId === undefined ? (solution.opportunity.linkedKeyResultId ?? null) : request.keyResultId,
+            keyResultId: request.keyResultId === undefined ? (keyResultPointers.get(solution.opportunity.id) ?? null) : request.keyResultId,
             squadId,
             startDate,
             endDate,

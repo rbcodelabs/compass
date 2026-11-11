@@ -7,23 +7,21 @@ const mockTask = {
   update: vi.fn(),
   findFirst: vi.fn(),
 };
-const mockTaskLink = {
-  findUnique: vi.fn(),
-  findFirst: vi.fn(),
-  create: vi.fn(),
-  delete: vi.fn(),
-};
+// The link writer (lib/task-link-writes.ts, entity_links) has its own tests; this file pins what the actions ask of it.
+const { mockCreateTaskLink, mockDeleteTaskLink, mockGetTaskLinkById } = vi.hoisted(() => ({
+  mockCreateTaskLink: vi.fn(),
+  mockDeleteTaskLink: vi.fn(),
+  mockGetTaskLinkById: vi.fn(),
+}));
 
 const mockPrisma = {
   $transaction: vi.fn(async (callback: (tx: { task: typeof mockTask }) => unknown) => callback(mockPrisma)),
   workspaceMember: { findFirst: vi.fn() },
   opportunity: { findFirst: vi.fn() },
   task: mockTask,
-  taskLink: mockTaskLink,
 };
 
-// The entity_links mirror of task links (ADR phase 7) has its own tests (__tests__/links/task-reference-mirror.test.ts); this file pins the legacy writes against hand-written fakes.
-vi.mock("@/lib/links/legacy-mirror", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/lib/links/legacy-mirror")>()), mirrorTaskReference: vi.fn(), unmirrorTaskReference: vi.fn() }));
+vi.mock("@/lib/task-link-writes", () => ({ createTaskLink: mockCreateTaskLink, createTaskLinks: vi.fn(), deleteTaskLink: mockDeleteTaskLink, getTaskLinkById: mockGetTaskLinkById }));
 vi.mock("@/lib/db", () => ({
   default: vi.fn(() => mockPrisma),
 }));
@@ -51,12 +49,11 @@ beforeEach(() => {
   mockPrisma.opportunity.findFirst.mockResolvedValue({ id: "opp-1" });
   mockTask.findUnique.mockResolvedValue({ id: "task-1", workspaceId: "ws-1" });
   mockTask.findMany.mockResolvedValue([]);
-  mockTaskLink.findUnique.mockResolvedValue({ taskId: "task-1" });
+  mockGetTaskLinkById.mockResolvedValue({ id: "link-1", taskId: "task-1", linkedType: "OPPORTUNITY", linkedId: "opp-1" });
   mockTask.create.mockResolvedValue({ id: "task-1", title: "Test Task", status: "TODO" });
   mockTask.update.mockResolvedValue({ id: "task-1" });
   mockTask.findFirst.mockResolvedValue(null);
-  mockTaskLink.findFirst.mockResolvedValue(null);
-  mockTaskLink.create.mockResolvedValue({ id: "link-1" });
+  mockCreateTaskLink.mockResolvedValue({ id: "link-1" });
 });
 
 // ─── addTask ──────────────────────────────────────────────────────────────────
@@ -130,7 +127,7 @@ describe("task action authorization", () => {
   it("denies cross-workspace links", async () => {
     mockPrisma.opportunity.findFirst.mockResolvedValue(null);
     await expect(linkTask("task-1", "OPPORTUNITY", "foreign", "/path")).rejects.toThrow("different workspace");
-    expect(mockTaskLink.create).not.toHaveBeenCalled();
+    expect(mockCreateTaskLink).not.toHaveBeenCalled();
   });
   it("legacy clear removes an agent assignment too", async () => {
     await updateTask("task-1", { assigneeUserId: null }, "/path");
@@ -254,24 +251,31 @@ describe("cancelTask", () => {
 // ─── linkTask / unlinkTask ────────────────────────────────────────────────────
 
 describe("linkTask", () => {
-  it("creates a new link when none exists", async () => {
-    await linkTask("task-1", "OPPORTUNITY", "opp-1", "/path");
-    expect(mockTaskLink.create).toHaveBeenCalledWith({
-      data: { taskId: "task-1", linkedType: "OPPORTUNITY", linkedId: "opp-1" },
-    });
+  it("creates the link through the writer", async () => {
+    const result = await linkTask("task-1", "OPPORTUNITY", "opp-1", "/path");
+    expect(mockCreateTaskLink).toHaveBeenCalledWith(mockPrisma, { taskId: "task-1", linkedType: "OPPORTUNITY", linkedId: "opp-1", workspaceId: "ws-1" });
+    expect(result).toMatchObject({ id: "link-1" });
   });
 
-  it("is idempotent — returns the existing link without creating a duplicate", async () => {
-    mockTaskLink.findFirst.mockResolvedValue({ id: "existing-link" });
+  it("is idempotent — a repeat returns the writer's existing link", async () => {
+    mockCreateTaskLink.mockResolvedValue({ id: "existing-link" });
     const result = await linkTask("task-1", "OPPORTUNITY", "opp-1", "/path");
-    expect(mockTaskLink.create).not.toHaveBeenCalled();
     expect(result).toMatchObject({ id: "existing-link" });
   });
 });
 
 describe("unlinkTask", () => {
-  it("deletes the link by id", async () => {
+  it("resolves the link by id and deletes it through the writer", async () => {
     await unlinkTask("link-1", "/path");
-    expect(mockTaskLink.delete).toHaveBeenCalledWith({ where: { id: "link-1" } });
+    expect(mockDeleteTaskLink).toHaveBeenCalledWith(mockPrisma, {
+      link: { id: "link-1", taskId: "task-1", linkedType: "OPPORTUNITY", linkedId: "opp-1" },
+      workspaceId: "ws-1",
+    });
+  });
+
+  it("throws Not found for an unknown link id", async () => {
+    mockGetTaskLinkById.mockResolvedValue(null);
+    await expect(unlinkTask("gone", "/path")).rejects.toThrow("Not found");
+    expect(mockDeleteTaskLink).not.toHaveBeenCalled();
   });
 });

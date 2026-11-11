@@ -15,10 +15,12 @@ const prisma = {
   feedbackItem: { findUnique: vi.fn() },
   evidence: { findUnique: vi.fn() },
   workspace: { findUnique: vi.fn() },
-  taskLink: { findMany: vi.fn() },
   $transaction: vi.fn(),
 }
 
+// Decision follow-up links live in entity_links; the reader has its own tests, so here it only answers "which requests have linked work".
+const { linkedTargetIds } = vi.hoisted(() => ({ linkedTargetIds: vi.fn() }))
+vi.mock("@/lib/task-links-read", () => ({ getLinkedTargetIds: linkedTargetIds }))
 vi.mock("@/lib/db", () => ({ default: () => prisma }))
 
 import {
@@ -44,7 +46,7 @@ describe("tracked decisions", () => {
     prisma.reviewRevision.create.mockResolvedValue({ id: "revision-1", requestId: "request-1", fingerprint: "fp" })
     prisma.reviewRequest.update.mockResolvedValue({})
     prisma.reviewRequest.updateMany.mockResolvedValue({ count: 1 })
-    prisma.taskLink.findMany.mockResolvedValue([])
+    linkedTargetIds.mockResolvedValue(new Set())
   })
 
   it("creates a pending tracking-only request for a workspace-scoped entity", async () => {
@@ -330,7 +332,7 @@ describe("tracked decisions", () => {
   describe("recordDecisionNoAction", () => {
     it("closes a decided decision with no linked work", async () => {
       prisma.reviewRequest.findFirst.mockResolvedValue({ id: "request-1", workspaceId: "ws-1", gateType: "TRACKED_DECISION", state: "DECIDED", noActionAt: null })
-      prisma.taskLink.findMany.mockResolvedValue([])
+      linkedTargetIds.mockResolvedValue(new Set())
       prisma.reviewRequest.update.mockResolvedValue({ id: "request-1", noActionAt: new Date(), noActionReason: "Informational only" })
 
       await recordDecisionNoAction({ workspaceId: "ws-1", requestId: "request-1", reason: "Informational only", actorUserId: "user-1" })
@@ -343,7 +345,7 @@ describe("tracked decisions", () => {
 
     it("stores a recordedPrefix before the reason, after validating the reason on its own (so 2,000 characters still work)", async () => {
       prisma.reviewRequest.findFirst.mockResolvedValue({ id: "request-1", workspaceId: "ws-1", gateType: "TRACKED_DECISION", state: "DECIDED", noActionAt: null })
-      prisma.taskLink.findMany.mockResolvedValue([])
+      linkedTargetIds.mockResolvedValue(new Set())
       prisma.reviewRequest.update.mockResolvedValue({ id: "request-1" })
       const reason = "r".repeat(2000)
       await recordDecisionNoAction({ workspaceId: "ws-1", requestId: "request-1", reason, actorUserId: null, recordedPrefix: "[Closed by agent A (id)] " })
@@ -377,7 +379,7 @@ describe("tracked decisions", () => {
 
     it("refuses to close a decision that already has linked follow-up work", async () => {
       prisma.reviewRequest.findFirst.mockResolvedValue({ id: "request-1", workspaceId: "ws-1", gateType: "TRACKED_DECISION", state: "DECIDED", noActionAt: null })
-      prisma.taskLink.findMany.mockResolvedValue([{ linkedId: "request-1" }])
+      linkedTargetIds.mockResolvedValue(new Set(["request-1"]))
       await expect(recordDecisionNoAction({ workspaceId: "ws-1", requestId: "request-1", reason: "Why", actorUserId: "user-1" }))
         .rejects.toEqual(expect.objectContaining({ code: "HAS_LINKED_WORK" }))
       expect(prisma.reviewRequest.update).not.toHaveBeenCalled()
@@ -397,7 +399,7 @@ describe("tracked decisions", () => {
         { id: "request-linked", updatedAt: new Date() },
         { id: "request-unlinked", updatedAt: new Date() },
       ])
-      prisma.taskLink.findMany.mockResolvedValue([{ linkedId: "request-linked" }])
+      linkedTargetIds.mockResolvedValue(new Set(["request-linked"]))
 
       const result = await listTrackedDecisions({ workspaceId: "ws-1", tab: "AWAITING_FOLLOW_THROUGH" })
 
@@ -406,8 +408,7 @@ describe("tracked decisions", () => {
       }))
       expect(result.requests.map((request) => request.id)).toEqual(["request-unlinked"])
       expect(result.total).toBe(1)
-      // Flag unset: exactly the legacy query (linkedId only, no task join).
-      expect(prisma.taskLink.findMany).toHaveBeenCalledWith({ where: { linkedType: "DECISION", linkedId: { in: ["request-linked", "request-unlinked"] } }, select: { linkedId: true } })
+      expect(linkedTargetIds).toHaveBeenCalledWith(prisma, { workspaceIds: ["ws-1"], linkedType: "DECISION", linkedIds: ["request-linked", "request-unlinked"] })
     })
 
     it("returns an empty page without querying task links when there are no DECIDED candidates", async () => {
@@ -415,7 +416,7 @@ describe("tracked decisions", () => {
 
       const result = await listTrackedDecisions({ workspaceId: "ws-1", tab: "AWAITING_FOLLOW_THROUGH" })
 
-      expect(prisma.taskLink.findMany).not.toHaveBeenCalled()
+      expect(linkedTargetIds).not.toHaveBeenCalled()
       expect(result.requests).toEqual([])
       expect(result.total).toBe(0)
     })
@@ -424,7 +425,7 @@ describe("tracked decisions", () => {
       prisma.reviewRequest.findMany.mockResolvedValue(
         Array.from({ length: 3 }, (_, index) => ({ id: `request-${index}`, updatedAt: new Date() })),
       )
-      prisma.taskLink.findMany.mockResolvedValue([])
+      linkedTargetIds.mockResolvedValue(new Set())
 
       const result = await listTrackedDecisions({ workspaceId: "ws-1", tab: "AWAITING_FOLLOW_THROUGH", page: 2, pageSize: 2 })
 

@@ -16,8 +16,6 @@ const models = {
   squad: { findMany: vi.fn() },
   opportunity: { findFirst: vi.fn(), findMany: vi.fn() },
   solution: { findFirst: vi.fn(), findMany: vi.fn() },
-  opportunityObjectiveLink: { findMany: vi.fn() },
-  solutionKeyResultLink: { findMany: vi.fn() },
   assumption: { findFirst: vi.fn() },
   experiment: { findFirst: vi.fn() },
   roadmapItem: { findFirst: vi.fn() },
@@ -25,7 +23,6 @@ const models = {
   workspaceMember: { findMany: vi.fn() },
   reviewRequest: { findFirst: vi.fn() },
   decisionApplication: { findFirst: vi.fn() },
-  artifactLink: { findMany: vi.fn() },
   artifact: { findMany: vi.fn() },
   feedbackItem: { findFirst: vi.fn() },
   customFieldDefinition: { findMany: vi.fn() },
@@ -37,6 +34,34 @@ const models = {
 };
 
 vi.mock("@/lib/db", () => ({ default: () => models }));
+
+// Every link family lives in entity_links and its readers have their own tests (__tests__/links/*); here they are stubbed so the
+// assertions stay on how entity-detail scopes, orders and shapes what the readers return.
+const links = vi.hoisted(() => ({
+  objectivesByOpportunity: vi.fn(),
+  keyResultsBySolution: vi.fn(),
+  solutionsByKeyResult: vi.fn(),
+  keyResultPointers: vi.fn(),
+  keyResultPointerLinks: vi.fn(),
+  taskIdsLinkedTo: vi.fn(),
+  taskLinks: vi.fn(),
+  objectiveOpportunities: vi.fn(),
+  solutionArtifactIds: vi.fn(),
+}));
+vi.mock("@/lib/artifacts", () => ({ getSolutionArtifactIds: links.solutionArtifactIds }));
+vi.mock("@/lib/typed-links", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/typed-links")>()),
+  getLinkedObjectivesByOpportunity: links.objectivesByOpportunity,
+  getLinkedKeyResultsBySolution: links.keyResultsBySolution,
+  getLinkedSolutionsByKeyResult: links.solutionsByKeyResult,
+  getOpportunityKeyResultPointers: links.keyResultPointers,
+}));
+vi.mock("@/lib/links/readers", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/links/readers")>()),
+  readEntityLinksOpportunityKeyResultPointer: links.keyResultPointerLinks,
+}));
+vi.mock("@/lib/task-links-read", () => ({ getTaskIdsLinkedTo: links.taskIdsLinkedTo, getTaskLinks: links.taskLinks }));
+vi.mock("@/lib/objective-linked-opportunities", () => ({ loadObjectiveLinkedOpportunities: links.objectiveOpportunities }));
 
 import {
   getEntityDetail,
@@ -61,12 +86,9 @@ const CASES: Array<{
     | "reviewRequest"
     | "decisionApplication"
     | "artifact"
-    | "artifactLink"
     | "customFieldDefinition"
     | "customFieldValue"
     | "workspaceScoringConfig"
-    | "opportunityObjectiveLink"
-    | "solutionKeyResultLink"
     | "workspace"
   >;
   where: Record<string, unknown>;
@@ -94,19 +116,24 @@ beforeEach(() => {
   models.task.findMany.mockResolvedValue([]);
   models.workspaceMember.findMany.mockResolvedValue([]);
   models.reviewRequest.findFirst.mockResolvedValue(null);
-  models.artifactLink.findMany.mockResolvedValue([]);
   models.artifact.findMany.mockResolvedValue([]);
   models.customFieldDefinition.findMany.mockResolvedValue([]);
   models.customFieldValue.findMany.mockResolvedValue([]);
   models.keyResult.findMany.mockResolvedValue([]);
   models.squad.findMany.mockResolvedValue([]);
   models.pMInterview.findMany.mockResolvedValue([]);
-  // Typed links: the opportunity / solution in scope, no links by default.
-  models.opportunity.findMany.mockResolvedValue([{ id: ID }]);
-  models.solution.findMany.mockResolvedValue([{ id: ID }]);
+  // No links of any family by default.
+  models.opportunity.findMany.mockResolvedValue([]);
   models.objective.findMany.mockResolvedValue([]);
-  models.opportunityObjectiveLink.findMany.mockResolvedValue([]);
-  models.solutionKeyResultLink.findMany.mockResolvedValue([]);
+  links.objectivesByOpportunity.mockResolvedValue(new Map());
+  links.keyResultsBySolution.mockResolvedValue(new Map());
+  links.solutionsByKeyResult.mockResolvedValue(new Map());
+  links.keyResultPointers.mockResolvedValue(new Map([[ID, null]]));
+  links.keyResultPointerLinks.mockResolvedValue([]);
+  links.solutionArtifactIds.mockResolvedValue([]);
+  links.taskIdsLinkedTo.mockResolvedValue([]);
+  links.taskLinks.mockResolvedValue(new Map());
+  links.objectiveOpportunities.mockResolvedValue({ scoringActive: false, items: [] });
   // No active Solution scoring model by default — fetchSolution's Scoring
   // section gate and fetchOpportunity's nested SolutionsList ScoreBadge gate
   // both read this.
@@ -125,34 +152,45 @@ describe("getEntityDetail — nested solutions are scoped by their own workspace
 
 describe("getEntityDetail — typed links ride along as additive, workspace-filtered payload", () => {
   it("returns linkedObjectives for an opportunity, reading the links and the objectives under this workspace", async () => {
-    models.opportunity.findFirst.mockResolvedValue({ id: ID, evidence: [], solutions: [], linkedKeyResult: null });
-    models.opportunityObjectiveLink.findMany.mockResolvedValue([{ id: "l1", opportunityId: ID, objectiveId: "obj-1", createdAt: new Date(1) }, { id: "l2", opportunityId: ID, objectiveId: "obj-foreign", createdAt: new Date(2) }]);
-    models.objective.findMany.mockResolvedValue([{ id: "obj-1", title: "Grow" }]);
+    models.opportunity.findFirst.mockResolvedValue({ id: ID, evidence: [], solutions: [] });
+    links.objectivesByOpportunity.mockResolvedValue(new Map([[ID, [{ id: "obj-1", title: "Grow" }]]]));
     const result = (await getEntityDetail("opportunity", ID, WS)) as { data: { linkedObjectives: unknown; linkedKeyResult: unknown } };
     expect(result.data.linkedObjectives).toEqual([{ id: "obj-1", title: "Grow" }]);
-    // The legacy pointer is never inferred from the links.
+    // The Key Result pointer is never inferred from the objective links.
     expect(result.data.linkedKeyResult ?? null).toBeNull();
-    expect(models.opportunityObjectiveLink.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { workspaceId: WS, opportunityId: { in: [ID] } } }));
-    expect(models.objective.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { id: { in: ["obj-1", "obj-foreign"] }, workspaceId: WS } }));
+    expect(links.objectivesByOpportunity).toHaveBeenCalledWith(models, WS, [ID], { preverified: true });
   });
 
   it("returns linkedKeyResults for a solution under the same filtering", async () => {
     models.solution.findFirst.mockResolvedValue({ id: ID, evidence: [], assumptions: [], comments: [], roadmapItems: [], score: null });
-    models.solutionKeyResultLink.findMany.mockResolvedValue([{ id: "s1", solutionId: ID, keyResultId: "kr-1", createdAt: new Date(1) }]);
-    models.keyResult.findMany.mockResolvedValue([{ id: "kr-1", title: "KR", objectiveId: "obj-1" }]);
+    links.keyResultsBySolution.mockResolvedValue(new Map([[ID, [{ id: "kr-1", title: "KR", objectiveId: "obj-1" }]]]));
     const result = (await getEntityDetail("solution", ID, WS)) as { data: { linkedKeyResults: unknown } };
     expect(result.data.linkedKeyResults).toEqual([{ id: "kr-1", title: "KR", objectiveId: "obj-1" }]);
-    expect(models.keyResult.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { id: { in: ["kr-1"] }, objective: { workspaceId: WS } } }));
+    expect(links.keyResultsBySolution).toHaveBeenCalledWith(models, WS, [ID], { preverified: true });
   });
 });
 
 describe("getEntityDetail — an opportunity's linked key result is scoped through its objective's workspaceId", () => {
   const kr = (workspaceId: string | null) => ({ id: "kr-1", title: "KR", current: 1, target: 2, unit: null, objective: { id: "o", workspaceId, title: "Objective", cycleId: "c" } });
   const run = async (workspaceId: string | null) => {
-    models.opportunity.findFirst.mockResolvedValue({ id: ID, evidence: [], solutions: [], linkedKeyResult: kr(workspaceId) });
+    models.opportunity.findFirst.mockResolvedValue({ id: ID, evidence: [], solutions: [] });
+    links.keyResultPointers.mockResolvedValue(new Map([[ID, "kr-1"]]));
+    models.keyResult.findFirst.mockResolvedValue(kr(workspaceId));
     return ((await getEntityDetail("opportunity", ID, WS)) as { data: { linkedKeyResult: unknown } }).data.linkedKeyResult;
   };
-  it("shows the link when the objective is in this workspace", async () => { expect(await run(WS)).not.toBeNull(); });
+  it("shows the link when the objective is in this workspace, reading the pointer from entity_links and scoping the key result", async () => {
+    expect(await run(WS)).not.toBeNull();
+    expect(links.keyResultPointers).toHaveBeenCalledWith(models, WS, [{ id: ID }]);
+    expect(models.keyResult.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "kr-1", objective: { workspaceId: WS } } }));
+  });
+  it("carries the pointer id on the payload even when no Key Result row resolves", async () => {
+    models.opportunity.findFirst.mockResolvedValue({ id: ID, evidence: [], solutions: [] });
+    links.keyResultPointers.mockResolvedValue(new Map([[ID, "kr-1"]]));
+    models.keyResult.findFirst.mockResolvedValue(null);
+    const data = ((await getEntityDetail("opportunity", ID, WS)) as { data: { linkedKeyResultId: unknown; linkedKeyResult: unknown } }).data;
+    expect(data.linkedKeyResultId).toBe("kr-1");
+    expect(data.linkedKeyResult).toBeNull();
+  });
   it("hides it when the objective has no workspaceId", async () => { expect(await run(null)).toBeNull(); });
   it("hides it when the objective belongs to another workspace", async () => { expect(await run("other-ws")).toBeNull(); });
 });
@@ -162,12 +200,21 @@ describe("getEntityDetail — objective linked opportunities", () => {
     models.objective.findFirst.mockResolvedValueOnce({ id: ID, keyResults: [{ id: "kr1", title: "K" }], parentKeyResult: null });
     const result = (await getEntityDetail("objective", ID, WS)) as { data: { linkedOpportunities: { items: unknown[] } } };
     expect(result.data.linkedOpportunities).toEqual({ scoringActive: false, items: [] });
-    expect(models.opportunityObjectiveLink.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ workspaceId: WS, objectiveId: { in: [ID] } }) }));
-    expect(models.opportunity.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { workspaceId: WS, linkedKeyResultId: { in: ["kr1"] } } }));
+    expect(links.objectiveOpportunities).toHaveBeenCalledWith(models, WS, expect.objectContaining({ id: ID }));
   });
 });
 
 describe("getEntityDetail — OKR nested reads are scoped by workspaceId", () => {
+  it("lists a key result's pointing opportunities from the pointer links, scoped to the workspace", async () => {
+    models.keyResult.findFirst.mockResolvedValue({ id: ID });
+    links.keyResultPointerLinks.mockResolvedValue([{ fromId: "opp-1" }, { fromId: "opp-2" }]);
+    models.opportunity.findMany.mockResolvedValue([{ id: "opp-1", title: "A", status: "OPEN" }]);
+    const result = (await getEntityDetail("keyResult", ID, WS)) as { data: { opportunities: unknown } };
+    expect(links.keyResultPointerLinks).toHaveBeenCalledWith(models, WS, { keyResultIds: [ID] });
+    expect(models.opportunity.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { workspaceId: WS, id: { in: ["opp-1", "opp-2"] } } }));
+    expect(result.data.opportunities).toEqual([{ id: "opp-1", title: "A", status: "OPEN" }]);
+  });
+
   it("filters a key result's supporting objectives by the workspace's own workspaceId", async () => {
     models.keyResult.findFirst.mockResolvedValue({ id: ID });
     await getEntityDetail("keyResult", ID, WS);
@@ -274,6 +321,7 @@ describe("getEntityDetail — return shape", () => {
 
   it("returns active roadmap delivery tasks and linkable workspace tasks in deterministic delivery order", async () => {
     models.roadmapItem.findFirst.mockResolvedValue({ id: ID, workspaceId: WS });
+    links.taskIdsLinkedTo.mockResolvedValue(["blocked"]);
     models.task.findMany
       .mockResolvedValueOnce([{ id: "blocked", status: "BLOCKED" }])
       .mockResolvedValueOnce([{ id: "candidate", title: "Candidate" }]);
@@ -285,7 +333,7 @@ describe("getEntityDetail — return shape", () => {
       where: {
         workspaceId: WS,
         status: { not: "CANCELLED" },
-        links: { some: { linkedType: "ROADMAP_ITEM", linkedId: ID } },
+        id: { in: ["blocked"] },
       },
       select: expect.objectContaining({ id: true, title: true, status: true, priority: true }),
       orderBy: [{ status: "asc" }, { sortOrder: "asc" }, { createdAt: "asc" }, { id: "asc" }],
@@ -294,11 +342,12 @@ describe("getEntityDetail — return shape", () => {
       where: {
         workspaceId: WS,
         status: { not: "CANCELLED" },
-        links: { none: { linkedType: "ROADMAP_ITEM", linkedId: ID } },
+        id: { notIn: ["blocked"] },
       },
       select: { id: true, title: true },
       orderBy: [{ title: "asc" }, { id: "asc" }],
     });
+    expect(links.taskIdsLinkedTo).toHaveBeenCalledWith(models, { workspaceId: WS, linkedType: "ROADMAP_ITEM", linkedId: ID });
     expect(result).toEqual({
       type: "roadmapItem",
       data: expect.objectContaining({
@@ -315,7 +364,7 @@ describe("getEntityDetail — return shape", () => {
     const result = await getEntityDetail("opportunity", ID, WS);
     expect(result).toEqual({
       type: "opportunity",
-      data: { ...row, pmInterviewEnabled: true, pmInterviews: [], deliveryTasks: [], linkableTasks: [], members: [], squads: [], availableKeyResults: [], customFields: [], existingScore: null, solutions: [], hasActiveSolutionScoringModel: false, linkedObjectives: [] },
+      data: { ...row, pmInterviewEnabled: true, pmInterviews: [], deliveryTasks: [], linkableTasks: [], members: [], squads: [], availableKeyResults: [], customFields: [], existingScore: null, solutions: [], hasActiveSolutionScoringModel: false, linkedObjectives: [], linkedKeyResultId: null },
     });
   });
 
@@ -331,12 +380,9 @@ describe("getEntityDetail — return shape", () => {
     | "reviewRequest"
     | "decisionApplication"
     | "artifact"
-    | "artifactLink"
     | "customFieldDefinition"
     | "customFieldValue"
     | "workspaceScoringConfig"
-    | "opportunityObjectiveLink"
-    | "solutionKeyResultLink"
     | "workspace"
   >;
       linkedType: string;
@@ -351,7 +397,6 @@ describe("getEntityDetail — return shape", () => {
       vi.clearAllMocks();
       models.task.findMany.mockResolvedValue([]);
       models.workspaceMember.findMany.mockResolvedValue([]);
-      models.artifactLink.findMany.mockResolvedValue([]);
       models.artifact.findMany.mockResolvedValue([]);
       // the launch workflow flag comes from the workspace module, resolved only by fetchRoadmapItem
       // (flattened onto the panel payload, see lib/entity-detail.ts) but is
@@ -364,8 +409,9 @@ describe("getEntityDetail — return shape", () => {
         type,
         data: expect.objectContaining({ deliveryTasks: [], linkableTasks: [], members: [] }),
       });
+      expect(links.taskIdsLinkedTo).toHaveBeenCalledWith(models, { workspaceId: WS, linkedType, linkedId: ID });
       expect(models.task.findMany).toHaveBeenNthCalledWith(1, expect.objectContaining({
-        where: expect.objectContaining({ links: { some: { linkedType, linkedId: ID } } }),
+        where: expect.objectContaining({ id: { in: [] } }),
       }));
     }
   });

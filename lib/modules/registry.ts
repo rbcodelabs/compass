@@ -5,7 +5,7 @@
  * Storage is one row per (workspace, key) in `workspace_modules`; no row means the `defaultEnabled` below. Adding a module is
  * therefore an entry here and nothing else: no migration. See docs/adr-workspace-modules.md.
  *
- * What is NOT a module: infrastructure, secrets and migration-mirror flags (COMPASS_ENTITY_LINKS_*, blob tokens, analytics keys)
+ * What is NOT a module: infrastructure and secrets (blob tokens, analytics keys)
  * stay environment configuration, and COMPASS_PASSKEYS_ENABLED stays an environment flag because passkeys are a user/auth-level
  * capability with no workspace to scope them to.
  */

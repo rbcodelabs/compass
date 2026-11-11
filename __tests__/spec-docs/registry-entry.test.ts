@@ -32,7 +32,7 @@ describe("DOC_SPECIFIES_SCOPE", () => {
     expect(def.candidates).toBeUndefined()
     expect(def.isEnabled).toBeUndefined()
     expect(def.attrs).toBeUndefined()
-    expect(def.legacy).toBeUndefined()
+    expect(def.dedicatedWriter).toBeUndefined()
     expect(isLinkTypeEnabled(def)).toBe(true)
   })
 

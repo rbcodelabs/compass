@@ -1,10 +1,9 @@
 /**
  * Opportunity detail "OST" tab follows the workspace thinking model, end to end.
  *
- * One Cycle -> Objective -> two Key Results, an Opportunity whose legacy Key Result pointer
- * (opportunities.linked_key_result_id) names the first Key Result, and one Solution. The typed link
- * tables are never written by raw SQL (typed-link-access guard); the legacy pointer is the supported
- * fallback parent in every preset, so each model has something to draw.
+ * One Cycle -> Objective -> two Key Results, an Opportunity whose Key Result pointer (an entity_links
+ * row, written through the app's typed-link writer) names the first Key Result, and one Solution. The
+ * pointer is the supported fallback parent in every preset, so each model has something to draw.
  *
  * `workspaces.thinking_model` is switched per test on the shared e2e workspace and always restored to NULL
  * (CLASSIC), because every other functional spec relies on CLASSIC copy and this suite is serialized.
@@ -13,6 +12,8 @@ import pg from "pg";
 import { randomUUID } from "node:crypto";
 import { test, expect } from "../fixtures/index";
 import { E2E_SCHEMA, isolatedE2EConnectionString } from "../fixtures/isolated-database";
+import getPrisma from "../../../lib/db";
+import { runTypedLinkTransaction, setKeyResultPointer } from "../../../lib/typed-links";
 
 const S = `"${E2E_SCHEMA}"`;
 
@@ -71,9 +72,9 @@ test.describe.serial("Opportunity OST tab follows the thinking model", () => {
       `INSERT INTO ${S}.key_results (id, objective_id, title, target, sort_order) VALUES ($1, $3, $4, 10, 0), ($2, $3, $5, 20, 1)`,
       [ids.kr, ids.kr2, ids.objective, titles.kr, titles.kr2],
     );
-    await pool.query(
-      `INSERT INTO ${S}.opportunities (id, workspace_id, title, linked_key_result_id) VALUES ($1, $2, $3, $4)`,
-      [ids.opp, workspaceId, titles.opp, ids.kr],
+    await pool.query(`INSERT INTO ${S}.opportunities (id, workspace_id, title) VALUES ($1, $2, $3)`, [ids.opp, workspaceId, titles.opp]);
+    await runTypedLinkTransaction(getPrisma(), (tx) =>
+      setKeyResultPointer(tx, { opportunityId: ids.opp, workspaceId, keyResultId: ids.kr, ctx: { source: "UI", createdById: null } }),
     );
     await pool.query(`INSERT INTO ${S}.solutions (id, workspace_id, opportunity_id, title) VALUES ($1, $2, $3, $4)`, [
       ids.solution,
@@ -92,6 +93,7 @@ test.describe.serial("Opportunity OST tab follows the thinking model", () => {
     try {
       await setModel(null);
       await pool.query(`DELETE FROM ${S}.solutions WHERE id = $1`, [ids.solution]);
+      await pool.query(`DELETE FROM ${S}.entity_links WHERE from_id = $1 OR to_id = ANY($2::uuid[])`, [ids.opp, [ids.kr, ids.kr2, ids.objective]]);
       await pool.query(`DELETE FROM ${S}.opportunities WHERE id = $1`, [ids.opp]);
       await pool.query(`DELETE FROM ${S}.key_results WHERE id = ANY($1::uuid[])`, [[ids.kr, ids.kr2]]);
       await pool.query(`DELETE FROM ${S}.objectives WHERE id = $1`, [ids.objective]);

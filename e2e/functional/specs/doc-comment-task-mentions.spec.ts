@@ -196,10 +196,10 @@ test.describe("Doc comment @mention -> task", () => {
     if (pool) {
       for (const docId of seededDocIds) {
         await pool.query(
-          `DELETE FROM "${S}".tasks WHERE id IN (SELECT task_id FROM "${S}".task_links WHERE linked_type = 'DOC' AND linked_id = $1)`,
+          `DELETE FROM "${S}".tasks WHERE id IN (SELECT from_id FROM "${S}".entity_links WHERE link_type = 'TASK_REFERENCES' AND to_type = 'DOC' AND to_id = $1)`,
           [docId],
         ).catch(() => undefined);
-        await pool.query(`DELETE FROM "${S}".task_links WHERE linked_type = 'DOC' AND linked_id = $1`, [docId]).catch(() => undefined);
+        await pool.query(`DELETE FROM "${S}".entity_links WHERE link_type = 'TASK_REFERENCES' AND to_type = 'DOC' AND to_id = $1`, [docId]).catch(() => undefined);
       }
       await pool.query(`DELETE FROM "${S}".agent_workspace_grants WHERE agent_id = $1`, [agentId]).catch(() => undefined);
       await pool.query(`DELETE FROM "${S}".agents WHERE id = $1`, [agentId]).catch(() => undefined);
@@ -294,16 +294,19 @@ test.describe("Doc comment @mention -> task", () => {
     // ── What was stored ──────────────────────────────────────────────────────
     const { rows: tasks } = await pool.query(
       `SELECT t.id, t.title, t.status, t.priority, t.assignee_user_id, t.assignee_agent_id, t.due_date, t.seq_number
-         FROM "${S}".tasks t JOIN "${S}".task_links l ON l.task_id = t.id
-        WHERE l.linked_type = 'DOC' AND l.linked_id = $1`,
+         FROM "${S}".tasks t JOIN "${S}".entity_links l ON l.from_id = t.id AND l.link_type = 'TASK_REFERENCES'
+        WHERE l.to_type = 'DOC' AND l.to_id = $1`,
       [docId],
     );
     expect(tasks).toHaveLength(1);
     expect(tasks[0]).toMatchObject({ title: "Draft rollout checklist and rollback criterion", priority: "HIGH", assignee_user_id: bUserId, assignee_agent_id: null });
     expect(new Date(tasks[0].due_date).toISOString().slice(0, 10)).toBe("2026-10-23");
     const taskId = tasks[0].id as string;
+    // The COMMENT link is residual (task_links); the DOC link is an association (entity_links).
     const { rows: links } = await pool.query(`SELECT linked_type, linked_id FROM "${S}".task_links WHERE task_id = $1 ORDER BY linked_type`, [taskId]);
-    expect(links.map((l) => l.linked_type)).toEqual(["COMMENT", "DOC"]);
+    expect(links.map((l) => l.linked_type)).toEqual(["COMMENT"]);
+    const { rows: docLinks } = await pool.query(`SELECT to_type, to_id FROM "${S}".entity_links WHERE link_type = 'TASK_REFERENCES' AND from_id = $1`, [taskId]);
+    expect(docLinks.map((l) => l.to_type)).toEqual(["DOC"]);
     const commentId = links.find((l) => l.linked_type === "COMMENT")!.linked_id as string;
     const { rows: [stored] } = await pool.query(`SELECT body FROM "${S}".doc_comments WHERE id = $1`, [commentId]);
     expect(stored.body).toContain(`](mention:user:${bUserId})`);
@@ -366,7 +369,7 @@ test.describe("Doc comment @mention -> task", () => {
     // Docked panel again: the thread and the passage pin read together without the sheet's blur.
     await page.context().addCookies([{ name: "compass_panel_docsComments", value: "1:440", url: test.info().project.use.baseURL as string }]);
     const docId = await openDocWithSelection(page, base, `Edge cases ${suffix}`, "NOTE");
-    const taskCount = async () => Number((await pool.query(`SELECT COUNT(*)::int AS n FROM "${S}".task_links WHERE linked_type = 'DOC' AND linked_id = $1`, [docId])).rows[0].n);
+    const taskCount = async () => Number((await pool.query(`SELECT COUNT(*)::int AS n FROM "${S}".entity_links WHERE link_type = 'TASK_REFERENCES' AND to_type = 'DOC' AND to_id = $1`, [docId])).rows[0].n);
 
     // ── Mention only: toggle off -> a comment, no task, mentioned person told ─
     let editor = await startComment(page);
@@ -427,7 +430,7 @@ test.describe("Doc comment @mention -> task", () => {
     await expect(agentCard).toContainText("Agent");
     await expect(page.locator(".doc-comment-pin-agent")).toHaveText("⚙ 1");
     const { rows: agentTasks } = await pool.query(
-      `SELECT t.assignee_user_id, t.assignee_agent_id FROM "${S}".tasks t JOIN "${S}".task_links l ON l.task_id = t.id WHERE l.linked_type = 'DOC' AND l.linked_id = $1`,
+      `SELECT t.assignee_user_id, t.assignee_agent_id FROM "${S}".tasks t JOIN "${S}".entity_links l ON l.from_id = t.id AND l.link_type = 'TASK_REFERENCES' WHERE l.to_type = 'DOC' AND l.to_id = $1`,
       [docId],
     );
     expect(agentTasks).toEqual([{ assignee_user_id: null, assignee_agent_id: agentId }]);

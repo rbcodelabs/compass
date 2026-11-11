@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createEntityLinkDelegate, type EntityLinkFakeRow } from "../helpers/entity-link-fake";
 
 /**
  * The composer-facing discovery actions. Membership is checked with the real
@@ -6,18 +7,19 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  * transactional write itself is covered in __tests__/lib/opportunity-create.
  */
 const m = vi.hoisted(() => {
+  const linkRows: Array<Record<string, unknown> & { id: string }> = [];
   const db = {
     workspace: { findFirst: vi.fn(), findUnique: vi.fn() },
     squad: { findFirst: vi.fn(), findMany: vi.fn() },
     keyResult: { findFirst: vi.fn(), findMany: vi.fn() },
     objective: { findFirst: vi.fn(), findMany: vi.fn() },
     feedbackItem: { findMany: vi.fn(), updateMany: vi.fn() },
-    opportunity: { create: vi.fn(), findFirst: vi.fn(), findMany: async ({ where }: { where: { id: { in: string[] } } }) => where.id.in.map((id) => ({ id, title: id })), },
-    opportunityObjectiveLink: { findFirst: vi.fn(), findMany: async () => [], create: vi.fn(), update: vi.fn(), deleteMany: vi.fn() },
-    entityLink: { deleteMany: async () => ({ count: 0 }) },
+    opportunity: { create: vi.fn(), findFirst: vi.fn(), updateMany: vi.fn(), findMany: async ({ where }: { where: { id: { in: string[] } } }) => where.id.in.map((id) => ({ id, title: id })), },
+    // entity_links is the only link store; it is replaced with the in-memory fake below, over `linkRows`.
+    entityLink: {} as Record<string, unknown>,
     $transaction: vi.fn(),
   };
-  return { db, auth: vi.fn(), revalidatePath: vi.fn() };
+  return { db, linkRows, auth: vi.fn(), revalidatePath: vi.fn() };
 });
 
 vi.mock("@/auth", () => ({ auth: m.auth }));
@@ -29,26 +31,29 @@ import {
   loadOpportunityComposerOptions,
 } from "@/app/[orgSlug]/[workspaceSlug]/discovery/actions";
 
-// The entity_links mirror (ADR phase 5) has its own tests; this file pins the legacy writes against hand-written fakes.
-process.env.COMPASS_ENTITY_LINKS_OPPORTUNITY_MIRROR = "0";
+Object.assign(m.db.entityLink, createEntityLinkDelegate(m.linkRows as EntityLinkFakeRow[]));
+const linksOf = (linkType: string) => m.linkRows.filter((row) => row.linkType === linkType);
+const OPPORTUNITY_OBJECTIVE = "OPPORTUNITY_TARGETS_OBJECTIVE";
+const OPPORTUNITY_KEY_RESULT = "OPPORTUNITY_TARGETS_KEY_RESULT";
 
 vi.mock("@/lib/work-item-sequence", async () => (await import("../helpers/work-item-sequence-mock")).workItemSequenceMock())
 
 beforeEach(() => {
   vi.clearAllMocks();
+  m.linkRows.length = 0;
   m.auth.mockResolvedValue({ user: { id: "user-1" } });
   m.db.workspace.findFirst.mockResolvedValue({ id: "ws-1" });
   m.db.workspace.findUnique.mockResolvedValue({ thinkingModel: null, thinkingModelLabels: null });
-  m.db.objective.findMany.mockResolvedValue([]);
+  const echo = async ({ where }: { where: { id: { in: string[] } } }) => where.id.in.map((id) => ({ id, title: id }));
+  m.db.objective.findMany.mockImplementation(echo);
+  m.db.keyResult.findMany.mockImplementation(echo);
+  m.db.opportunity.updateMany.mockResolvedValue({ count: 1 });
   m.db.objective.findFirst.mockImplementation(async ({ where }: { where: { id: string } }) => ({ id: where.id, workspaceId: "ws-1", title: where.id }));
-  m.db.opportunity.findFirst.mockResolvedValue({ id: "opp-new", workspaceId: "ws-1", title: "x", linkedKeyResultId: null });
+  m.db.opportunity.findFirst.mockResolvedValue({ id: "opp-new", workspaceId: "ws-1", title: "x" });
   m.db.$transaction.mockImplementation(async (callback: (tx: typeof m.db) => Promise<unknown>) => callback(m.db));
   m.db.opportunity.create.mockImplementation(async ({ data }: { data: { title: string } }) => ({ id: "opp-new", ...data }));
   m.db.squad.findFirst.mockResolvedValue({ id: "sq-1" });
   m.db.keyResult.findFirst.mockResolvedValue({ id: "kr-1", title: "KR", objectiveId: "obj-1", objective: { workspaceId: "ws-1" } });
-  m.db.opportunityObjectiveLink.findFirst.mockResolvedValue(null);
-  m.db.opportunityObjectiveLink.create.mockResolvedValue({ id: "link-1" });
-  m.db.opportunityObjectiveLink.deleteMany.mockResolvedValue({ count: 0 });
   m.db.feedbackItem.findMany.mockImplementation(async ({ where }: { where: { id: { in: string[] } } }) =>
     where.id.in.map((id) => ({ id })),
   );
@@ -101,16 +106,20 @@ describe("createOpportunityFromComposer", () => {
       title: "Onboarding stalls",
       status: "PRIORITIZED",
       squadId: "sq-1",
-      linkedKeyResultId: "kr-1",
     });
+    // The pointer is not a column any more: it is an entity_links row written in the same transaction.
+    expect(m.db.opportunity.create.mock.calls[0][0].data).not.toHaveProperty("linkedKeyResultId");
     expect(m.db.feedbackItem.updateMany).toHaveBeenCalledWith({
       where: { id: { in: ["fb-1", "fb-2"] }, workspaceId: "ws-1" },
       data: { opportunityId: "opp-new", updatedAt: expect.any(Date) },
     });
-    // The legacy pointer's LEGACY link is written in that same transaction.
-    expect(m.db.opportunityObjectiveLink.create).toHaveBeenCalledWith({
-      data: { workspaceId: "ws-1", opportunityId: "opp-new", objectiveId: "obj-1", origin: "LEGACY", source: "UI", createdById: null },
-    });
+    // The Key Result pointer and the LEGACY objective link derived from it are written in that same transaction.
+    expect(linksOf(OPPORTUNITY_KEY_RESULT)).toMatchObject([
+      { workspaceId: "ws-1", fromType: "OPPORTUNITY", fromId: "opp-new", toType: "KEY_RESULT", toId: "kr-1", source: "UI", createdById: null },
+    ]);
+    expect(linksOf(OPPORTUNITY_OBJECTIVE)).toMatchObject([
+      { workspaceId: "ws-1", fromId: "opp-new", toType: "OBJECTIVE", toId: "obj-1", origin: "LEGACY", source: "UI", createdById: null },
+    ]);
     // The rail lives in the discovery layout; linked feedback moves in the grid.
     expect(m.revalidatePath).toHaveBeenCalledWith("/[orgSlug]/[workspaceSlug]/discovery", "layout");
     expect(m.revalidatePath).toHaveBeenCalledWith("/acme/core/feedback");
@@ -162,9 +171,9 @@ describe("createOpportunityFromComposer", () => {
       expect(result).toEqual({ ok: true, opportunity: { id: "opp-new", title: "Onboarding" } });
       expect(m.db.$transaction).toHaveBeenCalledOnce();
       expect(m.db.objective.findMany).toHaveBeenCalledWith({ where: { id: { in: ["obj-1", "obj-2"] }, workspaceId: "ws-1" }, select: { id: true } });
-      expect(m.db.opportunityObjectiveLink.create.mock.calls.map((c) => c[0].data)).toEqual([
-        { workspaceId: "ws-1", opportunityId: "opp-new", objectiveId: "obj-1", origin: "DIRECT", source: "UI", createdById: "user-1" },
-        { workspaceId: "ws-1", opportunityId: "opp-new", objectiveId: "obj-2", origin: "DIRECT", source: "UI", createdById: "user-1" },
+      expect(linksOf(OPPORTUNITY_OBJECTIVE)).toMatchObject([
+        { workspaceId: "ws-1", fromId: "opp-new", toId: "obj-1", origin: "DIRECT", source: "UI", createdById: "user-1" },
+        { workspaceId: "ws-1", fromId: "opp-new", toId: "obj-2", origin: "DIRECT", source: "UI", createdById: "user-1" },
       ]);
       expect(m.revalidatePath).toHaveBeenCalledWith("/acme/core/okrs");
     });
@@ -174,14 +183,14 @@ describe("createOpportunityFromComposer", () => {
       const result = await createOpportunityFromComposer("acme", "core", { title: "x", objectiveIds: ["obj-1", "obj-foreign"] });
       expect(result).toEqual({ ok: false, error: expect.stringMatching(/not in this workspace/) });
       expect(m.db.opportunity.create).not.toHaveBeenCalled();
-      expect(m.db.opportunityObjectiveLink.create).not.toHaveBeenCalled();
+      expect(m.linkRows).toEqual([]);
     });
 
     it("a missing link table FAILS the create with a generic message and logs only the error name and code", async () => {
       const logged = vi.spyOn(console, "error").mockImplementation(() => {});
       m.db.objective.findMany.mockResolvedValue([{ id: "obj-1" }]);
-      m.db.opportunityObjectiveLink.findFirst.mockRejectedValue(
-        Object.assign(new Error('relation "opportunity_objective_links" does not exist SECRET-ROW'), { name: "PrismaClientKnownRequestError", code: "42P01" }),
+      vi.spyOn(m.db.entityLink as { findFirst: () => Promise<unknown> }, "findFirst").mockRejectedValue(
+        Object.assign(new Error('relation "entity_links" does not exist SECRET-ROW'), { name: "PrismaClientKnownRequestError", code: "42P01" }),
       );
       const result = await createOpportunityFromComposer("acme", "core", { title: "x", objectiveIds: ["obj-1"] });
       expect(result).toEqual({ ok: false, error: "Something went wrong. Nothing was created. Please try again." });

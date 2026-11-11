@@ -2,7 +2,7 @@ import getPrisma from "@/lib/db"
 import { captureWorkspaceMutation } from "@/lib/workspace-update-mutations"
 import { assignmentUpdate, validateTaskLink, validateTaskReferences, type TaskAssignee } from "@/lib/task-assignment"
 import { allocateOneSeq } from "@/lib/work-item-sequence"
-import { mirrorTaskLinks } from "@/lib/task-link-writes"
+import { createTaskLinks } from "@/lib/task-link-writes"
 import type { TaskLinkRecordType, TaskPriority, TaskStatus } from "@/lib/types"
 
 export type NewTaskInput = {
@@ -62,11 +62,10 @@ export async function createWorkspaceTask(workspaceId: string, data: NewTaskInpu
         dueDate: data.dueDate,
         iteration: data.iteration,
         sortOrder,
-        ...(data.links?.length ? { links: { create: data.links.map(link => ({ linkedType: link.linkedType, linkedId: link.linkedId })) } } : {}),
       },
     })
-    // The nested legacy links are mirrored in the same transaction (flagged); COMMENT links stay legacy-only.
-    if (data.links?.length) await mirrorTaskLinks(tx, { workspaceId, links: data.links.map(link => ({ taskId: created.id, linkedType: link.linkedType, linkedId: link.linkedId })) })
+    // Same transaction as the task: associations land in entity_links, COMMENT (residual) in task_links.
+    if (data.links?.length) await createTaskLinks(tx, { workspaceId, taskId: created.id, links: data.links })
     return created
   })
 }

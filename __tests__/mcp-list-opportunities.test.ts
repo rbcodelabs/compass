@@ -6,11 +6,11 @@ const mockPrisma = {
     findMany: vi.fn(),
     count: vi.fn(),
   },
-  // The additive typed-link read (workspace check of the listed ids, then their link rows).
-  opportunityObjectiveLink: {
+  objective: {
     findMany: vi.fn(),
   },
-  objective: {
+  // The linked Key Result of each opportunity is resolved from its pointer id, scoped through its Objective.
+  keyResult: {
     findMany: vi.fn(),
   },
   customFieldDefinition: { findMany: vi.fn() },
@@ -19,6 +19,15 @@ const mockPrisma = {
 
 vi.mock("@/lib/db", () => ({
   default: () => mockPrisma,
+}))
+
+// The entity_links reads (Key Result pointers and Objective links) have their own tests; here they are fed directly.
+const links = vi.hoisted(() => ({ pointers: new Map<string, string | null>() }))
+vi.mock("@/lib/typed-links", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/typed-links")>()),
+  getOpportunityKeyResultPointers: async (_db: unknown, _workspaceId: string, rows: Array<{ id: string }>) =>
+    new Map(rows.map((row) => [row.id, links.pointers.get(row.id) ?? null])),
+  getLinkedObjectivesByOpportunity: async () => new Map(),
 }))
 
 vi.mock("next/cache", () => ({
@@ -70,7 +79,8 @@ function getHandler(name: string): ToolCallback {
 describe("list_opportunities MCP tool", () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mockPrisma.opportunityObjectiveLink.findMany.mockResolvedValue([])
+    links.pointers.clear()
+    mockPrisma.keyResult.findMany.mockResolvedValue([])
     mockPrisma.objective.findMany.mockResolvedValue([])
     mockPrisma.opportunity.count.mockResolvedValue(2)
     mockPrisma.customFieldDefinition.findMany.mockResolvedValue([])
@@ -78,6 +88,8 @@ describe("list_opportunities MCP tool", () => {
   })
 
   it("groups multiline descriptions under each item and preserves structured list metadata", async () => {
+    links.pointers.set("opportunity-1", "kr-1")
+    mockPrisma.keyResult.findMany.mockResolvedValue([{ id: "kr-1", title: "Increase activated workspaces", objective: { title: "Improve onboarding" } }])
     mockPrisma.opportunity.findMany.mockResolvedValue([
       {
         id: "opportunity-1",
@@ -85,10 +97,6 @@ describe("list_opportunities MCP tool", () => {
         description: "  New admins cannot tell which setup step failed.\n- Check permissions\n\nRetry after inviting a teammate.  ",
         status: "VALIDATING",
         squad: { name: "Activation" },
-        linkedKeyResult: {
-          title: "Increase activated workspaces",
-          objective: { workspaceId: "workspace-1", title: "Improve onboarding" },
-        },
         _count: { solutions: 2 },
       },
       {
@@ -97,7 +105,6 @@ describe("list_opportunities MCP tool", () => {
         description: "  \n  ",
         status: "EXPLORING",
         squad: null,
-        linkedKeyResult: null,
         _count: { solutions: 0 },
       },
     ])
@@ -156,14 +163,16 @@ describe("list_opportunities MCP tool", () => {
         squadId: "squad-1",
       },
       include: {
-        linkedKeyResult: {
-          select: { title: true, objective: { select: { workspaceId: true, title: true } } },
-        },
         squad: { select: { name: true } },
         _count: { select: { solutions: { where: { workspaceId: "workspace-1" } } } },
       },
       orderBy: [{ createdAt: "desc" }, { id: "asc" }],
       take: 51,
+    })
+    // The pointed-at Key Result is read through its Objective's workspace, never trusted from the row.
+    expect(mockPrisma.keyResult.findMany).toHaveBeenCalledWith({
+      where: { id: { in: ["kr-1"] }, objective: { workspaceId: "workspace-1" } },
+      select: { id: true, title: true, objective: { select: { title: true } } },
     })
     // The total is counted against the filters but WITHOUT the keyset bound, so
     // it stays the denominator for the whole listing rather than the page.
@@ -180,7 +189,6 @@ describe("list_opportunities MCP tool", () => {
         description: null,
         status: "EXPLORING",
         squad: null,
-        linkedKeyResult: null,
         _count: { solutions: 0 },
       },
     ])
@@ -200,7 +208,7 @@ describe("list_opportunities recency filtering and sorting", () => {
     vi.clearAllMocks()
     mockPrisma.opportunity.count.mockResolvedValue(1)
     mockPrisma.opportunity.findMany.mockResolvedValue([
-      { id: "opportunity-1", title: "Any", description: null, status: "EXPLORING", squad: null, linkedKeyResult: null, _count: { solutions: 0 } },
+      { id: "opportunity-1", title: "Any", description: null, status: "EXPLORING", squad: null, _count: { solutions: 0 } },
     ])
   })
 
@@ -295,7 +303,6 @@ describe("list_opportunities keyset pagination", () => {
         description: null,
         status: "EXPLORING",
         squad: null,
-        linkedKeyResult: null,
         _count: { solutions: 0 },
         createdAt: new Date(EPOCH - index * 86_400_000),
         updatedAt: new Date(EPOCH - index * 86_400_000),
@@ -481,8 +488,8 @@ describe("list_opportunities keyset pagination", () => {
 
   it("includeCustomFields adds OPPORTUNITY field values per item, scoped to the workspace's definitions (TASK-100)", async () => {
     mockPrisma.opportunity.findMany.mockResolvedValue([
-      { id: "opportunity-1", title: "One", description: null, status: "ACTIVE", squad: null, linkedKeyResult: null, _count: { solutions: 0 } },
-      { id: "opportunity-2", title: "Two", description: null, status: "ACTIVE", squad: null, linkedKeyResult: null, _count: { solutions: 0 } },
+      { id: "opportunity-1", title: "One", description: null, status: "ACTIVE", squad: null, _count: { solutions: 0 } },
+      { id: "opportunity-2", title: "Two", description: null, status: "ACTIVE", squad: null, _count: { solutions: 0 } },
     ])
     mockPrisma.customFieldDefinition.findMany.mockResolvedValue([
       { id: "field-customer", name: "Customer", fieldType: "TEXT", objectType: "OPPORTUNITY", options: null, sharedOptionSetId: null, required: false, order: 0 },
@@ -501,7 +508,7 @@ describe("list_opportunities keyset pagination", () => {
 
   it("does not read custom fields unless asked", async () => {
     mockPrisma.opportunity.findMany.mockResolvedValue([
-      { id: "opportunity-1", title: "One", description: null, status: "ACTIVE", squad: null, linkedKeyResult: null, _count: { solutions: 0 } },
+      { id: "opportunity-1", title: "One", description: null, status: "ACTIVE", squad: null, _count: { solutions: 0 } },
     ])
     const result = await getHandler("list_opportunities")({ workspaceId: "workspace-1" })
     expect(mockPrisma.customFieldValue.findMany).not.toHaveBeenCalled()

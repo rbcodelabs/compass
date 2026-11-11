@@ -3,15 +3,20 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const tx = {
   keyResult: { findFirst: vi.fn(), update: vi.fn() },
   objective: { findFirst: vi.fn(), findMany: vi.fn(), findUnique: vi.fn() },
-  opportunity: { findMany: vi.fn() },
 };
-const mockSyncLegacyLink = vi.fn();
+const mockSetKeyResultPointer = vi.fn();
+/** The opportunities pointing at the key result, as the entity_links pointer reader returns them. */
+const mockReadPointers = vi.fn();
 
 vi.mock("@/lib/db", () => ({ default: () => tx }));
 vi.mock("@/lib/typed-links", () => ({
   runTypedLinkTransaction: (_prisma: unknown, work: (t: typeof tx) => Promise<unknown>) => work(tx),
-  syncLegacyLink: (...args: unknown[]) => mockSyncLegacyLink(...args),
+  setKeyResultPointer: (...args: unknown[]) => mockSetKeyResultPointer(...args),
 }));
+vi.mock("@/lib/links/readers", () => ({
+  readEntityLinksOpportunityKeyResultPointer: (...args: unknown[]) => mockReadPointers(...args),
+}));
+const pointing = (ids: string[]) => ids.map((fromId) => ({ fromId, toId: "kr-1" }));
 
 import { getKeyResultMoveTargets, moveKeyResultToObjective, OKRHierarchyError } from "@/lib/okr-hierarchy";
 
@@ -42,20 +47,22 @@ beforeEach(() => {
   tx.objective.findFirst.mockResolvedValue(target());
   tx.objective.findMany.mockResolvedValue([]);
   tx.objective.findUnique.mockResolvedValue({ parentKeyResultId: null, parentKeyResult: null });
-  tx.opportunity.findMany.mockResolvedValue([]);
+  mockReadPointers.mockResolvedValue([]);
 });
 
 describe("moveKeyResultToObjective", () => {
   it("re-parents the key result at the end of the target's list and re-derives each driven opportunity's LEGACY link", async () => {
-    tx.opportunity.findMany.mockResolvedValue([{ id: "opp-1" }, { id: "opp-2" }]);
+    mockReadPointers.mockResolvedValue(pointing(["opp-1", "opp-2"]));
     const result = await moveKeyResultToObjective(input);
 
     expect(tx.keyResult.update).toHaveBeenCalledWith({
       where: { id: "kr-1" },
       data: expect.objectContaining({ objectiveId: "obj-2", sortOrder: 4, updatedById: "user-1" }),
     });
-    expect(mockSyncLegacyLink).toHaveBeenCalledTimes(2);
-    expect(mockSyncLegacyLink).toHaveBeenCalledWith(
+    // The pointers are read from entity_links, scoped to the workspace and the key result.
+    expect(mockReadPointers).toHaveBeenCalledWith(tx, "ws-1", { keyResultIds: ["kr-1"] });
+    expect(mockSetKeyResultPointer).toHaveBeenCalledTimes(2);
+    expect(mockSetKeyResultPointer).toHaveBeenCalledWith(
       tx,
       expect.objectContaining({ opportunityId: "opp-1", workspaceId: "ws-1", keyResultId: "kr-1" }),
     );
@@ -118,10 +125,10 @@ describe("moveKeyResultToObjective", () => {
   });
 
   it("refuses to move a key result that drives too many opportunities for one transaction", async () => {
-    tx.opportunity.findMany.mockResolvedValue(Array.from({ length: 401 }, (_, i) => ({ id: `opp-${i}` })));
+    mockReadPointers.mockResolvedValue(pointing(Array.from({ length: 401 }, (_, i) => `opp-${i}`)));
     await codeOf(moveKeyResultToObjective(input));
     expect(tx.keyResult.update).not.toHaveBeenCalled();
-    expect(mockSyncLegacyLink).not.toHaveBeenCalled();
+    expect(mockSetKeyResultPointer).not.toHaveBeenCalled();
   });
 });
 

@@ -57,7 +57,7 @@ describe("097 registration", () => {
   });
 
   it("is the backfill the registry type names", () => {
-    expect(LINK_TYPES.TASK_REFERENCES.legacy?.backfillMigration).toBe(NAME);
+    expect(LINK_TYPES.TASK_REFERENCES.dedicatedWriter?.backfillMigration).toBe(NAME);
   });
 
   it("names all nine legacy target types and stores DECISION as REVIEW_REQUEST", () => {

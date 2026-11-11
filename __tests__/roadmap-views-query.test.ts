@@ -1,4 +1,8 @@
-import { describe, expect, it } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
+
+const { tasksLinkedTo } = vi.hoisted(() => ({ tasksLinkedTo: vi.fn() }))
+vi.mock("@/lib/task-links-read", () => ({ getTasksLinkedTo: tasksLinkedTo }))
+
 import { MAX_ROADMAP_ITEMS, buildRoadmapOrderBy, buildRoadmapWhere, effectiveWorkspaceIds, loadCrossWorkspaceRoadmap } from "@/lib/roadmap-views/query"
 import { DEFAULT_ROADMAP_DISPLAY, DEFAULT_ROADMAP_FILTERS } from "@/lib/roadmap-views/schema"
 
@@ -60,11 +64,12 @@ describe("loadCrossWorkspaceRoadmap", () => {
     autoCreated: false, solution: null, keyResult: null, opportunity: null, experiment: null, feedback: null, squad: null,
     launchChecklist: null, workspaceId, workspace: { id: workspaceId, name: workspaceId, slug: workspaceId },
   })
+  beforeEach(() => tasksLinkedTo.mockReset())
   const fakeDb = (rows: unknown[], links: unknown[] = []) => {
-    const seen: { where?: unknown; take?: number; linkWhere?: unknown; linkArgs?: unknown } = {}
+    const seen: { where?: unknown; take?: number } = {}
+    tasksLinkedTo.mockResolvedValue(links)
     const db = {
       roadmapItem: { findMany: async (args: { where: unknown; take: number }) => { seen.where = args.where; seen.take = args.take; return rows } },
-      taskLink: { findMany: async (args: { where: unknown }) => { seen.linkArgs = args; seen.linkWhere = args.where; return links } },
     } as never
     return { db, seen }
   }
@@ -73,9 +78,8 @@ describe("loadCrossWorkspaceRoadmap", () => {
     const { db, seen } = fakeDb([row("r1", "b")])
     const out = await loadCrossWorkspaceRoadmap(["a", "b"], { ...DEFAULT_ROADMAP_FILTERS, workspaceIds: ["b", "zzz"] }, DEFAULT_ROADMAP_DISPLAY, db)
     expect((seen.where as { workspaceId: unknown }).workspaceId).toEqual({ in: ["b"] })
-    expect((seen.linkWhere as { task: unknown }).task).toEqual({ workspaceId: { in: ["b"] } })
-    // Flag unset: exactly the legacy query (no extra columns).
-    expect(seen.linkArgs).toEqual({ where: { linkedType: "ROADMAP_ITEM", linkedId: { in: ["r1"] }, task: { workspaceId: { in: ["b"] } } }, select: { linkedId: true, task: { select: { status: true } } } })
+    // The delivery rollup is read from entity_links for the readable workspaces only.
+    expect(tasksLinkedTo).toHaveBeenCalledWith(expect.anything(), { workspaceIds: ["b"], linkedType: "ROADMAP_ITEM", linkedIds: ["r1"] })
     expect(out.items.map((i) => i.workspace.slug)).toEqual(["b"])
   })
 

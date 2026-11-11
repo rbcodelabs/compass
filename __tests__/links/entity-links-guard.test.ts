@@ -103,6 +103,10 @@ describe("the entity_links table is reached only through lib/links/", () => {
       .filter((line) => line !== "e2e/functional/specs/agent-conversation-links.spec.ts: entity_links model/table name")
       // The Experiments Gallery spec seeds artifact->experiment links by raw SQL (the app link helper needs tsx); it never reads them back through app code.
       .filter((line) => line !== "e2e/functional/specs/experiments-gallery.spec.ts: entity_links model/table name")
+      // End-to-end specs count, delete and seed link rows by raw SQL to assert what the UI wrote or to set up a fixture the app has no UI for; they never run app code.
+      .filter((line) => !/^e2e\/functional\/specs\/[\w-]+\.spec\.ts: entity_links model\/table name$/.test(line))
+      // The screenshot seed script inserts task links by raw SQL (it runs outside the app, like the e2e fixtures).
+      .filter((line) => line !== "seed-screenshots.ts: entity_links model/table name")
       // Files that legitimately use non-literal delegates over a fixed model list that does not include EntityLink.
       .filter((line) => !/^(lib\/entity-mutations\.ts|lib\/workspace-update-mutations\.ts|lib\/prisma-updated-at\.ts|scripts\/verify-geode-document-migration\.ts): dynamic delegate access$/.test(line));
     expect(offenders).toEqual([]);

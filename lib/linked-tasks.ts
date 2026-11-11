@@ -12,6 +12,7 @@
  */
 import getPrisma from "@/lib/db";
 import { resolveTaskAssignees } from "@/lib/task-assignment";
+import { getTaskIdsLinkedTo } from "@/lib/task-links-read";
 import { normalizeWorkspaceRole } from "@/lib/roles";
 import type { TaskLinkedType, TaskPriority, TaskStatus } from "@/lib/types";
 
@@ -26,12 +27,13 @@ const STATUS_PRECEDENCE: Record<string, number> = {
 
 export async function fetchLinkedTasksBundle(workspaceId: string, linkedType: TaskLinkedType, linkedId: string) {
   const prisma = getPrisma();
+  const linkedTaskIds = await getTaskIdsLinkedTo(prisma, { workspaceId, linkedType, linkedId });
   const [deliveryTasksRaw, linkableTasks, members] = await Promise.all([
     prisma.task.findMany({
       where: {
         workspaceId,
         status: { not: "CANCELLED" },
-        links: { some: { linkedType, linkedId } },
+        id: { in: linkedTaskIds },
       },
       select: {
         id: true,
@@ -50,7 +52,7 @@ export async function fetchLinkedTasksBundle(workspaceId: string, linkedType: Ta
       where: {
         workspaceId,
         status: { not: "CANCELLED" },
-        links: { none: { linkedType, linkedId } },
+        id: { notIn: linkedTaskIds },
       },
       select: { id: true, title: true },
       orderBy: [{ title: "asc" }, { id: "asc" }],

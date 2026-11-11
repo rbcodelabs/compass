@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { createFakePrisma, solutionRow, type FakeState } from "./roadmap-fake-prisma";
 
+vi.mock("@/lib/typed-links", async (importOriginal) => (await import("./roadmap-fake-prisma")).typedLinksWithPointerFixtures(await importOriginal<object>()));
 vi.mock("@/lib/workspace-update-mutations", () => ({
   captureWorkspaceMutation: async (_prisma: unknown, _model: string, _op: string, _source: unknown, _id: unknown, mutate: (tx: unknown) => Promise<unknown>) => mutate(_prisma),
 }));
@@ -11,7 +12,7 @@ vi.mock("@/lib/work-item-sequence", async () => (await import("../helpers/work-i
 
 const context = { workspaceId: "ws-1", source: "UI", captureSource: "UI" as const, userId: "user-1", today: "2026-10-05" };
 const fresh = (): FakeState => ({
-  solutions: [solutionRow("s1"), solutionRow("s2"), solutionRow("s3", { opportunity: { id: "opp-s3", squadId: null, linkedKeyResultId: null } })],
+  solutions: [solutionRow("s1"), solutionRow("s2"), solutionRow("s3", { opportunity: { id: "opp-s3", squadId: null, keyResultPointer: null } })],
   squads: [{ id: "squad-a", workspaceId: "ws-1" }, { id: "squad-b", workspaceId: "ws-1" }],
   items: [],
 });
@@ -60,7 +61,7 @@ describe("createRoadmapItemsFromSolutions", () => {
 
   it("places a batch on non-overlapping slots within a squad but side by side across squads", async () => {
     const state = fresh();
-    state.solutions.push(solutionRow("s4", { opportunity: { id: "opp-s4", squadId: "squad-b", linkedKeyResultId: null } }));
+    state.solutions.push(solutionRow("s4", { opportunity: { id: "opp-s4", squadId: "squad-b", keyResultPointer: null } }));
     await createRoadmapItemsFromSolutions(createFakePrisma(state), context, [{ solutionId: "s1" }, { solutionId: "s2" }, { solutionId: "s4" }]);
     const byId = Object.fromEntries(state.items.map((item) => [item.solutionId as string, item]));
     const day = (value: unknown) => (value as Date).toISOString().slice(0, 10);

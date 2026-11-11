@@ -180,8 +180,8 @@ test.describe("Re-QA a022c39e", () => {
   const taskRows = async (docId: string) =>
     (await pool.query(
       `SELECT t.id, t.title, t.status, t.assignee_user_id, t.assignee_agent_id
-         FROM "${S}".tasks t JOIN "${S}".task_links l ON l.task_id = t.id
-        WHERE l.linked_type = 'DOC' AND l.linked_id = $1 ORDER BY t.created_at`,
+         FROM "${S}".tasks t JOIN "${S}".entity_links l ON l.from_id = t.id AND l.link_type = 'TASK_REFERENCES'
+        WHERE l.to_type = 'DOC' AND l.to_id = $1 ORDER BY t.created_at`,
       [docId],
     )).rows as Array<{ id: string; title: string; status: string; assignee_user_id: string | null; assignee_agent_id: string | null }>;
 
@@ -270,8 +270,8 @@ test.describe("Re-QA a022c39e", () => {
   test.afterAll(async () => {
     if (pool) {
       for (const docId of seededDocIds) {
-        await pool.query(`DELETE FROM "${S}".tasks WHERE id IN (SELECT task_id FROM "${S}".task_links WHERE linked_type = 'DOC' AND linked_id = $1)`, [docId]).catch(() => undefined);
-        await pool.query(`DELETE FROM "${S}".task_links WHERE linked_type = 'DOC' AND linked_id = $1`, [docId]).catch(() => undefined);
+        await pool.query(`DELETE FROM "${S}".tasks WHERE id IN (SELECT from_id FROM "${S}".entity_links WHERE link_type = 'TASK_REFERENCES' AND to_type = 'DOC' AND to_id = $1)`, [docId]).catch(() => undefined);
+        await pool.query(`DELETE FROM "${S}".entity_links WHERE link_type = 'TASK_REFERENCES' AND to_type = 'DOC' AND to_id = $1`, [docId]).catch(() => undefined);
       }
       for (const id of [agentId, readAgentId, revokedAgentId, ghostAgentId]) {
         await pool.query(`DELETE FROM "${S}".agent_workspace_grants WHERE agent_id = $1`, [id]).catch(() => undefined);
@@ -711,7 +711,7 @@ test.describe("Re-QA a022c39e", () => {
       const r = await replay(author, captured, { ...input, body: `${token("user", bUserId, "b")} ok ${label}`, task });
       expect.soft(r.ok, `${label}: ${r.text}`).toBe(true);
     }
-    const rows = (await pool.query(`SELECT t.title, t.priority, to_char(t.due_date,'YYYY-MM-DD') AS due FROM "${S}".tasks t JOIN "${S}".task_links l ON l.task_id = t.id WHERE l.linked_type='DOC' AND l.linked_id=$1 ORDER BY t.title`, [docId])).rows;
+    const rows = (await pool.query(`SELECT t.title, t.priority, to_char(t.due_date,'YYYY-MM-DD') AS due FROM "${S}".tasks t JOIN "${S}".entity_links l ON l.from_id = t.id AND l.link_type = 'TASK_REFERENCES' WHERE l.to_type = 'DOC' AND l.to_id = $1 ORDER BY t.title`, [docId])).rows;
     finding("5 stored valid", JSON.stringify(rows));
     expect(rows.find((r) => r.title === "ok leap")?.due).toBe("2028-02-29");
     expect(rows.find((r) => r.title === "ok default")?.priority).toBe("MEDIUM");

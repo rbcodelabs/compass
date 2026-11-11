@@ -120,10 +120,7 @@ export default async function ReviewRequestPage({ params, searchParams }: { para
   const decidedForFollowUp = isTracked ? revision.decisions[0] : undefined
   const [followUpLinks, assigneeOptions] = decidedForFollowUp
     ? await Promise.all([
-        getTasksLinkedTo(prisma, { workspaceIds: [request.workspaceId], linkedType: "DECISION", linkedIds: [requestId] }, () => prisma.taskLink.findMany({
-          where: { linkedType: "DECISION", linkedId: requestId },
-          select: { task: { select: { id: true, title: true, status: true } } },
-        })),
+        getTasksLinkedTo(prisma, { workspaceIds: [request.workspaceId], linkedType: "DECISION", linkedIds: [requestId] }),
         canEditArtifacts ? eligibleTaskAssignees(request.workspaceId) : Promise.resolve([]),
       ])
     : [[], []]

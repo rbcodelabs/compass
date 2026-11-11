@@ -2,8 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const mockSolution = { findMany: vi.fn() }
 const mockAssumption = { findMany: vi.fn() }
-const mockSolutionKeyResultLink = { findMany: vi.fn() }
-const mockPrisma = { solution: mockSolution, assumption: mockAssumption, solutionKeyResultLink: mockSolutionKeyResultLink }
+const mockEntityLink = { findMany: vi.fn() }
+const mockPrisma = { solution: mockSolution, assumption: mockAssumption, entityLink: mockEntityLink }
 
 vi.mock("@/lib/db", () => ({ default: () => mockPrisma }))
 
@@ -38,7 +38,7 @@ describe("listSolutions", () => {
       },
     ])
     // The additive typed-link read runs on ids this query already filtered by workspace, so it is one link read (default: none).
-    mockSolutionKeyResultLink.findMany.mockResolvedValue([])
+    mockEntityLink.findMany.mockResolvedValue([])
     const result = await listSolutions({
       workspaceId: "workspace-1",
       status: "VALIDATED",

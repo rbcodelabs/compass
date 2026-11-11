@@ -30,6 +30,8 @@ const mockPrisma = {
   roadmapItem: { findFirst: vi.fn(), findMany: vi.fn(), findUnique: vi.fn(), create: vi.fn() },
   portfolioCapacityReservation: { findUnique: vi.fn() },
   portfolioCapacityPlan: { updateMany: vi.fn() },
+  // The Opportunity -> Key Result pointer read (entity_links); none of these opportunities has one.
+  entityLink: { findMany: async () => [] },
   $transaction: vi.fn(),
 }
 

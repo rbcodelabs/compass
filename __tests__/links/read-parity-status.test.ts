@@ -1,5 +1,5 @@
 /**
- * entityLinksReadParity in GET /api/admin/migrate (entity_links read flip, PR A): per family, LIVE legacy rows vs LIVE mirror rows in SQL.
+ * entityLinksReadParity in GET /api/admin/migrate (historical check once entity_links is the only store): per family, LIVE legacy rows vs LIVE mirror rows in SQL.
  *
  * Part 1 (always runs): registration and shape. Part 2 (needs a throwaway Postgres, any version >= 12): the real SQL against a minimal
  * schema holding only the columns the status reads, seeded with the cases the flip must survive.
@@ -94,11 +94,11 @@ describe.skipIf(!databaseUrl)("against a real Postgres", () => {
     try { return await getEntityLinksReadParityStatus(client as never, schema); } finally { client.release(); }
   };
 
-  it("an empty database is in parity, every count is a plain number and the modes are reported", async () => {
+  it("an empty database is in parity, every count is a plain number and no read mode is reported", async () => {
     const result = await status();
     expect(result.totalMismatches).toBe(0);
     expect(Object.keys(result.families).sort()).toEqual([...READ_PARITY_SPEC_NAMES].sort());
-    expect(result.readModes).toEqual({ SOLUTION_KR: "off", OPPORTUNITY: "off", ARTIFACT: "off", TASK: "off" });
+    expect(result).not.toHaveProperty("readModes");
     for (const entry of Object.values(result.families)) expect(entry).toMatchObject({ legacyLive: 0, mirrorLive: 0, onlyLegacy: 0, onlyEntityLinks: 0, originDrift: 0 });
   });
 

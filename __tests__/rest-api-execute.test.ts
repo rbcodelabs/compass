@@ -8,8 +8,10 @@ const mocks = vi.hoisted(() => ({
   actor: { current: { userId: "user-1", purpose: "USER" as const } as { userId: string | null; purpose: "USER" | "SERVICE" | "AGENT" | "AGENT_TURN" } },
   prisma: {
     squad: { findFirst: vi.fn() },
-    keyResult: { findFirst: vi.fn() },
-    opportunity: { findFirst: vi.fn() },
+    keyResult: { findFirst: vi.fn(), findMany: vi.fn() },
+    opportunity: { findFirst: vi.fn(), findMany: vi.fn() },
+    // The Opportunity -> Key Result pointer behind `linkedKeyResultId` is read from entity_links (none by default).
+    entityLink: { findMany: vi.fn(async () => [] as unknown[]) },
     solution: { findFirst: vi.fn() },
     assumption: { findFirst: vi.fn(), updateMany: vi.fn() },
     workspaceMember: { findFirst: vi.fn() },
@@ -379,14 +381,34 @@ describe("REST domain execution", () => {
     mocks.prisma.opportunity.findFirst.mockResolvedValue({
       id: FOREIGN, workspaceId: UUID, title: "Discovery", description: null,
       customerSegment: null, status: "EXPLORING", squadId: null,
-      linkedKeyResultId: null, createdAt: new Date("2026-10-02T00:00:00.000Z"),
+      createdAt: new Date("2026-10-02T00:00:00.000Z"),
       updatedAt: new Date("2026-10-02T01:00:00.000Z"),
     })
     const result = await executeRestRoute(route("getOpportunity"), {
       params: { workspaceId: UUID, id: FOREIGN }, query: {}, body: undefined,
-    }) as { createdAt: string; updatedAt: string }
+    }) as { createdAt: string; updatedAt: string; linkedKeyResultId: string | null }
     expect(result.createdAt).toBe("2026-10-02T00:00:00.000Z")
     expect(result.updatedAt).toBe("2026-10-02T01:00:00.000Z")
+    // The public field is still present, derived from the (absent) pointer link.
+    expect(result.linkedKeyResultId).toBeNull()
+  })
+
+  it("derives linkedKeyResultId from the entity_links pointer, in the workspace's own scope", async () => {
+    mocks.prisma.opportunity.findFirst.mockResolvedValue({
+      id: FOREIGN, workspaceId: UUID, title: "Discovery", description: null, customerSegment: null, status: "EXPLORING", squadId: null,
+      createdAt: new Date(), updatedAt: new Date(),
+    })
+    mocks.prisma.entityLink.findMany.mockResolvedValueOnce([{
+      id: "link-1", linkType: "OPPORTUNITY_TARGETS_KEY_RESULT", fromType: "OPPORTUNITY", fromId: FOREIGN, toType: "KEY_RESULT", toId: THIRD,
+      origin: "LEGACY", source: "API", createdById: null, createdAt: new Date(1),
+    }])
+    mocks.prisma.opportunity.findMany = vi.fn(async () => [{ id: FOREIGN, title: "Discovery" }])
+    mocks.prisma.keyResult.findMany = vi.fn(async () => [{ id: THIRD, title: "KR" }])
+    const result = await executeRestRoute(route("getOpportunity"), {
+      params: { workspaceId: UUID, id: FOREIGN }, query: {}, body: undefined,
+    }) as { linkedKeyResultId: string | null }
+    expect(result.linkedKeyResultId).toBe(THIRD)
+    expect(mocks.prisma.entityLink.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ workspaceId: UUID, linkType: "OPPORTUNITY_TARGETS_KEY_RESULT", fromId: { in: [FOREIGN] } }) }))
   })
 
   it("normalizes nullable and non-string feedback tags", async () => {
@@ -429,7 +451,7 @@ describe("REST domain execution", () => {
     mocks.prisma.opportunity.findFirst.mockResolvedValue({
       id: FOREIGN, workspaceId: UUID, title: "Discovery", description: null,
       customerSegment: null, status: "EXPLORING", squadId: null,
-      linkedKeyResultId: null, createdAt: new Date(), updatedAt: new Date(),
+      createdAt: new Date(), updatedAt: new Date(),
     })
 
     const result = await executeRestRoute(route("createOpportunity"), {

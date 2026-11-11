@@ -1,9 +1,10 @@
 /**
- * Phase 7 against a real Prisma client, real PrismaPg adapter, real unique indexes and the real migrations in a throwaway schema of the local
- * compass_e2e database. Proves what the fakes cannot:
- *   1. the legacy task_links row and its entity_links mirror row commit or roll back TOGETHER (a mirror refusal leaves no legacy row);
- *   2. the real UI task creator (createWorkspaceTask) mirrors its nested DOC link in the same transaction and leaves a COMMENT link legacy-only;
- *   3. unlinking, deleting a document and the workspace sweep remove the mirror row (deleteLinksForEntity against real SQL).
+ * Task links against a real Prisma client, real PrismaPg adapter, real unique indexes and the real migrations in a throwaway schema of the
+ * local compass_e2e database. Proves what the fakes cannot:
+ *   1. an association link lives only in entity_links (task_links stays empty for it) and a repeat is idempotent under a concurrent race;
+ *   2. a refused target rolls the link back, and a refusal inside the creating transaction rolls the task back with it;
+ *   3. the real UI task creator (createWorkspaceTask) writes its DOC link in the same transaction and keeps a COMMENT link residual (task_links);
+ *   4. a stale pre-cleanup task_links id still unlinks, and unlinking, the objective drain and the workspace sweep remove the rows (real SQL).
  *
  *   INTEGRATION_TEST_DATABASE_URL=postgresql://postgres:pw@localhost:5440/compass_e2e \
  *     npx vitest run __tests__/links/task-link-writes.integration.test.ts
@@ -19,7 +20,8 @@ vi.mock("@/lib/db", () => ({ default: () => holder.client }));
 import { replayAllMigrations } from "../helpers/replay-migrations";
 import { injectUpdatedAtExtension } from "@/lib/prisma-updated-at";
 import { createWorkspaceTask } from "@/lib/task-create";
-import { createTaskLink, deleteTaskLink, drainMirroredTaskLinksTo, mirrorTaskLinks, upsertTaskLink } from "@/lib/task-link-writes";
+import { createTaskLink, createTaskLinks, deleteTaskLink, drainTaskLinksTo, getTaskLinkById } from "@/lib/task-link-writes";
+import { getTaskLinks } from "@/lib/task-links-read";
 import { deleteLinksForEntity } from "@/lib/links/service";
 import { integrationDatabaseUrl } from "@/__tests__/helpers/integration-database"
 
@@ -33,8 +35,8 @@ describe.skipIf(!databaseUrl)("task link writers against a real Prisma client", 
   const [WS_A, WS_B] = [randomUUID(), randomUUID()];
   const [taskA, docA, docB, objectiveA] = [randomUUID(), randomUUID(), randomUUID(), randomUUID()];
   const q = (sql: string, params: unknown[] = []) => pool.query(sql.replaceAll("{S}", `"${schema}"`), params);
-  const legacy = async (where = "TRUE") => Number((await q(`SELECT count(*)::int AS n FROM {S}.task_links WHERE ${where}`)).rows[0].n);
-  const mirror = async (where = "TRUE") => Number((await q(`SELECT count(*)::int AS n FROM {S}.entity_links WHERE link_type = '${KEY}' AND ${where}`)).rows[0].n);
+  const residual = async (where = "TRUE") => Number((await q(`SELECT count(*)::int AS n FROM {S}.task_links WHERE ${where}`)).rows[0].n);
+  const references = async (where = "TRUE") => Number((await q(`SELECT count(*)::int AS n FROM {S}.entity_links WHERE link_type = '${KEY}' AND ${where}`)).rows[0].n);
   let prisma: AppPrismaClient;
 
   beforeAll(async () => {
@@ -63,60 +65,71 @@ describe.skipIf(!databaseUrl)("task link writers against a real Prisma client", 
     }
   });
 
-  it("writes the legacy row and the mirror row together, with the legacy row's source copied", async () => {
+  it("writes one entity_links row and no task_links row, and unlinks it", async () => {
     const link = await createTaskLink(prisma, { taskId: taskA, linkedType: "DOC", linkedId: docA, workspaceId: WS_A });
-    expect(await legacy()).toBe(1);
-    const row = (await q(`SELECT workspace_id, from_type, to_type, origin, source FROM {S}.entity_links WHERE link_type='${KEY}'`)).rows;
-    expect(row).toEqual([{ workspace_id: WS_A, from_type: "TASK", to_type: "DOC", origin: "DIRECT", source: "UI" }]);
+    expect(await residual()).toBe(0);
+    const row = (await q(`SELECT id, workspace_id, from_type, to_type, origin, source FROM {S}.entity_links WHERE link_type='${KEY}'`)).rows;
+    expect(row).toEqual([{ id: link.id, workspace_id: WS_A, from_type: "TASK", to_type: "DOC", origin: "DIRECT", source: "UI" }]);
+    expect(await getTaskLinkById(prisma, link.id)).toMatchObject({ id: link.id, taskId: taskA, linkedType: "DOC", linkedId: docA });
     await deleteTaskLink(prisma, { link, workspaceId: WS_A });
-    expect(await legacy()).toBe(0);
-    expect(await mirror()).toBe(0);
+    expect(await references()).toBe(0);
   });
 
-  it("a refused mirror rolls the legacy row back: a target in another workspace leaves neither row", async () => {
+  it("a refused target leaves nothing behind: a target in another workspace", async () => {
     await expect(createTaskLink(prisma, { taskId: taskA, linkedType: "DOC", linkedId: docB, workspaceId: WS_A })).rejects.toThrow(/not found in this workspace/);
-    expect(await legacy()).toBe(0);
-    expect(await mirror()).toBe(0);
+    expect(await references()).toBe(0);
+    expect(await residual()).toBe(0);
   });
 
-  it("upsert is idempotent and keeps one row in each table", async () => {
-    const upsert = () =>
-      upsertTaskLink(prisma, {
-        taskId: taskA, linkedType: "OBJECTIVE", linkedId: objectiveA, workspaceId: WS_A,
-        upsert: (tx) => tx.taskLink.upsert({ where: { taskId_linkedType_linkedId: { taskId: taskA, linkedType: "OBJECTIVE", linkedId: objectiveA } }, create: { taskId: taskA, linkedType: "OBJECTIVE", linkedId: objectiveA }, update: {} }),
-      });
-    await Promise.all([upsert(), upsert().catch(() => undefined)]);
-    await upsert();
-    expect(await legacy("linked_type = 'OBJECTIVE'")).toBe(1);
-    expect(await mirror("to_type = 'OBJECTIVE'")).toBe(1);
+  it("is idempotent under a concurrent race and keeps one row", async () => {
+    const create = () => createTaskLink(prisma, { taskId: taskA, linkedType: "OBJECTIVE", linkedId: objectiveA, workspaceId: WS_A });
+    await Promise.all([create(), create().catch(() => undefined)]);
+    await create();
+    expect(await references("to_type = 'OBJECTIVE'")).toBe(1);
+    expect(await residual("linked_type = 'OBJECTIVE'")).toBe(0);
   });
 
-  it("the UI task creator mirrors its nested links in the same transaction", async () => {
+  it("the UI task creator writes its links in the same transaction (DOC in entity_links); a COMMENT link is a residual task_links row", async () => {
     const task = await createWorkspaceTask(WS_A, { title: "From the UI", links: [{ linkedType: "DOC", linkedId: docA }] });
-    expect(await legacy(`task_id = '${task.id}'`)).toBe(1);
     expect((await q(`SELECT to_type, to_id FROM {S}.entity_links WHERE link_type='${KEY}' AND from_id = $1`, [task.id])).rows).toEqual([{ to_type: "DOC", to_id: docA }]);
+    expect(await residual(`task_id = '${task.id}'`)).toBe(0);
+    // The writer does not validate the target (the creator and the actions do); a COMMENT is never an association, so it goes to task_links.
+    await createTaskLink(prisma, { taskId: task.id, linkedType: "COMMENT", linkedId: randomUUID(), workspaceId: WS_A });
+    expect(await residual(`task_id = '${task.id}' AND linked_type = 'COMMENT'`)).toBe(1);
+    const merged = (await getTaskLinks(prisma, [{ id: task.id, workspaceId: WS_A }])).get(task.id)!;
+    expect(merged.map((l) => l.linkedType).sort()).toEqual(["COMMENT", "DOC"]);
   });
 
-  it("a mirror refusal inside the creating transaction rolls the task and its nested legacy link back", async () => {
+  it("a refusal inside the creating transaction rolls the task and its links back", async () => {
     const taskId = randomUUID();
-    const before = { tasks: Number((await q(`SELECT count(*)::int AS n FROM {S}.tasks`)).rows[0].n), links: await legacy() };
+    const before = Number((await q(`SELECT count(*)::int AS n FROM {S}.tasks`)).rows[0].n);
     await expect(
       prisma.$transaction(async (tx) => {
-        await tx.task.create({ data: { id: taskId, workspaceId: WS_A, title: "Doomed", links: { create: { linkedType: "DOC", linkedId: docB } } } });
-        await mirrorTaskLinks(tx, { workspaceId: WS_A, links: [{ taskId, linkedType: "DOC", linkedId: docB }] });
+        await tx.task.create({ data: { id: taskId, workspaceId: WS_A, title: "Doomed" } });
+        await createTaskLinks(tx, { workspaceId: WS_A, taskId, links: [{ linkedType: "DOC", linkedId: docB }] });
       }),
     ).rejects.toThrow(/not found in this workspace/);
-    expect(Number((await q(`SELECT count(*)::int AS n FROM {S}.tasks`)).rows[0].n)).toBe(before.tasks);
-    expect(await legacy()).toBe(before.links);
+    expect(Number((await q(`SELECT count(*)::int AS n FROM {S}.tasks`)).rows[0].n)).toBe(before);
   });
 
-  it("deleting a target's links and a workspace's links removes the mirror rows", async () => {
-    expect(await mirror()).toBeGreaterThan(0);
-    expect(await drainMirroredTaskLinksTo(prisma, { linkedType: "OBJECTIVE", linkedIds: [objectiveA] })).toBe(1);
-    expect(await mirror("to_type = 'OBJECTIVE'")).toBe(0);
+  it("a stale pre-cleanup task_links id still unlinks the pair it names", async () => {
+    await createTaskLink(prisma, { taskId: taskA, linkedType: "DOC", linkedId: docA, workspaceId: WS_A });
+    const staleId = randomUUID();
+    await q(`INSERT INTO {S}.task_links (id, task_id, linked_type, linked_id) VALUES ($1,$2,'DOC',$3) ON CONFLICT DO NOTHING`, [staleId, taskA, docA]);
+    const link = await getTaskLinkById(prisma, staleId);
+    expect(link).toMatchObject({ taskId: taskA, linkedType: "DOC", linkedId: docA });
+    await deleteTaskLink(prisma, { link: link!, workspaceId: WS_A });
+    expect(await references(`from_id = '${taskA}' AND to_id = '${docA}'`)).toBe(0);
+    expect(await residual(`task_id = '${taskA}' AND linked_id = '${docA}'`)).toBe(0);
+  });
+
+  it("the objective drain and the entity sweep remove the rows", async () => {
+    await createTaskLink(prisma, { taskId: taskA, linkedType: "OBJECTIVE", linkedId: objectiveA, workspaceId: WS_A });
+    await createTaskLink(prisma, { taskId: taskA, linkedType: "DOC", linkedId: docA, workspaceId: WS_A });
+    expect(await references()).toBeGreaterThan(0);
+    expect(await drainTaskLinksTo(prisma, { linkedType: "OBJECTIVE", linkedIds: [objectiveA] })).toBe(1);
+    expect(await references("to_type = 'OBJECTIVE'")).toBe(0);
     await deleteLinksForEntity(prisma, "DOC", [docA]);
-    expect(await mirror()).toBe(0);
-    // The legacy rows are untouched by the mirror cleanup (their own delete paths own them).
-    expect(await legacy()).toBeGreaterThan(0);
+    expect(await references()).toBe(0);
   });
 });

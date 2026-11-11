@@ -14,10 +14,10 @@ vi.mock("@/lib/tracked-decisions", () => ({
   TrackedDecisionError: class extends Error {},
 }))
 vi.mock("@/lib/mcp-authz", () => ({ getMcpActor: () => ({ userId: "user-1", purpose: "USER" }) }))
+vi.mock("@/lib/task-links-read", () => ({ getTasksLinkedTo: mocks.taskLink }))
 vi.mock("@/lib/db", () => ({ default: () => ({
   reviewRequest: { findUnique: mocks.review },
   workspace: { findUnique: mocks.workspace },
-  taskLink: { findMany: mocks.taskLink },
   agent: { findUnique: mocks.agent },
   user: { findUnique: mocks.user },
 }) }))

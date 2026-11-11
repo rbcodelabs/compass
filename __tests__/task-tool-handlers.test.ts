@@ -25,12 +25,19 @@ const mockTask = {
   create: vi.fn(),
   update: vi.fn(),
 }
-const mockTaskLink = {
-  findFirst: vi.fn(),
-  findMany: vi.fn(),
-  create: vi.fn(),
-  delete: vi.fn(),
-}
+// Association links live in entity_links; the writer and reader (lib/task-link-writes.ts, lib/task-links-read.ts) have their own tests,
+// so here they are stubbed and the assertions stay on what the handlers ask of them and how they shape the output.
+const mockLinks = vi.hoisted(() => ({
+  createTaskLink: vi.fn(),
+  findTaskLink: vi.fn(),
+  deleteTaskLinkByPair: vi.fn(),
+  getTaskLinks: vi.fn(),
+  getTaskIdsLinkedTo: vi.fn(),
+}))
+vi.mock("@/lib/task-link-writes", () => ({ createTaskLink: mockLinks.createTaskLink, findTaskLink: mockLinks.findTaskLink, deleteTaskLinkByPair: mockLinks.deleteTaskLinkByPair }))
+vi.mock("@/lib/task-links-read", () => ({ getTaskLinks: mockLinks.getTaskLinks, getTaskIdsLinkedTo: mockLinks.getTaskIdsLinkedTo }))
+/** What getTaskLinks answers for one task. */
+const taskLinksOf = (rows: { id: string; linkedType: string; linkedId: string }[]) => new Map([[TASK_ID, rows.map((row) => ({ taskId: TASK_ID, source: "MCP", createdById: null, createdAt: new Date(0), ...row }))]])
 const mockOpportunity = { findFirst: vi.fn(), findUnique: vi.fn(), findMany: vi.fn() }
 const mockSolution = { findUnique: vi.fn(), findMany: vi.fn() }
 const mockRoadmapItem = { findUnique: vi.fn(), findMany: vi.fn() }
@@ -44,7 +51,6 @@ const mockPrisma = {
   squad: { findFirst: vi.fn() },
   workspace: mockWorkspace,
   task: mockTask,
-  taskLink: mockTaskLink,
   opportunity: mockOpportunity,
   solution: mockSolution,
   roadmapItem: mockRoadmapItem,
@@ -56,8 +62,6 @@ const mockPrisma = {
   reviewRequest: mockReviewRequest,
 }
 
-// The entity_links mirror of task links (ADR phase 7) has its own tests (__tests__/links/task-reference-mirror.test.ts); this file pins the legacy writes against hand-written fakes.
-vi.mock("@/lib/links/legacy-mirror", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/lib/links/legacy-mirror")>()), mirrorTaskReference: vi.fn(), unmirrorTaskReference: vi.fn() }));
 vi.mock("@/lib/db", () => ({
   default: () => mockPrisma,
 }))
@@ -118,7 +122,6 @@ beforeEach(() => {
     squadId: null,
     parentTask: null,
     subtasks: [],
-    links: [],
   })
   mockTask.create.mockImplementation(({ data }: { data: Record<string, unknown> }) =>
     Promise.resolve({ id: TASK_ID, title: (data.title as string) ?? "Task", status: data.status ?? "TODO", priority: data.priority ?? "MEDIUM" })
@@ -129,6 +132,9 @@ beforeEach(() => {
   mockOpportunity.findUnique.mockResolvedValue({ id: OPP_ID, title: "Reduce churn" })
   mockOpportunity.findFirst.mockResolvedValue({ id: OPP_ID, title: "Reduce churn" })
   mockOpportunity.findMany.mockResolvedValue([{ id: OPP_ID, title: "Reduce churn" }])
+  mockLinks.getTaskLinks.mockResolvedValue(taskLinksOf([]))
+  mockLinks.getTaskIdsLinkedTo.mockResolvedValue([])
+  mockLinks.findTaskLink.mockResolvedValue(null)
 })
 
 describe("typed task assignees", () => {
@@ -164,7 +170,7 @@ describe("typed task assignees", () => {
     mockOpportunity.findFirst.mockResolvedValue(null)
     const result = await linkTask({ taskId: TASK_ID, linkedType: "OPPORTUNITY", linkedId: OPP_ID })
     expect(textOf(result)).toContain("different workspace")
-    expect(mockTaskLink.create).not.toHaveBeenCalled()
+    expect(mockLinks.createTaskLink).not.toHaveBeenCalled()
   })
 })
 
@@ -300,8 +306,8 @@ describe("getTask", () => {
       squadId: null,
       parentTask: { id: "epic-1", title: "Payments Epic" },
       subtasks: [{ id: "sub-1", title: "Wire up Stripe", status: "TODO" }],
-      links: [{ id: "link-1", linkedType: "OPPORTUNITY", linkedId: OPP_ID }],
     })
+    mockLinks.getTaskLinks.mockResolvedValueOnce(taskLinksOf([{ id: "link-1", linkedType: "OPPORTUNITY", linkedId: OPP_ID }]))
 
     const result = await getTask({ taskId: TASK_ID })
     const text = textOf(result)
@@ -378,7 +384,8 @@ describe("listTasks", () => {
     mockTask.findMany.mockResolvedValueOnce([])
     await listTasks({ workspaceId: WORKSPACE_ID, linkedType: "OPPORTUNITY", linkedId: OPP_ID })
     const where = mockTask.findMany.mock.calls[0][0].where
-    expect(where.links).toEqual({ some: { linkedType: "OPPORTUNITY", linkedId: OPP_ID } })
+    expect(mockLinks.getTaskIdsLinkedTo).toHaveBeenCalledWith(mockPrisma, { workspaceId: WORKSPACE_ID, linkedType: "OPPORTUNITY", linkedId: OPP_ID })
+    expect(where.id).toEqual({ in: [] })
   })
 
   it("lists tasks flat with subtask counts", async () => {
@@ -541,25 +548,22 @@ describe("linkTask", () => {
     mockTask.findUnique.mockResolvedValueOnce(null)
     const result = await linkTask({ taskId: "missing-task", linkedType: "OPPORTUNITY", linkedId: OPP_ID })
     expect(textOf(result)).toContain("not found")
-    expect(mockTaskLink.create).not.toHaveBeenCalled()
+    expect(mockLinks.createTaskLink).not.toHaveBeenCalled()
   })
 
   it("returns a not-found message when the linked target does not exist", async () => {
     mockOpportunity.findUnique.mockResolvedValueOnce(null)
     const result = await linkTask({ taskId: TASK_ID, linkedType: "OPPORTUNITY", linkedId: "missing-opp" })
     expect(textOf(result)).toContain("not found")
-    expect(mockTaskLink.create).not.toHaveBeenCalled()
+    expect(mockLinks.createTaskLink).not.toHaveBeenCalled()
   })
 
   it("creates a new link and returns a bare ID line", async () => {
-    mockTaskLink.findFirst.mockResolvedValueOnce(null)
-    mockTaskLink.create.mockResolvedValueOnce({ id: "link-1" })
+    mockLinks.createTaskLink.mockResolvedValueOnce({ id: "link-1" })
 
     const result = await linkTask({ taskId: TASK_ID, linkedType: "OPPORTUNITY", linkedId: OPP_ID })
 
-    expect(mockTaskLink.create).toHaveBeenCalledWith({
-      data: { taskId: TASK_ID, linkedType: "OPPORTUNITY", linkedId: OPP_ID },
-    })
+    expect(mockLinks.createTaskLink).toHaveBeenCalledWith(mockPrisma, { taskId: TASK_ID, linkedType: "OPPORTUNITY", linkedId: OPP_ID, workspaceId: WORKSPACE_ID })
     const text = textOf(result)
     expect(text).toContain("Reduce churn")
     expect(text).toContain("ID: link-1")
@@ -567,28 +571,27 @@ describe("linkTask", () => {
   })
 
   it("is idempotent — re-linking the same pair does not create a duplicate row", async () => {
-    mockTaskLink.findFirst.mockResolvedValueOnce({ id: "existing-link" })
+    mockLinks.findTaskLink.mockResolvedValueOnce({ id: "existing-link" })
 
     const result = await linkTask({ taskId: TASK_ID, linkedType: "OPPORTUNITY", linkedId: OPP_ID })
 
-    expect(mockTaskLink.create).not.toHaveBeenCalled()
+    expect(mockLinks.createTaskLink).not.toHaveBeenCalled()
     expect(textOf(result)).toContain("already linked")
+    expect(textOf(result)).toContain("ID: existing-link")
   })
 
   it("links to a DECISION (ReviewRequest), reading its title from currentRevision", async () => {
     const DECISION_ID = "decision-1"
-    mockTaskLink.findFirst.mockResolvedValueOnce(null)
     mockReviewRequest.findUnique.mockResolvedValueOnce({ id: DECISION_ID, currentRevision: { title: "Ship the export flow?" } })
     // validateTaskLink's own workspace-scoping lookup (task-assignment.ts) —
     // separate from the title lookup above.
     mockReviewRequest.findFirst.mockResolvedValueOnce({ id: DECISION_ID, workspaceId: WORKSPACE_ID })
-    mockTaskLink.create.mockResolvedValueOnce({ id: "link-2" })
+    mockLinks.createTaskLink.mockResolvedValueOnce({ id: "link-2" })
 
     const result = await linkTask({ taskId: TASK_ID, linkedType: "DECISION", linkedId: DECISION_ID })
 
-    expect(mockTaskLink.create).toHaveBeenCalledWith({
-      data: { taskId: TASK_ID, linkedType: "DECISION", linkedId: DECISION_ID },
-    })
+    // The caller's spelling (DECISION) goes to the writer, which stores it as REVIEW_REQUEST.
+    expect(mockLinks.createTaskLink).toHaveBeenCalledWith(mockPrisma, { taskId: TASK_ID, linkedType: "DECISION", linkedId: DECISION_ID, workspaceId: WORKSPACE_ID })
     const text = textOf(result)
     expect(text).toContain("Ship the export flow?")
     expect(text).toContain("ID: link-2")
@@ -598,7 +601,7 @@ describe("linkTask", () => {
     mockReviewRequest.findUnique.mockResolvedValueOnce(null)
     const result = await linkTask({ taskId: TASK_ID, linkedType: "DECISION", linkedId: "missing-decision" })
     expect(textOf(result)).toContain("not found")
-    expect(mockTaskLink.create).not.toHaveBeenCalled()
+    expect(mockLinks.createTaskLink).not.toHaveBeenCalled()
   })
 })
 
@@ -606,17 +609,17 @@ describe("linkTask", () => {
 
 describe("unlinkTask", () => {
   it("returns a not-found message when no matching link exists", async () => {
-    mockTaskLink.findFirst.mockResolvedValueOnce(null)
     const result = await unlinkTask({ taskId: TASK_ID, linkedType: "OPPORTUNITY", linkedId: OPP_ID })
     expect(textOf(result)).toContain("No link found")
-    expect(mockTaskLink.delete).not.toHaveBeenCalled()
+    expect(mockLinks.deleteTaskLinkByPair).not.toHaveBeenCalled()
   })
 
   it("deletes the matching link", async () => {
-    mockTaskLink.findFirst.mockResolvedValueOnce({ id: "link-1" })
+    mockLinks.findTaskLink.mockResolvedValueOnce({ id: "link-1" })
     const result = await unlinkTask({ taskId: TASK_ID, linkedType: "OPPORTUNITY", linkedId: OPP_ID })
-    expect(mockTaskLink.delete).toHaveBeenCalledWith({ where: { id: "link-1" } })
+    expect(mockLinks.deleteTaskLinkByPair).toHaveBeenCalledWith(mockPrisma, { taskId: TASK_ID, linkedType: "OPPORTUNITY", linkedId: OPP_ID, workspaceId: WORKSPACE_ID })
     expect(textOf(result)).toContain("Unlinked")
+    expect(textOf(result)).toContain("ID: link-1")
   })
 })
 
@@ -630,16 +633,15 @@ describe("listTaskLinks", () => {
   })
 
   it("returns an empty collection when the task has no links", async () => {
-    mockTaskLink.findMany.mockResolvedValueOnce([])
     const result = await listTaskLinks({ taskId: TASK_ID })
     expect(textOf(result)).toContain("no links")
     expect(result.structuredContent.data).toEqual({ items: [], count: 0 })
   })
 
   it("groups resolved links by linkedType", async () => {
-    mockTaskLink.findMany.mockResolvedValueOnce([
+    mockLinks.getTaskLinks.mockResolvedValueOnce(taskLinksOf([
       { id: "link-1", linkedType: "OPPORTUNITY", linkedId: OPP_ID },
-    ])
+    ]))
     mockOpportunity.findMany.mockResolvedValueOnce([{ id: OPP_ID, title: "Reduce churn" }])
 
     const result = await listTaskLinks({ taskId: TASK_ID })
@@ -650,9 +652,9 @@ describe("listTaskLinks", () => {
   })
 
   it("resolves a DECISION link's title from currentRevision, not a flat title column", async () => {
-    mockTaskLink.findMany.mockResolvedValueOnce([
+    mockLinks.getTaskLinks.mockResolvedValueOnce(taskLinksOf([
       { id: "link-2", linkedType: "DECISION", linkedId: "decision-1" },
-    ])
+    ]))
     mockReviewRequest.findMany.mockResolvedValueOnce([{ id: "decision-1", currentRevision: { title: "Ship the export flow?" } }])
 
     const result = await listTaskLinks({ taskId: TASK_ID })

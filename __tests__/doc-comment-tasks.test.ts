@@ -320,20 +320,20 @@ describe("notifications for mentions", () => {
 
 describe("loadCommentTaskCards", () => {
   it("returns one card per comment, scoped to the workspace", async () => {
-    mocks.db.taskLink.findMany.mockResolvedValue([
-      { taskId: TASK, linkedId: COMMENT, task: { id: TASK, seqPrefix: "TASK", seqNumber: 5, title: "Draft", status: "IN_PROGRESS", priority: "HIGH", dueDate: new Date("2026-10-23T00:00:00Z"), assigneeUserId: QUINN, assigneeAgentId: null } },
-    ])
+    // COMMENT is a residual link kind (task_links), read through lib/task-links-read.ts.
+    mocks.db.taskLink.findMany.mockResolvedValue([{ taskId: TASK, linkedId: COMMENT }])
+    mocks.db.task.findMany.mockResolvedValue([{ id: TASK, seqPrefix: "TASK", seqNumber: 5, title: "Draft", status: "IN_PROGRESS", priority: "HIGH", dueDate: new Date("2026-10-23T00:00:00Z"), assigneeUserId: QUINN, assigneeAgentId: null }])
     const cards = await loadCommentTaskCards(WS, [COMMENT])
     expect(mocks.db.taskLink.findMany).toHaveBeenCalledWith(expect.objectContaining({
       where: { linkedType: "COMMENT", linkedId: { in: [COMMENT] }, task: { workspaceId: WS } },
     }))
+    expect(mocks.db.task.findMany).toHaveBeenCalledWith({ where: { workspaceId: WS, id: { in: [TASK] } } })
     expect(cards[COMMENT]).toMatchObject({ taskId: TASK, displayId: "TASK-5", status: "IN_PROGRESS", priority: "HIGH", dueDate: "2026-10-23T00:00:00.000Z" })
   })
 
   it("keeps the last known name for an assignee who is no longer available", async () => {
-    mocks.db.taskLink.findMany.mockResolvedValue([
-      { taskId: TASK, linkedId: COMMENT, task: { id: TASK, seqPrefix: "TASK", seqNumber: 5, title: "Draft", status: "TODO", priority: "HIGH", dueDate: null, assigneeUserId: QUINN, assigneeAgentId: null } },
-    ])
+    mocks.db.taskLink.findMany.mockResolvedValue([{ taskId: TASK, linkedId: COMMENT }])
+    mocks.db.task.findMany.mockResolvedValue([{ id: TASK, seqPrefix: "TASK", seqNumber: 5, title: "Draft", status: "TODO", priority: "HIGH", dueDate: null, assigneeUserId: QUINN, assigneeAgentId: null }])
     mocks.resolveAssignees.mockImplementation(async (_ws: string, tasks: Array<Record<string, unknown>>) =>
       tasks.map(t => ({ ...t, assignee: { type: "USER", id: QUINN, displayName: "Unavailable person", available: false } })))
     mocks.db.user.findMany.mockResolvedValue([{ id: QUINN, name: "Quinn Morales", email: "quinn@example.com" }])

@@ -40,10 +40,11 @@ vi.mock("@/lib/workspace-updates-capture", () => ({
 await import("@/app/api/mcp/route");
 
 const alice = { userId: USERS.alice, purpose: "USER" as const };
+type ToolResult = { content: Array<{ text: string }>; structuredContent: { ok: boolean; data: Record<string, unknown> } };
 const call = (name: string, args: Record<string, unknown>, actor: typeof alice = alice) => {
   const handler = registeredTools[name];
   if (!handler) throw new Error(`Tool "${name}" was not registered`);
-  return runWithMcpActor(actor, () => handler(args));
+  return runWithMcpActor(actor, () => handler(args)) as Promise<ToolResult>;
 };
 
 beforeEach(() => {
@@ -142,29 +143,43 @@ describe("get_okr_cycle hides nested objectives that are not in the cycle's work
 });
 
 describe("a linked key result is hidden when its objective is not in the opportunity's workspace", () => {
-  const linked = (workspaceId: string | null) => ({ id: "kr-1", title: "Secret KR", objective: { workspaceId, title: "Secret objective title" } });
+  // The Key Result pointer is an entity_links row stamped with the opportunity's workspace. kr-a is workspace A's; kr-null sits under an
+  // objective with no workspaceId and kr-b under workspace B's, so a pointer to either must read as no pointer.
+  const point = (opportunityId: string, keyResultId: string) =>
+    fake.current!.state.entityLinks.push({
+      id: `p-${opportunityId}`, workspaceId: WS_A.id, linkType: "OPPORTUNITY_TARGETS_KEY_RESULT", fromType: "OPPORTUNITY", fromId: opportunityId, toType: "KEY_RESULT", toId: keyResultId,
+      origin: "LEGACY", source: "UI", createdById: null, attrs: null, createdAt: new Date(10), updatedAt: new Date(10),
+    });
 
   it("list_opportunities omits the KR (text and structured payload) for NULL and drifted objectives, keeps a consistent one", async () => {
-    const opp = (id: string, workspaceId: string | null) => ({ id, title: id, status: "EXPLORING", squad: null, linkedKeyResult: linked(workspaceId), _count: { solutions: 0 } });
-    (fake.current!.client.opportunity as { findMany: unknown }).findMany = async () => [opp("opp-ok", WS_A.id), opp("opp-null", null), opp("opp-drift", WS_B.id)];
+    const opp = (id: string) => ({ id, workspaceId: WS_A.id, title: id, status: "EXPLORING", squad: null, _count: { solutions: 0 } });
+    point("opp-ok", "kr-a");
+    point("opp-null", "kr-null");
+    point("opp-drift", "kr-b");
+    (fake.current!.client.opportunity as { findMany: unknown }).findMany = async () => [opp("opp-ok"), opp("opp-null"), opp("opp-drift")];
     const result = await call("list_opportunities", { workspaceId: WS_A.id });
     const text = result.content[0].text;
-    expect(text.match(/Secret objective title/g)).toHaveLength(1); // only opp-ok
+    expect(text.match(/A key result/g)).toHaveLength(1); // only opp-ok
     const items = (result as unknown as { structuredContent: { data: { items: Array<{ id: string; linkedKeyResult: unknown }> } } }).structuredContent.data.items;
     expect(items.map((i) => [i.id, i.linkedKeyResult !== null && i.linkedKeyResult !== undefined])).toEqual([["opp-ok", true], ["opp-null", false], ["opp-drift", false]]);
   });
 
-  it("get_opportunity omits the KR for a NULL or drifted objective", async () => {
-    for (const workspaceId of [null, WS_B.id]) {
-      const opportunity = { id: "opp-a", workspaceId: WS_A.id, title: "Opp", status: "EXPLORING", description: null, squad: null, linkedKeyResult: linked(workspaceId), solutions: [] };
-      (fake.current!.client.opportunity as { findUnique: unknown }).findUnique = async () => opportunity;
-      const text = (await call("get_opportunity", { opportunityId: "opp-a" })).content[0].text;
-      expect(text).not.toContain("Secret objective title");
-      expect(text).not.toContain("Linked KR");
+  it("get_opportunity omits the KR for a NULL or drifted objective, and returns a null linkedKeyResultId", async () => {
+    const opportunity = { id: "opp-a", workspaceId: WS_A.id, title: "Opp", status: "EXPLORING", description: null, squad: null, solutions: [] };
+    (fake.current!.client.opportunity as { findUnique: unknown }).findUnique = async () => opportunity;
+    for (const keyResultId of ["kr-null", "kr-b"]) {
+      fake.current!.state.entityLinks.length = 0;
+      point("opp-a", keyResultId);
+      const result = await call("get_opportunity", { opportunityId: "opp-a" });
+      expect(result.content[0].text).not.toContain("A key result");
+      expect(result.content[0].text).not.toContain("Linked KR");
+      expect(result.structuredContent.data).toMatchObject({ linkedKeyResult: null, linkedKeyResultId: null });
     }
-    const ok = { id: "opp-a", workspaceId: WS_A.id, title: "Opp", status: "EXPLORING", description: null, squad: null, linkedKeyResult: linked(WS_A.id), solutions: [] };
-    (fake.current!.client.opportunity as { findUnique: unknown }).findUnique = async () => ok;
-    expect((await call("get_opportunity", { opportunityId: "opp-a" })).content[0].text).toContain("Secret objective title");
+    fake.current!.state.entityLinks.length = 0;
+    point("opp-a", "kr-a");
+    const ok = await call("get_opportunity", { opportunityId: "opp-a" });
+    expect(ok.content[0].text).toContain("A objective / A key result");
+    expect(ok.structuredContent.data).toMatchObject({ linkedKeyResultId: "kr-a" });
   });
 });
 

@@ -24,7 +24,8 @@ import { workspaceMutationSource, type ProgrammaticSource } from "@/lib/programm
 import { allocateOneSeq } from "@/lib/work-item-sequence"
 import { agentConversationLinkTitles } from "@/lib/agent-conversation-link-titles"
 import { commentLinkTitles } from "@/lib/comment-link-titles"
-import { createTaskLink, deleteTaskLink } from "@/lib/task-link-writes"
+import { createTaskLink, deleteTaskLinkByPair, findTaskLink } from "@/lib/task-link-writes"
+import { getTaskIdsLinkedTo, getTaskLinks } from "@/lib/task-links-read"
 import { excludeToolApprovals } from "@/lib/tool-approval/gate"
 
 // Maps each TaskLinkedType to its Prisma model delegate name. Every target
@@ -228,14 +229,14 @@ export async function getTask({ taskId }: { taskId: string }) {
     include: {
       parentTask: { select: { id: true, title: true } },
       subtasks: { select: { id: true, title: true, status: true }, orderBy: { sortOrder: "asc" } },
-      links: true,
     },
   })
   if (!task) {
     return fail(`Task "${taskId}" not found.`)
   }
 
-  const links = await formatLinks(prisma, task.links, task.workspaceId)
+  const rawLinks = (await getTaskLinks(prisma, [task])).get(task.id) ?? []
+  const links = await formatLinks(prisma, rawLinks, task.workspaceId)
   const resolved = (await resolveTaskAssignees(task.workspaceId, [task]))[0]
 
   const lines = [
@@ -331,7 +332,7 @@ export async function listTasks({
     ...(squadId ? { squadId } : {}),
     ...(assignee !== undefined ? assignee === null ? { assigneeUserId: null, assigneeAgentId: null } : assignee.type === "AGENT" ? { assigneeAgentId: assignee.id } : { assigneeUserId: assignee.id } : assigneeUserId ? { assigneeUserId } : {}),
     ...(parentTaskId !== undefined ? { parentTaskId } : {}),
-    ...(linkedType && linkedId ? { links: { some: { linkedType, linkedId } } } : {}),
+    ...(linkedType && linkedId ? { id: { in: await getTaskIdsLinkedTo(prisma, { workspaceId, linkedType, linkedId }) } } : {}),
     ...(updatedSince || updatedBefore
       ? {
           updatedAt: {
@@ -570,15 +571,11 @@ export async function linkTask({
   try { await validateTaskLink(task.workspaceId, linkedType, linkedId) }
   catch (error) { return fail(error instanceof Error ? error.message : "Invalid task link") }
 
-  // Stays on task_links (not the TASK read flip): the existence check of a write, and it reports the legacy row id.
-  const existingLink = await prisma.taskLink.findFirst({
-    where: { taskId, linkedType, linkedId },
-  })
+  const existingLink = await findTaskLink(prisma, { taskId, linkedType, linkedId, workspaceId: task.workspaceId })
   if (existingLink) {
     return fail(`Task "${task.title}" is already linked to ${linkedType} '${target.title}'.\nID: ${existingLink.id}`)
   }
 
-  // Legacy row first (the source of truth), mirrored into entity_links in the same transaction while the flag is on.
   const link = await createTaskLink(prisma, { taskId, linkedType, linkedId, workspaceId: task.workspaceId })
 
   return ok(
@@ -601,16 +598,13 @@ export async function unlinkTask({
 }) {
   const prisma = getPrisma()
 
-  // Stays on task_links (not the TASK read flip): finds the legacy row to delete by id.
-  const link = await prisma.taskLink.findFirst({ where: { taskId, linkedType, linkedId } })
-  if (!link) {
+  const task = await prisma.task.findUnique({ where: { id: taskId }, select: { workspaceId: true } })
+  const link = task ? await findTaskLink(prisma, { taskId, linkedType, linkedId, workspaceId: task.workspaceId }) : null
+  if (!task || !link) {
     return fail(`No link found between task "${taskId}" and ${linkedType} "${linkedId}".`)
   }
 
-  const task = await prisma.task.findUnique({ where: { id: taskId }, select: { workspaceId: true } })
-  // A task row that vanished cannot be unmirrored through the service (it verifies the task); migration 097 prunes that mirror row.
-  if (task) await deleteTaskLink(prisma, { link, workspaceId: task.workspaceId })
-  else await prisma.taskLink.delete({ where: { id: link.id } })
+  await deleteTaskLinkByPair(prisma, { taskId, linkedType, linkedId, workspaceId: task.workspaceId })
 
   return ok(
     `Unlinked ${linkedType} "${linkedId}" from task "${taskId}".\nID: ${link.id}`,
@@ -628,8 +622,7 @@ export async function listTaskLinks({ taskId }: { taskId: string }) {
     return fail(`Task "${taskId}" not found.`)
   }
 
-  // Stays on task_links (not the TASK read flip): the listing exposes the legacy link id and includes COMMENT links, which entity_links never carries.
-  const rawLinks = await prisma.taskLink.findMany({ where: { taskId }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] })
+  const rawLinks = (await getTaskLinks(prisma, [task])).get(task.id) ?? []
   if (!rawLinks.length) {
     return ok(`Task "${task.title}" has no links.`, { items: [], count: 0 })
   }

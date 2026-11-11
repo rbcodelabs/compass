@@ -24,6 +24,7 @@ vi.mock("@/lib/db", () => ({
     decisionRecord: { findUnique: mockFindDecision },
     workspace: { findUnique: mockFindWorkspace },
     artifact: { findMany: mockFindArtifacts },
+    entityLink: { findMany: async () => [] },
   }),
 }))
 

@@ -4,10 +4,10 @@ const mocks = vi.hoisted(() => ({ link: vi.fn(), unlink: vi.fn(), artifacts: vi.
 vi.mock("@/lib/artifacts", () => ({ linkArtifactToDecision: mocks.link, unlinkArtifactFromDecision: mocks.unlink, getDecisionArtifacts: mocks.artifacts, getArtifactDecisions: mocks.decisions, getArtifactSolutionIds: async () => [], getArtifactExperimentIds: async () => [], getExperimentArtifactIds: async () => [] }))
 vi.mock("@/lib/tracked-decisions", () => ({ getTrackedDecision: mocks.tracked }))
 vi.mock("@/lib/mcp-authz", () => ({ getMcpActor: () => ({ userId: "agent-owner" }) }))
+vi.mock("@/lib/task-links-read", () => ({ getTasksLinkedTo: mocks.taskLink }))
 vi.mock("@/lib/db", () => ({ default: () => ({
   reviewRequest: { findUnique: mocks.review },
   artifact: { findUnique: mocks.artifact },
-  taskLink: { findMany: mocks.taskLink },
   agent: { findUnique: mocks.agent },
   user: { findUnique: mocks.user },
 }) }))
@@ -37,14 +37,14 @@ it.each(["decision", "review"])("adds live artifact metadata to the %s getter wi
   // prisma mock has no `workspace` delegate to resolve org/workspace slugs from.
   // getDecision additionally resolves requestedBy/followUpTasks/noAction (all
   // null/empty here since the fixture has no requestedById/requestedByAgentId,
-  // no linked task_links, and no noActionAt); getReviewRequest does not.
+  // no linked tasks, and no noActionAt); getReviewRequest does not.
   // Both getters also lift the revision's options and chosen option to the top
   // level; this fixture has no options or decisions, so they are empty/null.
   const extra = { options: [], chosenOption: null, questions: [], answers: [], ...(kind === "decision" ? { requestedBy: null, followUpTasks: [], noAction: null } : {}) }
   expect(result.structuredContent.data).toEqual({ ...request, reviewUrl: null, artifacts: [{ id: "artifact", title: "Prototype", status: "ACTIVE", currentRevision: { revisionNumber: 2 } }], ...extra })
   expect(mocks.artifacts).toHaveBeenCalledWith("workspace", "decision")
-  // Flag unset: the follow-up read is exactly the legacy query.
-  if (kind === "decision") expect(mocks.taskLink).toHaveBeenCalledWith({ where: { linkedType: "DECISION", linkedId: "decision" }, select: { task: { select: { id: true, title: true, status: true } } } })
+  // The follow-up tasks are read from entity_links, scoped to the decision's workspace.
+  if (kind === "decision") expect(mocks.taskLink).toHaveBeenCalledWith(expect.anything(), { workspaceIds: ["workspace"], linkedType: "DECISION", linkedIds: ["decision"] })
 })
 it("does not expose supporting links for legacy reviews", async () => {
   mocks.review.mockResolvedValue({ id: "decision", gateType: "RELEASE_AUTHORIZATION" })

@@ -13,13 +13,18 @@ function prismaWith(links: { id: string; opportunityId: string; objectiveId: str
   const objectiveFindMany = vi.fn(async ({ where }: { where: { id: { in: string[] }; workspaceId: string } }) =>
     where.workspaceId === WS && where.id.in.includes(OBJ) ? [{ id: OBJ, title: "Grow revenue" }] : [],
   );
-  const linkFindMany = vi.fn(async () => links);
+  // entity_links: the Opportunity <-> Objective rows are served for that link type; the Key Result pointer read finds none.
+  const linkFindMany = vi.fn(async ({ where }: { where: { linkType: string } }) =>
+    where.linkType === "OPPORTUNITY_TARGETS_OBJECTIVE"
+      ? links.map((l) => ({ id: l.id, linkType: where.linkType, fromType: "OPPORTUNITY", fromId: l.opportunityId, toType: "OBJECTIVE", toId: l.objectiveId, origin: "DIRECT", source: "UI", createdById: null, createdAt: l.createdAt }))
+      : [],
+  );
   const prisma = {
     opportunity: {
-      findFirst: vi.fn(async () => ({ id: OPP, title: "Churn", description: null, customerSegment: null, status: "EXPLORING", linkedKeyResult: null, evidence: [], feedback: [] })),
+      findFirst: vi.fn(async () => ({ id: OPP, title: "Churn", description: null, customerSegment: null, status: "EXPLORING", evidence: [], feedback: [] })),
       findMany: vi.fn(async () => [{ id: OPP }]),
     },
-    opportunityObjectiveLink: { findMany: linkFindMany },
+    entityLink: { findMany: linkFindMany },
     objective: { findMany: objectiveFindMany },
   };
   return { prisma: prisma as unknown as AppPrismaClient, linkFindMany, objectiveFindMany };
@@ -33,9 +38,9 @@ describe("PM interview context carries the linked objectives (additive)", () => 
     ]);
     const snapshot = await targetSnapshot(prisma, WS, "OPPORTUNITY", OPP);
     expect(snapshot.linkedObjectives).toEqual([{ id: OBJ, title: "Grow revenue" }]);
-    // The legacy outcome is a separate field and is never inferred from the links.
+    // The outcome (the Key Result pointer) is a separate field and is never inferred from the objective links.
     expect(snapshot.outcome).toBeNull();
-    expect(linkFindMany).toHaveBeenCalledWith(expect.objectContaining({ where: { workspaceId: WS, opportunityId: { in: [OPP] } } }));
+    expect(linkFindMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ workspaceId: WS, linkType: "OPPORTUNITY_TARGETS_OBJECTIVE", fromId: { in: [OPP] } }) }));
     expect(objectiveFindMany).toHaveBeenCalledWith(expect.objectContaining({ where: { id: { in: [OBJ, FOREIGN_OBJ] }, workspaceId: WS } }));
   });
 

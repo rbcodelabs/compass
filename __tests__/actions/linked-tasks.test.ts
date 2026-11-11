@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { mockAuth, mockGetWorkspace, mockRevalidatePath, prisma } = vi.hoisted(() => ({
+const { mockAuth, mockGetWorkspace, mockRevalidatePath, mockCreateTaskLink, mockCreateTaskLinks, prisma } = vi.hoisted(() => ({
+  mockCreateTaskLink: vi.fn(),
+  mockCreateTaskLinks: vi.fn(),
   mockAuth: vi.fn(),
   mockGetWorkspace: vi.fn(),
   mockRevalidatePath: vi.fn(),
@@ -9,13 +11,12 @@ const { mockAuth, mockGetWorkspace, mockRevalidatePath, prisma } = vi.hoisted(()
     opportunity: { findFirst: vi.fn() },
     workspaceMember: { findFirst: vi.fn() },
     task: { findFirst: vi.fn(), create: vi.fn() },
-    taskLink: { upsert: vi.fn() },
     $transaction: vi.fn(),
   },
 }));
 
-// The entity_links mirror of task links (ADR phase 7) has its own tests (__tests__/links/task-reference-mirror.test.ts); this file pins the legacy writes against hand-written fakes.
-vi.mock("@/lib/links/legacy-mirror", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/lib/links/legacy-mirror")>()), mirrorTaskReference: vi.fn(), unmirrorTaskReference: vi.fn() }));
+// The link writer (lib/task-link-writes.ts, entity_links) has its own tests; this file pins what the actions ask of it against hand-written fakes.
+vi.mock("@/lib/task-link-writes", () => ({ createTaskLink: mockCreateTaskLink, createTaskLinks: mockCreateTaskLinks, deleteTaskLink: vi.fn(), getTaskLinkById: vi.fn() }));
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/workspace", () => ({ getWorkspace: mockGetWorkspace }));
 vi.mock("@/lib/db", () => ({ default: () => prisma }));
@@ -35,7 +36,8 @@ beforeEach(() => {
   prisma.opportunity.findFirst.mockResolvedValue({ id: "opp-1" });
   prisma.task.findFirst.mockResolvedValue(null);
   prisma.task.create.mockResolvedValue({ id: "task-new" });
-  prisma.taskLink.upsert.mockResolvedValue({ id: "link-1" });
+  mockCreateTaskLink.mockResolvedValue({ id: "link-1" });
+  mockCreateTaskLinks.mockResolvedValue([{ id: "link-1" }]);
 });
 
 describe("addLinkedTask", () => {
@@ -47,18 +49,17 @@ describe("addLinkedTask", () => {
         workspaceId: "ws-1",
         title: "Ship it",
         status: "TODO",
-        links: { create: { linkedType: "ROADMAP_ITEM", linkedId: "roadmap-1" } },
       }),
     });
+    expect(mockCreateTaskLinks).toHaveBeenCalledWith(prisma, { workspaceId: "ws-1", taskId: "task-new", links: [{ linkedType: "ROADMAP_ITEM", linkedId: "roadmap-1" }] });
     expect(mockRevalidatePath).toHaveBeenCalledWith("/acme/product/roadmap");
   });
 
   it("creates a task linked to any other TaskLink-eligible entity, e.g. an opportunity", async () => {
     await addLinkedTask("acme", "product", "OPPORTUNITY", "opp-1", { title: "Investigate" }, "/acme/product/discovery/opp-1");
     expect(prisma.opportunity.findFirst).toHaveBeenCalledWith({ where: { id: "opp-1", workspaceId: "ws-1" } });
-    expect(prisma.task.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({ links: { create: { linkedType: "OPPORTUNITY", linkedId: "opp-1" } } }),
-    });
+    expect(prisma.task.create).toHaveBeenCalled();
+    expect(mockCreateTaskLinks).toHaveBeenCalledWith(prisma, { workspaceId: "ws-1", taskId: "task-new", links: [{ linkedType: "OPPORTUNITY", linkedId: "opp-1" }] });
     expect(mockRevalidatePath).toHaveBeenCalledWith("/acme/product/discovery/opp-1");
   });
 
@@ -97,17 +98,13 @@ describe("linkExistingTask", () => {
       where: { id: "foreign-task", workspaceId: "ws-1", status: { not: "CANCELLED" } },
       select: { id: true },
     });
-    expect(prisma.taskLink.upsert).not.toHaveBeenCalled();
+    expect(mockCreateTaskLink).not.toHaveBeenCalled();
   });
 
-  it("upserts the link when linking an existing task", async () => {
+  it("creates the link (idempotent in the writer) when linking an existing task", async () => {
     prisma.task.findFirst.mockResolvedValue({ id: "task-1" });
     await linkExistingTask("acme", "product", "ROADMAP_ITEM", "roadmap-1", "task-1", "/acme/product/roadmap");
-    expect(prisma.taskLink.upsert).toHaveBeenCalledWith({
-      where: { taskId_linkedType_linkedId: { taskId: "task-1", linkedType: "ROADMAP_ITEM", linkedId: "roadmap-1" } },
-      create: { taskId: "task-1", linkedType: "ROADMAP_ITEM", linkedId: "roadmap-1" },
-      update: {},
-    });
+    expect(mockCreateTaskLink).toHaveBeenCalledWith(prisma, { taskId: "task-1", linkedType: "ROADMAP_ITEM", linkedId: "roadmap-1", workspaceId: "ws-1" });
     expect(mockRevalidatePath).toHaveBeenCalledWith("/acme/product/roadmap");
   });
 

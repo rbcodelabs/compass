@@ -57,7 +57,7 @@ describe("098 registration", () => {
   });
 
   it("is the backfill the registry type names (no longer new-only)", () => {
-    expect(LINK_TYPES.SOLUTION_TARGETS_KEY_RESULT.legacy?.backfillMigration).toBe(NAME);
+    expect(LINK_TYPES.SOLUTION_TARGETS_KEY_RESULT.dedicatedWriter?.backfillMigration).toBe(NAME);
   });
 });
 

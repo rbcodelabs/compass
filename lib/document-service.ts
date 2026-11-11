@@ -277,7 +277,7 @@ export async function deleteDocument(docId: string, opts: DocumentMutationOption
     if (opts.operationId && await replay(workspaceId, opts.operationId, hash)) return
     throw error
   }
-  // Task links to this document were never cleaned by the legacy delete; their entity_links mirror rows (ADR phase 7) are, after the delete
-  // commits, whatever the flag says. A failure is logged and swallowed: migration 097 reports or prunes what is left.
+  // Links to this document (task links included) are swept after the delete commits. A failure is logged and swallowed:
+  // a leftover link is hidden by the workspace-filtered readers.
   await drainAfterParentDelete("document.delete.links", () => deleteLinksForEntity(db, "DOC", [docId]))
 }

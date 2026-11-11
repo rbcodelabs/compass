@@ -42,8 +42,11 @@ describe("GET /api/panels/discovery-rail authorization", () => {
 
   it("adds linkedObjectives from the typed links, never a link row that is wrong for the workspace, and nothing of B's", async () => {
     session.userId = USERS.alice;
-    const links = fake.current!.state.opportunityObjectiveLinks;
-    const row = (extra: Record<string, unknown>) => ({ id: `l${links.length}`, createdAt: new Date(links.length + 1), origin: "DIRECT", ...extra });
+    const links = fake.current!.state.entityLinks;
+    const row = ({ opportunityId, objectiveId, ...extra }: { workspaceId: string; opportunityId: string; objectiveId: string }) => ({
+      id: `l${links.length}`, createdAt: new Date(links.length + 1), updatedAt: new Date(1), origin: "DIRECT", source: "UI", createdById: null, attrs: null,
+      linkType: "OPPORTUNITY_TARGETS_OBJECTIVE", fromType: "OPPORTUNITY", fromId: opportunityId, toType: "OBJECTIVE", toId: objectiveId, ...extra,
+    });
     links.push(row({ workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a" }));
     // Stamped with A's workspaceId but pointing at B's objective, and at an objective with a NULL workspaceId: both hidden.
     links.push(row({ workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-b" }));

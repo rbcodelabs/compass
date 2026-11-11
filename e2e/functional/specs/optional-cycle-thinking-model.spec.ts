@@ -35,7 +35,7 @@ test.describe.serial("Optional cycle under Torres", () => {
   /** Count only: raw SQL may count and delete link rows here, never insert or update them. */
   async function countLinks() {
     const result = await pool.query(
-      `SELECT count(*)::int AS n FROM ${S}.opportunity_objective_links WHERE opportunity_id = $1 AND objective_id = $2`,
+      `SELECT count(*)::int AS n FROM ${S}.entity_links WHERE link_type = 'OPPORTUNITY_TARGETS_OBJECTIVE' AND from_id = $1 AND to_id = $2`,
       [opportunityId, outcomeId],
     );
     return result.rows[0].n as number;
@@ -65,7 +65,7 @@ test.describe.serial("Optional cycle under Torres", () => {
         await pool.query(`SELECT id FROM ${S}.objectives WHERE workspace_id = $1 AND title = $2`, [workspaceId, outcomeTitle])
       ).rows.map((row) => row.id as string);
       if (outcomeId) ids.push(outcomeId);
-      await pool.query(`DELETE FROM ${S}.opportunity_objective_links WHERE workspace_id = $1 AND (opportunity_id = $2 OR objective_id = ANY($3::uuid[]))`, [
+      await pool.query(`DELETE FROM ${S}.entity_links WHERE workspace_id = $1 AND link_type = 'OPPORTUNITY_TARGETS_OBJECTIVE' AND (from_id = $2 OR to_id = ANY($3::uuid[]))`, [
         workspaceId,
         opportunityId,
         ids,
@@ -130,7 +130,7 @@ test.describe.serial("Optional cycle under Torres", () => {
     expect(await countLinks()).toBe(1);
     // Stamped with the opportunity's workspace, made on purpose through the UI (count only, never read-modify-write).
     const stamped = await pool.query(
-      `SELECT count(*)::int AS n FROM ${S}.opportunity_objective_links WHERE opportunity_id = $1 AND objective_id = $2 AND workspace_id = $3 AND origin = 'DIRECT' AND source = 'UI'`,
+      `SELECT count(*)::int AS n FROM ${S}.entity_links WHERE link_type = 'OPPORTUNITY_TARGETS_OBJECTIVE' AND from_id = $1 AND to_id = $2 AND workspace_id = $3 AND origin = 'DIRECT' AND source = 'UI'`,
       [opportunityId, outcomeId, workspaceId],
     );
     expect(stamped.rows[0].n).toBe(1);

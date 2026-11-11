@@ -1,7 +1,7 @@
 /**
  * Real Prisma client, real adapter, real unique index, throwaway schema in the local compass_e2e database. Proves two things the
  * fakes cannot:
- *   1. a lost race on the unique pair index surfaces as an error isLinkUniqueRace recognises with the repo's actual client setup
+ *   1. a lost race on the entity_links unique pair index surfaces as an error isLinkUniqueRace recognises with the repo's actual client setup
  *      (PrismaClient + PrismaPg adapter + the updatedAt extension), so concurrent identical link calls all succeed and exactly one
  *      reports created: true (an idempotent no-op for the loser, not a raw error);
  *   2. draining a parent with more than one chunk of links runs as several committed statements of at most 500 links.
@@ -13,6 +13,7 @@ import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { AppPrismaClient } from "@/lib/db";
+import { linkEntities } from "@/lib/links/service";
 import { applyMigrations } from "@/lib/migrations/runner";
 import { injectUpdatedAtExtension } from "@/lib/prisma-updated-at";
 import {
@@ -71,19 +72,20 @@ describe.skipIf(!databaseUrl)("typed links against a real Prisma client and uniq
     }
   });
 
-  it("a duplicate insert on the pair index raises an error that isLinkUniqueRace recognises (both link models)", async () => {
-    const data = { workspaceId: WS, opportunityId: opportunity, objectiveId: objective, origin: "DIRECT" };
-    await prisma.opportunityObjectiveLink.create({ data });
-    const error = await prisma.opportunityObjectiveLink.create({ data }).then(() => null, (e: unknown) => e);
+  it("a duplicate insert on the pair index raises an error that isLinkUniqueRace recognises (both link types)", async () => {
+    const now = new Date();
+    const data = { workspaceId: WS, linkType: "OPPORTUNITY_TARGETS_OBJECTIVE", fromType: "OPPORTUNITY", fromId: opportunity, toType: "OBJECTIVE", toId: objective, origin: "DIRECT", source: "MCP", createdAt: now, updatedAt: now };
+    await prisma.entityLink.create({ data });
+    const error = await prisma.entityLink.create({ data }).then(() => null, (e: unknown) => e);
     expect(error, "second create must fail on the unique index").not.toBeNull();
     expect(isLinkUniqueRace(error), JSON.stringify({ code: (error as { code?: string }).code, meta: (error as { meta?: unknown }).meta, message: (error as Error).message })).toBe(true);
-    await prisma.opportunityObjectiveLink.deleteMany({});
+    await prisma.entityLink.deleteMany({});
 
-    const solutionData = { workspaceId: WS, solutionId: solution, keyResultId: keyResult };
-    await prisma.solutionKeyResultLink.create({ data: solutionData });
-    const solutionError = await prisma.solutionKeyResultLink.create({ data: solutionData }).then(() => null, (e: unknown) => e);
+    const solutionData = { workspaceId: WS, linkType: "SOLUTION_TARGETS_KEY_RESULT", fromType: "SOLUTION", fromId: solution, toType: "KEY_RESULT", toId: keyResult, source: "MCP", createdAt: now, updatedAt: now };
+    await prisma.entityLink.create({ data: solutionData });
+    const solutionError = await prisma.entityLink.create({ data: solutionData }).then(() => null, (e: unknown) => e);
     expect(isLinkUniqueRace(solutionError), (solutionError as Error)?.message).toBe(true);
-    await prisma.solutionKeyResultLink.deleteMany({});
+    await prisma.entityLink.deleteMany({});
   });
 
   it("is not fooled by an unrelated unique violation or other errors", () => {
@@ -100,7 +102,7 @@ describe.skipIf(!databaseUrl)("typed links against a real Prisma client and uniq
     );
     expect(results.filter((r) => r.created)).toHaveLength(1);
     expect(results.filter((r) => !r.created)).toHaveLength(7);
-    expect(await count("opportunity_objective_links")).toBe(1);
+    expect(await count("entity_links WHERE link_type = 'OPPORTUNITY_TARGETS_OBJECTIVE'")).toBe(1);
   });
 
   it("concurrent identical link calls all succeed (solution and key result)", async () => {
@@ -110,52 +112,41 @@ describe.skipIf(!databaseUrl)("typed links against a real Prisma client and uniq
       ),
     );
     expect(results.filter((r) => r.created)).toHaveLength(1);
-    expect(await count("solution_key_result_links")).toBe(1);
+    expect(await count("entity_links WHERE link_type = 'SOLUTION_TARGETS_KEY_RESULT'")).toBe(1);
   });
 
-  it("a duplicate artifact_links insert is recognised by isLinkUniqueRace, and concurrent identical ArtifactLink writes all succeed with one creator", async () => {
+  it("concurrent identical Artifact -> Solution link calls all succeed with one creator (the dedicated writer's shape)", async () => {
     const artifact = randomUUID();
     await q(`INSERT INTO {S}.artifacts (id, workspace_id, title, source_type) VALUES ($1,$2,'art','EXTERNAL_LINK')`, [artifact, WS]);
-    const data = { workspaceId: WS, artifactId: artifact, linkedType: "SOLUTION", linkedId: solution };
-    await prisma.artifactLink.create({ data });
-    const error = await prisma.artifactLink.create({ data }).then(() => null, (e: unknown) => e);
-    expect(error, "second create must fail on the unique index").not.toBeNull();
-    expect(isLinkUniqueRace(error), JSON.stringify({ code: (error as { code?: string }).code, meta: (error as { meta?: unknown }).meta, message: (error as Error).message })).toBe(true);
-    await prisma.artifactLink.deleteMany({});
-    // The same read-then-create shape as lib/artifacts.ts linkArtifactToSolution, under the shared retry.
+    // The same service call lib/artifacts.ts linkArtifactToSolution makes, under the shared retry.
     const results = await Promise.all(
       Array.from({ length: 8 }, () =>
-        runTypedLinkTransaction(prisma, async (tx) => {
-          const existing = await tx.artifactLink.findFirst({ where: { artifactId: artifact, linkedType: "SOLUTION", linkedId: solution } });
-          if (existing) return { created: false };
-          await tx.artifactLink.create({ data });
-          return { created: true };
-        }),
+        runTypedLinkTransaction(prisma, async (tx) =>
+          linkEntities(tx, { linkType: "ARTIFACT_ATTACHED_TO_SOLUTION", fromId: artifact, toId: solution, expectedWorkspaceId: WS, ctx: { source: "MCP", createdById: null }, viaDedicatedWriter: true }),
+        ),
       ),
     );
     expect(results.filter((r) => r.created)).toHaveLength(1);
-    expect(await count("artifact_links")).toBe(1);
+    expect(await count("entity_links WHERE link_type = 'ARTIFACT_ATTACHED_TO_SOLUTION'")).toBe(1);
   });
 
   it("drainLinksFor deletes a parent's links in committed statements of at most 500 links", async () => {
     const total = LINK_WRITE_CHUNK * 2 + 150;
     await q(`INSERT INTO {S}.opportunities (id, workspace_id, title) SELECT gen_random_uuid(), $1, 'bulk ' || g FROM generate_series(1, $2::int) g`, [WS, total]);
     await q(
-      `INSERT INTO {S}.opportunity_objective_links (workspace_id, opportunity_id, objective_id, origin)
-       SELECT $1, o.id, $2, 'DIRECT' FROM {S}.opportunities o WHERE o.title LIKE 'bulk %'`,
+      `INSERT INTO {S}.entity_links (workspace_id, link_type, from_type, from_id, to_type, to_id, origin, source, created_at, updated_at)
+       SELECT $1, 'OPPORTUNITY_TARGETS_OBJECTIVE', 'OPPORTUNITY', o.id, 'OBJECTIVE', $2, 'DIRECT', 'MCP', now(), now() FROM {S}.opportunities o WHERE o.title LIKE 'bulk %'`,
       [WS, objective],
     );
     // The earlier concurrent test left one link on this objective as well.
-    const before = await count("opportunity_objective_links");
+    const before = Number((await q(`SELECT count(*)::int AS n FROM {S}.entity_links WHERE to_type = 'OBJECTIVE' AND to_id = $1`, [objective])).rows[0].n);
     expect(before).toBe(total + 1);
 
     statements.length = 0;
-    // The count also includes the entity_links mirror rows (flag on outside production) that name this objective.
-    const mirrored = Number((await q(`SELECT count(*)::int AS n FROM {S}.entity_links WHERE to_type = 'OBJECTIVE' AND to_id = $1`, [objective])).rows[0].n);
     const removed = await drainLinksFor(prisma, "objective", [objective]);
-    expect(removed).toBe(before + mirrored);
-    expect(await count("opportunity_objective_links")).toBe(0);
-    const deletes = statements.filter((s) => /DELETE FROM/.test(s.query) && /opportunity_objective_links/.test(s.query));
+    expect(removed).toBe(before);
+    expect(await count("entity_links WHERE to_type = 'OBJECTIVE'")).toBe(0);
+    const deletes = statements.filter((s) => /DELETE FROM/.test(s.query) && /entity_links/.test(s.query));
     // 1,151 links need at least three passes, and no DELETE can name more than one chunk of ids (the highest bind parameter is the id count).
     expect(deletes.length).toBeGreaterThanOrEqual(Math.ceil(before / LINK_WRITE_CHUNK));
     for (const statement of deletes) {

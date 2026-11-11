@@ -12,11 +12,11 @@ vi.mock("@/lib/db", () => ({
       delete: vi.fn().mockResolvedValue({ id: "obj-123" }),
     },
     opportunity: { findMany: vi.fn().mockResolvedValue([]) },
-    opportunityObjectiveLink: { findMany: vi.fn().mockResolvedValue([]), deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
-    solutionKeyResultLink: { findMany: vi.fn().mockResolvedValue([]), deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
+    // entity_links is the only link store (the Key Result pointer, objective and solution links).
+    entityLink: { findMany: vi.fn().mockResolvedValue([]), deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
     keyResult: {
       count: vi.fn().mockResolvedValue(0),
-      findUnique: vi.fn().mockResolvedValue({ objectiveId: "obj-123" }),
+      findUnique: vi.fn().mockResolvedValue({ objectiveId: "obj-123", objective: { workspaceId: "workspace-1" } }),
       create: vi.fn().mockResolvedValue({ id: "kr-123" }),
       update: vi.fn().mockResolvedValue({ id: "kr-123" }),
       delete: vi.fn().mockResolvedValue({ id: "kr-123" }),

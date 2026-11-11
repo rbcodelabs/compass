@@ -7,7 +7,7 @@ import { fail, ok } from "@/lib/mcp-output"
 import { z } from "zod"
 import { captureWorkspaceMutation } from "@/lib/workspace-update-mutations"
 import { getMcpActor } from "@/lib/mcp-authz"
-import { setOpportunityKeyResult } from "@/lib/typed-links"
+import { getOpportunityKeyResultPointers, setOpportunityKeyResult } from "@/lib/typed-links"
 import {
   BatchRequestError, createOpportunityBatch, type BatchContext, type BatchItemResult, type OpportunityBatchItem,
 } from "@/lib/opportunity-batch-create"
@@ -69,14 +69,15 @@ export async function createOpportunity(input: {
   }])
   const result = results[0]
   if (!result.ok) return fail(result.error)
-  const opportunity = await prisma.opportunity.findFirst({ where: { id: result.id, workspaceId: input.workspaceId }, select: { id: true, seqPrefix: true, seqNumber: true, title: true, status: true, customerSegment: true, linkedKeyResultId: true, squadId: true } })
+  const opportunity = await prisma.opportunity.findFirst({ where: { id: result.id, workspaceId: input.workspaceId }, select: { id: true, seqPrefix: true, seqNumber: true, title: true, status: true, customerSegment: true, squadId: true } })
   if (!opportunity) return fail("The opportunity was created but could not be read back.")
+  const linkedKeyResultId = (await getOpportunityKeyResultPointers(prisma, input.workspaceId, [opportunity])).get(opportunity.id) ?? null
   return ok(withUrlLine(
     `**Opportunity created** in "${workspace.name}"\nID: ${opportunity.id}${displayLine("opportunity", opportunity)}\nTitle: ${opportunity.title}\nStatus: ${opportunity.status}`,
     safeEntityUrl({ orgSlug: workspace.organization?.slug, workspaceSlug: workspace.slug, type: "opportunity", id: opportunity.id, displayId: displayIdFromRow("opportunity", opportunity) }),
   ), {
     id: opportunity.id, displayId: displayIdFromRow("opportunity", opportunity), title: opportunity.title, status: opportunity.status, workspaceId: input.workspaceId,
-    customerSegment: opportunity.customerSegment, linkedKeyResultId: opportunity.linkedKeyResultId, squadId: opportunity.squadId,
+    customerSegment: opportunity.customerSegment, linkedKeyResultId, squadId: opportunity.squadId,
   })
 }
 

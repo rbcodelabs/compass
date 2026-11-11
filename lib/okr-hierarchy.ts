@@ -1,6 +1,7 @@
 import getPrisma from "@/lib/db";
 import { NO_CYCLE_LABEL } from "@/lib/okr-cycle-scope";
-import { runTypedLinkTransaction, syncLegacyLink } from "@/lib/typed-links";
+import { readEntityLinksOpportunityKeyResultPointer } from "@/lib/links/readers";
+import { runTypedLinkTransaction, setKeyResultPointer } from "@/lib/typed-links";
 
 /**
  * Cycle fields are null (title NO_CYCLE_LABEL) for an Objective with no cycle
@@ -465,11 +466,7 @@ export async function moveKeyResultToObjective(input: {
       throw new OKRHierarchyError("CIRCULAR_HIERARCHY", "The OKR hierarchy exceeds the supported depth.");
     }
 
-    const opportunities = await tx.opportunity.findMany({
-      where: { linkedKeyResultId: keyResult.id, workspaceId: input.workspaceId },
-      select: { id: true },
-      take: MAX_MOVE_OPPORTUNITIES + 1,
-    });
+    const opportunities = (await readEntityLinksOpportunityKeyResultPointer(tx, input.workspaceId, { keyResultIds: [keyResult.id] })).map((link) => ({ id: link.fromId }));
     if (opportunities.length > MAX_MOVE_OPPORTUNITIES) {
       throw new OKRHierarchyError(
         "INVALID_TIME_HORIZON",
@@ -494,7 +491,7 @@ export async function moveKeyResultToObjective(input: {
 
     // The Opportunity <-> Objective LEGACY link is derived from the pointer's Key Result, so it follows the move.
     for (const opportunity of opportunities) {
-      await syncLegacyLink(tx, {
+      await setKeyResultPointer(tx, {
         opportunityId: opportunity.id,
         workspaceId: input.workspaceId,
         keyResultId: keyResult.id,
