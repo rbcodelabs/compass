@@ -5,7 +5,7 @@
  *
  * Commenting keeps its contract: the button is titled "Comment on selection" and hands the editor's current selection to the same
  * handler the toolbar button used, so anchors are captured exactly as before. Link editing is inline (an input replaces the buttons), so
- * nothing leaves the bubble.
+ * nothing leaves the bubble. The bubble is shown only while the editor has focus and a non-empty text selection.
  */
 import { forwardRef, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BubbleMenu, type BubbleMenuProps } from "@tiptap/react/menus";
