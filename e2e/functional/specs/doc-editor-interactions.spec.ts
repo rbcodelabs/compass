@@ -71,6 +71,8 @@ test.describe("Doc editor interactions (desktop)", () => {
   test("selection bubble keeps the comment flow", async ({ page, base }) => {
     await openDoc(page, base);
     await page.keyboard.type("COMMENTWORD in a sentence");
+    // A comment anchors to saved content: wait for the autosave to settle first.
+    await expect(page.getByTestId("doc-save-status")).toHaveAttribute("data-state", "saved", { timeout: 15_000 });
     await page.keyboard.press("Home");
     for (let i = 0; i < "COMMENTWORD".length; i++) await page.keyboard.press("Shift+ArrowRight");
     const commentButton = page.getByTitle("Comment on selection");
