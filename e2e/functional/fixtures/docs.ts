@@ -19,7 +19,8 @@ export async function clickNewDoc(page: Page): Promise<void> {
   // that is still showing. Best effort: nothing here should fail the calling spec.
   const toggleNow = page.getByTestId("library-toggle");
   if ((await toggleNow.getAttribute("aria-pressed").catch(() => null)) === "true") {
-    await toggleNow.click({ timeout: 3_000, force: true }).catch(() => {});
+    // dispatchEvent, not click(): at phone width the drawer covers the toggle, so a coordinate click would land on the drawer.
+    await toggleNow.dispatchEvent("click").catch(() => {});
   }
   const overlay = page.locator('aside[data-mode="overlay"][aria-label="Library"]');
   if (await overlay.isVisible().catch(() => false)) await page.keyboard.press("Escape");
