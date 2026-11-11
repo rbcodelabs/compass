@@ -749,6 +749,7 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
             {justUpdated && !remote && <UpdatedJustNow />}
             {saveError && !remote && <span role="alert" className="text-xs text-status-danger">{saveError} <button type="button" className="underline" onClick={() => { void saveQueue.retry(); }}>Retry save</button></span>}
           </div>
+          {publishAction}
           {/* Open comments sidebar */}
           <ToolbarButton onClick={() => setActiveDocPanel("comments")} title="Comments" quiet>
             <span className="relative flex items-center justify-center">
@@ -788,7 +789,6 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
       </div>
       {remote && <RemoteUpdateBanner writer={remote.writer} onReload={handleReloadRemote} onKeepMine={handleKeepMine} />}
 
-      {publishAction}
 
       {/* Compact toolbar: only on touch and narrow screens, where there is no hover and the native selection UI takes over. Desktop
           formats through the selection bubble and the "/" menu. */}
