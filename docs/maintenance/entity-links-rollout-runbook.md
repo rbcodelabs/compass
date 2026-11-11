@@ -30,8 +30,17 @@ served). Flags are plain env vars: a change needs a redeploy to take effect.
    `entity_links read failed` and `[entity-links read-compare] mismatch`. Both must be empty.
 6. **On.** Flip one family at a time to `on`, redeploy, and repeat the parity GET and log search. Leave each family `on` through a soak
    before flipping the next.
-7. **Cleanup** (separate PR, only once every deployment you operate holds `on` on all families): remove the legacy readers and the
-   read-flag switch.
+7. **Cleanup.** The code half is DONE (this change): the legacy readers, the dual-write mirror, the read-flag switch and the shadow
+   comparator are removed, so `entity_links` is the only code path. It must not deploy to a database until every family is `*_READ=on`
+   there (a deployment still on `off` or `shadow` would show empty links after the deploy, because the cleanup code never reads the legacy
+   tables again) and the parity GET was 0. The legacy tables, their Prisma models and the migrations stay in place. The
+   `COMPASS_ENTITY_LINKS_*_MIRROR` and `*_READ` env vars are ignored and can be deleted from each environment after the deploy.
+   Left for the follow-up change: drop the four legacy tables (`opportunity_objective_links`, `solution_key_result_links`,
+   `artifact_links`, and the association rows of `task_links`) and the `opportunities.linked_key_result_id` column, and delete the env vars.
+   `task_links` itself stays while COMMENT and AGENT_CONVERSATION task links (never mirrored) live there; moving those is a separate change.
+   Two places still touch a frozen table on purpose, because Prisma's emulated `Restrict` (relationMode = "prisma") would otherwise refuse
+   the parent delete: `lib/legacy-link-tables.ts` removes `artifact_links` rows before an Artifact goes, and `deleteLinksOfTasks` in
+   `lib/task-link-writes.ts` removes `task_links` rows before a workspace's tasks go. Both disappear with the tables.
 
 ## Residual drift
 
@@ -42,10 +51,14 @@ free number) rather than editing a shipped one.
 
 ## Rollback
 
-Set the family's `*_READ` back to `shadow` (or `off`) and redeploy. Reads return to the legacy tables immediately; the mirror keeps
-writing, so no data is lost and a later flip needs no new backfill. Do not delete mirror rows to roll back.
+Before the step 7 code is deployed: set the family's `*_READ` back to `shadow` (or `off`) and redeploy. Reads return to the legacy tables
+immediately; the mirror keeps writing, so no data is lost and a later flip needs no new backfill. Do not delete mirror rows to roll back.
 
-## What to verify, per family, before `on`
+After the step 7 code is deployed there is no flag to flip: links written since then exist only in `entity_links`, so redeploying the previous
+build (which reads the legacy tables when its flags are `off`, or `entity_links` when they are `on`) is safe only with every family's `*_READ`
+still `on`. Keep those env vars set until the follow-up change deletes them.
+
+## What to verify, per family, before `on` (historical: done before step 7)
 
 - Every writer mirrors in the same transaction as the legacy write (tasks: `lib/task-link-writes.ts`, including decision follow-through).
 - Parity is 0 on real data, and a shadow soak shows no read-compare mismatches.

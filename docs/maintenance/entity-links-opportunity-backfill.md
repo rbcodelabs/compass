@@ -1,5 +1,10 @@
 # entity_links phase 5: Opportunity <-> Objective and the Opportunity -> Key Result pointer
 
+> **Status: historical (entity_links cleanup, runbook step 7).** entity_links is now the only store for Opportunity <-> Objective links and the Opportunity -> Key Result pointer (the `linked_key_result_id` column is no longer read or written). The dual-write mirror, the
+> `COMPASS_ENTITY_LINKS_*_MIRROR` / `*_READ` flags and the shadow-compare code are gone; this runbook describes how the one-time backfill
+> moved the old rows and is kept for deployments that have not run it yet. The legacy table is frozen (nothing reads or writes it) until a
+> later change drops it. `GET /api/admin/migrate` still reports `entityLinksReadParity`, now a historical check (see the runbook).
+
 Runbook for migration `095_entity_links_backfill_opportunity` (ADR "One generic entity_links table", phase 5). Nothing here applies
 anything by itself.
 
@@ -52,26 +57,12 @@ Like 072/094, 106 is a one-shot: a later round of drift needs another separately
 - Origin changes made while the flag is off are not mirrored; 095 repairs them. With the flag off, removals of stale pointer and LEGACY objective rows still happen on the next legacy write (only creation is gated).
 - A live writer inserting a pair between 095's select and insert makes the unique index refuse that batch; the hook re-selects (bounded), and a re-POST resumes anyway.
 
-## Read flag and read parity (entity_links read flip)
+## Read flag and read parity (retired)
 
-`COMPASS_ENTITY_LINKS_OPPORTUNITY_READ` = `off | shadow | on` decides how readers treat `OPPORTUNITY_TARGETS_OBJECTIVE` (origin compared) and `OPPORTUNITY_TARGETS_KEY_RESULT` (the `linked_key_result_id` pointer). Fail-closed: only the exact strings `shadow` and `on` count (in production
-exactly; elsewhere trimmed and case-insensitive), anything else, including unset, is `off`, and unlike the `*_MIRROR` flag there is no
-default-on outside production. Semantics: `off` reads the legacy table only; `shadow` serves the legacy result and compares it with
-`entity_links` (counts and ids only, never content), `on` serves `entity_links`. Rollback is always the flag set to `off`. The flag moves
-`LegacyAdapter.mode` from `mirror` to `shadow` / `read` (`effectiveLegacyMode` in `lib/links/registry.ts`).
-
-This change ships the flag, the comparator (`lib/links/read-compare.ts`) and the status below, and routes NO reader through them yet, so setting
-the flag changes nothing until the reader PR for this family lands.
-
-`GET /api/admin/migrate` reports `entityLinksReadParity` (read-only, counts and ids capped at 20): the read modes, `totalMismatches`, and per
-type `legacyLive`, `mirrorLive`, `onlyLegacy` (a flipped reader would hide the link), `onlyEntityLinks` (it would show an extra link) and
-`originDrift`. "Live" means both endpoints exist in the link's workspace, i.e. what the workspace-filtered readers show, so quarantined
-rows (dangling, cross-workspace) are absent on both sides. Cost: one scan of the legacy table plus the mirror rows of the family's types
-(`entity_links` has no index that leads with `link_type`); poll sparingly. Require zero mismatches (or an explained, repaired cause) before
-setting the flag to `on`. Types in this family: `opportunityObjective`, `opportunityKeyResultPointer`.
-
-The fourth family, `COMPASS_ENTITY_LINKS_SOLUTION_KR_READ` (`SOLUTION_TARGETS_KEY_RESULT`, status entry `solutionKeyResult`), has the same semantics and is backfilled by the explicit-only `098_entity_links_backfill_solution_key_result` (runbook:
-`entity-links-solution-key-result-backfill.md`). Until 098 has been applied its parity shows `onlyLegacy` for every pre-mirror link, so it must stay `off` or `shadow` until then.
+The per-family read flag and the shadow comparator were removed with the cleanup: readers always serve entity_links. `GET /api/admin/migrate`
+still reports `entityLinksReadParity` (read-only, counts and ids capped at 20) as a historical check: per link type `legacyLive`,
+`mirrorLive`, `onlyLegacy`, `onlyEntityLinks` and `originDrift`, where "live" means both endpoints exist in the link's workspace. Links
+created after the cleanup exist only in entity_links, so `onlyEntityLinks` grows by design.
 
 Testing note: the SQL half of `__tests__/links/read-parity-status.test.ts` is skipped unless `INTEGRATION_TEST_DATABASE_URL` points at a throwaway
 Postgres (any version >= 12, for example `postgresql://postgres@localhost:5499/t`); it builds and drops its own schema. Run it before changing
