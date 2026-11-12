@@ -3,10 +3,11 @@
  * of each legacy table against the LIVE entity_links rows of the matching link types. "Live" is what the workspace-filtered readers show:
  * both endpoints exist in the link's workspace (a dangling, foreign or NULL-workspace endpoint is absent).
  *
- * AFTER THE CODE CLEANUP (entity_links is the only store; the legacy tables are frozen and no code writes them) this is a historical
- * check, not a gate: links created after the cleanup exist only in entity_links, so `onlyEntityLinks` grows by design, and a link
- * removed after the cleanup leaves its frozen legacy row behind, so `onlyLegacy` can too. It is still the way to prove the backfills
- * landed before the legacy tables are dropped.
+ * AFTER THE CODE CLEANUP (entity_links is the only store; the legacy tables are frozen and no code writes them) links created after the
+ * cleanup exist only in entity_links, so `onlyEntityLinks` grows by design, and a link removed after the cleanup leaves its frozen
+ * legacy row behind, so `onlyLegacy` can too. `onlyLegacy` is the GATE of migration 116 (lib/migrations/entity-links-legacy-drop.ts): it
+ * must be 0 before the legacy tables are dropped. A family whose legacy source no longer exists (116 ran) reports `legacyDropped` and
+ * zeros instead of querying a missing table.
  *
  * Counts and capped ids only (no titles or content). Nothing here writes. Cost: each family reads its legacy table plus the rows of its
  * link types once (entity_links has no index that leads with link_type, so that part is a scan filtered by the workspace index), so

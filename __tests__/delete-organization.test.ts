@@ -434,7 +434,7 @@ describe("deleteOrganization", () => {
       where: { workspaceId: "ws-1" },
       data: { assumptionId: null },
     });
-    // The frozen artifact_links rows would Restrict the Artifact delete, so they are removed here (entity_links go with the workspace sweep).
+    // Artifact links are entity_links rows; they go with the workspace sweep.
     expect(mockArtifact.updateMany).toHaveBeenCalledWith({
       where: { workspaceId: "ws-1" },
       data: { currentRevisionId: null, updatedAt: expect.any(Date) },

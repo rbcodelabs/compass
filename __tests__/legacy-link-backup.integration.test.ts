@@ -97,9 +97,12 @@ describe.skipIf(!databaseUrl)("legacy link backup (export / verify / restore)", 
     const dir = tmp()
     let calls = 0
     const racing: BackupQuery = async (sql, params) => {
-      // After the first page of task_links is read, another writer adds a row, so the final count disagrees.
-      if (/FROM "[^"]+"\."task_links" WHERE TRUE AND id >/.test(sql) && ++calls === 2) await q(`INSERT INTO $S.task_links(task_id,linked_type,linked_id) VALUES (gen_random_uuid(),'DOC',gen_random_uuid())`)
-      return query(sql, params)
+      const result = await query(sql, params)
+      // After the last (empty) page of task_links has been read, another writer adds a row, so the final count disagrees with the export.
+      if (/FROM "[^"]+"\."task_links" WHERE TRUE AND id >/.test(sql) && ++calls === 3) {
+        await q(`INSERT INTO $S.task_links(task_id,linked_type,linked_id) VALUES (gen_random_uuid(),'DOC',gen_random_uuid())`)
+      }
+      return result
     }
     await expect(exportLegacyLinks(racing, schema, dir)).rejects.toThrow(/changed during the export/)
   }, 120_000)

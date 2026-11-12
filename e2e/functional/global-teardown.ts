@@ -286,7 +286,7 @@ export default async function globalTeardown() {
         [wsId]
       );
 
-      // Task links live in entity_links (swept by workspace above); nothing writes the frozen task_links table any more.
+      // Task links live in entity_links (swept by workspace above).
       await pool.query(
         `DELETE FROM "${S}".tasks WHERE workspace_id = $1`,
         [wsId]

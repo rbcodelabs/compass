@@ -7,7 +7,7 @@ const tx = {
   // `onDelete: Restrict`, so either one left behind turns the delete into a 500.
   commentElementAnchor: { deleteMany: vi.fn() },
   commentExternalAuthor: { deleteMany: vi.fn() },
-  // COMMENT task links are TASK_CREATED_FROM rows in entity_links; the frozen task_links twin of a not-yet-moved link goes too.
+  // COMMENT task links are TASK_CREATED_FROM rows in entity_links.
   entityLink: { findMany: vi.fn(), deleteMany: vi.fn() },
 }
 const runTransaction = async (operation: (client: typeof tx) => unknown, options?: { isolationLevel: string }) => {

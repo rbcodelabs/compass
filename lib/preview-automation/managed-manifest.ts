@@ -429,7 +429,7 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
   "116_entity_links_drop_legacy_tables": {
     "lib/migrations/entity-links-legacy-drop.ts": "af35c04bd7c46f836f8839d6cb079ca08a891428ee6c06d36e6179faf12c6933",
     "lib/migrations/legacy-link-relations.ts": "60ffe4aed01d764fb5fe7eca8b6e45822684ce16fa63ffdb715c3f4fff9ececa",
-    "lib/migrations/entity-links-read-parity.ts": "6d0e397af87aff9f964ecfec34429deea08279792cdcbe7c71781c4cc7fd007f",
+    "lib/migrations/entity-links-read-parity.ts": "94f366faa71f247aba57d16d7be127ddf864791d52b8a3247425cf3bb589aca0",
     "lib/migrations/workspace-id-on-solution-objective.ts": "43295c27b84b319d6cfcada757c7dab6c598c930e237aa642c8d05fa94a3f8c7",
   },
 };

@@ -35,9 +35,14 @@ describe.skipIf(!databaseUrl)("113 entity_links conversation backfill", () => {
   beforeAll(async () => {
     client = await pool.connect()
     await q(`CREATE SCHEMA $S`)
-    for (const table of ["entity_links", "task_links", "tasks", "agent_conversations"]) {
+    for (const table of ["entity_links", "tasks", "agent_conversations"]) {
       await q(`CREATE TABLE $S.${table} (LIKE "compass_dev".${table} INCLUDING DEFAULTS INCLUDING INDEXES)`)
     }
+    // task_links is gone from the Prisma schema (and so from the compass_dev fixture schema); create the legacy table as migration 027 shipped it.
+    await q(`CREATE TABLE $S.task_links (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(), task_id UUID NOT NULL, linked_type VARCHAR(30) NOT NULL, linked_id UUID NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(), created_by_id UUID, source VARCHAR(20) NOT NULL DEFAULT 'UI')`)
+    await q(`CREATE UNIQUE INDEX idx_task_links_task_linked_unique ON $S.task_links (task_id, linked_type, linked_id)`)
     await q(`CREATE TABLE $S._prisma_migrations (migration_name text, finished_at timestamptz)`)
     await q(`INSERT INTO $S._prisma_migrations VALUES ('091_entity_links', now())`)
     await q(`INSERT INTO $S.agent_conversations (id, workspace_id, user_id, created_at, updated_at) VALUES ($1,$2,$3,now(),now()), ($4,$5,$3,now(),now())`, [convGood, wsA, user, convOther, wsB])
