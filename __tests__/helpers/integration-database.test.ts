@@ -19,6 +19,7 @@ describe("integration database opt-in guard", () => {
     SAFE,
     "postgres://postgres:pw@127.0.0.1:5440/compass_e2e",
     `${SAFE}?sslmode=disable`,
+    `${SAFE}?sslmode=prefer`,
   ])("accepts %s", (url) => {
     expect(() => assertSafeIntegrationDatabaseUrl(url)).not.toThrow()
   })
@@ -28,6 +29,12 @@ describe("integration database opt-in guard", () => {
     ["a remote host that merely contains localhost", "postgresql://postgres:pw@localhost.evil.com:5432/compass_e2e"],
     ["the wrong database", "postgresql://postgres:pw@localhost:5432/postgres"],
     ["a schema override", `${SAFE}?schema=public`],
+    ["a host override", `${SAFE}?host=evil.example.com`],
+    ["a hostaddr override", `${SAFE}?hostaddr=10.0.0.5`],
+    ["a dbname override", `${SAFE}?dbname=prod`],
+    ["an options override", `${SAFE}?options=-c%20search_path%3Dpublic`],
+    ["an sslmode outside the allowlist", `${SAFE}?sslmode=require`],
+    ["an unknown parameter next to a good one", `${SAFE}?sslmode=disable&application_name=x`],
     ["a non-postgres protocol", "mysql://root:pw@localhost:3306/compass_e2e"],
     ["an unparseable value", "not a url"],
   ])("rejects %s", (_label, url) => {

@@ -13,9 +13,9 @@
  * E2E_ISOLATED_DATABASE guard (e2e/functional/fixtures/isolated-database.ts).
  *
  * Safety guard (the strictest behaviour the per-feature tests used to implement individually): a set value must be a
- * postgres(ql) URL on localhost / 127.0.0.1 whose database is exactly `compass_e2e` and which carries no `?schema=`
- * override. A set-but-unsafe value throws at import so the suite fails loudly rather than silently skipping or, worse,
- * writing to a real database. Other query parameters such as `?sslmode=disable` are allowed.
+ * postgres(ql) URL on localhost / 127.0.0.1 whose database is exactly `compass_e2e`, with no query parameters
+ * except `sslmode=disable|prefer` (so no `?schema=`, `?host=`, `?dbname=` ... override). A set-but-unsafe value throws at import so the suite fails loudly rather than silently skipping or, worse,
+ * writing to a real database.
  *
  * The per-feature variables this replaced are NOT honoured (clean break); if one is set while the new one is not, a
  * one-line hint is printed so a stale local environment is easy to fix.
@@ -60,6 +60,9 @@ export const LEGACY_INTEGRATION_DATABASE_ENVS = [
 const ALLOWED_PROTOCOLS = ["postgresql:", "postgres:"]
 const ALLOWED_HOSTS = ["localhost", "127.0.0.1"]
 const REQUIRED_DATABASE = "compass_e2e"
+// pg-connection-string lets query parameters override the host/database (`?host=`, `?dbname=`, ...), so nothing but
+// a plain-TCP sslmode is allowed. CI sets none; `disable`/`prefer` cover a local container without TLS.
+const ALLOWED_QUERY_PARAMS: Record<string, readonly string[]> = { sslmode: ["disable", "prefer"] }
 
 type Env = Record<string, string | undefined>
 
@@ -77,7 +80,9 @@ export function assertSafeIntegrationDatabaseUrl(raw: string): URL {
   if (!ALLOWED_PROTOCOLS.includes(url.protocol)) reject(`protocol ${url.protocol}`)
   if (!ALLOWED_HOSTS.includes(url.hostname)) reject(`host ${url.hostname}`)
   if (url.pathname !== `/${REQUIRED_DATABASE}`) reject(`database ${url.pathname}`)
-  if (url.searchParams.has("schema")) reject("has ?schema=")
+  for (const [key, value] of url.searchParams) {
+    if (!ALLOWED_QUERY_PARAMS[key]?.includes(value)) reject(`query parameter ${key}=${value} is not allowed`)
+  }
   return url
 }
 

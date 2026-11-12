@@ -151,8 +151,12 @@ function instrumentPool(target: Pool) {
 // 2 (workspaces + organizations) from the narrowed getUserWorkspaces.
 const BASELINE_OPERATIONS = 5
 const BASELINE_SELECTS = 10
-const DEDUPED_OPERATIONS = 3
-const DEDUPED_SELECTS = 4
+// Budget re-measured after #324 (org-wide member read-only workspace access, 6f86a53c), which added intended
+// queries: getUserWorkspaces also reads read-only org memberships (+1 operation, +2 selects through the organization
+// include). The dedupe itself is still proven by the per-key assertions below (Workspace.findFirst once, one session
+// read, no WorkspaceMember walk); this total only guards against new, unintended queries creeping in.
+const DEDUPED_OPERATIONS = 4
+const DEDUPED_SELECTS = 6
 
 const databaseUrl = integrationDatabaseUrl
 
@@ -281,8 +285,7 @@ describe.skipIf(!databaseUrl).sequential("workspace request dedupe", () => {
     expect(selects().length).toBe(BASELINE_SELECTS)
   })
 
-  // TODO(integration-ci): measured query counts drifted from the asserted budget (total 4 vs DEDUPED_OPERATIONS 3; Workspace.findFirst 3 vs 2 for two arguments); cause not investigated, decide whether the extra query is intended and update the budget or remove it, found when enabling in CI
-  it.skip("deduped: the same render issues 4 statements and 1 session read", async () => {
+  it("deduped: the same render issues 4 statements and 1 session read", async () => {
     await inRequestScope(dedupedRenderSequence)
     expect(authState.calls).toBe(1)
     expect(counts.get("Workspace.findFirst")).toBe(1)
@@ -294,14 +297,16 @@ describe.skipIf(!databaseUrl).sequential("workspace request dedupe", () => {
     expect(selects().length).toBe(DEDUPED_SELECTS)
   })
 
-  // TODO(integration-ci): measured query counts drifted from the asserted budget (total 4 vs DEDUPED_OPERATIONS 3; Workspace.findFirst 3 vs 2 for two arguments); cause not investigated, decide whether the extra query is intended and update the budget or remove it, found when enabling in CI
-  it.skip("keys the memo by arguments", async () => {
+  it("keys the memo by arguments", async () => {
     await inRequestScope(async () => {
       const { getWorkspaceContext } = await import("@/lib/workspace-context")
       await getWorkspaceContext(ORG_SLUG, WS_SLUG)
       await getWorkspaceContext(ORG_SLUG, "some-other-workspace")
     })
-    expect(counts.get("Workspace.findFirst")).toBe(2)
+    // One lookup for the real slug. The unknown slug misses, and because the caller is an org member
+    // getWorkspaceContext then runs the read-only-access fallback findFirst (#324): 1 + 2 = 3. A broken memo
+    // would repeat the first key and show 4.
+    expect(counts.get("Workspace.findFirst")).toBe(3)
   })
 
   it("does NOT persist across request scopes", async () => {

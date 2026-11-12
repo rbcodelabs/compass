@@ -10,6 +10,10 @@ on:
     branches: [main]
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   integration:
     runs-on: ubuntu-latest
@@ -45,11 +49,31 @@ jobs:
       # Every suite creates its own random schema in the shared database; two workers keep the connection count
       # (several suites open pools of 20) well under postgres' default max_connections of 100.
       - name: Run integration suites
+        shell: bash
         run: |
-          mapfile -t FILES < <(node scripts/integration-tests.mjs list)
+          set -euo pipefail
+          # Not process substitution: that would hide a failing `list`. An empty list must stop here, because
+          # `vitest run` with no file filters would run the whole unit suite with the database variable set.
+          LIST="$(node scripts/integration-tests.mjs list)"
+          [ -n "$LIST" ] || { echo "::error::no integration test files found (scripts/integration-tests.mjs list was empty)"; exit 1; }
+          mapfile -t FILES <<< "$LIST"
+          [ "${#FILES[@]}" -gt 0 ] || { echo "::error::empty integration file list"; exit 1; }
           echo "Running ${#FILES[@]} integration test files"
           pnpm exec vitest run --maxWorkers=2 --reporter=default --reporter=json --outputFile.json=integration-results.json "${FILES[@]}"
-      # Vitest reports "all skipped" as success, so assert that the suites really ran.
+      # Vitest reports "all skipped" as success, so assert that the suites really ran. If vitest itself failed it may
+      # have written no results; say so once instead of adding a second, confusing failure.
       - name: Assert the suites ran (not skipped)
         if: always()
-        run: node scripts/integration-tests.mjs check integration-results.json
+        run: |
+          if [ -f integration-results.json ]; then
+            node scripts/integration-tests.mjs check integration-results.json
+          else
+            echo "No integration-results.json: the run step failed before vitest produced results (see above)."
+          fi
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-results
+          path: integration-results.json
+          if-no-files-found: ignore
