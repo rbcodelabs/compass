@@ -87,6 +87,7 @@ describe.skipIf(!databaseUrl)("116 entity_links legacy drop through the register
     await twin("TASK_REFERENCES", "TASK", ids.task, "DOC", ids.doc)
     // An entity_links-only row (a link made after the cleanup): allowed.
     await twin("TASK_REFERENCES", "TASK", ids.task, "SOLUTION", ids.sol)
+    ids.entityOnly = (await q(`SELECT id FROM $S.entity_links WHERE link_type = 'TASK_REFERENCES' AND to_type = 'SOLUTION'`)).rows[0].id
   }, 240_000)
 
   afterAll(async () => {
@@ -159,6 +160,8 @@ describe.skipIf(!databaseUrl)("116 entity_links legacy drop through the register
     expect(await hasColumn()).toBe(false)
     expect(await receipt(NAME)).toBe(1)
     expect(await entityLinks()).toBe(links)
+    // The entity_links-only row (no legacy twin) did not block the drop and is still there, unchanged.
+    expect((await q(`SELECT from_id, to_id, link_type FROM $S.entity_links WHERE id = $1`, [ids.entityOnly])).rows).toEqual([{ from_id: ids.task, to_id: ids.sol, link_type: "TASK_REFERENCES" }])
     expect(await count(`SELECT count(*)::text AS n FROM $S.opportunities`)).toBe(opportunities)
     expect(await count(`SELECT count(*)::text AS n FROM $S.tasks`)).toBe(1)
   }, 180_000)

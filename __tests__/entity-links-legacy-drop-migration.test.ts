@@ -90,7 +90,7 @@ function fakeClient(handler: (sql: string, params: unknown[]) => Reply | undefin
 
 const ALL_PRESENT = { tables: [...LEGACY_LINK_TABLES], column: true }
 /** A database where the receipts, the catalog and the parity / 115 / 113 numbers are all configurable. */
-function world(opts: { receipts?: string[]; present?: { tables: string[]; column: boolean }; onlyLegacy?: number; originDrift?: number; unmoved?: number; conversationUnmatched?: number } = {}) {
+function world(opts: { receipts?: string[]; present?: { tables: string[]; column: boolean }; onlyLegacy?: number; onlyEntityLinks?: number; originDrift?: number; unmoved?: number; conversationUnmatched?: number } = {}) {
   const receipts = opts.receipts ?? ["091_entity_links", "115_entity_links_task_link_move"]
   const present = opts.present ?? ALL_PRESENT
   return fakeClient((sql, params) => {
@@ -99,7 +99,7 @@ function world(opts: { receipts?: string[]; present?: { tables: string[]; column
     if (/information_schema\.tables/.test(sql)) return { rows: present.tables.map((table_name) => ({ table_name })) }
     if (/information_schema\.columns/.test(sql)) return { rows: [{ n: present.column ? "1" : "0" }] }
     if (/^\s*WITH/.test(sql)) {
-      const row = { legacy_live: "1", mirror_live: "1", only_legacy: String(opts.onlyLegacy ?? 0), only_legacy_ids: (opts.onlyLegacy ? ["legacy-1"] : []), only_entity_links: "0", only_entity_links_ids: [], origin_drift: String(opts.originDrift ?? 0), origin_drift_ids: [] }
+      const row = { legacy_live: "1", mirror_live: "1", only_legacy: String(opts.onlyLegacy ?? 0), only_legacy_ids: (opts.onlyLegacy ? ["legacy-1"] : []), only_entity_links: String(opts.onlyEntityLinks ?? 0), only_entity_links_ids: (opts.onlyEntityLinks ? ["el-only-1"] : []), origin_drift: String(opts.originDrift ?? 0), origin_drift_ids: [] }
       return { rows: [row] }
     }
     if (/GROUP BY cls/.test(sql)) return { rows: [] } // the quarantine breakdowns
@@ -167,9 +167,12 @@ describe("the preflight refuses (nothing dropped) unless every check passes", ()
     expect(result.notes.join("\n")).toMatch(/different origin \(reported, not blocking\)/)
   })
 
-  it("entity_links-only rows are not a blocker (parity reports only legacy-only rows as blockers)", async () => {
-    const { client } = world()
+  it("entity_links-only rows (hidden rows such as a TASK_REFERENCES row with no task_links twin, or a moved COMMENT link no task lists) never block and are never touched", async () => {
+    const { client, query } = world({ onlyEntityLinks: 7 })
     expect((await evaluateLegacyDropPreflight(client, "s")).blockers).toEqual([])
+    await expect(dropLegacyLinkRelations(client, "s", [])).resolves.toHaveLength(5)
+    // The drop never writes entity_links: no INSERT / UPDATE / DELETE of any kind is issued.
+    expect(query.mock.calls.map(([sql]) => String(sql)).filter((sql) => /^\s*(INSERT|UPDATE|DELETE)\b/i.test(sql))).toEqual([])
   })
 })
 
