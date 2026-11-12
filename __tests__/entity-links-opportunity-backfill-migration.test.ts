@@ -57,8 +57,8 @@ describe("095 registration", () => {
   });
 
   it("is the backfill the two registry types name", () => {
-    expect(LINK_TYPES.OPPORTUNITY_TARGETS_OBJECTIVE.legacy?.backfillMigration).toBe(NAME);
-    expect(LINK_TYPES.OPPORTUNITY_TARGETS_KEY_RESULT.legacy?.backfillMigration).toBe(NAME);
+    expect(LINK_TYPES.OPPORTUNITY_TARGETS_OBJECTIVE.dedicatedWriter?.backfillMigration).toBe(NAME);
+    expect(LINK_TYPES.OPPORTUNITY_TARGETS_KEY_RESULT.dedicatedWriter?.backfillMigration).toBe(NAME);
   });
 });
 

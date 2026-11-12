@@ -90,13 +90,13 @@ test.describe("Discussion comment @mention -> task", () => {
     await expect(comment.getByTestId("comment-mention")).toContainText(`@${bName}`, { timeout: 10_000 });
     await expect(comment.getByTestId("comment-task-card")).toBeVisible();
 
-    // The task is assigned to B and linked to the comment and to the Roadmap Item.
+    // The task is assigned to B and linked to the Roadmap Item (an association, stored in entity_links); its comment link is residual.
     const { rows } = await pool.query<{ linked_type: string }>(
-      `SELECT l.linked_type FROM "${S}".tasks t JOIN "${S}".task_links l ON l.task_id = t.id
-        WHERE t.workspace_id = $1 AND t.assignee_user_id = $2 ORDER BY l.linked_type`,
+      `SELECT l.to_type AS linked_type FROM "${S}".tasks t JOIN "${S}".entity_links l ON l.from_id = t.id AND l.link_type = 'TASK_REFERENCES'
+        WHERE t.workspace_id = $1 AND t.assignee_user_id = $2 ORDER BY l.to_type`,
       [workspaceId, bUserId],
     );
-    expect(rows.map((row) => row.linked_type)).toEqual(["COMMENT", "ROADMAP_ITEM"]);
+    expect(rows.map((row) => row.linked_type)).toEqual(["ROADMAP_ITEM"]);
 
     // Reload: chip and card come back from the server.
     await page.reload();

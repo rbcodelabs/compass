@@ -1,6 +1,8 @@
 import pg from "pg";
 import { test, expect } from "../fixtures/index";
 import { isolatedE2EConnectionString } from "../fixtures/isolated-database";
+import getPrisma from "../../../lib/db";
+import { runTypedLinkTransaction, setKeyResultPointer } from "../../../lib/typed-links";
 
 const title = "Teams need to choose which launch stages fit their discovery process";
 const feedbackTitle = "Make marketing and launch stages optional for teams focused on continuous discovery";
@@ -18,7 +20,11 @@ async function seedRelationships() {
     const { rows: [kr] } = await pool.query(`INSERT INTO compass_dev.key_results
       (id,objective_id,title,target,current) VALUES (gen_random_uuid(),$1,$2,50,12) RETURNING id`, [objective.id, krTitle]);
     const { rows: [opportunity] } = await pool.query(`INSERT INTO compass_dev.opportunities
-      (id,workspace_id,title,status,linked_key_result_id) VALUES (gen_random_uuid(),$1,$2,'EXPLORING',$3) RETURNING id`, [workspace.id,title,kr.id]);
+      (id,workspace_id,title,status) VALUES (gen_random_uuid(),$1,$2,'EXPLORING') RETURNING id`, [workspace.id,title]);
+    // The Key Result pointer is an entity_links row, written through the app's typed-link writer.
+    await runTypedLinkTransaction(getPrisma(), (tx) =>
+      setKeyResultPointer(tx, { opportunityId: opportunity.id, workspaceId: workspace.id, keyResultId: kr.id, ctx: { source: "UI", createdById: null } }),
+    );
     const { rows: [empty] } = await pool.query(`INSERT INTO compass_dev.opportunities
       (id,workspace_id,title,status) VALUES (gen_random_uuid(),$1,'Unlinked discovery need','EXPLORING') RETURNING id`, [workspace.id]);
     const { rows: [feedback] } = await pool.query(`INSERT INTO compass_dev.feedback

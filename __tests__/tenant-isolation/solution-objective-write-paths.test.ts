@@ -450,6 +450,7 @@ const KNOWN_RAW_INSERT_SITES: Record<string, number> = {
   "__tests__/work-item-ids-backfill.integration.test.ts": 3, // legacy objective/solution/task fixtures for the 093 backfill; one objective deliberately has no workspace
   "e2e/functional/fixtures/seed-e2e.ts": 2,
   "e2e/functional/specs/agent-conversation-links.spec.ts": 1, // one solution fixture for the conversation-links check, listing workspace_id
+  "e2e/functional/specs/entity-links-ui.spec.ts": 2, // a solution and an objective for the link UI flows, each listing workspace_id
   "e2e/functional/specs/link-authoring.spec.ts": 2, // one objective and one solution for the synthetic workspace, each listing workspace_id
   "e2e/functional/specs/kanban-mobile-scroll.spec.ts": 2, // 1 literal solutions insert + 1 allow-listed dynamic (board.table)
   "e2e/functional/specs/markdown-description.spec.ts": 1, // allow-listed dynamic (kind)

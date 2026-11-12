@@ -81,7 +81,20 @@ export function solutionRow(id: string, overrides: Record<string, unknown> = {})
     title: `Solution ${id}`,
     status: "VALIDATED",
     opportunityId: `opp-${id}`,
-    opportunity: { id: `opp-${id}`, squadId: "squad-a", linkedKeyResultId: "kr-1" },
+    opportunity: { id: `opp-${id}`, squadId: "squad-a", keyResultPointer: "kr-1" },
     ...overrides,
+  };
+}
+
+/**
+ * For `vi.mock("@/lib/typed-links", async (importOriginal) => (await import("./roadmap-fake-prisma")).typedLinksWithPointerFixtures(await importOriginal()))`.
+ * The Opportunity -> Key Result pointer lives in entity_links (its own tests cover the read); here it is fed from the fixture
+ * opportunity rows' `keyResultPointer`.
+ */
+export function typedLinksWithPointerFixtures<T extends object>(actual: T): T {
+  return {
+    ...actual,
+    getOpportunityKeyResultPointers: async (_db: unknown, _workspaceId: string, rows: Array<{ id: string; keyResultPointer?: string | null }>) =>
+      new Map(rows.map((row) => [row.id, row.keyResultPointer ?? null])),
   };
 }

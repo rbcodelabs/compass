@@ -16,7 +16,7 @@ const { mockAuth, mockGetWorkspace, trigger, prisma } = vi.hoisted(() => ({
   },
 }))
 
-vi.mock("@/lib/links/legacy-mirror", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/lib/links/legacy-mirror")>()), mirrorTaskReference: vi.fn(), unmirrorTaskReference: vi.fn() }))
+vi.mock("@/lib/task-link-writes", () => ({ createTaskLink: vi.fn(), createTaskLinks: vi.fn(), deleteTaskLink: vi.fn(), getTaskLinkById: vi.fn() }))
 vi.mock("@/auth", () => ({ auth: mockAuth }))
 vi.mock("@/lib/workspace", () => ({ getWorkspace: mockGetWorkspace }))
 vi.mock("@/lib/db", () => ({ default: () => prisma }))

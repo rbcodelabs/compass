@@ -25,6 +25,7 @@ import type { SquadData, MemberData } from "@/lib/types";
 import { normalizeWorkspaceRole } from "@/lib/roles";
 import { WorkspacePage } from "@/components/patterns/workspace-page";
 import { buildTaskCards } from "@/lib/task-read-model";
+import { getTaskLinks, type TaskLinkView } from "@/lib/task-links-read";
 import { getWorkspace } from "@/lib/workspace";
 import { taskBoardFilterKey } from "@/lib/task-filters";
 import { parseAssigneeFilter, resolveTaskAssignees, taskLinkScope } from "@/lib/task-assignment";
@@ -153,11 +154,10 @@ export default async function TasksPage({ params, searchParams }: TasksPageProps
   }));
 
   const taskIds = rawTasks.map((task) => task.id);
-  const [taskLinks, subtaskCounts] = taskIds.length === 0
-    ? [[], []]
+  const [linksByTask, subtaskCounts] = taskIds.length === 0
+    ? [new Map<string, TaskLinkView[]>(), []]
     : await Promise.all([
-        // Stays on task_links (not the TASK read flip): the rows carry the legacy link id the UI passes to unlinkTask, and COMMENT links are legacy-only.
-        prisma.taskLink.findMany({ where: { taskId: { in: taskIds } }, orderBy: { createdAt: "asc" } }),
+        getTaskLinks(prisma, rawTasks.map((task) => ({ id: task.id, workspaceId: workspace.id }))),
         prisma.task.groupBy({
           by: ["parentTaskId"],
           where: { workspaceId: workspace.id, parentTaskId: { in: taskIds } },
@@ -168,6 +168,7 @@ export default async function TasksPage({ params, searchParams }: TasksPageProps
   // Batch-resolve linked-object titles across all tasks on this page, grouped
   // by linkedType, mirroring the resolver used by the MCP handlers — a single
   // page load can touch many linkedTypes at once, so this avoids N+1 queries.
+  const taskLinks = [...linksByTask.values()].flat();
   const linksByType = new Map<string, string[]>();
   for (const link of taskLinks) {
     const ids = linksByType.get(link.linkedType) ?? [];

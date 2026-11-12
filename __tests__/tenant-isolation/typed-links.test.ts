@@ -20,6 +20,10 @@ import {
 import { WS_A, WS_B, createTenantFakePrisma } from "../helpers/tenant-fake-prisma";
 
 const ctx = { source: "MCP" as const, createdById: null };
+const OBJECTIVE_LINK = "OPPORTUNITY_TARGETS_OBJECTIVE";
+const SOLUTION_KR_LINK = "SOLUTION_TARGETS_KEY_RESULT";
+const POINTER_LINK = "OPPORTUNITY_TARGETS_KEY_RESULT";
+let current: ReturnType<typeof createTenantFakePrisma>;
 
 function setup() {
   const fake = createTenantFakePrisma();
@@ -28,14 +32,30 @@ function setup() {
   fake.state.objectives.push({ id: "obj-a2", workspaceId: WS_A.id, cycleId: "cycle-a", title: "A objective 2", status: "ON_TRACK", sortOrder: 1 });
   fake.state.keyResults.push({ id: "kr-a-sibling", objectiveId: "obj-a", title: "A sibling key result", target: 1, current: 0, sortOrder: 1 });
   fake.state.keyResults.push({ id: "kr-a2", objectiveId: "obj-a2", title: "A key result 2", target: 1, current: 0, sortOrder: 0 });
-  const links = fake.state.opportunityObjectiveLinks;
-  const krLinks = fake.state.solutionKeyResultLinks;
+  current = fake;
+  // Views over entity_links, shaped like the old link tables so the assertions read the same.
+  const links = () => fake.state.entityLinks.filter((row) => row.linkType === OBJECTIVE_LINK).map((row): Record<string, unknown> => ({ ...row, opportunityId: row.fromId, objectiveId: row.toId }));
+  const krLinks = () => fake.state.entityLinks.filter((row) => row.linkType === SOLUTION_KR_LINK).map((row): Record<string, unknown> => ({ ...row, solutionId: row.fromId, keyResultId: row.toId }));
+  const pointers = () => fake.state.entityLinks.filter((row) => row.linkType === POINTER_LINK);
   const writesSince = (mark: number) => fake.state.writes.slice(mark);
-  return { fake, tx, links, krLinks, writesSince };
+  return { fake, tx, links, krLinks, pointers, writesSince };
 }
 const opp = (fake: ReturnType<typeof setup>["fake"], id: string) => fake.state.opportunities.find((o) => o.id === id)!;
-const seedLink = (links: Record<string, unknown>[], row: Record<string, unknown>) =>
-  links.push({ id: `seed-${links.length}`, source: "UI", createdById: null, createdAt: new Date(10 + links.length), ...row });
+const seedEntityLink = (row: Record<string, unknown>) =>
+  current.state.entityLinks.push({
+    id: `seed-${current.state.entityLinks.length}`, source: "UI", createdById: null, attrs: null, createdAt: new Date(10 + current.state.entityLinks.length), updatedAt: new Date(10),
+    ...row,
+  });
+const seedObjectiveLink = (row: { workspaceId: string; opportunityId: string; objectiveId: string; origin: string; createdAt?: Date }) => {
+  const { opportunityId, objectiveId, ...rest } = row;
+  seedEntityLink({ linkType: OBJECTIVE_LINK, fromType: "OPPORTUNITY", fromId: opportunityId, toType: "OBJECTIVE", toId: objectiveId, ...rest });
+};
+const seedSolutionLink = (row: { workspaceId: string; solutionId: string; keyResultId: string }) => {
+  const { solutionId, keyResultId, ...rest } = row;
+  seedEntityLink({ linkType: SOLUTION_KR_LINK, fromType: "SOLUTION", fromId: solutionId, toType: "KEY_RESULT", toId: keyResultId, origin: null, ...rest });
+};
+const seedPointer = (opportunityId: string, keyResultId: string, workspaceId: string = WS_A.id) =>
+  seedEntityLink({ linkType: POINTER_LINK, fromType: "OPPORTUNITY", fromId: opportunityId, toType: "KEY_RESULT", toId: keyResultId, workspaceId, origin: "LEGACY" });
 
 describe("assertSameWorkspacePair", () => {
   it("returns the shared workspace id", () => {
@@ -56,9 +76,9 @@ describe("linkOpportunityToObjective", () => {
     const { fake, tx, links } = setup();
     const result = await linkOpportunityToObjective(tx, { opportunityId: "opp-a", objectiveId: "obj-a", ctx, workspaceId: WS_B.id } as never);
     expect(result.created).toBe(true);
-    expect(links).toHaveLength(1);
-    expect(links[0]).toMatchObject({ workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a", origin: "DIRECT", source: "MCP" });
-    expect(fake.state.writes.filter((w) => w.startsWith("opportunityObjectiveLink"))).toHaveLength(1);
+    expect(links()).toHaveLength(1);
+    expect(links()[0]).toMatchObject({ workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a", origin: "DIRECT", source: "MCP" });
+    expect(fake.state.writes.filter((w) => w.startsWith("entityLink"))).toHaveLength(1);
   });
 
   it("is idempotent: a repeat reports created:false and writes nothing", async () => {
@@ -67,7 +87,7 @@ describe("linkOpportunityToObjective", () => {
     const mark = fake.state.writes.length;
     const again = await linkOpportunityToObjective(tx, { opportunityId: "opp-a", objectiveId: "obj-a", ctx });
     expect(again.created).toBe(false);
-    expect(links).toHaveLength(1);
+    expect(links()).toHaveLength(1);
     expect(fake.state.writes.slice(mark)).toEqual([]);
   });
 
@@ -81,7 +101,7 @@ describe("linkOpportunityToObjective", () => {
     const { fake, tx, links } = setup();
     const mark = fake.state.writes.length;
     await expect(linkOpportunityToObjective(tx, { opportunityId, objectiveId, ctx })).rejects.toBeInstanceOf(TypedLinkError);
-    expect(links).toEqual([]);
+    expect(links()).toEqual([]);
     expect(fake.state.writes.slice(mark)).toEqual([]);
   });
 
@@ -90,24 +110,24 @@ describe("linkOpportunityToObjective", () => {
     await expect(
       linkOpportunityToObjective(tx, { opportunityId: "opp-a", objectiveId: "obj-a", expectedWorkspaceId: WS_B.id, ctx }),
     ).rejects.toBeInstanceOf(TypedLinkError);
-    expect(links).toEqual([]);
+    expect(links()).toEqual([]);
   });
 
   it("adding a DIRECT link over an existing LEGACY pair flips its origin to DIRECT (no second row)", async () => {
     const { tx, links } = setup();
-    seedLink(links, { workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a", origin: "LEGACY" });
+    seedObjectiveLink({ workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a", origin: "LEGACY" });
     const result = await linkOpportunityToObjective(tx, { opportunityId: "opp-a", objectiveId: "obj-a", ctx });
     expect(result).toMatchObject({ created: false, originFlipped: true });
-    expect(links).toHaveLength(1);
-    expect(links[0].origin).toBe("DIRECT");
+    expect(links()).toHaveLength(1);
+    expect(links()[0].origin).toBe("DIRECT");
   });
 
   it("repairs a drifted workspaceId on the existing pair instead of failing the unique index", async () => {
     const { tx, links } = setup();
-    seedLink(links, { workspaceId: WS_B.id, opportunityId: "opp-a", objectiveId: "obj-a", origin: "DIRECT" });
+    seedObjectiveLink({ workspaceId: WS_B.id, opportunityId: "opp-a", objectiveId: "obj-a", origin: "DIRECT" });
     await linkOpportunityToObjective(tx, { opportunityId: "opp-a", objectiveId: "obj-a", ctx });
-    expect(links).toHaveLength(1);
-    expect(links[0].workspaceId).toBe(WS_A.id);
+    expect(links()).toHaveLength(1);
+    expect(links()[0].workspaceId).toBe(WS_A.id);
   });
 });
 
@@ -116,15 +136,15 @@ describe("unlinkOpportunityFromObjective", () => {
     const { tx, links } = setup();
     await linkOpportunityToObjective(tx, { opportunityId: "opp-a", objectiveId: "obj-a", ctx });
     expect(await unlinkOpportunityFromObjective(tx, { opportunityId: "opp-a", objectiveId: "obj-a" })).toMatchObject({ removed: 1 });
-    expect(links).toEqual([]);
+    expect(links()).toEqual([]);
     expect(await unlinkOpportunityFromObjective(tx, { opportunityId: "opp-a", objectiveId: "obj-a" })).toMatchObject({ removed: 0 });
   });
 
   it("never touches another workspace's link for the same ids", async () => {
     const { tx, links } = setup();
-    seedLink(links, { workspaceId: WS_B.id, opportunityId: "opp-a", objectiveId: "obj-a", origin: "DIRECT" });
+    seedObjectiveLink({ workspaceId: WS_B.id, opportunityId: "opp-a", objectiveId: "obj-a", origin: "DIRECT" });
     expect(await unlinkOpportunityFromObjective(tx, { opportunityId: "opp-a", objectiveId: "obj-a" })).toMatchObject({ removed: 0 });
-    expect(links).toHaveLength(1);
+    expect(links()).toHaveLength(1);
   });
 
   it("denies a foreign opportunity", async () => {
@@ -134,76 +154,80 @@ describe("unlinkOpportunityFromObjective", () => {
 
   it("keeps the link while the legacy pointer still implies it (a legacy-derived pair cannot be unlinked, only its DIRECT claim dropped)", async () => {
     const { fake, tx, links } = setup();
-    opp(fake, "opp-a").linkedKeyResultId = "kr-a";
-    seedLink(links, { workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a", origin: "DIRECT" });
+    seedPointer("opp-a", "kr-a");
+    seedObjectiveLink({ workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a", origin: "DIRECT" });
     const result = await unlinkOpportunityFromObjective(tx, { opportunityId: "opp-a", objectiveId: "obj-a" });
     expect(result).toMatchObject({ removed: 0, stillLinkedViaKeyResult: true });
-    expect(links).toHaveLength(1);
-    expect(links[0].origin).toBe("LEGACY");
+    expect(links()).toHaveLength(1);
+    expect(links()[0].origin).toBe("LEGACY");
   });
 });
 
-describe("setOpportunityKeyResult (legacy pointer dual-write)", () => {
-  it("set: writes the column and a LEGACY link to the key result's objective", async () => {
-    const { fake, tx, links } = setup();
-    await setOpportunityKeyResult(tx, { opportunityId: "opp-a", keyResultId: "kr-a", ctx });
-    expect(opp(fake, "opp-a").linkedKeyResultId).toBe("kr-a");
-    expect(links).toHaveLength(1);
-    expect(links[0]).toMatchObject({ workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a", origin: "LEGACY" });
+describe("setOpportunityKeyResult (the Key Result pointer in entity_links)", () => {
+  it("set: writes the pointer link and a LEGACY link to the key result's objective, never the column", async () => {
+    const { fake, tx, links, pointers } = setup();
+    const updated = await setOpportunityKeyResult(tx, { opportunityId: "opp-a", keyResultId: "kr-a", ctx });
+    expect(updated.linkedKeyResultId).toBe("kr-a");
+    expect(opp(fake, "opp-a").linkedKeyResultId).toBeNull();
+    expect(pointers()).toMatchObject([{ workspaceId: WS_A.id, fromId: "opp-a", toType: "KEY_RESULT", toId: "kr-a", origin: "LEGACY" }]);
+    expect(links()).toHaveLength(1);
+    expect(links()[0]).toMatchObject({ workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a", origin: "LEGACY" });
   });
 
   it("change to a key result under another objective: deletes the old LEGACY link and creates the new one", async () => {
     const { tx, links } = setup();
     await setOpportunityKeyResult(tx, { opportunityId: "opp-a", keyResultId: "kr-a", ctx });
     await setOpportunityKeyResult(tx, { opportunityId: "opp-a", keyResultId: "kr-a2", ctx });
-    expect(links.map((l) => [l.objectiveId, l.origin])).toEqual([["obj-a2", "LEGACY"]]);
+    expect(links().map((l) => [l.objectiveId, l.origin])).toEqual([["obj-a2", "LEGACY"]]);
   });
 
-  it("change to a sibling key result under the same objective keeps the single link", async () => {
-    const { tx, links } = setup();
+  it("change to a sibling key result under the same objective keeps the single objective link and replaces the pointer", async () => {
+    const { tx, links, pointers } = setup();
     await setOpportunityKeyResult(tx, { opportunityId: "opp-a", keyResultId: "kr-a", ctx });
-    const before = links[0];
+    const before = links()[0];
     await setOpportunityKeyResult(tx, { opportunityId: "opp-a", keyResultId: "kr-a-sibling", ctx });
-    expect(links).toEqual([before]);
+    expect(links()).toEqual([before]);
+    expect(pointers().map((row) => row.toId)).toEqual(["kr-a-sibling"]);
   });
 
-  it("clear: deletes the LEGACY link and nulls the column", async () => {
-    const { fake, tx, links } = setup();
+  it("clear: deletes the pointer and the LEGACY link", async () => {
+    const { tx, links, pointers } = setup();
     await setOpportunityKeyResult(tx, { opportunityId: "opp-a", keyResultId: "kr-a", ctx });
-    await setOpportunityKeyResult(tx, { opportunityId: "opp-a", keyResultId: null, ctx });
-    expect(opp(fake, "opp-a").linkedKeyResultId).toBeNull();
-    expect(links).toEqual([]);
+    const cleared = await setOpportunityKeyResult(tx, { opportunityId: "opp-a", keyResultId: null, ctx });
+    expect(cleared.linkedKeyResultId).toBeNull();
+    expect(pointers()).toEqual([]);
+    expect(links()).toEqual([]);
   });
 
   it("a DIRECT link survives a legacy clear and a legacy change away from its objective", async () => {
     const { tx, links } = setup();
     await linkOpportunityToObjective(tx, { opportunityId: "opp-a", objectiveId: "obj-a", ctx });
     await setOpportunityKeyResult(tx, { opportunityId: "opp-a", keyResultId: "kr-a2", ctx });
-    expect(links.map((l) => [l.objectiveId, l.origin]).sort()).toEqual([["obj-a", "DIRECT"], ["obj-a2", "LEGACY"]]);
+    expect(links().map((l) => [l.objectiveId, l.origin]).sort()).toEqual([["obj-a", "DIRECT"], ["obj-a2", "LEGACY"]]);
     await setOpportunityKeyResult(tx, { opportunityId: "opp-a", keyResultId: null, ctx });
-    expect(links.map((l) => [l.objectiveId, l.origin])).toEqual([["obj-a", "DIRECT"]]);
+    expect(links().map((l) => [l.objectiveId, l.origin])).toEqual([["obj-a", "DIRECT"]]);
   });
 
   it("a legacy set is not downgrading an existing DIRECT link to the same objective", async () => {
     const { tx, links } = setup();
     await linkOpportunityToObjective(tx, { opportunityId: "opp-a", objectiveId: "obj-a", ctx });
     await setOpportunityKeyResult(tx, { opportunityId: "opp-a", keyResultId: "kr-a", ctx });
-    expect(links).toHaveLength(1);
-    expect(links[0].origin).toBe("DIRECT");
+    expect(links()).toHaveLength(1);
+    expect(links()[0].origin).toBe("DIRECT");
     await setOpportunityKeyResult(tx, { opportunityId: "opp-a", keyResultId: null, ctx });
-    expect(links).toHaveLength(1);
+    expect(links()).toHaveLength(1);
   });
 
   it.each([
     ["a key result in another workspace", "kr-b"],
     ["a key result under an objective with a NULL workspaceId", "kr-null"],
     ["a missing key result", "nope"],
-  ])("denies %s: no column write, no link write", async (_label, keyResultId) => {
-    const { fake, tx, links } = setup();
+  ])("denies %s: no opportunity write, no link write", async (_label, keyResultId) => {
+    const { fake, tx, links, pointers } = setup();
     const mark = fake.state.writes.length;
     await expect(setOpportunityKeyResult(tx, { opportunityId: "opp-a", keyResultId, ctx })).rejects.toBeInstanceOf(TypedLinkError);
-    expect(opp(fake, "opp-a").linkedKeyResultId).toBeNull();
-    expect(links).toEqual([]);
+    expect(pointers()).toEqual([]);
+    expect(links()).toEqual([]);
     expect(fake.state.writes.slice(mark)).toEqual([]);
   });
 
@@ -219,8 +243,8 @@ describe("Solution <-> Key Result", () => {
     const first = await linkSolutionToKeyResult(tx, { solutionId: "sol-a", keyResultId: "kr-a", ctx, workspaceId: WS_B.id } as never);
     const again = await linkSolutionToKeyResult(tx, { solutionId: "sol-a", keyResultId: "kr-a", ctx });
     expect([first.created, again.created]).toEqual([true, false]);
-    expect(krLinks).toHaveLength(1);
-    expect(krLinks[0]).toMatchObject({ workspaceId: WS_A.id, solutionId: "sol-a", keyResultId: "kr-a", source: "MCP" });
+    expect(krLinks()).toHaveLength(1);
+    expect(krLinks()[0]).toMatchObject({ workspaceId: WS_A.id, solutionId: "sol-a", keyResultId: "kr-a", source: "MCP" });
   });
 
   it.each([
@@ -232,17 +256,17 @@ describe("Solution <-> Key Result", () => {
     const { fake, tx, krLinks } = setup();
     const mark = fake.state.writes.length;
     await expect(linkSolutionToKeyResult(tx, { solutionId, keyResultId, ctx })).rejects.toBeInstanceOf(TypedLinkError);
-    expect(krLinks).toEqual([]);
+    expect(krLinks()).toEqual([]);
     expect(fake.state.writes.slice(mark)).toEqual([]);
   });
 
   it("unlink removes once then reports 0, within the solution's workspace only", async () => {
     const { tx, krLinks } = setup();
     await linkSolutionToKeyResult(tx, { solutionId: "sol-a", keyResultId: "kr-a", ctx });
-    seedLink(krLinks, { workspaceId: WS_B.id, solutionId: "sol-a", keyResultId: "kr-a-other", origin: undefined });
+    seedSolutionLink({ workspaceId: WS_B.id, solutionId: "sol-a", keyResultId: "kr-a-other" });
     expect(await unlinkSolutionFromKeyResult(tx, { solutionId: "sol-a", keyResultId: "kr-a" })).toMatchObject({ removed: 1 });
     expect(await unlinkSolutionFromKeyResult(tx, { solutionId: "sol-a", keyResultId: "kr-a" })).toMatchObject({ removed: 0 });
-    expect(krLinks).toHaveLength(1);
+    expect(krLinks()).toHaveLength(1);
   });
 
   it("does not change Solution.opportunityId", async () => {
@@ -255,38 +279,38 @@ describe("Solution <-> Key Result", () => {
 describe("deleteLinksFor", () => {
   it("removes every link naming the deleted parent, of both origins, and leaves other rows", async () => {
     const { tx, links, krLinks } = setup();
-    seedLink(links, { workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a", origin: "LEGACY" });
-    seedLink(links, { workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a2", origin: "DIRECT" });
-    seedLink(links, { workspaceId: WS_B.id, opportunityId: "opp-b", objectiveId: "obj-b", origin: "DIRECT" });
-    seedLink(krLinks, { workspaceId: WS_A.id, solutionId: "sol-a", keyResultId: "kr-a" });
+    seedObjectiveLink({ workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a", origin: "LEGACY" });
+    seedObjectiveLink({ workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a2", origin: "DIRECT" });
+    seedObjectiveLink({ workspaceId: WS_B.id, opportunityId: "opp-b", objectiveId: "obj-b", origin: "DIRECT" });
+    seedSolutionLink({ workspaceId: WS_A.id, solutionId: "sol-a", keyResultId: "kr-a" });
     expect(await deleteLinksFor(tx, "objective", ["obj-a"])).toBe(1);
     expect(await deleteLinksFor(tx, "opportunity", ["opp-a"])).toBe(1);
     expect(await deleteLinksFor(tx, "keyResult", ["kr-a"])).toBe(1);
-    expect(links.map((l) => l.opportunityId)).toEqual(["opp-b"]);
-    expect(krLinks).toEqual([]);
+    expect(links().map((l) => l.opportunityId)).toEqual(["opp-b"]);
+    expect(krLinks()).toEqual([]);
   });
 
   it("is a no-op for an empty id list and chunks large lists", async () => {
     const { fake, tx, links } = setup();
     expect(await deleteLinksFor(tx, "solution", [])).toBe(0);
-    for (let i = 0; i < 1_200; i += 1) seedLink(links, { workspaceId: WS_A.id, opportunityId: `o${i}`, objectiveId: "obj-a", origin: "LEGACY" });
-    const spy = vi.spyOn(fake.client.opportunityObjectiveLink, "deleteMany");
-    // Many parent ids in one call: 1,200 ids are split so no statement touches more than LINK_WRITE_CHUNK ids.
+    for (let i = 0; i < 1_200; i += 1) seedObjectiveLink({ workspaceId: WS_A.id, opportunityId: `o${i}`, objectiveId: "obj-a", origin: "LEGACY" });
+    const spy = vi.spyOn(fake.client.entityLink, "deleteMany");
+    // Many parent ids in one call: 1,200 ids are split so no statement touches more than LINK_WRITE_CHUNK links.
     const ids = Array.from({ length: 1_200 }, (_, i) => `o${i}`);
     expect(await deleteLinksFor(tx, "opportunity", ids)).toBe(1_200);
-    expect(links).toEqual([]);
+    expect(links()).toEqual([]);
     expect(spy).toHaveBeenCalledTimes(3);
-    for (const [args] of spy.mock.calls) expect(((args as { where: { opportunityId: { in: string[] } } }).where.opportunityId.in).length).toBeLessThanOrEqual(500);
+    for (const [args] of spy.mock.calls) expect(((args as { where: { id: { in: string[] } } }).where.id.in).length).toBeLessThanOrEqual(500);
   });
 });
 
 describe("reads", () => {
   it("returns objectives per opportunity ordered by created_at then id, and never a link with the wrong workspaceId", async () => {
     const { tx, links } = setup();
-    seedLink(links, { workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a2", origin: "DIRECT", createdAt: new Date(5) });
-    seedLink(links, { workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a", origin: "LEGACY", createdAt: new Date(5) });
+    seedObjectiveLink({ workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a2", origin: "DIRECT", createdAt: new Date(5) });
+    seedObjectiveLink({ workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a", origin: "LEGACY", createdAt: new Date(5) });
     // Wrong workspaceId on the link row: both endpoints are workspace A's, but the row says B. Never returned to A.
-    seedLink(links, { workspaceId: WS_B.id, opportunityId: "opp-a", objectiveId: "obj-b", origin: "DIRECT", createdAt: new Date(1) });
+    seedObjectiveLink({ workspaceId: WS_B.id, opportunityId: "opp-a", objectiveId: "obj-b", origin: "DIRECT", createdAt: new Date(1) });
     const map = await getLinkedObjectivesByOpportunity(tx, WS_A.id, ["opp-a"]);
     // Equal created_at ties break on the LINK id (seed-0 for obj-a2, seed-1 for obj-a), not on the objective id.
     expect(map.get("opp-a")!.map((o) => o.id)).toEqual(["obj-a2", "obj-a"]);
@@ -294,16 +318,16 @@ describe("reads", () => {
 
   it("hides a link whose objective is NULL-workspace or in another workspace, even if the link row claims workspace A", async () => {
     const { tx, links } = setup();
-    seedLink(links, { workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-null", origin: "DIRECT" });
-    seedLink(links, { workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-b", origin: "DIRECT" });
-    seedLink(links, { workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "ghost", origin: "DIRECT" });
+    seedObjectiveLink({ workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-null", origin: "DIRECT" });
+    seedObjectiveLink({ workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-b", origin: "DIRECT" });
+    seedObjectiveLink({ workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "ghost", origin: "DIRECT" });
     const map = await getLinkedObjectivesByOpportunity(tx, WS_A.id, ["opp-a"]);
     expect(map.get("opp-a")).toEqual([]);
   });
 
   it("does not return links for an opportunity that is not in the workspace", async () => {
     const { tx, links } = setup();
-    seedLink(links, { workspaceId: WS_A.id, opportunityId: "opp-b", objectiveId: "obj-a", origin: "DIRECT" });
+    seedObjectiveLink({ workspaceId: WS_A.id, opportunityId: "opp-b", objectiveId: "obj-a", origin: "DIRECT" });
     const map = await getLinkedObjectivesByOpportunity(tx, WS_A.id, ["opp-b"]);
     expect(map.get("opp-b")).toBeUndefined();
   });
@@ -315,10 +339,10 @@ describe("reads", () => {
 
   it("returns key results per solution with the same workspace filtering", async () => {
     const { tx, krLinks } = setup();
-    seedLink(krLinks, { workspaceId: WS_A.id, solutionId: "sol-a", keyResultId: "kr-a" });
-    seedLink(krLinks, { workspaceId: WS_A.id, solutionId: "sol-a", keyResultId: "kr-b" });
-    seedLink(krLinks, { workspaceId: WS_A.id, solutionId: "sol-a", keyResultId: "kr-null" });
-    seedLink(krLinks, { workspaceId: WS_B.id, solutionId: "sol-a", keyResultId: "kr-a2" });
+    seedSolutionLink({ workspaceId: WS_A.id, solutionId: "sol-a", keyResultId: "kr-a" });
+    seedSolutionLink({ workspaceId: WS_A.id, solutionId: "sol-a", keyResultId: "kr-b" });
+    seedSolutionLink({ workspaceId: WS_A.id, solutionId: "sol-a", keyResultId: "kr-null" });
+    seedSolutionLink({ workspaceId: WS_B.id, solutionId: "sol-a", keyResultId: "kr-a2" });
     const map = await getLinkedKeyResultsBySolution(tx, WS_A.id, ["sol-a", "sol-null"]);
     expect(map.get("sol-a")!.map((k) => k.id)).toEqual(["kr-a"]);
     expect(map.get("sol-null")).toBeUndefined();
@@ -328,8 +352,8 @@ describe("reads", () => {
 describe("listLinks", () => {
   it("lists by opportunity with objective titles, paginates with a cursor, and is workspace filtered", async () => {
     const { tx, links } = setup();
-    for (const objectiveId of ["obj-a", "obj-a2"]) seedLink(links, { workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId, origin: "DIRECT" });
-    seedLink(links, { workspaceId: WS_B.id, opportunityId: "opp-a", objectiveId: "obj-b", origin: "DIRECT" });
+    for (const objectiveId of ["obj-a", "obj-a2"]) seedObjectiveLink({ workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId, origin: "DIRECT" });
+    seedObjectiveLink({ workspaceId: WS_B.id, opportunityId: "opp-a", objectiveId: "obj-b", origin: "DIRECT" });
     const page1 = await listLinks(tx, { workspaceId: WS_A.id, opportunityId: "opp-a", limit: 1 });
     const objectiveIds = (items: { [k: string]: unknown }[]) => items.map((i) => i.objectiveId);
     expect(objectiveIds(page1.items)).toEqual(["obj-a"]);
@@ -351,8 +375,8 @@ describe("listLinks", () => {
 
   it("lists by objective, solution and key result", async () => {
     const { tx, links, krLinks } = setup();
-    seedLink(links, { workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a", origin: "LEGACY" });
-    seedLink(krLinks, { workspaceId: WS_A.id, solutionId: "sol-a", keyResultId: "kr-a" });
+    seedObjectiveLink({ workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a", origin: "LEGACY" });
+    seedSolutionLink({ workspaceId: WS_A.id, solutionId: "sol-a", keyResultId: "kr-a" });
     expect((await listLinks(tx, { workspaceId: WS_A.id, objectiveId: "obj-a", limit: 10 })).items[0]).toMatchObject({ opportunityId: "opp-a", origin: "LEGACY" });
     expect((await listLinks(tx, { workspaceId: WS_A.id, solutionId: "sol-a", limit: 10 })).items[0]).toMatchObject({ kind: "solution_key_result", keyResultId: "kr-a", keyResultTitle: "A key result" });
     expect((await listLinks(tx, { workspaceId: WS_A.id, keyResultId: "kr-a", limit: 10 })).items[0]).toMatchObject({ solutionId: "sol-a", solutionTitle: "A solution" });
@@ -360,7 +384,7 @@ describe("listLinks", () => {
 });
 
 describe("updatedAt: a key result edit is an edit (recency sort and the expectedUpdatedAt check depend on it)", () => {
-  it("setOpportunityKeyResult bumps updatedAt, records updatedById for a human, and invalidates a stale expectedUpdatedAt", async () => {
+  it("setOpportunityKeyResult bumps updatedAt (the pointer is a link, so this is the only row write), records updatedById for a human, and invalidates a stale expectedUpdatedAt", async () => {
     const { fake, tx } = setup();
     const row = opp(fake, "opp-a") as Record<string, unknown>;
     const before = new Date(1_000);
@@ -388,7 +412,7 @@ describe("updatedAt: a key result edit is an edit (recency sort and the expected
     row.updatedAt = new Date(1_000);
     await unlinkOpportunityFromObjective(tx, { opportunityId: "opp-a", objectiveId: "obj-a" });
     expect((row.updatedAt as Date).getTime()).toBe(1_000);
-    seedLink(links, { workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a", origin: "DIRECT" });
+    seedObjectiveLink({ workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a", origin: "DIRECT" });
     await unlinkOpportunityFromObjective(tx, { opportunityId: "opp-a", objectiveId: "obj-a" });
     expect((row.updatedAt as Date).getTime()).toBeGreaterThan(1_000);
   });
@@ -403,14 +427,12 @@ describe("updatedAt: a key result edit is an edit (recency sort and the expected
 });
 
 describe("a missing link table FAILS LOUDLY: reads, writes, deletes and the tools all propagate the database error", () => {
-  const missing = (code: string) => Object.assign(new Error('relation "opportunity_objective_links" does not exist'), { code });
+  const missing = (code: string) => Object.assign(new Error('relation "entity_links" does not exist'), { code });
   const withMissingTable = (error: unknown) => {
     const { fake, tx, links } = setup();
-    seedLink(links, { workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a", origin: "DIRECT" });
-    for (const model of ["opportunityObjectiveLink", "solutionKeyResultLink"] as const) {
-      const delegate = fake.client[model] as unknown as Record<string, () => Promise<never>>;
-      for (const op of ["findMany", "findFirst", "create", "update", "deleteMany"]) delegate[op] = async () => { throw error };
-    }
+    seedObjectiveLink({ workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a", origin: "DIRECT" });
+    const delegate = fake.client.entityLink as unknown as Record<string, () => Promise<never>>;
+    for (const op of ["findMany", "findFirst", "create", "update", "deleteMany"]) delegate[op] = async () => { throw error };
     return { fake, tx };
   };
 
@@ -419,7 +441,7 @@ describe("a missing link table FAILS LOUDLY: reads, writes, deletes and the tool
     ["Postgres 42P01 on the error", missing("42P01")],
     ["Postgres 42P01 on the cause", Object.assign(new Error("query failed"), { cause: { originalCode: "42P01" } })],
     ["driver adapter metadata", Object.assign(new Error("query failed"), { code: "P2010", meta: { driverAdapterError: { cause: { originalCode: "42P01" } } } })],
-    ["a code-less 'relation does not exist' message", new Error('relation "solution_key_result_links" does not exist')],
+    ["a code-less 'relation does not exist' message", new Error('relation "entity_links" does not exist')],
   ])("both batch read helpers THROW the original error (%s), with no 'no links' fallback and no warning", async (_n, error) => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const { tx } = withMissingTable(error);
@@ -453,33 +475,34 @@ describe("a missing link table FAILS LOUDLY: reads, writes, deletes and the tool
 
   it("preverified skips the workspace re-check query", async () => {
     const { fake, tx, links } = setup();
-    seedLink(links, { workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a", origin: "DIRECT" });
+    seedObjectiveLink({ workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a", origin: "DIRECT" });
     const spy = vi.spyOn(fake.client.opportunity, "findMany");
     expect((await getLinkedObjectivesByOpportunity(tx, WS_A.id, ["opp-a"], { preverified: true })).get("opp-a")).toEqual([{ id: "obj-a", title: "A objective" }]);
-    expect(spy).not.toHaveBeenCalled();
+    // The link reader's own liveness check still reads the opportunities once; the unverified call adds the workspace re-check on top.
+    const afterPreverified = spy.mock.calls.length;
     await getLinkedObjectivesByOpportunity(tx, WS_A.id, ["opp-a"]);
-    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy.mock.calls.length - afterPreverified).toBe(afterPreverified + 1);
   });
 });
 
 describe("draining a parent with many links", () => {
   it("drainLinksFor deletes by LINK id in passes of at most 500 links, however many one parent holds", async () => {
     const { fake, tx, links } = setup();
-    for (let i = 0; i < 1_203; i += 1) seedLink(links, { workspaceId: WS_A.id, opportunityId: `o${i}`, objectiveId: "obj-a", origin: "LEGACY" });
-    seedLink(links, { workspaceId: WS_A.id, opportunityId: "keep", objectiveId: "obj-a2", origin: "DIRECT" });
-    const spy = vi.spyOn(fake.client.opportunityObjectiveLink, "deleteMany");
+    for (let i = 0; i < 1_203; i += 1) seedObjectiveLink({ workspaceId: WS_A.id, opportunityId: `o${i}`, objectiveId: "obj-a", origin: "LEGACY" });
+    seedObjectiveLink({ workspaceId: WS_A.id, opportunityId: "keep", objectiveId: "obj-a2", origin: "DIRECT" });
+    const spy = vi.spyOn(fake.client.entityLink, "deleteMany");
     expect(await drainLinksFor(tx, "objective", ["obj-a"])).toBe(1_203);
-    expect(links.map((l) => l.opportunityId)).toEqual(["keep"]);
+    expect(links().map((l) => l.opportunityId)).toEqual(["keep"]);
     expect(spy.mock.calls.map(([args]) => ((args as { where: { id: { in: string[] } } }).where.id.in).length)).toEqual([500, 500, 203]);
     expect(await drainLinksFor(tx, "objective", ["obj-a"])).toBe(0);
   });
 
   it("drainLegacyLinksForOpportunities drains only LEGACY links", async () => {
     const { tx, links } = setup();
-    seedLink(links, { workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a", origin: "LEGACY" });
-    seedLink(links, { workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a2", origin: "DIRECT" });
+    seedObjectiveLink({ workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a", origin: "LEGACY" });
+    seedObjectiveLink({ workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a2", origin: "DIRECT" });
     expect(await drainLegacyLinksForOpportunities(tx, ["opp-a"])).toBe(1);
-    expect(links.map((l) => l.origin)).toEqual(["DIRECT"]);
+    expect(links().map((l) => l.origin)).toEqual(["DIRECT"]);
   });
 });
 
@@ -489,7 +512,7 @@ describe("drain robustness", () => {
   it("a delete that removes nothing is re-checked: the loop ends when a FIND is empty (a concurrent drain took the rows), no spurious error", async () => {
     const { tx, fake } = setup()
     let finds = 0
-    const delegate = fake.client.opportunityObjectiveLink as unknown as { findMany: unknown; deleteMany: unknown }
+    const delegate = fake.client.entityLink as unknown as { findMany: unknown; deleteMany: unknown }
     delegate.findMany = async () => (finds++ === 0 ? ids(3) : [])
     delegate.deleteMany = async () => ({ count: 0 })
     await expect(drainLinksFor(tx, "objective", ["obj-a"])).resolves.toBe(0)
@@ -498,7 +521,7 @@ describe("drain robustness", () => {
 
   it("repeated stalls (rows keep appearing, none deletable) still end in an error rather than looping", async () => {
     const { tx, fake } = setup()
-    const delegate = fake.client.opportunityObjectiveLink as unknown as { findMany: unknown; deleteMany: unknown }
+    const delegate = fake.client.entityLink as unknown as { findMany: unknown; deleteMany: unknown }
     delegate.findMany = async () => ids(3)
     delegate.deleteMany = async () => ({ count: 0 })
     await expect(drainLinksFor(tx, "objective", ["obj-a"])).rejects.toThrow("Link delete made no progress")
@@ -506,7 +529,7 @@ describe("drain robustness", () => {
 
   it("a runaway drain stops at the pass cap", async () => {
     const { tx, fake } = setup()
-    const delegate = fake.client.opportunityObjectiveLink as unknown as { findMany: unknown; deleteMany: unknown }
+    const delegate = fake.client.entityLink as unknown as { findMany: unknown; deleteMany: unknown }
     delegate.findMany = async () => ids(1)
     delegate.deleteMany = async () => ({ count: 1 })
     await expect(drainLinksFor(tx, "objective", ["obj-a"])).rejects.toThrow("pass cap")
@@ -524,9 +547,9 @@ describe("drain robustness", () => {
 
   it("the legacy drain with an objective id only takes the link the deleted key result implied", async () => {
     const { tx, links } = setup()
-    seedLink(links, { workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a", origin: "LEGACY" })
-    seedLink(links, { workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a2", origin: "LEGACY" })
+    seedObjectiveLink({ workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a", origin: "LEGACY" })
+    seedObjectiveLink({ workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a2", origin: "LEGACY" })
     expect(await drainLegacyLinksForOpportunities(tx, ["opp-a"], "obj-a")).toBe(1)
-    expect(links.map((l) => l.objectiveId)).toEqual(["obj-a2"])
+    expect(links().map((l) => l.objectiveId)).toEqual(["obj-a2"])
   })
 })

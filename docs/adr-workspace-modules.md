@@ -109,7 +109,7 @@ optional; agents are not.
 
 ## What stays environment configuration
 
-Infrastructure, secrets and migration-mirror flags: `COMPASS_ENTITY_LINKS_*`, blob tokens, analytics keys, model credentials, etc.
+Infrastructure and secrets: blob tokens, analytics keys, model credentials, etc.
 `COMPASS_PASSKEYS_ENABLED` is **user/auth-level**, not workspace-level (the passkey provider is registered at the login screen, before any
 workspace exists), so it is deliberately unchanged.
 

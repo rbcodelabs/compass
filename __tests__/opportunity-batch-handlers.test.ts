@@ -13,6 +13,8 @@ const prisma = vi.hoisted(() => {
     opportunity: { findUnique: vi.fn(), findFirst: vi.fn(), create: vi.fn() },
     solution: { findFirst: vi.fn(), create: vi.fn() },
     squad: { findFirst: vi.fn() },
+    // The Key Result pointer is read back from entity_links; these opportunities have none.
+    entityLink: { findMany: vi.fn() },
     $transaction: vi.fn(),
   }
   db.$transaction.mockImplementation(async (callback: (tx: typeof db) => unknown) => callback(db))
@@ -39,6 +41,7 @@ beforeEach(() => {
   prisma.opportunity.findUnique.mockResolvedValue({ id: OPP, title: "Parent", workspaceId: WS, workspace: null })
   prisma.solution.findFirst.mockResolvedValue(null)
   prisma.squad.findFirst.mockResolvedValue(null)
+  prisma.entityLink.findMany.mockResolvedValue([])
   prisma.opportunity.create.mockResolvedValue({ id: "created" })
   prisma.solution.create.mockResolvedValue({ id: "created" })
 })
@@ -61,10 +64,12 @@ describe("create_opportunity (single item, now on the shared core)", () => {
     prisma.opportunity.findFirst
       .mockResolvedValueOnce(null) // sortOrder lane
       .mockResolvedValueOnce(null) // existence check in the transaction
-      .mockResolvedValueOnce({ id: "created", title: "Trimmed", status: "EXPLORING", customerSegment: null, linkedKeyResultId: null, squadId: null })
+      .mockResolvedValueOnce({ id: "created", title: "Trimmed", status: "EXPLORING", customerSegment: null, squadId: null })
     const result = await asHuman(() => createOpportunity({ workspaceId: WS, title: "  Trimmed  " }))
     expect(result.structuredContent.ok).toBe(true)
     expect(prisma.opportunity.create.mock.calls[0][0].data).toMatchObject({ workspaceId: WS, title: "Trimmed", source: "MCP" })
+    // The payload still carries linkedKeyResultId, derived from the (absent) pointer link.
+    expect(result.structuredContent.data).toMatchObject({ id: "created", linkedKeyResultId: null })
   })
 })
 

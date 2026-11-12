@@ -9,10 +9,9 @@ import {
 import { loadExperimentGalleryExtras } from "@/lib/experiments/gallery-server"
 import { MAX_GALLERY_ARTIFACTS_PER_ITEM } from "@/lib/gallery/artifacts"
 
-vi.mock("@/lib/links/read-mode", () => ({ getLinkReadMode: () => "off" }))
-// The experiment-artifact link read goes through the entity-links read-compare layer; stub it at that seam.
+// The experiment-artifact link read goes through the entity_links readers; stub it at that seam.
 const links = vi.hoisted(() => ({ readEntityLinksArtifactExperiment: vi.fn() }))
-vi.mock("@/lib/links/read-compare", () => ({ readEntityLinksArtifactExperiment: links.readEntityLinksArtifactExperiment }))
+vi.mock("@/lib/links/readers", () => ({ readEntityLinksArtifactExperiment: links.readEntityLinksArtifactExperiment }))
 
 const item = (id: string, over: Partial<ExperimentGalleryItem> = {}): ExperimentGalleryItem => ({
   id, title: id, hypothesis: `h-${id}`, status: "DESIGNING", conclusion: null, squad: null, ...over,

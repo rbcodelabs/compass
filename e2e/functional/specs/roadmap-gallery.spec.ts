@@ -39,7 +39,11 @@ test("gallery shows previews, filmstrip, placeholders, grouping and stays usable
         [rev, id, `artifacts/${ws}/${id}/page.html`, withThumbnail ? thumb : null, withThumbnail ? "image/png" : null, withThumbnail ? PNG.length : null, withThumbnail ? 1 : null, withThumbnail ? 1 : null, withThumbnail ? new Date() : null],
       );
       await pool.query(`UPDATE "${S}".artifacts SET current_revision_id = $1 WHERE id = $2`, [rev, id]);
-      await pool.query(`INSERT INTO "${S}".artifact_links (workspace_id, artifact_id, linked_type, linked_id) VALUES ($1, $2, 'SOLUTION', $3)`, [ws, id, solutionId]);
+      await pool.query(
+        `INSERT INTO "${S}".entity_links (workspace_id, link_type, from_type, from_id, to_type, to_id, origin, source, created_at, updated_at)
+         VALUES ($1, 'ARTIFACT_ATTACHED_TO_SOLUTION', 'ARTIFACT', $2, 'SOLUTION', $3, 'DIRECT', 'UI', NOW(), NOW())`,
+        [ws, id, solutionId],
+      );
       if (withThumbnail) {
         const target = path.join("/tmp", "compass-artifacts", thumb);
         await mkdir(path.dirname(target), { recursive: true });
@@ -123,7 +127,7 @@ test("gallery shows previews, filmstrip, placeholders, grouping and stays usable
     // roadmap-pinned-columns.spec.ts's column counts when both ran in the same invocation.
     const like = `%${suffix}`;
     await pool.query(`DELETE FROM "${S}".roadmap_items WHERE title LIKE $1`, [like]);
-    await pool.query(`DELETE FROM "${S}".artifact_links WHERE artifact_id IN (SELECT id FROM "${S}".artifacts WHERE title LIKE $1)`, [like]);
+    await pool.query(`DELETE FROM "${S}".entity_links WHERE link_type = 'ARTIFACT_ATTACHED_TO_SOLUTION' AND from_id IN (SELECT id FROM "${S}".artifacts WHERE title LIKE $1)`, [like]);
     await pool.query(`DELETE FROM "${S}".artifact_revisions WHERE artifact_id IN (SELECT id FROM "${S}".artifacts WHERE title LIKE $1)`, [like]);
     await pool.query(`DELETE FROM "${S}".artifacts WHERE title LIKE $1`, [like]);
     await pool.query(`DELETE FROM "${S}".solutions WHERE title LIKE $1`, [like]);

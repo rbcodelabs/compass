@@ -60,10 +60,10 @@ async function seedJourney(): Promise<SeededJourney> {
         RETURNING id
       `, [workspace.id, title, item.status, item.priority, workspace.user_id, index]);
       await pool.query(`
-        INSERT INTO "${S}".task_links
-          (id, task_id, linked_type, linked_id, created_at)
-        VALUES (gen_random_uuid(), $1, 'ROADMAP_ITEM', $2, NOW())
-      `, [task.id, roadmap.id]);
+        INSERT INTO "${S}".entity_links
+          (workspace_id, link_type, from_type, from_id, to_type, to_id, origin, source, created_at, updated_at)
+        VALUES ($1, 'TASK_REFERENCES', 'TASK', $2, 'ROADMAP_ITEM', $3, 'DIRECT', 'UI', NOW(), NOW())
+      `, [workspace.id, task.id, roadmap.id]);
       linked.push({ id: task.id, title, status: item.status });
     }
 

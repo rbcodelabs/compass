@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { createEntityLinkDelegate, type EntityLinkFakeRow } from "../helpers/entity-link-fake"
 
 vi.mock("@/lib/db", () => ({ default: vi.fn() }))
 vi.mock("@/auth", () => ({ auth: vi.fn(async () => ({ user: { id: "user-1" } })) }))
@@ -10,13 +11,13 @@ import {
   normalizeNewOpportunityInput,
 } from "@/lib/opportunity-create"
 
-// The entity_links mirror (ADR phase 5) has its own tests; this file pins the legacy writes against hand-written fakes.
-process.env.COMPASS_ENTITY_LINKS_OPPORTUNITY_MIRROR = "0";
-
 vi.mock("@/lib/work-item-sequence", async () => (await import("../helpers/work-item-sequence-mock")).workItemSequenceMock())
 
+const OPPORTUNITY_OBJECTIVE = "OPPORTUNITY_TARGETS_OBJECTIVE"
+const OPPORTUNITY_KEY_RESULT = "OPPORTUNITY_TARGETS_KEY_RESULT"
+
 /**
- * A tiny in-memory stand-in for the four tables this write touches. Its
+ * A tiny in-memory stand-in for the tables this write touches (entity_links is the only link store). Its
  * `$transaction` works on a copy and only commits the copy when the callback
  * resolves, so "nothing is created" can be asserted on real state rather than
  * on which mocks happened to be called.
@@ -28,7 +29,7 @@ type State = {
   squads: Array<{ id: string; workspaceId: string }>
   keyResults: Array<{ id: string; workspaceId: string; objectiveId: string }>
   objectives: Array<{ id: string; workspaceId: string; title: string }>
-  links: Array<Record<string, unknown> & { id: string; opportunityId: string; objectiveId: string; origin: string }>
+  links: EntityLinkFakeRow[]
 }
 
 function makeDb(initial: State) {
@@ -44,23 +45,10 @@ function makeDb(initial: State) {
         const row = s.keyResults.find((r) => r.id === where.id && r.workspaceId === where.objective.workspaceId)
         return row ? { id: row.id, title: row.id, objectiveId: row.objectiveId, objective: { workspaceId: row.workspaceId } } : null
       },
+      findMany: async ({ where }: { where: { id: { in: string[] }; objective: { workspaceId: string } } }) =>
+        s.keyResults.filter((r) => where.id.in.includes(r.id) && r.workspaceId === where.objective.workspaceId).map((r) => ({ id: r.id, title: r.id })),
     },
-    entityLink: { deleteMany: async () => ({ count: 0 }) },
-    opportunityObjectiveLink: {
-      findMany: async ({ where }: { where: { opportunityId: string } }) => s.links.filter((l) => l.opportunityId === where.opportunityId).map((l) => ({ objectiveId: l.objectiveId })),
-      findFirst: async ({ where }: { where: { opportunityId: string; objectiveId: string } }) =>
-        s.links.find((l) => l.opportunityId === where.opportunityId && l.objectiveId === where.objectiveId) ?? null,
-      create: async ({ data }: { data: Record<string, unknown> }) => {
-        const row = { id: `link-${s.links.length + 1}`, ...data } as State["links"][number]
-        s.links.push(row)
-        return row
-      },
-      deleteMany: async ({ where }: { where: { opportunityId: string; origin: string } }) => {
-        const doomed = s.links.filter((l) => l.opportunityId === where.opportunityId && l.origin === where.origin)
-        s.links = s.links.filter((l) => !doomed.includes(l))
-        return { count: doomed.length }
-      },
-    },
+    entityLink: createEntityLinkDelegate(s.links),
     feedbackItem: {
       findMany: async ({ where }: { where: { id: { in: string[] }; workspaceId: string } }) =>
         s.feedback.filter((row) => where.id.in.includes(row.id) && row.workspaceId === where.workspaceId),
@@ -77,9 +65,11 @@ function makeDb(initial: State) {
         return row
       },
       findMany: async ({ where }: { where: { id: { in: string[] } } }) => s.opportunities.filter((o) => where.id.in.includes(o.id)).map((o) => ({ id: o.id, title: o.title })),
+      // The to-one pointer write touches the opportunity row (so a concurrent writer conflicts).
+      updateMany: async ({ where }: { where: { id: string } }) => ({ count: s.opportunities.filter((o) => o.id === where.id).length }),
       findFirst: async ({ where }: { where: { id: string; workspaceId?: string } }) => {
         const row = s.opportunities.find((o) => o.id === where.id && (!where.workspaceId || o.workspaceId === where.workspaceId))
-        return row ? { id: row.id, workspaceId: row.workspaceId, title: row.title, linkedKeyResultId: row.linkedKeyResultId ?? null } : null
+        return row ? { id: row.id, workspaceId: row.workspaceId, title: row.title } : null
       },
     },
     objective: {
@@ -124,6 +114,7 @@ const seed = (): State => ({
 })
 
 let db: ReturnType<typeof makeDb>
+const linksOfType = (linkType: string) => db.state.links.filter((row) => row.linkType === linkType)
 const create = (input: Parameters<typeof createOpportunityWithLinks>[2]) =>
   createOpportunityWithLinks(db as unknown as AppPrismaClient, WS, input)
 
@@ -191,8 +182,13 @@ describe("createOpportunityWithLinks", () => {
       title: "Onboarding stalls",
       status: "VALIDATING",
       squadId: "sq-1",
-      linkedKeyResultId: "kr-1",
     })
+    // The key result is an entity_links pointer, not a column on the opportunity.
+    expect(db.state.opportunities[0]).not.toHaveProperty("linkedKeyResultId")
+    expect(opportunity.linkedKeyResultId).toBe("kr-1")
+    expect(linksOfType(OPPORTUNITY_KEY_RESULT)).toEqual([
+      expect.objectContaining({ workspaceId: WS, fromType: "OPPORTUNITY", fromId: opportunity.id, toType: "KEY_RESULT", toId: "kr-1" }),
+    ])
     const [fb1, fb2] = db.state.feedback
     expect(fb1.opportunityId).toBe(opportunity.id)
     // Re-linking moves an item off its old opportunity — same as the grid.
@@ -203,11 +199,12 @@ describe("createOpportunityWithLinks", () => {
     expect(fb2.status).toBe("UNDER_REVIEW")
   })
 
-  it("dual-writes: a key result also creates the LEGACY opportunity-objective link, in the same transaction", async () => {
+  it("a key result also creates the derived LEGACY opportunity-objective link, in the same transaction", async () => {
     const opportunity = await create({ title: "Linked", linkedKeyResultId: "kr-1" })
-    expect(db.state.links).toEqual([
-      expect.objectContaining({ workspaceId: WS, opportunityId: opportunity.id, objectiveId: "obj-1", origin: "LEGACY", source: "UI" }),
+    expect(linksOfType(OPPORTUNITY_OBJECTIVE)).toEqual([
+      expect.objectContaining({ workspaceId: WS, fromId: opportunity.id, toId: "obj-1", origin: "LEGACY", source: "UI", createdById: null }),
     ])
+    expect(linksOfType(OPPORTUNITY_KEY_RESULT)).toHaveLength(1)
     expect(db.$transaction).toHaveBeenCalledOnce()
   })
 
@@ -234,7 +231,8 @@ describe("createOpportunityWithLinks", () => {
 
   it("is a plain create when nothing is linked", async () => {
     await create({ title: "Solo" })
-    expect(db.state.opportunities[0]).toMatchObject({ linkedKeyResultId: null, squadId: null, status: "UNREVIEWED" })
+    expect(db.state.opportunities[0]).toMatchObject({ squadId: null, status: "UNREVIEWED" })
+    expect(db.state.links).toEqual([])
     expect(db.state.feedback.every((row) => row.opportunityId !== "opp-1")).toBe(true)
   })
 
@@ -260,21 +258,26 @@ describe("createOpportunityWithLinks", () => {
         { createdById: "user-1" },
       )
       expect(db.$transaction).toHaveBeenCalledOnce()
-      expect(db.state.links).toEqual([
-        expect.objectContaining({ workspaceId: WS, opportunityId: opportunity.id, objectiveId: "obj-1", origin: "DIRECT", source: "UI", createdById: "user-1" }),
-        expect.objectContaining({ workspaceId: WS, opportunityId: opportunity.id, objectiveId: "obj-2", origin: "DIRECT" }),
+      expect(linksOfType(OPPORTUNITY_OBJECTIVE)).toEqual([
+        expect.objectContaining({ workspaceId: WS, fromId: opportunity.id, toId: "obj-1", origin: "DIRECT", source: "UI", createdById: "user-1" }),
+        expect.objectContaining({ workspaceId: WS, fromId: opportunity.id, toId: "obj-2", origin: "DIRECT" }),
       ])
-      // The legacy pointer is not touched by objective links.
-      expect(db.state.opportunities[0]).toMatchObject({ linkedKeyResultId: null })
+      // Objective links never create a Key Result pointer.
+      expect(linksOfType(OPPORTUNITY_KEY_RESULT)).toEqual([])
     })
 
-    it("keeps the legacy keyResultId dual-write intact alongside chosen objectives", async () => {
+    it("sets the Key Result pointer alongside chosen objectives", async () => {
       const opportunity = await create({ title: "Both", linkedKeyResultId: "kr-1", objectiveIds: ["obj-2"] })
-      expect(db.state.opportunities[0]).toMatchObject({ linkedKeyResultId: "kr-1" })
-      expect(db.state.links.map((l) => [l.objectiveId, l.origin, l.opportunityId])).toEqual([
+      expect(linksOfType(OPPORTUNITY_KEY_RESULT).map((l) => [l.fromId, l.toId])).toEqual([[opportunity.id, "kr-1"]])
+      expect(linksOfType(OPPORTUNITY_OBJECTIVE).map((l) => [l.toId, l.origin, l.fromId])).toEqual([
         ["obj-1", "LEGACY", opportunity.id],
         ["obj-2", "DIRECT", opportunity.id],
       ])
+    })
+
+    it("an objective that is also the pointer's own is flipped to DIRECT (a deliberate choice), not duplicated", async () => {
+      const opportunity = await create({ title: "Same", linkedKeyResultId: "kr-1", objectiveIds: ["obj-1"] })
+      expect(linksOfType(OPPORTUNITY_OBJECTIVE).map((l) => [l.toId, l.origin, l.fromId])).toEqual([["obj-1", "DIRECT", opportunity.id]])
     })
 
     it("writes no objective link when none is chosen (a plain create is unchanged)", async () => {
@@ -296,10 +299,10 @@ describe("createOpportunityWithLinks", () => {
       const originalTransaction = db.$transaction.getMockImplementation()!
       db.$transaction.mockImplementationOnce(async (callback) =>
         originalTransaction(async (tx) => {
-          const client = tx as { opportunityObjectiveLink: { create: (a: { data: { objectiveId: string } }) => Promise<unknown> } }
-          const realCreate = client.opportunityObjectiveLink.create
-          client.opportunityObjectiveLink.create = async (args) => {
-            if (args.data.objectiveId === "obj-2") throw new Error("write failed")
+          const client = tx as { entityLink: { create: (a: { data: { toId: string } }) => Promise<unknown> } }
+          const realCreate = client.entityLink.create
+          client.entityLink.create = async (args) => {
+            if (args.data.toId === "obj-2") throw new Error("write failed")
             return realCreate(args)
           }
           return callback(tx)

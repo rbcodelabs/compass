@@ -180,6 +180,7 @@ import {
 } from "@/lib/okr-tool-handlers"
 import {
   getLinkedObjectivesByOpportunity,
+  getOpportunityKeyResultPointers,
 } from "@/lib/typed-links"
 import {
   linkOpportunityToObjectiveTool,
@@ -1180,7 +1181,6 @@ const _handler = createMcpHandler(
           prisma.opportunity.findMany({
             where: decodedCursor ? { ...where, ...keysetAfter(sortKey, sortDirection, decodedCursor) } : where,
             include: {
-              linkedKeyResult: { select: { title: true, objective: { select: { workspaceId: true, title: true } } } },
               squad: { select: { name: true } },
               _count: { select: { solutions: { where: { workspaceId } } } },
             },
@@ -1221,19 +1221,28 @@ const _handler = createMcpHandler(
               s: alreadySeen + opportunities.length,
             })
           : null
-        // A linked KR is scoped through its Objective: hide the link when that Objective is NULL / in another workspace.
-        for (const o of opportunities) if (o.linkedKeyResult && o.linkedKeyResult.objective.workspaceId !== workspaceId) o.linkedKeyResult = null
+        // The Key Result pointer comes from entity_links; a linked KR is scoped through its Objective, so the link is hidden when
+        // that Objective is NULL / in another workspace. Never inferred from the Objective links below.
+        const keyResultPointers = await getOpportunityKeyResultPointers(prisma, workspaceId, opportunities)
+        const pointedKeyResultIds = [...new Set([...keyResultPointers.values()].filter((id): id is string => id !== null))]
+        const pointedKeyResults = new Map(
+          (pointedKeyResultIds.length
+            ? await prisma.keyResult.findMany({ where: { id: { in: pointedKeyResultIds }, objective: { workspaceId } }, select: { id: true, title: true, objective: { select: { title: true } } } })
+            : []
+          ).map((kr) => [kr.id, kr]),
+        )
+        const keyResultOf = (opportunityId: string) => pointedKeyResults.get(keyResultPointers.get(opportunityId) ?? "") ?? null
         // Additive: the typed Opportunity<->Objective links, one workspace-filtered batch for the page.
-        // `linkedKeyResult` above stays derived from the legacy column only and is never inferred from these.
         const linkedObjectives = await getLinkedObjectivesByOpportunity(prisma, workspaceId, opportunities.map(o => o.id), { preverified: true })
         const fieldValues = columns ? await loadCustomFieldValuesFor(prisma, columns, opportunities.map(o => o.id)) : null
         const lines = opportunities.map(o => {
           const description = o.description?.trim().replace(/\r\n?/g, "\n")
           const fieldsText = formatFieldValues(fieldValues?.get(o.id))
           const objectives = linkedObjectives.get(o.id) ?? []
+          const linkedKeyResult = keyResultOf(o.id)
           return (
             `• **${o.title}** [${o.status}]${o.squad ? ` (${o.squad.name})` : ""} — ${o._count.solutions} solutions` +
-            (o.linkedKeyResult ? ` — KR: ${o.linkedKeyResult.objective.title} / ${o.linkedKeyResult.title}` : "") +
+            (linkedKeyResult ? ` — KR: ${linkedKeyResult.objective.title} / ${linkedKeyResult.title}` : "") +
             (objectives.length ? ` — Objectives: ${objectives.map(obj => obj.title).join(", ")}` : "") +
             (fieldsText ? ` — Fields: ${fieldsText}` : "") +
             (description ? `\n  Description: ${description.replace(/\n/g, "\n    ")}` : "") +
@@ -1253,19 +1262,22 @@ const _handler = createMcpHandler(
               })}`
             : ""
         return ok(lines.join("\n") + footer, {
-          items: opportunities.map((o) => ({
+          items: opportunities.map((o) => {
+            const linkedKeyResult = keyResultOf(o.id)
+            return {
             id: o.id,
             title: o.title,
             description: o.description,
             status: o.status,
             squad: o.squad?.name ?? null,
             solutions: o._count.solutions,
-            linkedKeyResult: o.linkedKeyResult
-              ? { title: o.linkedKeyResult.title, objective: o.linkedKeyResult.objective.title }
+            linkedKeyResult: linkedKeyResult
+              ? { title: linkedKeyResult.title, objective: linkedKeyResult.objective.title }
               : null,
             linkedObjectives: linkedObjectives.get(o.id) ?? [],
             ...(fieldValues ? { customFields: fieldValues.get(o.id) } : {}),
-          })),
+            }
+          }),
           ...(columns ? { fields: describeColumns(columns) } : {}),
           count: opportunities.length,
           total,
@@ -1290,7 +1302,6 @@ const _handler = createMcpHandler(
         const opp = await prisma.opportunity.findUnique({
           where: { id: opportunityId },
           include: {
-            linkedKeyResult: { select: { id: true, title: true, objective: { select: { workspaceId: true, title: true } } } },
             squad: { select: { name: true } },
             solutions: {
               orderBy: { createdAt: "asc" },
@@ -1317,16 +1328,19 @@ const _handler = createMcpHandler(
         }
         // Hide a solution whose own workspaceId is NULL or names another workspace, rather than trusting its parent.
         opp.solutions = opp.solutions.filter((sol) => sol.workspaceId === opp.workspaceId)
-        // Same for the linked KR: its Objective must be in the opportunity's workspace, or the link is hidden.
-        if (opp.linkedKeyResult && opp.linkedKeyResult.objective.workspaceId !== opp.workspaceId) opp.linkedKeyResult = null
-        // Additive typed Opportunity<->Objective links (workspace-filtered). `linkedKeyResult` stays legacy-column-only.
+        // The linked KR is the entity_links pointer; its Objective must be in the opportunity's workspace, or the link is hidden.
+        const pointedKeyResultId = (await getOpportunityKeyResultPointers(prisma, opp.workspaceId, [opp])).get(opp.id) ?? null
+        const linkedKeyResult = pointedKeyResultId
+          ? await prisma.keyResult.findFirst({ where: { id: pointedKeyResultId, objective: { workspaceId: opp.workspaceId } }, select: { id: true, title: true, objective: { select: { workspaceId: true, title: true } } } })
+          : null
+        // Additive typed Opportunity<->Objective links (workspace-filtered).
         const linkedObjectives = (await getLinkedObjectivesByOpportunity(prisma, opp.workspaceId, [opp.id], { preverified: true })).get(opp.id) ?? []
 
         const lines: string[] = [
           `# ${opp.title} [${opp.status}]`,
           `ID: ${opp.id}`,
           opp.squad ? `Squad: ${opp.squad.name}` : "",
-          opp.linkedKeyResult ? `Linked KR: ${opp.linkedKeyResult.objective.title} / ${opp.linkedKeyResult.title} (${opp.linkedKeyResult.id})` : "",
+          linkedKeyResult ? `Linked KR: ${linkedKeyResult.objective.title} / ${linkedKeyResult.title} (${linkedKeyResult.id})` : "",
           linkedObjectives.length ? `Linked objectives: ${linkedObjectives.map(obj => `${obj.title} (${obj.id})`).join(", ")}` : "",
           opp.description ? `\n${opp.description}` : "",
           "",
@@ -1351,7 +1365,7 @@ const _handler = createMcpHandler(
           lines.push("")
         }
 
-        return ok(lines.join("\n"), { ...opp, linkedObjectives })
+        return ok(lines.join("\n"), { ...opp, linkedKeyResultId: linkedKeyResult ? pointedKeyResultId : null, linkedKeyResult, linkedObjectives })
       }
     )
 

@@ -1,9 +1,8 @@
 /**
  * Pure builder: CanvasOverview -> ChainGraph. No Prisma, no React.
  *
- * The overview already comes from the read-flag-aware loaders (getCanvasOverview reads Opportunity<->Objective and
- * Solution<->Key Result links through readByFamilyMode, so a flipped family is served from entity_links with no change
- * here), and buildCanvasEdges already encodes the thinking-model rules and cycle avoidance. This module only reshapes:
+ * The overview already comes from the entity_links readers (getCanvasOverview reads the Opportunity<->Objective,
+ * Opportunity->Key Result and Solution<->Key Result links), and buildCanvasEdges already encodes the thinking-model rules and cycle avoidance. This module only reshapes:
  *
  *  - Key Results are contracted into their Objective (KR -> Opportunity becomes Objective -> Opportunity), because v1
  *    shows the core chain only. Self-loops and duplicates produced by the contraction are dropped, strongest kind wins.

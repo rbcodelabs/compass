@@ -26,6 +26,7 @@ import {
   validateExternalUrl,
   validateHtmlUpload,
 } from "@/lib/artifacts"
+import { countEntityLinksByArtifact } from "@/lib/links/readers"
 import { captureAndStoreArtifactThumbnail, scheduleArtifactThumbnailCapture } from "@/lib/artifact-thumbnail"
 import { assertKindAllowedForSource, parseArtifactKind, readArtifactKind } from "@/lib/artifact-kind"
 import { listArtifactSlides } from "@/lib/artifact-slides"
@@ -58,11 +59,12 @@ export async function listArtifacts({ workspaceId, includeArchived = false, expe
   const linkedIds = experimentId ? await getExperimentArtifactIds(prisma, workspaceId, experimentId) : undefined
   const artifacts = linkedIds && linkedIds.length === 0 ? [] : await prisma.artifact.findMany({
     where: { workspaceId, ...(includeArchived ? {} : { status: "ACTIVE" }), ...(linkedIds ? { id: { in: linkedIds } } : {}) },
-    include: { currentRevision: { select: { revisionNumber: true, filename: true, externalUrl: true } }, _count: { select: { revisions: true, links: true } } },
+    include: { currentRevision: { select: { revisionNumber: true, filename: true, externalUrl: true } }, _count: { select: { revisions: true } } },
     orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
   })
+  const linkCounts = await countEntityLinksByArtifact(prisma, workspaceId, artifacts.map((artifact) => artifact.id))
   const urlFor = await artifactUrlResolver(workspaceId)
-  const items = artifacts.map((artifact) => ({ ...artifact, kind: readArtifactKind(artifact.kind), url: urlFor(artifact.id) }))
+  const items = artifacts.map((artifact) => ({ ...artifact, _count: { ...artifact._count, links: linkCounts.get(artifact.id) ?? 0 }, kind: readArtifactKind(artifact.kind), url: urlFor(artifact.id) }))
   const lines = items.map((item) => `- ${item.title} (${item.id})${item.url ? `\n  URL: ${item.url}` : ""}`)
   return ok(`${artifacts.length} artifact${artifacts.length === 1 ? "" : "s"} found.${lines.length ? `\n${lines.join("\n")}` : ""}`, { items, count: artifacts.length })
 }

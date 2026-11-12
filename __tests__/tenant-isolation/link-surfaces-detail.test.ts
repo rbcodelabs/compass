@@ -29,8 +29,11 @@ vi.mock("@/lib/score-summary", () => ({ toSolutionScoreData: () => null, toOppor
 import { getEntityDetail } from "@/lib/entity-detail"
 
 const state = () => fake.current!.state
-const seed = (row: Record<string, unknown>) =>
-  state().solutionKeyResultLinks.push({ id: `l-${state().solutionKeyResultLinks.length + 1}`, source: "UI", createdById: null, createdAt: new Date(10 + state().solutionKeyResultLinks.length), ...row })
+const seed = ({ solutionId, keyResultId, ...row }: { workspaceId: string; solutionId: string; keyResultId: string }) =>
+  state().entityLinks.push({
+    id: `l-${state().entityLinks.length + 1}`, linkType: "SOLUTION_TARGETS_KEY_RESULT", fromType: "SOLUTION", fromId: solutionId, toType: "KEY_RESULT", toId: keyResultId,
+    origin: null, source: "UI", createdById: null, attrs: null, createdAt: new Date(10 + state().entityLinks.length), updatedAt: new Date(10), ...row,
+  })
 const setPreset = (thinkingModel: string | null) => {
   state().workspaces.find((w) => w.id === WS_A.id)!.thinkingModel = thinkingModel
 }
@@ -68,9 +71,9 @@ describe("Solution detail", () => {
 
   it("a missing link table FAILS the solution read with the database error (no silent empty list)", async () => {
     setPreset("TORRES_OST")
-    const missing = Object.assign(new Error('relation "solution_key_result_links" does not exist'), { code: "42P01" })
-    const client = fake.current!.client as unknown as { solutionKeyResultLink: { findMany: unknown } }
-    client.solutionKeyResultLink.findMany = async () => {
+    const missing = Object.assign(new Error('relation "entity_links" does not exist'), { code: "42P01" })
+    const client = fake.current!.client as unknown as { entityLink: { findMany: unknown } }
+    client.entityLink.findMany = async () => {
       throw missing
     }
     await expect(getEntityDetail("solution", "sol-a", WS_A.id)).rejects.toBe(missing)
@@ -110,18 +113,19 @@ describe("Key Result detail", () => {
   it("a missing link table FAILS the key result read with the database error (no silent empty list)", async () => {
     setPreset("TORRES_OST")
     const missing = Object.assign(new Error("missing"), { code: "P2021" })
-    const client = fake.current!.client as unknown as { solutionKeyResultLink: { findMany: unknown } }
-    client.solutionKeyResultLink.findMany = async () => {
+    const client = fake.current!.client as unknown as { entityLink: { findMany: unknown } }
+    client.entityLink.findMany = async () => {
       throw missing
     }
     await expect(getEntityDetail("keyResult", "kr-a", WS_A.id)).rejects.toBe(missing)
   })
 
-  it("CLASSIC never reads the link table for a key result, so it is unaffected by a missing one", async () => {
+  it("CLASSIC never reads the Solution <-> Key Result links for a key result (the Key Result pointer read is separate and always made)", async () => {
     setPreset(null)
-    const client = fake.current!.client as unknown as { solutionKeyResultLink: { findMany: unknown } }
-    client.solutionKeyResultLink.findMany = async () => {
-      throw new Error("must not be read under CLASSIC")
+    const client = fake.current!.client as unknown as { entityLink: { findMany: unknown } }
+    client.entityLink.findMany = async ({ where }: { where: { linkType: string } }) => {
+      if (where.linkType === "SOLUTION_TARGETS_KEY_RESULT") throw new Error("must not be read under CLASSIC")
+      return []
     }
     await expect(getEntityDetail("keyResult", "kr-a", WS_A.id)).resolves.not.toBeNull()
   })

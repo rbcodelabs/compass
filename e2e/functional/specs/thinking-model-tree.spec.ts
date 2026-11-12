@@ -39,7 +39,7 @@ test.describe.serial("Thinking model tree and picker", () => {
 
   /** Count only: raw SQL may read-count and delete link rows here, never insert or update them. */
   async function countLinks(opportunityId: string, extra = "", extraParams: unknown[] = []) {
-    const result = await pool.query(`SELECT count(*)::int AS n FROM ${S}.opportunity_objective_links WHERE opportunity_id = $1 AND objective_id = $2 ${extra}`, [opportunityId, ids.objective, ...extraParams]);
+    const result = await pool.query(`SELECT count(*)::int AS n FROM ${S}.entity_links WHERE link_type = 'OPPORTUNITY_TARGETS_OBJECTIVE' AND from_id = $1 AND to_id = $2 ${extra}`, [opportunityId, ids.objective, ...extraParams]);
     return result.rows[0].n as number;
   }
 
@@ -83,8 +83,8 @@ test.describe.serial("Thinking model tree and picker", () => {
     if (!pool) return;
     try {
       await setModel(null);
-      await pool.query(`DELETE FROM ${S}.solution_key_result_links WHERE workspace_id = $1 AND key_result_id = $2`, [workspaceId, ids.kr]);
-      await pool.query(`DELETE FROM ${S}.opportunity_objective_links WHERE workspace_id = $1 AND objective_id = $2`, [workspaceId, ids.objective]);
+      await pool.query(`DELETE FROM ${S}.entity_links WHERE workspace_id = $1 AND link_type = 'SOLUTION_TARGETS_KEY_RESULT' AND to_id = $2`, [workspaceId, ids.kr]);
+      await pool.query(`DELETE FROM ${S}.entity_links WHERE workspace_id = $1 AND link_type = 'OPPORTUNITY_TARGETS_OBJECTIVE' AND to_id = $2`, [workspaceId, ids.objective]);
       await pool.query(`DELETE FROM ${S}.solutions WHERE id = $1`, [ids.solution]);
       await pool.query(`DELETE FROM ${S}.opportunities WHERE id = ANY($1::uuid[])`, [[ids.linkedOpp, ids.poolOpp]]);
       await pool.query(`DELETE FROM ${S}.key_results WHERE id = $1`, [ids.kr]);

@@ -35,7 +35,6 @@ export default async function DiscoveryLayout({ children, params }: DiscoveryLay
         title: true,
         status: true,
         squadId: true,
-        linkedKeyResultId: true,
       },
     }),
     prisma.squad.findMany({

@@ -31,7 +31,11 @@ const DENIED = { ok: false, error: "Entity not found or access denied" }
 const BASE = `/${WS_A.org}/${WS_A.slug}`
 const SCREENS = [`${BASE}/discovery/opp-a`, `${BASE}/discovery/tree`, `${BASE}/okrs`]
 const state = () => fake.current!.state
-const links = () => state().solutionKeyResultLinks
+const SOLUTION_KEY_RESULT = "SOLUTION_TARGETS_KEY_RESULT"
+const links = () => state().entityLinks.filter((l) => l.linkType === SOLUTION_KEY_RESULT)
+const linkRow = (row: Record<string, unknown>) => ({
+  linkType: SOLUTION_KEY_RESULT, fromType: "SOLUTION", toType: "KEY_RESULT", origin: "DIRECT", attrs: null, updatedAt: new Date(10), ...row,
+})
 const linkWrites = () => state().writes.filter((w) => /Link\./.test(w))
 
 beforeEach(() => {
@@ -45,7 +49,7 @@ describe("linkSolutionToKeyResultAction", () => {
     const result = await linkSolutionToKeyResultAction("sol-a", "kr-a")
     expect(result).toEqual({ ok: true, changed: true })
     expect(links()).toHaveLength(1)
-    expect(links()[0]).toMatchObject({ workspaceId: WS_A.id, solutionId: "sol-a", keyResultId: "kr-a", source: "UI", createdById: USERS.alice })
+    expect(links()[0]).toMatchObject({ workspaceId: WS_A.id, fromId: "sol-a", toId: "kr-a", source: "UI", createdById: USERS.alice })
     expect(revalidate.mock.calls.map((c) => c[0])).toEqual(SCREENS)
   })
 
@@ -138,28 +142,28 @@ describe("infrastructure failures are not reported as not-found", () => {
 
   it("a missing link table FAILS (generic message, not a denial and not a silent success), logging only name and code, with nothing written", async () => {
     const logged = vi.spyOn(console, "error").mockImplementation(() => {})
-    const original = fake.current!.client.solutionKeyResultLink.findFirst
-    fake.current!.client.solutionKeyResultLink.findFirst = (async () => {
-      throw Object.assign(new Error('relation "solution_key_result_links" does not exist'), { name: "PrismaClientKnownRequestError", code: "P2021" })
+    const original = fake.current!.client.entityLink.findFirst
+    fake.current!.client.entityLink.findFirst = (async () => {
+      throw Object.assign(new Error('relation "entity_links" does not exist'), { name: "PrismaClientKnownRequestError", code: "P2021" })
     }) as never
     const result = await linkSolutionToKeyResultAction("sol-a", "kr-a")
-    fake.current!.client.solutionKeyResultLink.findFirst = original
+    fake.current!.client.entityLink.findFirst = original
     expect(result).toEqual({ ok: false, error: "Something went wrong. Please try again." })
     const text = JSON.stringify(logged.mock.calls)
     expect(text).toContain("P2021")
-    expect(text).not.toContain("solution_key_result_links")
+    expect(text).not.toContain("entity_links")
     expect(links()).toHaveLength(0)
     logged.mockRestore()
   })
 
   it("a failure inside the write transaction is generic, and the authorization message stays for real denials", async () => {
     const logged = vi.spyOn(console, "error").mockImplementation(() => {})
-    const original = fake.current!.client.solutionKeyResultLink.findFirst
-    fake.current!.client.solutionKeyResultLink.findFirst = (async () => {
+    const original = fake.current!.client.entityLink.findFirst
+    fake.current!.client.entityLink.findFirst = (async () => {
       throw Object.assign(new Error("connection terminated"), { name: "Error", code: "ECONNRESET" })
     }) as never
     expect(await linkSolutionToKeyResultAction("sol-a", "kr-a")).toEqual({ ok: false, error: "Something went wrong. Please try again." })
-    fake.current!.client.solutionKeyResultLink.findFirst = original
+    fake.current!.client.entityLink.findFirst = original
     expect(await linkSolutionToKeyResultAction("sol-a", "kr-b")).toEqual(DENIED)
     expect(JSON.stringify(logged.mock.calls)).toContain("ECONNRESET")
     logged.mockRestore()
@@ -168,7 +172,7 @@ describe("infrastructure failures are not reported as not-found", () => {
 
 describe("unlinkSolutionFromKeyResultAction", () => {
   const seedLink = (row: Record<string, unknown> = {}) =>
-    links().push({ id: "l-1", workspaceId: WS_A.id, solutionId: "sol-a", keyResultId: "kr-a", source: "UI", createdById: null, createdAt: new Date(10), ...row })
+    state().entityLinks.push(linkRow({ id: "l-1", workspaceId: WS_A.id, fromId: "sol-a", toId: "kr-a", source: "UI", createdById: null, createdAt: new Date(10), ...row }))
 
   it("removes the link", async () => {
     seedLink()
@@ -187,7 +191,7 @@ describe("unlinkSolutionFromKeyResultAction", () => {
     ["a solution with a NULL workspaceId", "sol-null", "kr-a"],
   ])("denies %s and leaves every link untouched", async (_label, solutionId, keyResultId) => {
     seedLink()
-    links().push({ id: "l-b", workspaceId: WS_B.id, solutionId: "sol-b", keyResultId: "kr-b", source: "UI", createdById: null, createdAt: new Date(11) })
+    seedLink({ id: "l-b", workspaceId: WS_B.id, fromId: "sol-b", toId: "kr-b", createdAt: new Date(11) })
     expect(await unlinkSolutionFromKeyResultAction(solutionId, keyResultId)).toEqual(DENIED)
     expect(links()).toHaveLength(2)
     expect(linkWrites()).toEqual([])

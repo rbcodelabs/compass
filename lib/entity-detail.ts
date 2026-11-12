@@ -32,7 +32,9 @@ import { agentConversationLinkTitles } from "@/lib/agent-conversation-link-title
 import { commentLinkTitles } from "@/lib/comment-link-titles";
 import { isPmInterviewEnabled, isResearchCaptureEnabled } from "@/lib/research-feature";
 import { isModuleEnabled } from "@/lib/modules/server";
-import { getLinkedKeyResultsBySolution, getLinkedObjectivesByOpportunity, getLinkedSolutionsByKeyResult } from "@/lib/typed-links";
+import { getLinkedKeyResultsBySolution, getLinkedObjectivesByOpportunity, getLinkedSolutionsByKeyResult, getOpportunityKeyResultPointers } from "@/lib/typed-links";
+import { readEntityLinksOpportunityKeyResultPointer } from "@/lib/links/readers";
+import { getTaskLinks, type TaskLinkView } from "@/lib/task-links-read";
 import { getSolutionArtifactIds } from "@/lib/artifacts";
 import { loadThinkingModelSource, offersSolutionToKrSurfaces } from "@/lib/thinking-model/link-surfaces";
 import { fetchLinkedTasksBundle } from "@/lib/linked-tasks";
@@ -152,7 +154,6 @@ async function fetchKeyResult(id: string, workspaceId: string) {
         take: 10,
       },
       roadmapItems: { select: { id: true, title: true, horizon: true, status: true } },
-      opportunities: { select: { id: true, title: true, status: true } },
       supportingObjectives: {
         // Only objectives that carry this workspace's own workspaceId (NULL / drifted rows are hidden).
         where: { workspaceId },
@@ -169,12 +170,21 @@ async function fetchKeyResult(id: string, workspaceId: string) {
     },
   });
   if (!item) return null;
+  // The Opportunities whose Key Result pointer targets this one (the link is the only store of the pointer).
+  const pointerLinks = await readEntityLinksOpportunityKeyResultPointer(getPrisma(), workspaceId, { keyResultIds: [id] });
+  const opportunities = pointerLinks.length === 0
+    ? []
+    : await getPrisma().opportunity.findMany({
+        where: { workspaceId, id: { in: pointerLinks.map((link) => link.fromId) } },
+        select: { id: true, title: true, status: true },
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      });
   const linkedTasks = await fetchLinkedTasksBundle(workspaceId, "KEY_RESULT", id);
   // Phase 4B: the read-only "Linked solutions" list, only for presets that offer it (CLASSIC reads nothing extra and its payload is unchanged).
-  if (!offersSolutionToKrSurfaces(await loadThinkingModelSource(getPrisma(), workspaceId))) return { ...item, ...linkedTasks };
+  if (!offersSolutionToKrSurfaces(await loadThinkingModelSource(getPrisma(), workspaceId))) return { ...item, opportunities, ...linkedTasks };
   // The key result was just read under this workspace's filter, so the reader may skip re-verifying it.
   const linkedSolutions = (await getLinkedSolutionsByKeyResult(getPrisma(), workspaceId, [id], { preverified: true })).get(id) ?? [];
-  return { ...item, ...linkedTasks, linkedSolutions };
+  return { ...item, opportunities, ...linkedTasks, linkedSolutions };
 }
 
 async function pmInterviewHistory(workspaceId: string, targetType: string, targetId: string) {
@@ -186,16 +196,6 @@ async function fetchOpportunity(id: string, workspaceId: string) {
   const item = await getPrisma().opportunity.findFirst({
     where: { id, workspaceId },
     include: {
-      linkedKeyResult: {
-        select: {
-          id: true,
-          title: true,
-          current: true,
-          target: true,
-          unit: true,
-          objective: { select: { id: true, workspaceId: true, title: true, cycleId: true } },
-        },
-      },
       squad: { select: { id: true, name: true, color: true } },
       solutions: {
         // Hide a NULL / other-workspace solution instead of trusting its opportunity parent.
@@ -256,14 +256,13 @@ async function fetchOpportunity(id: string, workspaceId: string) {
   if (!item) return null;
   const thinkingModel = resolveThinkingModel(item.workspace ?? {});
   const offersObjectivePicker = thinkingModel.links.oppToObjective === "primary";
-  const [pmInterviews, linkedTasks, evidence, squads, keyResults, customFields, linkedObjectivesByOpportunity, pickerObjectives] = await Promise.all([
+  const [pmInterviews, linkedTasks, evidence, squads, keyResults, customFields, linkedObjectivesByOpportunity, pickerObjectives, pointers] = await Promise.all([
     pmInterviewHistory(workspaceId, "OPPORTUNITY", id),
     fetchLinkedTasksBundle(workspaceId, "OPPORTUNITY", id),
     resolveEvidenceProvenance(item.evidence),
     getPrisma().squad.findMany({ where: { workspaceId }, select: { id: true, name: true, color: true }, orderBy: { createdAt: "asc" } }),
     getPrisma().keyResult.findMany({ where: { objective: { workspaceId } }, select: { id: true, title: true, objective: { select: { title: true } } }, orderBy: { createdAt: "asc" } }),
     loadCustomFieldsForObject(getPrisma(), { workspaceId, objectType: "OPPORTUNITY", objectId: id }),
-    // Additive typed Opportunity<->Objective links. linkedKeyResult above stays the legacy column only.
     getLinkedObjectivesByOpportunity(getPrisma(), workspaceId, [id], { preverified: true }),
     // Options for the picker, filtered on the Objective's own workspaceId (a NULL / drifted row is not offered).
     offersObjectivePicker
@@ -273,10 +272,25 @@ async function fetchOpportunity(id: string, workspaceId: string) {
           orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
         })
       : Promise.resolve(null),
+    getOpportunityKeyResultPointers(getPrisma(), workspaceId, [{ id }]),
   ]);
+  const linkedKeyResultId = pointers.get(id) ?? null;
+  const pointedKeyResult = linkedKeyResultId
+    ? await getPrisma().keyResult.findFirst({
+        where: { id: linkedKeyResultId, objective: { workspaceId } },
+        select: {
+          id: true,
+          title: true,
+          current: true,
+          target: true,
+          unit: true,
+          objective: { select: { id: true, workspaceId: true, title: true, cycleId: true } },
+        },
+      })
+    : null;
   const solutionScoringModel = item.workspace?.scoringConfig?.solutionScoringModel ?? null;
-  // A linked KR is scoped through its Objective: hide the link when that Objective is NULL / in another workspace.
-  const linkedKeyResult = item.linkedKeyResult && item.linkedKeyResult.objective.workspaceId === workspaceId ? item.linkedKeyResult : null;
+  // A linked KR is scoped through its Objective: hidden (null) when that Objective is NULL / in another workspace.
+  const linkedKeyResult = pointedKeyResult && pointedKeyResult.objective.workspaceId === workspaceId ? pointedKeyResult : null;
   // OST tab extras (typed Solution->KR chips, solution tasks, the Objectives the chain touches): batch reads, no N+1.
   const chain = await loadOpportunityChainExtras(
     getPrisma(),
@@ -286,7 +300,7 @@ async function fetchOpportunity(id: string, workspaceId: string) {
     item.solutions ?? [],
   );
   return {
-    ...item, ...(item.linkedKeyResult ? { linkedKeyResult } : {}), evidence, ...linkedTasks, squads, customFields,
+    ...item, linkedKeyResultId, ...(linkedKeyResultId ? { linkedKeyResult } : {}), evidence, ...linkedTasks, squads, customFields,
     linkedObjectives: linkedObjectivesByOpportunity.get(id) ?? [],
     ...(pickerObjectives
       ? { availableObjectives: pickerObjectives.map((o) => ({ id: o.id, title: o.title, cycleTitle: o.cycle?.title ?? null })) }
@@ -522,13 +536,11 @@ async function fetchTask(id: string, workspaceId: string) {
     where: { id, workspaceId },
     include: {
       squad: { select: { id: true, name: true, color: true } },
-      links: true,
       parentTask: { select: { id: true, title: true } },
       subtasks: {
         orderBy: { sortOrder: "asc" },
         include: {
           squad: { select: { id: true, name: true, color: true } },
-          links: true,
           _count: { select: { subtasks: true } },
         },
       },
@@ -536,7 +548,7 @@ async function fetchTask(id: string, workspaceId: string) {
   });
   if (!task) return null;
 
-  const [rawSquads, rawMembers, customFields, [resolvedTask, ...resolvedSubtasks]] = await Promise.all([
+  const [rawSquads, rawMembers, customFields, [resolvedTask, ...resolvedSubtasks], linksByTask] = await Promise.all([
     prisma.squad.findMany({ where: { workspaceId }, orderBy: { createdAt: "asc" } }),
     prisma.workspaceMember.findMany({
       where: { workspaceId },
@@ -545,10 +557,11 @@ async function fetchTask(id: string, workspaceId: string) {
     }),
     loadCustomFieldsForObject(prisma, { workspaceId, objectType: "TASK", objectId: id }),
     resolveTaskAssignees(workspaceId, [task, ...task.subtasks]),
+    getTaskLinks(prisma, [task, ...task.subtasks].map((t) => ({ id: t.id, workspaceId }))),
   ]);
 
   // Batch-resolve titles for every link on this task and its subtasks.
-  const allLinks = [...task.links, ...task.subtasks.flatMap((s) => s.links)];
+  const allLinks = [...linksByTask.values()].flat();
   const linksByType = new Map<string, string[]>();
   for (const link of allLinks) {
     const ids = linksByType.get(link.linkedType) ?? [];
@@ -587,7 +600,7 @@ async function fetchTask(id: string, workspaceId: string) {
       for (const row of rows) titleById.set(`${linkedType}:${row.id}`, row.title);
     })
   );
-  const resolveLinks = (links: typeof task.links) =>
+  const resolveLinks = (links: TaskLinkView[]) =>
     links.map((l) => ({
       id: l.id,
       linkedType: l.linkedType,
@@ -624,8 +637,8 @@ async function fetchTask(id: string, workspaceId: string) {
 
   return {
     ...resolvedTask,
-    links: resolveLinks(task.links),
-    subtasks: task.subtasks.map((s, i) => ({ ...resolvedSubtasks[i], links: resolveLinks(s.links) })),
+    links: resolveLinks(linksByTask.get(task.id) ?? []),
+    subtasks: task.subtasks.map((s, i) => ({ ...resolvedSubtasks[i], links: resolveLinks(linksByTask.get(s.id) ?? []) })),
     squads: rawSquads,
     members: rawMembers.map((m) => ({
       id: m.id,

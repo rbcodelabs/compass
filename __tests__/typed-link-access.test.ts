@@ -3,15 +3,16 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 /**
- * The typed link models and tables (opportunity_objective_links, solution_key_result_links) are reached
- * through ONE module, lib/typed-links.ts, which owns the tenant-safety rules (workspaceId from the authorized
- * parent, both endpoints re-verified in the transaction, origin never downgraded, workspace-filtered reads).
- * Nothing else in app code may name them: not a model delegate, not a table, not a generic delegate lookup.
- * The migration hook and its SQL (lib/migrations, prisma/migrations) and schema.prisma legitimately do, and so
- * do tests.
+ * entity_links is the ONLY store for the Opportunity <-> Objective, Opportunity -> Key Result, Solution <-> Key Result, Artifact and
+ * task-reference links. The tables they replaced (opportunity_objective_links, solution_key_result_links, artifact_links, and the
+ * association rows of task_links) are frozen until a later change drops them, so NOTHING in app code may name those models or tables:
+ * not a model delegate, not a table, not a generic delegate lookup. The migration hooks and SQL (lib/migrations, prisma/migrations),
+ * schema.prisma, the workspace export module and lib/legacy-link-tables.ts (which deletes the frozen artifact_links rows that would Restrict an
+ * Artifact delete) legitimately do, and so do tests.
  *
- * (This used to be the migration-only PR's "nothing reads these tables yet" guard. The code PR that deploys
- * after migration 071 replaces that invariant with this narrower, permanent one.)
+ * One legacy table is still live: task_links holds the residual link kinds that are not associations (COMMENT, AGENT_CONVERSATION), and
+ * is reached only through lib/task-link-writes.ts and lib/task-links-read.ts (plus the Task.links relation filters on those residual
+ * kinds, which name no model).
  */
 const ROOT = process.cwd();
 const SKIP_DIRS = new Set(["node_modules", ".next", ".git", "generated", ".worktrees", ".claude", ".pnpm-store"]);
@@ -27,6 +28,9 @@ const rejoinConcatenation = (text: string) => text.replace(/["'`]\s*\+\s*["'`]/g
 /** Generic, non-literal model access on a Prisma-like receiver: prisma[name], tx[model]. */
 const DYNAMIC_DELEGATE = /\b(?:\w*[Pp]risma\w*|\w*[Cc]lient|db|tx|database)\s*\[\s*(?:`[^`]*\$\{|[^"'`\]\s])/;
 const DYNAMIC_MODEL_INTROSPECTION = /Prisma\.ModelName|\bdmmf\b/;
+
+/** Prose may mention a table; code may not. */
+const stripComments = (text: string) => text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\/\/.*$/gm, "$1");
 
 function findLinkReferences(text: string): string[] {
   const joined = rejoinConcatenation(text);
@@ -48,17 +52,6 @@ function sourceFiles(dir: string): string[] {
 const rel = (file: string) => path.relative(ROOT, file);
 const relPosix = (file: string) => rel(file).split(path.sep).join("/");
 const isMigrationOwned = (file: string) => relPosix(file).startsWith("lib/migrations/") || relPosix(file).startsWith("prisma/migrations/");
-/** The one module that may name the link models, and schema.prisma (which declares them). */
-const LINK_MODULE = "lib/typed-links.ts";
-/**
- * The end-to-end files that must delete synthetic link rows by workspace id (no foreign key reaches them, so deleting the workspace
- * would leave them behind in the shared e2e database): the typed-links spec's afterAll and the suite's global teardown. The spec
- * verifies behaviour through the MCP tools.
- */
-// thinking-model-tree.spec.ts creates its edge through the UI (the picker, i.e. lib/typed-links.ts). Raw SQL there may only COUNT link rows
-// and DELETE its own in afterAll; the narrower per-statement check below enforces that so a raw INSERT or UPDATE cannot slip in.
-// link-authoring.spec.ts (Phase 4B) does the same: every edge is created through the UI, raw SQL only counts and deletes by workspace id.
-const E2E_CLEANUP_SPECS = new Set(["e2e/functional/specs/typed-links.spec.ts", "e2e/functional/specs/thinking-model-tree.spec.ts", "e2e/functional/specs/link-authoring.spec.ts", "e2e/functional/specs/optional-cycle-thinking-model.spec.ts", "e2e/functional/specs/objective-linked-opportunities.spec.ts", "e2e/functional/global-teardown.ts"]);
 /**
  * lib/workspace-export/ copies a whole workspace between workspaces/organizations, including its link rows, by walking every exported
  * model generically (dynamic delegates, model introspection, and the link model names in its classification registry). It is the only
@@ -68,7 +61,11 @@ const E2E_CLEANUP_SPECS = new Set(["e2e/functional/specs/typed-links.spec.ts", "
  * Both are asserted in __tests__/workspace-export*.integration.test.ts.
  */
 const isWorkspaceExportModule = (file: string) => relPosix(file).startsWith("lib/workspace-export/");
-const isLinkModuleOrSchema = (file: string) => relPosix(file) === LINK_MODULE || relPosix(file) === "prisma/schema.prisma" || E2E_CLEANUP_SPECS.has(relPosix(file));
+const isSchema = (file: string) => relPosix(file) === "prisma/schema.prisma" || relPosix(file) === "lib/legacy-link-tables.ts";
+/** Residual task_links (COMMENT, AGENT_CONVERSATION): the only live legacy table, behind two modules. */
+const TASK_LINK_MODULES = new Set(["lib/task-link-writes.ts", "lib/task-links-read.ts"]);
+const FROZEN_LINK = /\.(?:opportunityObjectiveLink|solutionKeyResultLink|artifactLink)\b|\bartifact_links\b/;
+const TASK_LINK_DELEGATE = /\.taskLink\b/;
 
 // Files that legitimately use non-literal Prisma delegates or model introspection today, each over a fixed
 // model list that does not include the link models (the name check above still covers those lists).
@@ -124,39 +121,33 @@ describe("typed link models are reached only through lib/typed-links.ts", () => 
     expect(files.some((file) => rel(file) === "seed-screenshots.ts")).toBe(true);
   });
 
-  it("the allow-listed e2e files may only DELETE from the link tables or count their rows, never INSERT or UPDATE them", () => {
-    for (const spec of E2E_CLEANUP_SPECS) {
-      const text = readFileSync(path.join(ROOT, spec), "utf-8");
-      expect(text, spec).toMatch(LINK_NAME);
-      expect(text, spec).not.toMatch(/(?:INSERT\s+INTO|UPDATE)\s+\S*(?:opportunity_objective_links|solution_key_result_links)/i);
-      for (const line of text.split("\n").filter((l) => LINK_NAME.test(l) && /(?:SELECT|DELETE|INSERT|UPDATE)\s/i.test(l))) {
-        expect(line, `${spec}: ${line.trim()}`).toMatch(/DELETE FROM|SELECT count/i);
-      }
+  it("the end-to-end suites clean up and assert through entity_links, never the frozen tables", () => {
+    for (const file of files.filter((candidate) => relPosix(candidate).startsWith("e2e/"))) {
+      const text = readFileSync(file, "utf-8");
+      expect(text.match(LINK_NAME) ?? [], relPosix(file)).toEqual([]);
     }
   });
 
-  it.each(["thinking-model-tree.spec.ts", "optional-cycle-thinking-model.spec.ts", "objective-linked-opportunities.spec.ts"])("%s: every SQL literal that names a link table is a COUNT or a DELETE, nothing else", (spec) => {
-    const text = readFileSync(path.join(ROOT, "e2e/functional/specs", spec), "utf-8");
-    const literals = [...text.matchAll(/`([^`]*)`|"([^"\n]*)"|'([^'\n]*)'/g)].map((m) => m[1] ?? m[2] ?? m[3] ?? "");
-    const naming = literals.filter((literal) => LINK_NAME.test(literal));
-    expect(naming.length).toBeGreaterThan(0);
-    for (const literal of naming) {
-      expect(literal, literal).toMatch(/^\s*(?:DELETE FROM|SELECT count)/i);
-      expect(literal, literal).not.toMatch(/\b(?:INSERT|UPDATE)\b/i);
-    }
-  });
-
-  it("lib/typed-links.ts does name them (so the scan below is looking at the right thing)", () => {
-    expect(findLinkReferences(readFileSync(path.join(ROOT, LINK_MODULE), "utf-8"))).toContain("link model/table name");
-  });
-
-  it("nothing in app/, lib/, components/, hooks/, scripts/, e2e/, prisma/ seeds or root scripts references the link models or tables except that module and the migration hook", () => {
+  it("nothing in app/, lib/, components/, hooks/, scripts/, e2e/, prisma/ seeds or root scripts references the link models or tables except the migration hooks, the schema and workspace export", () => {
     const offenders = files
-      .filter((file) => !isMigrationOwned(file) && !isLinkModuleOrSchema(file) && !isWorkspaceExportModule(file))
+      .filter((file) => !isMigrationOwned(file) && !isSchema(file) && !isWorkspaceExportModule(file))
       .flatMap((file) => {
         const hits = findLinkReferences(readFileSync(file, "utf-8")).filter(
           (hit) => !(hit === "dynamic delegate access" || hit === "model introspection") || !ALLOWED_GENERIC_ACCESS.has(rel(file).split(path.sep).join("/")),
         );
+        return hits.map((hit) => `${rel(file)}: ${hit}`);
+      });
+    expect(offenders).toEqual([]);
+  });
+
+  it("no code names the frozen artifact / opportunity / solution link models or task_links except the migrations, the schema and workspace export, and task_links only through the two task-link modules", () => {
+    const offenders = files
+      .filter((file) => !isMigrationOwned(file) && !isSchema(file) && !isWorkspaceExportModule(file))
+      .flatMap((file) => {
+        const text = stripComments(readFileSync(file, "utf-8"));
+        const hits: string[] = [];
+        if (FROZEN_LINK.test(text)) hits.push("frozen link model/table");
+        if (TASK_LINK_DELEGATE.test(text) && !TASK_LINK_MODULES.has(relPosix(file))) hits.push("task_links accessor");
         return hits.map((hit) => `${rel(file)}: ${hit}`);
       });
     expect(offenders).toEqual([]);

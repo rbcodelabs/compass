@@ -22,8 +22,7 @@ const mockPrisma = {
   agentOrgAdminGrant: { findFirst: vi.fn() },
   opportunity: { findUnique: vi.fn(), findFirst: vi.fn(), update: vi.fn(), findMany: vi.fn() },
   objective: { findUnique: vi.fn(), findMany: vi.fn() },
-  opportunityObjectiveLink: { findMany: vi.fn() },
-  solutionKeyResultLink: { findMany: vi.fn() },
+  entityLink: { findMany: vi.fn() },
   solution: { findUnique: vi.fn(), findFirst: vi.fn(), update: vi.fn() },
   roadmapItem: { findUnique: vi.fn(), update: vi.fn() },
   artifact: { findUnique: vi.fn() },
@@ -866,10 +865,10 @@ describe("register() wrapper enforces gates end-to-end", () => {
     mockPrisma.workspace.findFirst.mockResolvedValue({ id: "11111111-1111-4111-8111-111111111111" })
     mockPrisma.opportunity.findFirst.mockResolvedValue({ id: uuid, seqPrefix: "OPP", seqNumber: 1 })
     mockPrisma.opportunity.findUnique.mockResolvedValue({
-      workspaceId: "11111111-1111-4111-8111-111111111111", id: uuid, title: "Reduce churn", status: "EXPLORING", description: null, squad: null, linkedKeyResult: null, solutions: [],
+      workspaceId: "11111111-1111-4111-8111-111111111111", id: uuid, title: "Reduce churn", status: "EXPLORING", description: null, squad: null, solutions: [],
     })
     mockPrisma.opportunity.findMany.mockResolvedValue([{ id: uuid }])
-    mockPrisma.opportunityObjectiveLink.findMany.mockResolvedValue([])
+    mockPrisma.entityLink.findMany.mockResolvedValue([])
     const result = (await callTool("get_opportunity", MEMBER, { workspaceId: "11111111-1111-4111-8111-111111111111", opportunityId: "opp-1" })) as { content: { text: string }[] }
     expect(result.content[0].text).toContain("Reduce churn")
     expect(mockPrisma.opportunity.findFirst.mock.calls[0][0].where).toEqual({ workspaceId: "11111111-1111-4111-8111-111111111111", seqPrefix: "OPP", seqNumber: 1 })
@@ -893,13 +892,12 @@ describe("register() wrapper enforces gates end-to-end", () => {
       status: "EXPLORING",
       description: null,
       squad: null,
-      linkedKeyResult: null,
       solutions: [],
     })
     mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
     // The additive linkedObjectives read: workspace-checked opportunity, then its (empty) link rows.
     mockPrisma.opportunity.findMany.mockResolvedValue([{ id: "opp_1" }])
-    mockPrisma.opportunityObjectiveLink.findMany.mockResolvedValue([])
+    mockPrisma.entityLink.findMany.mockResolvedValue([])
     const result = (await callTool("get_opportunity", MEMBER, { opportunityId: "opp_1" })) as {
       content: { text: string }[]
     }

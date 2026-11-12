@@ -57,8 +57,8 @@ describe("096 registration", () => {
   });
 
   it("is the backfill the two registry types name", () => {
-    expect(LINK_TYPES.ARTIFACT_ATTACHED_TO_SOLUTION.legacy?.backfillMigration).toBe(NAME);
-    expect(LINK_TYPES.ARTIFACT_SUPPORTS_DECISION.legacy?.backfillMigration).toBe(NAME);
+    expect(LINK_TYPES.ARTIFACT_ATTACHED_TO_SOLUTION.dedicatedWriter?.backfillMigration).toBe(NAME);
+    expect(LINK_TYPES.ARTIFACT_SUPPORTS_DECISION.dedicatedWriter?.backfillMigration).toBe(NAME);
   });
 
   it("uses only DSQL-safe SQL: no ON CONFLICT, no multi-array unnest, no DDL", () => {

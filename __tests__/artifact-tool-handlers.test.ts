@@ -5,7 +5,6 @@ const prisma = {
   workspace: { findUnique: vi.fn() },
   artifact: { findMany: vi.fn(), findFirst: vi.fn(), findUnique: vi.fn(), create: vi.fn(), update: vi.fn() },
   artifactRevision: { findFirst: vi.fn(), create: vi.fn() },
-  artifactLink: { findFirst: vi.fn(), findMany: vi.fn() },
   solution: { findMany: vi.fn() },
   experiment: { findMany: vi.fn() },
   entityLink: { findMany: vi.fn() },
@@ -28,7 +27,6 @@ beforeEach(() => {
   actorState.actor = { userId: "user-1", purpose: "USER" }
   prisma.$transaction.mockImplementation(async (callback) => callback(prisma))
   prisma.artifactRevision.findFirst.mockResolvedValue(null)
-  prisma.artifactLink.findMany.mockResolvedValue([])
   prisma.entityLink.findMany.mockResolvedValue([])
   prisma.experiment.findMany.mockResolvedValue([])
   storage.put.mockResolvedValue({ pathname: "artifacts/ws-1/art-1/rev-2.html" })
@@ -80,7 +78,6 @@ describe("Artifact MCP output redaction", () => {
       id: "art-1", workspaceId: "ws-1", title: "Prototype", sourceType: "HTML_UPLOAD", status: "ACTIVE",
       currentRevision: { id: "rev-1", revisionNumber: 1, blobPathname: "private/current.html" },
       revisions: [{ id: "rev-1", revisionNumber: 1, blobPathname: "private/rev.html" }],
-      links: [],
     })
     const result = await getArtifact({ artifactId: "art-1" })
     expect(JSON.stringify(result)).not.toContain("private/")
@@ -92,7 +89,7 @@ describe("Artifact MCP experiment links", () => {
   const link = { linkType: "ARTIFACT_ATTACHED_TO_EXPERIMENT", fromType: "ARTIFACT", fromId: "art-1", toType: "EXPERIMENT", toId: "exp-1", origin: "DIRECT" }
 
   it("get_artifact returns the attached experiments (workspace-scoped) in structured data and text", async () => {
-    prisma.artifact.findUnique.mockResolvedValue({ id: "art-1", workspaceId: "ws-1", title: "Prototype", sourceType: "HTML_UPLOAD", status: "ACTIVE", currentRevision: null, revisions: [], links: [] })
+    prisma.artifact.findUnique.mockResolvedValue({ id: "art-1", workspaceId: "ws-1", title: "Prototype", sourceType: "HTML_UPLOAD", status: "ACTIVE", currentRevision: null, revisions: [] })
     prisma.entityLink.findMany.mockResolvedValue([link])
     // The live-endpoint check and the display lookup both ask for the artifact / experiment rows in the workspace.
     prisma.artifact.findMany.mockResolvedValue([{ id: "art-1", title: "Prototype" }])
@@ -105,7 +102,7 @@ describe("Artifact MCP experiment links", () => {
   })
 
   it("get_artifact reports None and returns an empty list when nothing is attached", async () => {
-    prisma.artifact.findUnique.mockResolvedValue({ id: "art-1", workspaceId: "ws-1", title: "Prototype", sourceType: "HTML_UPLOAD", status: "ACTIVE", currentRevision: null, revisions: [], links: [] })
+    prisma.artifact.findUnique.mockResolvedValue({ id: "art-1", workspaceId: "ws-1", title: "Prototype", sourceType: "HTML_UPLOAD", status: "ACTIVE", currentRevision: null, revisions: [] })
     const result = await getArtifact({ artifactId: "art-1" })
     expect(result.content[0].text).toContain("Linked experiments: None")
     expect(result.structuredContent).toMatchObject({ data: { experiments: [] } })
@@ -117,7 +114,7 @@ describe("Artifact MCP experiment links", () => {
     prisma.artifact.findMany.mockImplementation(async (args: { where: { id?: { in: string[] } } }) => (args.where.id ? [{ id: "art-2", title: "Two", kind: null }] : []))
     const listed = await listArtifacts({ workspaceId: "ws-1", experimentId: "exp-1" })
     expect(listed.structuredContent).toMatchObject({ data: { count: 1, items: [{ id: "art-2" }] } })
-    expect(prisma.artifact.findMany).toHaveBeenLastCalledWith(expect.objectContaining({ where: expect.objectContaining({ workspaceId: "ws-1", id: { in: ["art-2"] }, status: "ACTIVE" }) }))
+    expect(prisma.artifact.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ workspaceId: "ws-1", id: { in: ["art-2"] }, status: "ACTIVE" }) }))
 
     prisma.entityLink.findMany.mockResolvedValue([])
     prisma.artifact.findMany.mockClear()
@@ -220,7 +217,7 @@ describe("Artifact MCP user link", () => {
   it("get_artifact prints and returns the page URL", async () => {
     prisma.artifact.findUnique.mockResolvedValue({
       id: "art-1", workspaceId: "ws-1", title: "Prototype", sourceType: "HTML_UPLOAD", status: "ACTIVE",
-      currentRevision: null, revisions: [], links: [],
+      currentRevision: null, revisions: [],
     })
     const result = await getArtifact({ artifactId: "art-1" })
     expect(result.content[0].text).toContain(`URL: ${PAGE}`)
@@ -245,6 +242,20 @@ describe("Artifact MCP user link", () => {
     expect(result.content[0].text).toContain(`URL: ${ORIGIN}/acme/compass/docs/artifacts/art-2`)
     expect(result.structuredContent).toMatchObject({ data: { items: [{ url: PAGE }, { url: `${ORIGIN}/acme/compass/docs/artifacts/art-2` }] } })
     expect(prisma.workspace.findUnique).toHaveBeenCalledTimes(1)
+  })
+
+  it("list_artifacts counts each artifact's live Solution and Decision links from entity_links", async () => {
+    const entityLink = (id: string, linkType: string, fromId: string, toType: string, toId: string) => ({ id, linkType, fromType: "ARTIFACT", fromId, toType, toId, origin: "DIRECT", source: "UI", createdById: null, createdAt: new Date(0) })
+    prisma.entityLink.findMany.mockImplementation(async (args: { where: { linkType: string } }) => args.where.linkType === "ARTIFACT_ATTACHED_TO_SOLUTION"
+      ? [entityLink("l1", "ARTIFACT_ATTACHED_TO_SOLUTION", "art-1", "SOLUTION", "sol-1")]
+      : [])
+    prisma.solution.findMany.mockResolvedValue([{ id: "sol-1", title: "Solution" }])
+    // The list query carries no id filter; the live-endpoint check asks for the linked artifact row.
+    prisma.artifact.findMany.mockImplementation(async (args: { where: { id?: unknown } }) => args.where.id
+      ? [{ id: "art-1", title: "One" }]
+      : [{ id: "art-1", title: "One", kind: null, _count: { revisions: 2 } }, { id: "art-2", title: "Two", kind: null, _count: { revisions: 1 } }])
+    const result = await listArtifacts({ workspaceId: "ws-1" })
+    expect(result.structuredContent).toMatchObject({ data: { items: [{ id: "art-1", _count: { revisions: 2, links: 1 } }, { id: "art-2", _count: { revisions: 1, links: 0 } }] } })
   })
 
   it("omits the link rather than failing when the origin is not configured", async () => {
@@ -295,7 +306,6 @@ describe("Artifact MCP kind", () => {
       id: "art-1", workspaceId: "ws-1", title: "Deck", sourceType: "HTML_UPLOAD", kind: "SLIDE_DECK", status: "ACTIVE",
       currentRevision: { id: "rev-1", revisionNumber: 1, blobPathname: "private/current.html" },
       revisions: [{ id: "rev-1", revisionNumber: 1, blobPathname: "private/current.html" }],
-      links: [],
     })
     storage.get.mockResolvedValue(new TextEncoder().encode('<html><body><section class="slide" data-slide-title="Intro">One</section><section class="slide">Two</section></body></html>'))
     const result = await getArtifact({ artifactId: "art-1" })

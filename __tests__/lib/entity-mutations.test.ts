@@ -8,26 +8,26 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { setModules } from "../helpers/modules";
+import { createEntityLinkDelegate, entityLinkRow, type EntityLinkFakeRow } from "../helpers/entity-link-fake";
 
-// The entity_links mirror (ADR phase 5) has its own tests; this file pins the legacy writes against hand-written fakes.
-process.env.COMPASS_ENTITY_LINKS_OPPORTUNITY_MIRROR = "0";
+const echoIds = async ({ where }: { where: { id: { in: string[] } } }) => where.id.in.map((id) => ({ id, title: id }));
 
 const models = {
-  objective: { findFirst: vi.fn(), update: vi.fn() },
-  keyResult: { findFirst: vi.fn(), update: vi.fn() },
-  opportunity: { findFirst: vi.fn(), update: vi.fn(), findMany: async ({ where }: { where: { id: { in: string[] } } }) => where.id.in.map((id) => ({ id, title: id })), },
+  objective: { findFirst: vi.fn(), update: vi.fn(), findMany: echoIds },
+  keyResult: { findFirst: vi.fn(), update: vi.fn(), findMany: echoIds },
+  opportunity: { findFirst: vi.fn(), update: vi.fn(), updateMany: vi.fn(), findMany: async ({ where }: { where: { id: { in: string[] } } }) => where.id.in.map((id) => ({ id, title: id })), },
   solution: { findFirst: vi.fn(), update: vi.fn() },
   feedbackItem: { findFirst: vi.fn(), update: vi.fn() },
   roadmapItem: { findFirst: vi.fn(), findUnique: vi.fn(), update: vi.fn() },
   task: { findFirst: vi.fn(), update: vi.fn() },
 };
 
-const links = { findFirst: vi.fn(), findMany: async () => [], create: vi.fn(), update: vi.fn(), deleteMany: vi.fn() };
+// entity_links is the only store of the Key Result pointer and the objective links derived from it.
+const linkRows: EntityLinkFakeRow[] = [];
 
 const database = {
   ...models,
-  opportunityObjectiveLink: links,
-  entityLink: { deleteMany: async () => ({ count: 0 }) },
+  entityLink: createEntityLinkDelegate(linkRows),
   squad: { findFirst: vi.fn() },
   opportunity: models.opportunity,
   workspace: { findUnique: vi.fn() },
@@ -78,37 +78,54 @@ describe("EDIT_CONFIG", () => {
   });
 });
 
-describe("opportunity linkedKeyResultId edits dual-write the LEGACY link", () => {
+describe("opportunity linkedKeyResultId edits write the entity_links pointer and its derived LEGACY link", () => {
+  const OPPORTUNITY_OBJECTIVE = "OPPORTUNITY_TARGETS_OBJECTIVE";
+  const OPPORTUNITY_KEY_RESULT = "OPPORTUNITY_TARGETS_KEY_RESULT";
+  const ofType = (linkType: string) => linkRows.filter((row) => row.linkType === linkType);
+  const seed = (linkType: string, toType: string, toId: string, origin: string | null) =>
+    linkRows.push(entityLinkRow({ workspaceId: WS, linkType, fromType: "OPPORTUNITY", fromId: "e1", toType, toId, origin }));
+
   beforeEach(() => {
-    models.opportunity.findFirst.mockResolvedValue({ id: "e1", workspaceId: WS, title: "Opp", linkedKeyResultId: null });
+    linkRows.length = 0;
+    models.opportunity.findFirst.mockResolvedValue({ id: "e1", workspaceId: WS, title: "Opp" });
+    models.opportunity.update.mockResolvedValue({ id: "e1", workspaceId: WS, title: "Opp" });
     models.keyResult.findFirst.mockResolvedValue({ id: "target", title: "KR", objectiveId: "obj-1", objective: { workspaceId: WS } });
-    links.findFirst.mockResolvedValue(null);
-    links.create.mockResolvedValue({ id: "link-1" });
-    links.deleteMany.mockResolvedValue({ count: 0 });
   });
 
-  it("set: validates the key result in the workspace, writes the column and the link in one transaction", async () => {
+  it("set: validates the key result in the workspace, writes the pointer and the derived link in one transaction", async () => {
     expect(await updateEntityField("opportunity", "e1", WS, "linkedKeyResultId", "target", { kind: "USER", id: "user-1" })).toEqual({ ok: true });
     expect(models.keyResult.findFirst).toHaveBeenCalledWith({ where: { id: "target", objective: { workspaceId: WS } }, select: { id: true } });
-    expect(models.opportunity.update).toHaveBeenCalledWith({ where: { id: "e1" }, data: { linkedKeyResultId: "target", updatedAt: expect.any(Date), updatedById: "user-1" } });
-    expect(links.create).toHaveBeenCalledWith({
-      data: { workspaceId: WS, opportunityId: "e1", objectiveId: "obj-1", origin: "LEGACY", source: "UI", createdById: "user-1" },
-    });
+    // The column is no longer written; the opportunity row is only touched.
+    expect(models.opportunity.update).toHaveBeenCalledWith({ where: { id: "e1" }, data: { updatedAt: expect.any(Date), updatedById: "user-1" } });
+    expect(ofType(OPPORTUNITY_KEY_RESULT)).toMatchObject([{ workspaceId: WS, fromId: "e1", toType: "KEY_RESULT", toId: "target", source: "UI", createdById: "user-1" }]);
+    expect(ofType(OPPORTUNITY_OBJECTIVE)).toMatchObject([{ workspaceId: WS, fromId: "e1", toType: "OBJECTIVE", toId: "obj-1", origin: "LEGACY", source: "UI", createdById: "user-1" }]);
     expect(database.$transaction).toHaveBeenCalled();
   });
 
-  it("clear: nulls the column and deletes only the LEGACY links of that opportunity", async () => {
+  it("replace: the previous pointer and its LEGACY link go, a DIRECT link stays", async () => {
+    seed(OPPORTUNITY_KEY_RESULT, "KEY_RESULT", "old-kr", null);
+    seed(OPPORTUNITY_OBJECTIVE, "OBJECTIVE", "obj-old", "LEGACY");
+    seed(OPPORTUNITY_OBJECTIVE, "OBJECTIVE", "obj-direct", "DIRECT");
+    expect(await updateEntityField("opportunity", "e1", WS, "linkedKeyResultId", "target")).toEqual({ ok: true });
+    expect(ofType(OPPORTUNITY_KEY_RESULT).map((row) => row.toId)).toEqual(["target"]);
+    expect(ofType(OPPORTUNITY_OBJECTIVE).map((row) => [row.toId, row.origin])).toEqual([["obj-direct", "DIRECT"], ["obj-1", "LEGACY"]]);
+  });
+
+  it("clear: removes the pointer and deletes only the LEGACY links of that opportunity", async () => {
+    seed(OPPORTUNITY_KEY_RESULT, "KEY_RESULT", "target", null);
+    seed(OPPORTUNITY_OBJECTIVE, "OBJECTIVE", "obj-1", "LEGACY");
+    seed(OPPORTUNITY_OBJECTIVE, "OBJECTIVE", "obj-direct", "DIRECT");
     expect(await updateEntityField("opportunity", "e1", WS, "linkedKeyResultId", null)).toEqual({ ok: true });
-    expect(models.opportunity.update).toHaveBeenCalledWith({ where: { id: "e1" }, data: { linkedKeyResultId: null, updatedAt: expect.any(Date) } });
-    expect(links.deleteMany).toHaveBeenCalledWith({ where: { opportunityId: "e1", origin: "LEGACY" } });
-    expect(links.create).not.toHaveBeenCalled();
+    expect(models.opportunity.update).toHaveBeenCalledWith({ where: { id: "e1" }, data: { updatedAt: expect.any(Date) } });
+    expect(ofType(OPPORTUNITY_KEY_RESULT)).toEqual([]);
+    expect(ofType(OPPORTUNITY_OBJECTIVE).map((row) => [row.toId, row.origin])).toEqual([["obj-direct", "DIRECT"]]);
   });
 
   it("writes nothing when the key result's objective is not in the workspace", async () => {
     models.keyResult.findFirst.mockResolvedValue(null);
     expect(await updateEntityField("opportunity", "e1", WS, "linkedKeyResultId", "foreign")).toMatchObject({ ok: false, status: 404 });
     expect(models.opportunity.update).not.toHaveBeenCalled();
-    expect(links.create).not.toHaveBeenCalled();
+    expect(linkRows).toEqual([]);
   });
 });
 

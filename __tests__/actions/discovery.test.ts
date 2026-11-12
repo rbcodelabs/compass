@@ -1,7 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-
-// The entity_links mirror (ADR phase 5) has its own tests; this file pins the legacy writes against hand-written fakes.
-process.env.COMPASS_ENTITY_LINKS_OPPORTUNITY_MIRROR = "0";
+import { createEntityLinkDelegate, entityLinkRow, type EntityLinkFakeRow } from "../helpers/entity-link-fake";
 
 // Membership/foreign-entity denial uses real helpers in product-analytics-auth.test.ts.
 vi.mock("@/lib/product-action-auth", () => ({
@@ -11,9 +9,11 @@ vi.mock("@/lib/product-action-auth", () => ({
 
 // Build a mock prisma object with all needed models.
 // getPrisma() is a synchronous default export, so we mock the factory.
+const linkRows: EntityLinkFakeRow[] = [];
 const mockOpportunity = {
   create: vi.fn(),
   update: vi.fn(),
+  updateMany: vi.fn(),
   findFirst: vi.fn(),
   delete: vi.fn(),
   findMany: async ({ where }: { where: { id: { in: string[] } } }) => where.id.in.map((id) => ({ id, title: id })),
@@ -44,9 +44,10 @@ const mockPrisma = {
   opportunityScore: mockOpportunityScore,
   solutionScore: mockSolutionScore,
   squad: { findFirst: vi.fn().mockResolvedValue({ id: "squad-1" }) },
-  keyResult: { findFirst: vi.fn() },
-  opportunityObjectiveLink: { findFirst: vi.fn(), findMany: async () => [], create: vi.fn(), update: vi.fn(), deleteMany: vi.fn() },
-  entityLink: { deleteMany: async () => ({ count: 0 }) },
+  keyResult: { findFirst: vi.fn(), findMany: async ({ where }: { where: { id: { in: string[] } } }) => where.id.in.map((id) => ({ id, title: id })) },
+  objective: { findMany: async ({ where }: { where: { id: { in: string[] } } }) => where.id.in.map((id) => ({ id, title: id })) },
+  // entity_links is the only store of the Key Result pointer and the objective links; rows are inspected directly.
+  entityLink: createEntityLinkDelegate(linkRows),
 };
 // createOpportunity writes the opportunity and its links in one transaction.
 const mockTransaction = vi.fn(async (callback: (tx: typeof mockPrisma) => Promise<unknown>) => callback(mockPrisma));
@@ -97,6 +98,7 @@ const mockAuth = vi.mocked(auth);
 
 beforeEach(() => {
   vi.clearAllMocks();
+  linkRows.length = 0;
   mockOpportunity.create.mockResolvedValue({ id: "opp-1", title: "Test Opp" });
   mockOpportunity.update.mockResolvedValue({ id: "opp-1", status: "VALIDATING" });
   mockOpportunity.findFirst.mockResolvedValue(null); // no last item by default
@@ -126,7 +128,8 @@ describe("createOpportunity", () => {
     const callArgs = mockOpportunity.create.mock.calls[0][0].data;
     expect(callArgs.status).toBe("UNREVIEWED");
     expect(callArgs.title).toBe("Improve onboarding");
-    expect(result).toEqual({ id: "opp-1", title: "Test Opp" });
+    // linkedKeyResultId is the entity_links pointer (none here), not the row's column.
+    expect(result).toEqual({ id: "opp-1", title: "Test Opp", linkedKeyResultId: null });
   });
 
   it("passes through a custom status", async () => {
@@ -245,15 +248,17 @@ describe("updateAssumptionStatus", () => {
 // ─── linkOpportunityToKeyResult ───────────────────────────────────────────────
 
 describe("linkOpportunityToKeyResult", () => {
-  const mockLinks = mockPrisma.opportunityObjectiveLink;
+  const OPPORTUNITY_OBJECTIVE = "OPPORTUNITY_TARGETS_OBJECTIVE";
+  const OPPORTUNITY_KEY_RESULT = "OPPORTUNITY_TARGETS_KEY_RESULT";
+  const ofType = (linkType: string) => linkRows.filter((row) => row.linkType === linkType);
+  const seed = (linkType: string, toType: string, toId: string, origin: string | null) =>
+    linkRows.push(entityLinkRow({ workspaceId: "ws-1", linkType, fromType: "OPPORTUNITY", fromId: "opp-1", toType, toId, origin }));
   beforeEach(() => {
-    // The action used to have NO auth call at all; it now authorizes both ends, then dual-writes.
+    // The action authorizes both ends, then writes the pointer and its derived link together.
     vi.mocked(requireProductEntity).mockResolvedValue({ workspaceId: "ws-1", opportunityId: null });
-    mockOpportunity.findFirst.mockResolvedValue({ id: "opp-1", workspaceId: "ws-1", title: "Opp", linkedKeyResultId: null });
+    mockOpportunity.findFirst.mockResolvedValue({ id: "opp-1", workspaceId: "ws-1", title: "Opp" });
+    mockOpportunity.update.mockResolvedValue({ id: "opp-1", workspaceId: "ws-1", title: "Opp" });
     mockPrisma.keyResult.findFirst.mockResolvedValue({ id: "kr-1", title: "KR", objectiveId: "obj-1", objective: { workspaceId: "ws-1" } });
-    mockLinks.findFirst.mockResolvedValue(null);
-    mockLinks.create.mockResolvedValue({ id: "link-1" });
-    mockLinks.deleteMany.mockResolvedValue({ count: 0 });
   });
   afterEach(() => {
     vi.mocked(requireProductEntity).mockResolvedValue({ workspaceId: "ws-1", opportunityId: "opp-1" });
@@ -267,21 +272,42 @@ describe("linkOpportunityToKeyResult", () => {
     ]);
   });
 
-  it("links an opportunity to a key result: the legacy column and a LEGACY link to the key result's objective, in one transaction", async () => {
+  it("links an opportunity to a key result: the pointer and a LEGACY link to the key result's objective, in one transaction", async () => {
     await linkOpportunityToKeyResult("opp-1", "kr-1", "/path");
-    expect(mockOpportunity.update).toHaveBeenCalledWith({ where: { id: "opp-1" }, data: { linkedKeyResultId: "kr-1", updatedAt: expect.any(Date), updatedById: "user-1" } });
-    expect(mockLinks.create).toHaveBeenCalledWith({
-      data: { workspaceId: "ws-1", opportunityId: "opp-1", objectiveId: "obj-1", origin: "LEGACY", source: "UI", createdById: "user-1" },
-    });
+    // The opportunity row is only touched; the pointer is no longer a column.
+    expect(mockOpportunity.update).toHaveBeenCalledWith({ where: { id: "opp-1" }, data: { updatedAt: expect.any(Date), updatedById: "user-1" } });
+    expect(ofType(OPPORTUNITY_KEY_RESULT)).toMatchObject([
+      { workspaceId: "ws-1", fromType: "OPPORTUNITY", fromId: "opp-1", toType: "KEY_RESULT", toId: "kr-1", source: "UI", createdById: "user-1" },
+    ]);
+    expect(ofType(OPPORTUNITY_OBJECTIVE)).toMatchObject([
+      { workspaceId: "ws-1", fromId: "opp-1", toType: "OBJECTIVE", toId: "obj-1", origin: "LEGACY", source: "UI", createdById: "user-1" },
+    ]);
     expect(mockTransaction).toHaveBeenCalledOnce();
   });
 
-  it("clears the link when null is passed: nulls the column and deletes only LEGACY links", async () => {
+  it("re-pointing replaces the pointer, moves the LEGACY link, and never touches a DIRECT link", async () => {
+    seed(OPPORTUNITY_KEY_RESULT, "KEY_RESULT", "kr-old", null);
+    seed(OPPORTUNITY_OBJECTIVE, "OBJECTIVE", "obj-old", "LEGACY");
+    seed(OPPORTUNITY_OBJECTIVE, "OBJECTIVE", "obj-direct", "DIRECT");
+    await linkOpportunityToKeyResult("opp-1", "kr-1", "/path");
+    expect(ofType(OPPORTUNITY_KEY_RESULT).map((row) => row.toId)).toEqual(["kr-1"]);
+    expect(ofType(OPPORTUNITY_OBJECTIVE).map((row) => [row.toId, row.origin])).toEqual([["obj-direct", "DIRECT"], ["obj-1", "LEGACY"]]);
+  });
+
+  it("a DIRECT link to the key result's own objective is kept as DIRECT (never downgraded)", async () => {
+    seed(OPPORTUNITY_OBJECTIVE, "OBJECTIVE", "obj-1", "DIRECT");
+    await linkOpportunityToKeyResult("opp-1", "kr-1", "/path");
+    expect(ofType(OPPORTUNITY_OBJECTIVE).map((row) => [row.toId, row.origin])).toEqual([["obj-1", "DIRECT"]]);
+    expect(ofType(OPPORTUNITY_KEY_RESULT).map((row) => row.toId)).toEqual(["kr-1"]);
+  });
+
+  it("clears the link when null is passed: removes the pointer and only the LEGACY objective links", async () => {
+    seed(OPPORTUNITY_KEY_RESULT, "KEY_RESULT", "kr-1", null);
+    seed(OPPORTUNITY_OBJECTIVE, "OBJECTIVE", "obj-1", "LEGACY");
+    seed(OPPORTUNITY_OBJECTIVE, "OBJECTIVE", "obj-direct", "DIRECT");
     await linkOpportunityToKeyResult("opp-1", null, "/path");
-    const callArgs = mockOpportunity.update.mock.calls[0][0].data;
-    expect(callArgs.linkedKeyResultId).toBeNull();
-    expect(mockLinks.deleteMany).toHaveBeenCalledWith({ where: { opportunityId: "opp-1", origin: "LEGACY" } });
-    expect(mockLinks.create).not.toHaveBeenCalled();
+    expect(ofType(OPPORTUNITY_KEY_RESULT)).toEqual([]);
+    expect(ofType(OPPORTUNITY_OBJECTIVE).map((row) => [row.toId, row.origin])).toEqual([["obj-direct", "DIRECT"]]);
     expect(vi.mocked(requireProductEntity).mock.calls).toEqual([["opportunity", "opp-1"]]);
   });
 
@@ -290,14 +316,14 @@ describe("linkOpportunityToKeyResult", () => {
     await expect(linkOpportunityToKeyResult("opp-1", "kr-1", "/path")).rejects.toThrow("access denied");
     expect(mockTransaction).not.toHaveBeenCalled();
     expect(mockOpportunity.update).not.toHaveBeenCalled();
-    expect(mockLinks.create).not.toHaveBeenCalled();
+    expect(linkRows).toEqual([]);
   });
 
   it("writes nothing when the key result is in another workspace", async () => {
     vi.mocked(requireProductEntity).mockResolvedValueOnce({ workspaceId: "ws-1", opportunityId: null }).mockRejectedValueOnce(new Error("Entity not found or access denied"));
     await expect(linkOpportunityToKeyResult("opp-1", "kr-other", "/path")).rejects.toThrow("access denied");
     expect(mockOpportunity.update).not.toHaveBeenCalled();
-    expect(mockLinks.create).not.toHaveBeenCalled();
+    expect(linkRows).toEqual([]);
   });
 
   it("still refuses inside the transaction when the key result's objective is not in the workspace (defense in depth)", async () => {

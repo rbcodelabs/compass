@@ -17,7 +17,8 @@ vi.mock("@/lib/work-item-page", async () => {
   return { resolveWorkItemPage: async (args: { type: string; param: string }) => { resolvePage(args); return mock.resolveWorkItemPage(args) } }
 })
 vi.mock("@/auth", () => ({ auth }))
-vi.mock("@/lib/db", () => ({ default: () => ({ workspace: { findFirst: findWorkspace }, reviewRequest: { findFirst }, artifact: { findMany: findArtifacts }, taskLink: { findMany: findTaskLinks } }) }))
+vi.mock("@/lib/db", () => ({ default: () => ({ workspace: { findFirst: findWorkspace }, reviewRequest: { findFirst }, artifact: { findMany: findArtifacts } }) }))
+vi.mock("@/lib/task-links-read", () => ({ getTasksLinkedTo: findTaskLinks }))
 vi.mock("@/lib/artifacts", () => ({ getDecisionArtifacts: linkedArtifacts }))
 vi.mock("@/lib/task-assignment", () => ({ eligibleTaskAssignees: eligibleAssignees }))
 vi.mock("@/app/[orgSlug]/[workspaceSlug]/docs/actions", () => ({ linkArtifactDecision: vi.fn(), unlinkArtifactDecision: vi.fn() }))
@@ -156,10 +157,10 @@ describe("review request page — \"Send to agent\" on a decided banner", () => 
     expect(link.getAttribute("href")).toBe("/acme/product/agent?entityType=decision&entityId=request-1")
   })
 
-  it("loads follow-up tasks with exactly the legacy task_links query when the TASK flag is unset", async () => {
+  it("loads follow-up tasks from the entity_links reader, scoped to the decision's workspace", async () => {
     findFirst.mockResolvedValue(decidedRequest("TRACKED_DECISION", "APPROVE"))
     render(await ReviewRequestPage({ params: Promise.resolve({ orgSlug: "acme", workspaceSlug: "product", requestId: "request-1" }) }))
-    expect(findTaskLinks).toHaveBeenCalledWith({ where: { linkedType: "DECISION", linkedId: "request-1" }, select: { task: { select: { id: true, title: true, status: true } } } })
+    expect(findTaskLinks).toHaveBeenCalledWith(expect.anything(), { workspaceIds: ["workspace-1"], linkedType: "DECISION", linkedIds: ["request-1"] })
   })
 
   it("hides the link when the decided TRACKED_DECISION outcome is REJECT", async () => {

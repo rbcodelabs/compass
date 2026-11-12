@@ -9,6 +9,7 @@ const { mockAuth, revalidate, state, membership } = vi.hoisted(() => ({
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
+vi.mock("@/lib/typed-links", async (importOriginal) => (await import("../lib/roadmap-fake-prisma")).typedLinksWithPointerFixtures(await importOriginal<object>()));
 vi.mock("next/cache", () => ({ revalidatePath: revalidate }));
 vi.mock("@/lib/workspace-update-mutations", () => ({
   captureWorkspaceMutation: async (_p: unknown, _m: string, _o: string, _s: unknown, _id: unknown, mutate: (tx: unknown) => Promise<unknown>) => mutate(_p),
@@ -44,7 +45,7 @@ beforeEach(() => {
   state.solutions = [
     solutionRow("s1", { status: "VALIDATED", score: { normalizedScore: 90 } }),
     solutionRow("s2", { status: "VALIDATED", score: { normalizedScore: 60 } }),
-    solutionRow("s3", { status: "IN_DELIVERY", score: { normalizedScore: 75 }, opportunity: { id: "opp-s3", squadId: "squad-b", linkedKeyResultId: null } }),
+    solutionRow("s3", { status: "IN_DELIVERY", score: { normalizedScore: 75 }, opportunity: { id: "opp-s3", squadId: "squad-b", keyResultPointer: null } }),
     solutionRow("s4", { status: "IDEA", score: { normalizedScore: 99 } }),
   ];
   state.squads = [{ id: "squad-a", workspaceId: WS }, { id: "squad-b", workspaceId: WS }];

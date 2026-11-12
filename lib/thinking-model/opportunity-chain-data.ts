@@ -7,6 +7,7 @@
  */
 import type { AppPrismaClient } from "@/lib/db"
 import { getLinkedKeyResultsBySolution } from "@/lib/typed-links"
+import { readEntityLinksTaskReferences } from "@/lib/links/readers"
 import type { ResolvedThinkingModel } from "./resolve"
 import type { ChainObjectiveInput, ChainTaskInput } from "./opportunity-chain"
 
@@ -32,24 +33,30 @@ export async function loadOpportunityChainExtras(
   solutions: readonly SolutionRef[],
 ): Promise<OpportunityChainExtras> {
   const solutionIds = solutions.map((s) => s.id)
-  const [keyResultsBySolution, taskLinks] = await Promise.all([
+  const [keyResultsBySolution, taskRefs] = await Promise.all([
     solutionIds.length > 0 && model.links.solToKr !== "hidden"
       ? getLinkedKeyResultsBySolution(prisma, workspaceId, solutionIds, { preverified: true })
       : Promise.resolve(new Map<string, Array<{ id: string; title: string; objectiveId: string }>>()),
     solutionIds.length > 0
-      ? prisma.taskLink.findMany({
-          where: { linkedType: "SOLUTION", linkedId: { in: solutionIds }, task: { workspaceId, status: { not: "CANCELLED" } } },
-          select: { linkedId: true, createdAt: true, task: { select: { id: true, title: true, status: true } } },
-          orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-        })
+      ? readEntityLinksTaskReferences(prisma, workspaceId, { target: { type: "SOLUTION", ids: solutionIds } })
       : Promise.resolve([]),
   ])
 
+  // Delivery tasks per solution, in link order (created_at, id): reader rows are already workspace-filtered on both endpoints.
+  const taskRows = taskRefs.length > 0
+    ? await prisma.task.findMany({
+        where: { workspaceId, status: { not: "CANCELLED" }, id: { in: [...new Set(taskRefs.map((link) => link.fromId))] } },
+        select: { id: true, title: true, status: true },
+      })
+    : []
+  const taskById = new Map(taskRows.map((task) => [task.id, task]))
   const tasksBySolution = new Map<string, ChainTaskInput[]>()
-  for (const link of taskLinks) {
-    const list = tasksBySolution.get(link.linkedId) ?? []
-    list.push(link.task)
-    tasksBySolution.set(link.linkedId, list)
+  for (const link of taskRefs) {
+    const task = taskById.get(link.fromId)
+    if (!task) continue
+    const list = tasksBySolution.get(link.toId) ?? []
+    list.push(task)
+    tasksBySolution.set(link.toId, list)
   }
 
   // Objectives the chain can touch: typed parents, the legacy pointer's Objective, and chips' owners.

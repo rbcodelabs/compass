@@ -17,6 +17,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const W_A = "ws-a";
 const W_B = "ws-b";
 const ALICE = "user-alice"; // member of A only
+const OPPORTUNITY_OBJECTIVE = "OPPORTUNITY_TARGETS_OBJECTIVE";
+const OPPORTUNITY_KEY_RESULT = "OPPORTUNITY_TARGETS_KEY_RESULT";
+const SOLUTION_KEY_RESULT = "SOLUTION_TARGETS_KEY_RESULT";
 
 type Row = Record<string, unknown>;
 const db = vi.hoisted(() => ({ current: null as null | ReturnType<typeof makeDb> }));
@@ -42,17 +45,18 @@ function makeDb() {
     ],
     squad: [{ id: "00000000-0000-4000-8000-00000000000a", workspaceId: W_A, name: "A" }, { id: "00000000-0000-4000-8000-00000000000b", workspaceId: W_B, name: "B" }],
     opportunity: [
-      { id: "opp-b", workspaceId: W_B, squadId: "00000000-0000-4000-8000-00000000000b", linkedKeyResultId: null },
-      { id: "opp-a", workspaceId: W_A, squadId: null, linkedKeyResultId: "kr-a" },
+      { id: "opp-b", workspaceId: W_B, squadId: "00000000-0000-4000-8000-00000000000b" },
+      { id: "opp-a", workspaceId: W_A, squadId: null },
     ],
-    opportunityObjectiveLink: [
-      { id: "l-a-legacy", workspaceId: W_A, opportunityId: "opp-a", objectiveId: "obj-a", origin: "LEGACY" },
-      { id: "l-a-direct", workspaceId: W_A, opportunityId: "opp-a", objectiveId: "obj-a2", origin: "DIRECT" },
-      { id: "l-b", workspaceId: W_B, opportunityId: "opp-b", objectiveId: "obj-b", origin: "DIRECT" },
-    ],
-    solutionKeyResultLink: [
-      { id: "s-a", workspaceId: W_A, solutionId: "sol-a", keyResultId: "kr-a" },
-      { id: "s-b", workspaceId: W_B, solutionId: "sol-b", keyResultId: "kr-b" },
+    // entity_links is the only link store: the Key Result pointer of opp-a, its derived LEGACY objective link, a DIRECT one, and solution links.
+    entityLink: [
+      { id: "p-a", workspaceId: W_A, linkType: OPPORTUNITY_KEY_RESULT, fromType: "OPPORTUNITY", fromId: "opp-a", toType: "KEY_RESULT", toId: "kr-a", origin: null },
+      { id: "p-b", workspaceId: W_B, linkType: OPPORTUNITY_KEY_RESULT, fromType: "OPPORTUNITY", fromId: "opp-b", toType: "KEY_RESULT", toId: "kr-b", origin: null },
+      { id: "l-a-legacy", workspaceId: W_A, linkType: OPPORTUNITY_OBJECTIVE, fromType: "OPPORTUNITY", fromId: "opp-a", toType: "OBJECTIVE", toId: "obj-a", origin: "LEGACY" },
+      { id: "l-a-direct", workspaceId: W_A, linkType: OPPORTUNITY_OBJECTIVE, fromType: "OPPORTUNITY", fromId: "opp-a", toType: "OBJECTIVE", toId: "obj-a2", origin: "DIRECT" },
+      { id: "l-b", workspaceId: W_B, linkType: OPPORTUNITY_OBJECTIVE, fromType: "OPPORTUNITY", fromId: "opp-b", toType: "OBJECTIVE", toId: "obj-b", origin: "DIRECT" },
+      { id: "s-a", workspaceId: W_A, linkType: SOLUTION_KEY_RESULT, fromType: "SOLUTION", fromId: "sol-a", toType: "KEY_RESULT", toId: "kr-a", origin: null },
+      { id: "s-b", workspaceId: W_B, linkType: SOLUTION_KEY_RESULT, fromType: "SOLUTION", fromId: "sol-b", toType: "KEY_RESULT", toId: "kr-b", origin: null },
     ],
     experiment: [],
     roadmapItem: [{ id: "rm-a", workspaceId: W_A, squadId: null }, { id: "rm-b", workspaceId: W_B, squadId: "00000000-0000-4000-8000-00000000000b" }],
@@ -122,7 +126,12 @@ function makeDb() {
     create: async ({ data }: { data: Row }) => { const row = { id: `${model}-new`, ...data }; tables[model].push(row); writes.push(`${model}.create`); return row; },
     update: async ({ where, data }: { where: Row; data: Row }) => { const row = tables[model].find((r) => matches(model, r, where)); if (!row) throw new Error("not found"); Object.assign(row, data); writes.push(`${model}.update:${row.id}`); return row; },
     updateMany: async ({ where, data }: { where: Row; data: Row }) => { const rows = tables[model].filter((r) => matches(model, r, where)); rows.forEach((r) => { Object.assign(r, data); writes.push(`${model}.updateMany:${r.id}`); }); return { count: rows.length }; },
-    findUnique: async ({ where }: { where: Row }) => { const row = tables[model].find((r) => matches(model, r, where)); return row ? { ...row } : null; },
+    findUnique: async ({ where }: { where: Row }) => {
+      const row = tables[model].find((r) => matches(model, r, where));
+      if (!row) return null;
+      // A key result is read with its objective's workspace (the select shape of the delete flows).
+      return model === "keyResult" ? { ...row, objective: tables.objective.find((o) => o.id === row.objectiveId) } : { ...row };
+    },
     delete: async ({ where }: { where: Row }) => { const i = tables[model].findIndex((r) => matches(model, r, where)); if (i < 0) throw new Error("not found"); if (restricted.has(String(tables[model][i].id))) throw new Error("Restrict: still referenced");  writes.push(`${model}.delete:${tables[model][i].id}`); tables[model].splice(i, 1); return {}; },
   });
   const client: Record<string, unknown> = {
@@ -226,17 +235,20 @@ describe("OKR server actions", () => {
     expect(db.current!.writes).toEqual([]);
   });
 
-  const linkIds = () => db.current!.tables.opportunityObjectiveLink.map((r) => r.id);
-  const solutionLinkIds = () => db.current!.tables.solutionKeyResultLink.map((r) => r.id);
+  const idsOf = (linkType: string) => db.current!.tables.entityLink.filter((r) => r.linkType === linkType).map((r) => r.id);
+  const linkIds = () => idsOf(OPPORTUNITY_OBJECTIVE);
+  const solutionLinkIds = () => idsOf(SOLUTION_KEY_RESULT);
+  const pointerIds = () => idsOf(OPPORTUNITY_KEY_RESULT);
 
-  it("deleteKeyResult deletes the key result, THEN removes the LEGACY link and the solution links; DIRECT links and workspace B's stay", async () => {
+  it("deleteKeyResult deletes the key result, THEN removes the pointer, the LEGACY link and the solution links; DIRECT links and workspace B's stay", async () => {
     await okr.deleteKeyResult("kr-a", "/p");
     expect(linkIds()).toEqual(["l-a-direct", "l-b"]);
     expect(solutionLinkIds()).toEqual(["s-b"]);
+    expect(pointerIds()).toEqual(["p-b"]);
     expect(db.current!.tables.keyResult.map((r) => r.id)).not.toContain("kr-a");
     const writes = db.current!.writes;
     expect(writes.indexOf("keyResult.delete:kr-a")).toBeGreaterThan(-1);
-    expect(writes.indexOf("keyResult.delete:kr-a")).toBeLessThan(writes.findIndex((w) => w.startsWith("opportunityObjectiveLink.deleteMany")));
+    expect(writes.indexOf("keyResult.delete:kr-a")).toBeLessThan(writes.findIndex((w) => w.startsWith("entityLink.deleteMany")));
   });
 
   it("a REFUSED key result delete (supporting objective or check-ins: Restrict) throws and every link survives", async () => {
@@ -244,6 +256,7 @@ describe("OKR server actions", () => {
     await expect(okr.deleteKeyResult("kr-a", "/p")).rejects.toThrow("Restrict");
     expect(linkIds()).toEqual(["l-a-legacy", "l-a-direct", "l-b"]);
     expect(solutionLinkIds()).toEqual(["s-a", "s-b"]);
+    expect(pointerIds()).toEqual(["p-a", "p-b"]);
     expect(db.current!.writes.filter((w) => /Link\./.test(w))).toEqual([]);
   });
 
@@ -254,15 +267,15 @@ describe("OKR server actions", () => {
   });
 
   it("deleteObjective deletes the objective, then removes every opportunity link to it (both origins) and only those", async () => {
-    db.current!.tables.opportunityObjectiveLink.push({ id: "l-a-direct-obj-a", workspaceId: W_A, opportunityId: "opp-a2", objectiveId: "obj-a", origin: "DIRECT" });
+    db.current!.tables.entityLink.push({ id: "l-a-direct-obj-a", workspaceId: W_A, linkType: OPPORTUNITY_OBJECTIVE, fromType: "OPPORTUNITY", fromId: "opp-a2", toType: "OBJECTIVE", toId: "obj-a", origin: "DIRECT" });
     await okr.deleteObjective("obj-a", "/p");
     expect(linkIds()).toEqual(["l-a-direct", "l-b"]);
-    expect(db.current!.writes.indexOf("objective.delete:obj-a")).toBeLessThan(db.current!.writes.findIndex((w) => w.startsWith("opportunityObjectiveLink.deleteMany")));
+    expect(db.current!.writes.indexOf("objective.delete:obj-a")).toBeLessThan(db.current!.writes.findIndex((w) => w.startsWith("entityLink.deleteMany")));
   });
 
   it("if the post-delete drain fails the delete still succeeds for the user: logged and swallowed, leftovers left for 072 / directDangling", async () => {
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
-    (db.current!.client.opportunityObjectiveLink as { findMany: unknown }).findMany = async () => { throw new Error("link table unavailable") };
+    (db.current!.client.entityLink as { findMany: unknown }).findMany = async () => { throw new Error("link table unavailable") };
     await expect(okr.deleteObjective("obj-a", "/p")).resolves.toBeUndefined();
     expect(db.current!.tables.objective.map((r) => r.id)).not.toContain("obj-a");
     expect(JSON.parse(String(log.mock.calls[0][0]))).toMatchObject({ event: "typed_links.cleanup_failed", surface: "ui.deleteObjective" });

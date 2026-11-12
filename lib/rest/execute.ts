@@ -30,6 +30,7 @@ import { getCustomFieldValues, setCustomFieldValue } from "@/lib/custom-field-to
 import { toCustomFieldDefinitionData } from "@/lib/custom-field-definitions"
 import type { CustomFieldValue } from "@/lib/types"
 import { linkEntitiesTool, listLinksTool, unlinkEntitiesTool } from "@/lib/link-tool-handlers"
+import { getOpportunityKeyResultPointers } from "@/lib/typed-links"
 import { getEligibleParentKeyResults } from "@/lib/okr-hierarchy"
 import { archiveScoringModel, createScoringModel, getOpportunityScore, getSolutionScore, listScoringModels, listTopOpportunities, scoreOpportunity, scoreSolution, setWorkspaceScoringModel, updateScoringModel } from "@/lib/scoring-tool-handlers"
 import { captureWorkspaceMutation } from "@/lib/workspace-update-mutations"
@@ -75,7 +76,7 @@ type Input = { params: Record<string, string>; query: Record<string, unknown>; b
 
 const select = {
   workspace: { id: true, organizationId: true, slug: true, name: true, description: true, createdAt: true, updatedAt: true },
-  opportunity: { id: true, seqPrefix: true, seqNumber: true, workspaceId: true, title: true, description: true, customerSegment: true, status: true, squadId: true, linkedKeyResultId: true, createdAt: true, updatedAt: true },
+  opportunity: { id: true, seqPrefix: true, seqNumber: true, workspaceId: true, title: true, description: true, customerSegment: true, status: true, squadId: true, createdAt: true, updatedAt: true },
   solution: { id: true, seqPrefix: true, seqNumber: true, workspaceId: true, opportunityId: true, title: true, description: true, status: true, createdAt: true, updatedAt: true },
   assumption: { id: true, seqPrefix: true, seqNumber: true, solutionId: true, title: true, description: true, riskLevel: true, status: true, createdAt: true, updatedAt: true },
   feedback: { id: true, seqPrefix: true, seqNumber: true, workspaceId: true, opportunityId: true, title: true, description: true, type: true, status: true, voteCount: true, tags: true, submitterName: true, submitterEmail: true, createdAt: true, updatedAt: true },
@@ -269,9 +270,9 @@ export async function executeRestRoute(route: RestRoute, input: Input): Promise<
     }
     case "getWorkspace": return serialize(found(await prisma.workspace.findFirst({ where: { id: workspaceId, ...(isServiceActor(actor) ? {} : await agentWorkspaceWhere(actor)) }, select: select.workspace })))
 
-    case "listOpportunities": return listPage(`opportunities:${workspaceId}:${filters(input.query, ["status", "squadId"])}`, input.query, (cursor, take) => prisma.opportunity.findMany({ where: { workspaceId, ...pick(input.query, ["status", "squadId"]), ...cursorWhere(cursor) }, select: select.opportunity, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take }))
-    case "getOpportunity": return serialize(found(await prisma.opportunity.findFirst({ where: { id, workspaceId }, select: select.opportunity })))
-    case "createOpportunity": { await validateOpportunityRefs(prisma, workspaceId, body); const result = ensureTool(await createOpportunity({ workspaceId, title: String(body.title), description: nullable(body.description), customerSegment: nullable(body.customerSegment), status: body.status as "UNREVIEWED" | "EXPLORING" | "VALIDATING" | "PRIORITIZED" | "ACTIVE" | undefined, squadId: nullable(body.squadId), keyResultId: nullable(body.linkedKeyResultId), source: "API" })); return serialize(found(await prisma.opportunity.findFirst({ where: { workspaceId, id: String((result as { id: string }).id) }, select: select.opportunity }))) }
+    case "listOpportunities": return listPage(`opportunities:${workspaceId}:${filters(input.query, ["status", "squadId"])}`, input.query, (cursor, take) => prisma.opportunity.findMany({ where: { workspaceId, ...pick(input.query, ["status", "squadId"]), ...cursorWhere(cursor) }, select: select.opportunity, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take }).then((rows) => withKeyResultPointers(prisma, workspaceId, rows)))
+    case "getOpportunity": return serialize(await withKeyResultPointer(prisma, workspaceId, found(await prisma.opportunity.findFirst({ where: { id, workspaceId }, select: select.opportunity }))))
+    case "createOpportunity": { await validateOpportunityRefs(prisma, workspaceId, body); const result = ensureTool(await createOpportunity({ workspaceId, title: String(body.title), description: nullable(body.description), customerSegment: nullable(body.customerSegment), status: body.status as "UNREVIEWED" | "EXPLORING" | "VALIDATING" | "PRIORITIZED" | "ACTIVE" | undefined, squadId: nullable(body.squadId), keyResultId: nullable(body.linkedKeyResultId), source: "API" })); return serialize(await withKeyResultPointer(prisma, workspaceId, found(await prisma.opportunity.findFirst({ where: { workspaceId, id: String((result as { id: string }).id) }, select: select.opportunity })))) }
     case "createOpportunitiesBatch": case "createSolutionsBatch": {
       const items = (body.items ?? []) as Record<string, unknown>[]
       try {
@@ -291,7 +292,7 @@ export async function executeRestRoute(route: RestRoute, input: Input): Promise<
       if (Object.keys(editable).length) ensureTool(await updateOpportunity({ opportunityId: id, ...editable }))
       if (body.status) ensureTool(await updateOpportunityStatus({ opportunityId: id, status: body.status as "UNREVIEWED" | "EXPLORING" | "VALIDATING" | "PRIORITIZED" | "ACTIVE" | "ARCHIVED", source: "API" }))
       if (body.linkedKeyResultId !== undefined) ensureTool(await updateOpportunityKeyResult({ opportunityId: id, keyResultId: nullable(body.linkedKeyResultId) ?? null, workspaceId, source: "API" }))
-      return serialize(found(await prisma.opportunity.findFirst({ where: { id, workspaceId }, select: select.opportunity })))
+      return serialize(await withKeyResultPointer(prisma, workspaceId, found(await prisma.opportunity.findFirst({ where: { id, workspaceId }, select: select.opportunity }))))
     }
     case "linkOpportunityObjective": {
       const data = ensureTool(await linkOpportunityToObjectiveTool({ workspaceId, opportunityId: id, objectiveId: String(body.objectiveId), source: "API" })) as { link: unknown }
@@ -882,6 +883,16 @@ function found<T>(value: T | null | undefined): T { if (value == null) throw new
 function nullable(value: unknown): string | null | undefined { return value === null ? null : typeof value === "string" ? value : undefined }
 function pick(source: Record<string, unknown>, keys: string[]): Record<string, unknown> { return Object.fromEntries(keys.flatMap((key) => source[key] === undefined ? [] : [[key, source[key]]])) }
 function filters(query: Record<string, unknown>, keys: string[]): string { return JSON.stringify(pick(query, keys)) }
+/** Opportunity rows carry `linkedKeyResultId` in the public shape; it is the entity_links pointer, not a column. */
+async function withKeyResultPointers<T extends { id: string }>(prisma: ReturnType<typeof getPrisma>, workspaceId: string, rows: readonly T[]): Promise<Array<T & { linkedKeyResultId: string | null }>> {
+  const pointers = await getOpportunityKeyResultPointers(prisma, workspaceId, rows)
+  return rows.map((row) => ({ ...row, linkedKeyResultId: pointers.get(row.id) ?? null }))
+}
+
+async function withKeyResultPointer<T extends { id: string }>(prisma: ReturnType<typeof getPrisma>, workspaceId: string, row: T): Promise<T & { linkedKeyResultId: string | null }> {
+  return (await withKeyResultPointers(prisma, workspaceId, [row]))[0]
+}
+
 function serialize(value: unknown): unknown {
   const serialized = JSON.parse(JSON.stringify(value)) as unknown
   if (serialized && typeof serialized === "object" && "seqNumber" in serialized) {

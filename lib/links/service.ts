@@ -3,7 +3,7 @@
  * table for association links", section 5). ONLY this directory may name the EntityLink model or the
  * table; a guard test (__tests__/links/entity-links-guard.test.ts) pins that. Everything else goes
  * through the functions below, so the invariants live in one reviewed place. They are the same ones
- * lib/typed-links.ts keeps for the legacy pair tables:
+ * lib/typed-links.ts kept for the pair tables it replaced:
  *
  *  - TENANT SAFETY. A link's `workspaceId` is copied from the verified `from` row, never from an input.
  *    `expectedWorkspaceId` is a PRECONDITION: both endpoints are re-verified inside the same
@@ -67,10 +67,10 @@ export type EntityLinkRow = {
 const FEATURE_OFF = "This link type cannot be used: it is not enabled for this deployment."
 const MODULE_OFF = "This link type cannot be used: it is not enabled for this workspace. A workspace admin can enable the module it belongs to in Settings > Modules."
 
-/** A legacy-mirrored type is written only by its legacy writer (lib/links/legacy-mirror.ts), which passes viaLegacyWriter. */
-function assertWritableHere(def: LinkTypeDef, viaLegacyWriter: boolean | undefined, viaInternalWriter?: boolean) {
+/** A type with a dedicated writer (lib/typed-links.ts, lib/artifacts.ts, lib/task-link-writes.ts) is written only by it, which passes viaDedicatedWriter. */
+function assertWritableHere(def: LinkTypeDef, viaDedicatedWriter: boolean | undefined, viaInternalWriter?: boolean) {
   if (def.internal && !viaInternalWriter) throw new TypedLinkError(`${def.key} is managed by its owning feature, not the generic link tools.`, "INVALID")
-  if (def.legacy && !viaLegacyWriter) {
+  if (def.dedicatedWriter && !viaDedicatedWriter) {
     const tool = def.compat?.mcpTools[0]
     throw new TypedLinkError(`${def.key} is written through ${tool ?? "its existing link tool"}, not the generic link tools.`, "INVALID")
   }
@@ -125,15 +125,17 @@ export type LinkEntitiesInput = {
   attrs?: unknown
   origin?: LinkOrigin
   ctx: LinkContext
-  /** Set only by lib/links/legacy-mirror.ts, the single writer of a legacy-mirrored type. */
-  viaLegacyWriter?: boolean
+  /** Set only by the dedicated writer module of a type that has one (see LinkTypeDef.dedicatedWriter). */
+  viaDedicatedWriter?: boolean
   /** Set only by the module that owns an `internal` type (lib/agent-conversation-links.ts). */
   viaInternalWriter?: boolean
-  /** With viaLegacyWriter only: an existing row takes `origin` (and, when it becomes DIRECT, this call's source and actor), because the legacy row is the truth. */
+  /** With viaDedicatedWriter only: an existing row takes `origin` (and, when it becomes DIRECT, this call's source and actor). */
   reconcileOrigin?: boolean
+  /** With reconcileOrigin: an existing DIRECT row is never downgraded (a derived write cannot undo a link someone made). */
+  keepDirectOrigin?: boolean
 }
 
-export type LinkEntitiesResult = { link: EntityLinkRow; created: boolean; from: LinkEndpoint; to: LinkEndpoint; def: LinkTypeDef }
+export type LinkEntitiesResult = { link: EntityLinkRow; created: boolean; originFlipped: boolean; from: LinkEndpoint; to: LinkEndpoint; def: LinkTypeDef }
 
 /**
  * Creates the link, or reconciles the existing one, without ON CONFLICT. Run it through
@@ -141,7 +143,7 @@ export type LinkEntitiesResult = { link: EntityLinkRow; created: boolean; from: 
  */
 export async function linkEntities(tx: Tx, input: LinkEntitiesInput): Promise<LinkEntitiesResult> {
   const def = requireLinkType(input.linkType)
-  assertWritableHere(def, input.viaLegacyWriter, input.viaInternalWriter)
+  assertWritableHere(def, input.viaDedicatedWriter, input.viaInternalWriter)
   await assertEnabled(def, input.expectedWorkspaceId)
   const origin = input.origin ?? "DIRECT"
   if (def.origins && !def.origins.includes(origin)) throw new TypedLinkError(`${def.key} does not allow origin ${origin}.`, "INVALID")
@@ -163,10 +165,10 @@ export async function linkEntities(tx: Tx, input: LinkEntitiesInput): Promise<Li
 
   const existing = (await tx.entityLink.findFirst({ where: { fromId: first.id, linkType: def.key, toId: second.id } })) as EntityLinkRow | null
   if (existing) {
-    // The legacy writer reconciles: its own table already decided whether a repeat is an error, and the mirror row may predate it.
-    if (def.duplicatePolicy === "error" && !input.viaLegacyWriter) throw new TypedLinkError(`Already linked (${def.key}).`, "INVALID")
-    const originDrift = Boolean(input.viaLegacyWriter && input.reconcileOrigin && existing.origin !== origin)
-    if (existing.workspaceId === workspaceId && !originDrift) return { link: existing, created: false, from: fromEndpoint, to: toEndpoint, def }
+    // The dedicated writer reconciles: it decides for itself whether a repeat is an error.
+    if (def.duplicatePolicy === "error" && !input.viaDedicatedWriter) throw new TypedLinkError(`Already linked (${def.key}).`, "INVALID")
+    const originDrift = Boolean(input.viaDedicatedWriter && input.reconcileOrigin && existing.origin !== origin && !(input.keepDirectOrigin && existing.origin === "DIRECT"))
+    if (existing.workspaceId === workspaceId && !originDrift) return { link: existing, created: false, originFlipped: false, from: fromEndpoint, to: toEndpoint, def }
     // A drifted workspaceId is repaired to the verified one: both endpoints were just checked there.
     const link = (await tx.entityLink.update({
       where: { id: existing.id },
@@ -176,7 +178,7 @@ export async function linkEntities(tx: Tx, input: LinkEntitiesInput): Promise<Li
         ...(originDrift ? { origin, ...(origin === "DIRECT" ? { source: input.ctx.source, createdById: input.ctx.createdById ?? null } : {}) } : {}),
       },
     })) as EntityLinkRow
-    return { link, created: false, from: fromEndpoint, to: toEndpoint, def }
+    return { link, created: false, originFlipped: originDrift && origin === "DIRECT", from: fromEndpoint, to: toEndpoint, def }
   }
 
   await enforceCardinality(tx, def, workspaceId, first, second)
@@ -198,7 +200,7 @@ export async function linkEntities(tx: Tx, input: LinkEntitiesInput): Promise<Li
       updatedAt: now,
     },
   })) as EntityLinkRow
-  return { link, created: true, from: fromEndpoint, to: toEndpoint, def }
+  return { link, created: true, originFlipped: false, from: fromEndpoint, to: toEndpoint, def }
 }
 
 async function enforceCardinality(tx: Tx, def: LinkTypeDef, workspaceId: string, from: LinkEndpoint, to: LinkEndpoint) {
@@ -219,7 +221,7 @@ async function enforceCardinality(tx: Tx, def: LinkTypeDef, workspaceId: string,
   }
 }
 
-export type UnlinkEntitiesInput = { linkType: string; fromId: string; toId: string; expectedWorkspaceId: string; viaLegacyWriter?: boolean; viaInternalWriter?: boolean }
+export type UnlinkEntitiesInput = { linkType: string; fromId: string; toId: string; expectedWorkspaceId: string; viaDedicatedWriter?: boolean; viaInternalWriter?: boolean }
 
 /**
  * Removes the link (a hard delete; the audit trail is the workspace update capture). Only the `from`
@@ -228,9 +230,8 @@ export type UnlinkEntitiesInput = { linkType: string; fromId: string; toId: stri
  */
 export async function unlinkEntities(tx: Tx, input: UnlinkEntitiesInput): Promise<{ removed: number; removedIds: string[]; def: LinkTypeDef }> {
   const def = requireLinkType(input.linkType)
-  assertWritableHere(def, input.viaLegacyWriter, input.viaInternalWriter)
-  // A mirror row must stay removable after the flag is turned off, or the legacy unlink would strand it.
-  if (!input.viaLegacyWriter) await assertEnabled(def, input.expectedWorkspaceId)
+  assertWritableHere(def, input.viaDedicatedWriter, input.viaInternalWriter)
+  if (!input.viaDedicatedWriter) await assertEnabled(def, input.expectedWorkspaceId)
   const from = await requireEndpoint(tx, def.from, input.expectedWorkspaceId, input.fromId)
   const pair = { linkType: def.key, workspaceId: from.workspaceId }
   const where =
@@ -246,7 +247,7 @@ export async function unlinkEntities(tx: Tx, input: UnlinkEntitiesInput): Promis
 
 /**
  * Removes the links of one type that start at `fromId`, optionally keeping those that end at `exceptToIds` and optionally only
- * those of one origin. For the legacy writer only (a pointer that moved replaces its row; LEGACY objective links go stale when the
+ * those of one origin. For a dedicated writer only (a pointer that moved replaces its row; LEGACY objective links go stale when the
  * pointer does). The `from` endpoint is verified in `expectedWorkspaceId`; the delete is by `fromId` and type, so a row whose
  * workspace_id has drifted is removed too. `removed: 0` is success.
  */
@@ -272,7 +273,7 @@ export async function unlinkFromEntity(
 
 /**
  * Drains the links of one type that start at any of `fromIds` (optionally only one origin and only those that end at `toId`), in
- * committed passes of at most LINK_WRITE_CHUNK links. For the legacy writer only: the mirror counterpart of the legacy LEGACY-link
+ * committed passes of at most LINK_WRITE_CHUNK links. For a dedicated writer: the drain of the derived (LEGACY) links
  * drain after a Key Result is deleted. Idempotent.
  */
 export async function drainLinksFromEntities(
@@ -294,7 +295,7 @@ export async function drainLinksFromEntities(
 
 /**
  * Drains the links of one type that END at any of `toIds` (of entity type `toType`), in committed passes of at most LINK_WRITE_CHUNK
- * links, through the reverse index (to_id, link_type, from_id). For the legacy writer only: the mirror counterpart of a legacy delete that
+ * links, through the reverse index (to_id, link_type, from_id). For a dedicated writer: the drain of the links after a delete that
  * removes the links to a deleted target (a Key Result or Objective). Removal never depends on the flag. Idempotent.
  */
 export async function drainLinksToEntities(db: Tx, input: { linkType: string; toType: LinkableEntityType; toIds: readonly string[] }): Promise<number> {
@@ -385,8 +386,8 @@ export async function listLinks(db: Tx, input: ListEntityLinksInput): Promise<{ 
   if (input.linkType !== undefined) {
     const def = requireLinkType(input.linkType)
     scoped = applicable.filter((entry) => entry.def.key === def.key)
-    // Disabled, or legacy-mirrored (reads stay on the legacy table): nothing to list, and not an error.
-    if (scoped.length === 0 && (def.legacy || !(await isLinkTypeEnabledInWorkspace(def, input.workspaceId)))) return { items: [], nextCursor: null }
+    // Disabled, or owned by a dedicated writer (its own tools list it): nothing to list, and not an error.
+    if (scoped.length === 0 && (def.dedicatedWriter || !(await isLinkTypeEnabledInWorkspace(def, input.workspaceId)))) return { items: [], nextCursor: null }
     if (scoped.length === 0) throw new TypedLinkError(`${def.key} does not link ${entityType} entities.`, "INVALID")
   }
   if (scoped.length === 0) return { items: [], nextCursor: null }
@@ -444,4 +445,38 @@ export async function listLinks(db: Tx, input: ListEntityLinksInput): Promise<{ 
     })
   }
   return { items, nextCursor }
+}
+
+// ── Pair reads for the dedicated writers ────────────────────────────────────
+
+/**
+ * The one stored link of a pair, whatever the state of its endpoints (no liveness filter), scoped to `workspaceId`. For a dedicated writer
+ * deciding what its own write should do: unlike the readers it must still see a link whose far end has since vanished.
+ */
+export async function findLink(db: Tx, input: { linkType: string; fromId: string; toId: string; workspaceId: string }): Promise<EntityLinkRow | null> {
+  const def = requireLinkType(input.linkType)
+  return (await db.entityLink.findFirst({ where: { linkType: def.key, fromId: input.fromId, toId: input.toId, workspaceId: input.workspaceId } })) as EntityLinkRow | null
+}
+
+/**
+ * One keyset page (createdAt, id ascending) of the links of one type touching one entity, scoped to `workspaceId`. `after` is a decoded
+ * cursor. The caller resolves the other endpoint through workspace-filtered reads and drops a link whose far end is gone.
+ */
+export async function listLinkRows(
+  db: Tx,
+  input: { linkType: string; workspaceId: string; fromId?: string; toId?: string; after?: { createdAt: Date; id: string } | null; take: number },
+): Promise<EntityLinkRow[]> {
+  const def = requireLinkType(input.linkType)
+  const after = input.after ? { OR: [{ createdAt: { gt: input.after.createdAt } }, { createdAt: input.after.createdAt, id: { gt: input.after.id } }] } : {}
+  return (await db.entityLink.findMany({
+    where: { AND: [{ workspaceId: input.workspaceId, linkType: def.key, ...(input.fromId ? { fromId: input.fromId } : {}), ...(input.toId ? { toId: input.toId } : {}) }, after] },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    take: input.take,
+  })) as EntityLinkRow[]
+}
+
+/** A stored link by its own id, or null (ids are uuids; a malformed one is simply not found). The caller authorizes through the link's endpoints. */
+export async function findLinkById(db: Tx, id: string): Promise<EntityLinkRow | null> {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) return null
+  return (await db.entityLink.findUnique({ where: { id } })) as EntityLinkRow | null
 }

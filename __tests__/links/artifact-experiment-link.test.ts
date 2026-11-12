@@ -1,5 +1,5 @@
 /**
- * ARTIFACT_ATTACHED_TO_EXPERIMENT: a NATIVE entity_links type (no legacy table, no mirror, no read flag). lib/artifacts.ts wraps the
+ * ARTIFACT_ATTACHED_TO_EXPERIMENT: a NATIVE entity_links type (no dedicated writer). lib/artifacts.ts wraps the
  * generic service for the tools; the UI drives the same type through changeEntityLink. Covers link / replay / unlink, tenant refusal, the
  * archived-artifact rule, delete sweeps, the batch reader PR B (the experiments gallery) depends on, summaries and the picker view.
  */
@@ -50,7 +50,7 @@ describe("registry entry", () => {
   it("is a native, always-enabled type visible to reads on both endpoints, with a UI and compat tools", () => {
     const def = getLinkType(KEY)!;
     expect(def).toMatchObject({ from: "ARTIFACT", to: "EXPERIMENT", duplicatePolicy: "idempotent", restrictedContexts: "deny", cardinality: { from: "many", to: "many" } });
-    expect(def.legacy).toBeUndefined();
+    expect(def.dedicatedWriter).toBeUndefined();
     expect(def.internal).toBeUndefined();
     expect(def.lifecycle).toEqual({ onFromDeleted: "delete", onToDeleted: "delete", onArchive: "keep" });
     expect(isLinkTypeEnabled(def)).toBe(true);
@@ -76,7 +76,6 @@ describe("link and unlink", () => {
     expect(rows()).toHaveLength(1);
     expect(rows()[0]).toMatchObject({ workspaceId: WS_A.id, fromType: "ARTIFACT", fromId: "art-a", toType: "EXPERIMENT", toId: "exp-a", origin: "DIRECT", source: "MCP", createdById: "user-alice" });
     expect(result.id).toBe(rows()[0].id);
-    expect(state().artifactLinks).toHaveLength(0); // never the legacy table
     expect(state().experiments.find((e) => e.id === "exp-a")).toEqual(experiment);
     expect(state().artifacts.find((a) => a.id === "art-a")).toEqual(artifact);
   });
@@ -106,7 +105,7 @@ describe("link and unlink", () => {
     expect(state().experiments.some((e) => e.id === "exp-a")).toBe(true);
   });
 
-  it("the generic link service accepts the type too (it is not legacy-mirrored)", async () => {
+  it("the generic link service accepts the type too (it has no dedicated writer)", async () => {
     const result = await linkEntities(tx(), { linkType: KEY, fromId: "art-a", toId: "exp-a", expectedWorkspaceId: WS_A.id, ctx: { source: "MCP" } });
     expect(result.created).toBe(true);
   });

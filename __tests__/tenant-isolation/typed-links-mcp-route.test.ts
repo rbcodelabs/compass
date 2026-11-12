@@ -1,6 +1,6 @@
 /**
- * Tenant isolation and behaviour of the typed-link MCP tools and the legacy
- * pointer dual-write, driven through the real `register()` wrapper (gate first,
+ * Tenant isolation and behaviour of the typed-link MCP tools and the Key Result
+ * pointer (an entity_links row), driven through the real `register()` wrapper (gate first,
  * handler second) against the tenant fake Prisma.
  *
  * Pins down what the gate matrix in mcp-tool-gates.test.ts cannot: that the
@@ -49,15 +49,25 @@ const call = (name: string, args: Record<string, unknown>, actor: { userId: stri
 
 beforeEach(() => {
   fake.current = createTenantFakePrisma();
-  // A second objective and key results in workspace A, so the legacy pointer can move between objectives.
+  // A second objective and key results in workspace A, so the Key Result pointer can move between objectives.
   fake.current.state.objectives.push({ id: "obj-a2", workspaceId: WS_A.id, cycleId: "cycle-a", title: "A objective 2", status: "ON_TRACK", sortOrder: 1 });
   fake.current.state.keyResults.push({ id: "kr-a2", objectiveId: "obj-a2", title: "A key result 2", target: 1, current: 0, sortOrder: 0 });
 });
 
 const state = () => fake.current!.state;
-const links = () => state().opportunityObjectiveLinks;
+// entity_links is the only link store; these views keep the field names the assertions use.
+const links = () => state().entityLinks.filter((l) => l.linkType === "OPPORTUNITY_TARGETS_OBJECTIVE").map((l): Record<string, unknown> => ({ ...l, opportunityId: l.fromId, objectiveId: l.toId }));
+const solutionLinks = () => state().entityLinks.filter((l) => l.linkType === "SOLUTION_TARGETS_KEY_RESULT").map((l) => ({ ...l, solutionId: l.fromId, keyResultId: l.toId }));
+const pointerOf = (opportunityId: string) => (state().entityLinks.find((l) => l.linkType === "OPPORTUNITY_TARGETS_KEY_RESULT" && l.fromId === opportunityId)?.toId as string | undefined) ?? null;
 const linkWrites = () => state().writes.filter((w) => /Link\./.test(w));
-const seed = (rows: Record<string, unknown>[], table: Record<string, unknown>[]) => rows.forEach((row) => table.push({ id: `seed-${table.length}`, createdAt: new Date(10 + table.length), ...row }));
+const seedEntityLink = (row: Record<string, unknown>) =>
+  state().entityLinks.push({ id: `seed-${state().entityLinks.length}`, createdAt: new Date(10 + state().entityLinks.length), updatedAt: new Date(10), source: "UI", createdById: null, attrs: null, ...row });
+const seedObjectiveLinks = (rows: Array<{ workspaceId: string; opportunityId: string; objectiveId: string; origin: string; source?: string; createdAt?: Date }>) =>
+  rows.forEach(({ opportunityId, objectiveId, ...rest }) =>
+    seedEntityLink({ linkType: "OPPORTUNITY_TARGETS_OBJECTIVE", fromType: "OPPORTUNITY", fromId: opportunityId, toType: "OBJECTIVE", toId: objectiveId, ...rest }));
+const seedSolutionLinks = (rows: Array<{ workspaceId: string; solutionId: string; keyResultId: string }>) =>
+  rows.forEach(({ solutionId, keyResultId, ...rest }) =>
+    seedEntityLink({ linkType: "SOLUTION_TARGETS_KEY_RESULT", fromType: "SOLUTION", fromId: solutionId, toType: "KEY_RESULT", toId: keyResultId, origin: null, ...rest }));
 
 describe("link_opportunity_to_objective", () => {
   it("creates a DIRECT link stamped with the opportunity's workspace, idempotently", async () => {
@@ -119,7 +129,7 @@ describe("unlink_opportunity_from_objective", () => {
   });
 
   it("leaves workspace B's link for the same ids untouched", async () => {
-    seed([{ workspaceId: WS_B.id, opportunityId: "opp-a", objectiveId: "obj-a", origin: "DIRECT" }], links());
+    seedObjectiveLinks([{ workspaceId: WS_B.id, opportunityId: "opp-a", objectiveId: "obj-a", origin: "DIRECT" }]);
     expect((await call("unlink_opportunity_from_objective", { workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a" })).structuredContent.data).toMatchObject({ removed: 0 });
     expect(links()).toHaveLength(1);
   });
@@ -134,7 +144,7 @@ describe("link_solution_to_key_result / unlink_solution_from_key_result", () => 
     const first = await call("link_solution_to_key_result", { workspaceId: WS_A.id, solutionId: "sol-a", keyResultId: "kr-a" });
     const again = await call("link_solution_to_key_result", { workspaceId: WS_A.id, solutionId: "sol-a", keyResultId: "kr-a" });
     expect([first.structuredContent.data.created, again.structuredContent.data.created]).toEqual([true, false]);
-    expect(state().solutionKeyResultLinks).toEqual([expect.objectContaining({ workspaceId: WS_A.id, solutionId: "sol-a", keyResultId: "kr-a", source: "MCP" })]);
+    expect(solutionLinks()).toEqual([expect.objectContaining({ workspaceId: WS_A.id, solutionId: "sol-a", keyResultId: "kr-a", source: "MCP" })]);
     expect((await call("unlink_solution_from_key_result", { workspaceId: WS_A.id, solutionId: "sol-a", keyResultId: "kr-a" })).structuredContent.data).toMatchObject({ removed: 1 });
     expect((await call("unlink_solution_from_key_result", { workspaceId: WS_A.id, solutionId: "sol-a", keyResultId: "kr-a" })).structuredContent.data).toMatchObject({ removed: 0 });
   });
@@ -146,7 +156,7 @@ describe("link_solution_to_key_result / unlink_solution_from_key_result", () => 
     ["a solution whose workspaceId is NULL", { solutionId: "sol-null", keyResultId: "kr-a" }],
   ])("denies %s and writes nothing", async (_label, ids) => {
     await expect(call("link_solution_to_key_result", { workspaceId: WS_A.id, ...ids })).rejects.toThrow(/does not belong to workspace|access denied|not found/);
-    expect(state().solutionKeyResultLinks).toEqual([]);
+    expect(solutionLinks()).toEqual([]);
     expect(state().writes).toEqual([]);
   });
 
@@ -161,7 +171,7 @@ describe("list_links", () => {
     await call("link_opportunity_to_objective", { workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a" });
     await call("link_opportunity_to_objective", { workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a2" });
     // Stamped B although both endpoints are A's: not A's link, never returned to A.
-    seed([{ workspaceId: WS_B.id, opportunityId: "opp-a", objectiveId: "obj-b", origin: "DIRECT", source: "UI" }], links());
+    seedObjectiveLinks([{ workspaceId: WS_B.id, opportunityId: "opp-a", objectiveId: "obj-b", origin: "DIRECT", source: "UI" }]);
 
     const page1 = await call("list_links", { workspaceId: WS_A.id, opportunityId: "opp-a", limit: 1 });
     expect(page1.structuredContent.data).toMatchObject({ count: 1, items: [{ objectiveId: "obj-a", objectiveTitle: "A objective", origin: "DIRECT" }] });
@@ -184,19 +194,19 @@ describe("list_links", () => {
   });
 });
 
-describe("link_opportunity_to_kr dual-writes the legacy column and a LEGACY link", () => {
+describe("link_opportunity_to_kr writes the Key Result pointer and a derived LEGACY link", () => {
   it("set, change to another objective's key result, then clear: the LEGACY link follows and a DIRECT link survives", async () => {
     await call("link_opportunity_to_objective", { workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a" });
     await call("link_opportunity_to_kr", { opportunityId: "opp-a", keyResultId: "kr-a2" });
-    expect(state().opportunities.find((o) => o.id === "opp-a")!.linkedKeyResultId).toBe("kr-a2");
+    expect(pointerOf("opp-a")).toBe("kr-a2");
     expect(links().map((l) => [l.objectiveId, l.origin]).sort()).toEqual([["obj-a", "DIRECT"], ["obj-a2", "LEGACY"]]);
 
     await call("link_opportunity_to_kr", { opportunityId: "opp-a", keyResultId: null });
-    expect(state().opportunities.find((o) => o.id === "opp-a")!.linkedKeyResultId).toBeNull();
+    expect(pointerOf("opp-a")).toBeNull();
     expect(links().map((l) => [l.objectiveId, l.origin])).toEqual([["obj-a", "DIRECT"]]);
   });
 
-  it("legacy tool then new tool: adding the DIRECT link over the LEGACY pair flips origin, so a later clear keeps it", async () => {
+  it("pointer tool then objective tool: adding the DIRECT link over the LEGACY pair flips origin, so a later clear keeps it", async () => {
     await call("link_opportunity_to_kr", { opportunityId: "opp-a", keyResultId: "kr-a" });
     expect(links().map((l) => l.origin)).toEqual(["LEGACY"]);
     await call("link_opportunity_to_objective", { workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a" });
@@ -209,21 +219,24 @@ describe("link_opportunity_to_kr dual-writes the legacy column and a LEGACY link
     fake.current!.addMember(WS_B.id, USERS.alice);
     await expect(call("link_opportunity_to_kr", { opportunityId: "opp-a", keyResultId: "kr-b" })).rejects.toThrow(/same workspace/);
     expect(state().writes).toEqual([]);
-    expect(state().opportunities.find((o) => o.id === "opp-a")!.linkedKeyResultId).toBeNull();
+    expect(pointerOf("opp-a")).toBeNull();
   });
 
-  it("returns linkedKeyResultId only from the column, never inferred from a link", async () => {
+  it("returns linkedKeyResultId from the pointer it just set or cleared, never inferred from an objective link", async () => {
     await call("link_opportunity_to_objective", { workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a" });
-    const result = await call("link_opportunity_to_kr", { opportunityId: "opp-a", keyResultId: null });
-    expect(result.structuredContent.data).toMatchObject({ linkedKeyResultId: null });
+    const cleared = await call("link_opportunity_to_kr", { opportunityId: "opp-a", keyResultId: null });
+    expect(cleared.structuredContent.data).toMatchObject({ linkedKeyResultId: null });
+    const set = await call("link_opportunity_to_kr", { opportunityId: "opp-a", keyResultId: "kr-a2" });
+    expect(set.structuredContent.data).toMatchObject({ linkedKeyResultId: "kr-a2" });
   });
 });
 
-describe("create_opportunity with a keyResultId writes both", () => {
-  it("creates the opportunity with the column and the LEGACY link in the key result's workspace", async () => {
+describe("create_opportunity with a keyResultId writes the pointer and the derived link", () => {
+  it("creates the opportunity with the pointer and the LEGACY link in the key result's workspace", async () => {
     const result = await call("create_opportunity", { workspaceId: WS_A.id, title: "New idea", keyResultId: "kr-a2" });
     const created = state().opportunities.find((o) => o.title === "New idea")!;
-    expect(created).toMatchObject({ workspaceId: WS_A.id, linkedKeyResultId: "kr-a2" });
+    expect(created).toMatchObject({ workspaceId: WS_A.id });
+    expect(pointerOf(created.id as string)).toBe("kr-a2");
     expect(result.structuredContent.data).toMatchObject({ linkedKeyResultId: "kr-a2" });
     expect(links()).toEqual([expect.objectContaining({ workspaceId: WS_A.id, opportunityId: created.id, objectiveId: "obj-a2", origin: "LEGACY" })]);
   });
@@ -242,19 +255,19 @@ describe("create_opportunity with a keyResultId writes both", () => {
 
 describe("reads: linkedObjectives are additive and never inferred into linkedKeyResult", () => {
   const stubOpportunity = (workspaceId = WS_A.id) => {
-    const opportunity = { id: "opp-a", workspaceId, title: "Opp", status: "EXPLORING", description: null, squad: null, linkedKeyResult: null, solutions: [] };
+    const opportunity = { id: "opp-a", workspaceId, title: "Opp", status: "EXPLORING", description: null, squad: null, solutions: [] };
     (fake.current!.client.opportunity as { findUnique: unknown }).findUnique = async () => opportunity;
   };
 
   it("get_opportunity returns linkedObjectives in created order, and links to hidden objectives are omitted", async () => {
     stubOpportunity();
-    seed([
+    seedObjectiveLinks([
       { workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a2", origin: "DIRECT", createdAt: new Date(1) },
       { workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a", origin: "LEGACY", createdAt: new Date(2) },
       { workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-b", origin: "DIRECT", createdAt: new Date(3) },
       { workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-null", origin: "DIRECT", createdAt: new Date(4) },
       { workspaceId: WS_B.id, opportunityId: "opp-a", objectiveId: "obj-a", origin: "DIRECT", createdAt: new Date(0) },
-    ], links());
+    ]);
     const result = await call("get_opportunity", { opportunityId: "opp-a" });
     expect(result.structuredContent.data.linkedObjectives).toEqual([
       { id: "obj-a2", title: "A objective 2" },
@@ -265,12 +278,12 @@ describe("reads: linkedObjectives are additive and never inferred into linkedKey
     expect(result.content[0].text).not.toContain("Linked KR");
   });
 
-  it("list_opportunities adds linkedObjectives per item from one batch, and linkedKeyResult stays legacy-only", async () => {
-    seed([{ workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a", origin: "DIRECT" }], links());
+  it("list_opportunities adds linkedObjectives per item from one batch, and linkedKeyResult stays pointer-only", async () => {
+    seedObjectiveLinks([{ workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a", origin: "DIRECT" }]);
     // list_opportunities includes relations the fake does not model; give it the shape it reads.
     (fake.current!.client.opportunity as { findMany: unknown }).findMany = async ({ where, include }: { where: Record<string, unknown>; include?: unknown }) => {
       if (include) {
-        return state().opportunities.filter((o) => o.workspaceId === where.workspaceId).map((o) => ({ ...o, description: null, squad: null, linkedKeyResult: null, _count: { solutions: 0 } }));
+        return state().opportunities.filter((o) => o.workspaceId === where.workspaceId).map((o) => ({ ...o, description: null, squad: null, _count: { solutions: 0 } }));
       }
       return state().opportunities.filter((o) => (where.id as { in: string[] }).in.includes(o.id) && o.workspaceId === where.workspaceId);
     };
@@ -279,7 +292,7 @@ describe("reads: linkedObjectives are additive and never inferred into linkedKey
   });
 
   it("list_solutions adds linkedKeyResults", async () => {
-    seed([{ workspaceId: WS_A.id, solutionId: "sol-a", keyResultId: "kr-a" }], state().solutionKeyResultLinks);
+    seedSolutionLinks([{ workspaceId: WS_A.id, solutionId: "sol-a", keyResultId: "kr-a" }]);
     (fake.current!.client.solution as { findMany: unknown }).findMany = async ({ where, include }: { where: Record<string, unknown>; include?: unknown }) => {
       if (include) {
         return state().solutions.filter((s) => s.workspaceId === where.workspaceId).map((s) => ({ ...s, opportunity: { id: "opp-a", title: "A opportunity", status: "EXPLORING", squadId: null }, roadmapItems: [] }));

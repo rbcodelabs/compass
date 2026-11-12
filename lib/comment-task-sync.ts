@@ -22,6 +22,7 @@
  */
 import getPrisma from "@/lib/db"
 import { setDocCommentStatusCore, type CommentStatus } from "@/lib/doc-comments"
+import { getResidualTargetIds } from "@/lib/task-links-read"
 
 /** A task in one of these states no longer holds a thread open. */
 const FINISHED = ["DONE", "CANCELLED"]
@@ -77,11 +78,11 @@ async function reconcile(taskId: string): Promise<ThreadSyncResult> {
   const result: ThreadSyncResult = { resolved: [], reopened: [] }
   try {
     const prisma = getPrisma()
-    // Stays on task_links (not the TASK read flip): COMMENT links are legacy-only by design and never mirrored to entity_links.
-    const links = await prisma.taskLink.findMany({ where: { taskId, linkedType: "COMMENT" }, select: { linkedId: true } })
-    if (links.length === 0) return result
+    // COMMENT is a residual link kind (not an association), so it lives only in task_links (see lib/task-link-writes.ts).
+    const commentIds = await getResidualTargetIds(prisma, { taskId, linkedType: "COMMENT" })
+    if (commentIds.length === 0) return result
     const linked = await prisma.docComment.findMany({
-      where: { id: { in: links.map(link => link.linkedId) } },
+      where: { id: { in: commentIds } },
       select: { id: true, parentId: true },
     })
     const rootIds = [...new Set(linked.map(comment => comment.parentId ?? comment.id))]

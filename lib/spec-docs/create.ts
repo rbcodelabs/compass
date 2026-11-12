@@ -16,8 +16,9 @@ import { randomUUID } from "node:crypto"
 import getPrisma from "@/lib/db"
 import { createDocument, deleteDocument, documentRevision } from "@/lib/document-service"
 import { DOC_SPECIFIES_SCOPE_LINK_TYPE } from "@/lib/links/registry"
+import { readEntityLinksArtifact } from "@/lib/links/readers"
 import { linkEntities } from "@/lib/links/service"
-import { TypedLinkError, getLinkedKeyResultsBySolution, getLinkedObjectivesByOpportunity, runTypedLinkTransaction, type LinkSource } from "@/lib/typed-links"
+import { TypedLinkError, getLinkedKeyResultsBySolution, getLinkedObjectivesByOpportunity, getOpportunityKeyResultPointers, runTypedLinkTransaction, type LinkSource } from "@/lib/typed-links"
 import { listDocIdsForScope, type SpecScopeType } from "@/lib/spec-docs/scopes"
 import {
   renderSpecTemplate,
@@ -61,11 +62,8 @@ const record = (row: { id: string; title: string }): SpecRecord => ({ id: row.id
 
 async function artifactsLinkedToSolutions(db: Db, workspaceId: string, solutionIds: string[]): Promise<SpecRecord[]> {
   if (solutionIds.length === 0) return []
-  const links = await db.artifactLink.findMany({
-    where: { workspaceId, linkedType: "SOLUTION", linkedId: { in: solutionIds } },
-    select: { artifactId: true },
-  })
-  const ids = [...new Set(links.map((link) => link.artifactId))]
+  const links = await readEntityLinksArtifact(db, workspaceId, { solutionIds })
+  const ids = [...new Set(links.map((link) => link.fromId))]
   if (ids.length === 0) return []
   const artifacts = await db.artifact.findMany({
     where: { id: { in: ids }, workspaceId, status: "ACTIVE" },
@@ -106,10 +104,11 @@ async function loadTemplateData(db: Db, workspaceId: string, scopeType: SpecScop
     }
   }
 
-  const opportunity = await db.opportunity.findFirst({ where: { id: scopeId, workspaceId }, select: { id: true, title: true, linkedKeyResultId: true } })
+  const opportunity = await db.opportunity.findFirst({ where: { id: scopeId, workspaceId }, select: { id: true, title: true } })
   if (!opportunity) return null
-  const pointerKeyResult = opportunity.linkedKeyResultId
-    ? await db.keyResult.findFirst({ where: { id: opportunity.linkedKeyResultId, objective: { workspaceId } }, select: { id: true, title: true } })
+  const pointerKeyResultId = (await getOpportunityKeyResultPointers(db, workspaceId, [opportunity])).get(opportunity.id) ?? null
+  const pointerKeyResult = pointerKeyResultId
+    ? await db.keyResult.findFirst({ where: { id: pointerKeyResultId, objective: { workspaceId } }, select: { id: true, title: true } })
     : null
   const objectives = (await getLinkedObjectivesByOpportunity(db, workspaceId, [opportunity.id], { preverified: true })).get(opportunity.id) ?? []
   const solutions = await db.solution.findMany({ where: { opportunityId: opportunity.id, workspaceId }, orderBy: bySortThenCreated, select: { id: true, title: true } })

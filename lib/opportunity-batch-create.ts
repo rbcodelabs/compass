@@ -28,7 +28,7 @@ import {
   type NormalizedOpportunityInput,
 } from "@/lib/opportunity-create"
 import { OPPORTUNITY_TITLE_MAX_LENGTH } from "@/lib/opportunity-draft"
-import { assertKeyResultInWorkspace, syncLegacyLink, TypedLinkError, type LinkSource } from "@/lib/typed-links"
+import { assertKeyResultInWorkspace, setKeyResultPointer, TypedLinkError, type LinkSource } from "@/lib/typed-links"
 import { BATCH_DESCRIPTION_MAX_LENGTH, BATCH_MAX_ITEMS } from "@/lib/batch-create-limits"
 import { captureWorkspaceMutation } from "@/lib/workspace-update-mutations"
 import { allocateOneSeq } from "@/lib/work-item-sequence"
@@ -269,13 +269,12 @@ async function createOneOpportunity(
             customerSegment: data.customerSegment,
             status: data.status,
             squadId: data.squadId,
-            linkedKeyResultId: data.linkedKeyResultId,
             sortOrder,
             source: ctx.source,
           },
         })
         if (data.linkedKeyResultId) {
-          await syncLegacyLink(tx, {
+          await setKeyResultPointer(tx, {
             opportunityId: created.id,
             workspaceId,
             keyResultId: data.linkedKeyResultId,

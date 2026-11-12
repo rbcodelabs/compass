@@ -35,7 +35,6 @@ export async function GET(req: Request) {
         title: true,
         status: true,
         squadId: true,
-        linkedKeyResultId: true,
       },
     }),
     prisma.squad.findMany({

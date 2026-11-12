@@ -26,13 +26,13 @@ All seven registered link types are merged on `origin/main` (`lib/links/registry
 | Link type | Edge | Source of truth for reads today |
 |---|---|---|
 | `EXPERIMENT_INFORMED_BY_STUDY` | Experiment to Research study | `entity_links` only (no legacy table) |
-| `SOLUTION_TARGETS_KEY_RESULT` | Solution to KR | legacy `SolutionKeyResultLink`; mirrored + 098 backfill merged |
-| `OPPORTUNITY_TARGETS_OBJECTIVE` | Opportunity to Objective | legacy `OpportunityObjectiveLink`; mirrored + 095 backfill |
-| `OPPORTUNITY_TARGETS_KEY_RESULT` | Opportunity to KR (to-one) | legacy `Opportunity.linkedKeyResultId`; mirrored + 095 |
-| `ARTIFACT_ATTACHED_TO_SOLUTION`, `ARTIFACT_SUPPORTS_DECISION` | Artifact to Solution / Decision | legacy `ArtifactLink`; mirrored + 096 |
-| `TASK_REFERENCES` | Task to Opp/Sol/Roadmap/Obj/KR/Doc/Exp/Feedback/Decision | legacy `TaskLink`; mirrored + 097 |
+| `SOLUTION_TARGETS_KEY_RESULT` | Solution to KR | `entity_links` only (legacy table frozen) |
+| `OPPORTUNITY_TARGETS_OBJECTIVE` | Opportunity to Objective | `entity_links` only (legacy table frozen) |
+| `OPPORTUNITY_TARGETS_KEY_RESULT` | Opportunity to KR (to-one) | `entity_links` only (`Opportunity.linkedKeyResultId` is no longer read or written) |
+| `ARTIFACT_ATTACHED_TO_SOLUTION`, `ARTIFACT_SUPPORTS_DECISION` | Artifact to Solution / Decision | `entity_links` only (legacy table frozen) |
+| `TASK_REFERENCES` | Task to Opp/Sol/Roadmap/Obj/KR/Doc/Exp/Feedback/Decision | `entity_links` only (COMMENT / AGENT_CONVERSATION task links stay in `task_links`) |
 
-Critical nuance: the legacy-backed types are in `mode: "mirror"`, and the read flip is controlled per family by `COMPASS_ENTITY_LINKS_{SOLUTION_KR,OPPORTUNITY,ARTIFACT,TASK}_READ` (`off | shadow | on`, default **off**, merged as PR A #441 with "no behaviour change"). While a flag is off, the legacy table is the source of truth and `entity_links` is a shadow. **A graph that reads `entity_links` directly today would be wrong or empty for those types.** It must read through the same seam the flag flips (see 4.2).
+Update (entity_links cleanup): the per-family read flags and the mirror are gone. Every link type above is read from `entity_links` only, so the graph reads them directly through the existing canvas readers. The note below is the original design-time analysis, kept for the record.
 
 Branches: the `feat/entity-links-{artifact,opp-objective,solution-kr,task}` branches are the pre-squash histories of PRs #430, #433, #434 and #436, all merged (`git cherry` shows `+` only because of squash-merge; I did not tree-diff each). The detached checkout at `42994f6b` is the tip of `feat/entity-links-task`, 13 commits behind `origin/main`. `feat/experiment-study-links-v2` is 6 commits ahead of main and I did not determine whether it is superseded by merged #425; treat as open. There is no new link type to wait for.
 
@@ -61,7 +61,7 @@ Branches: the `feat/entity-links-{artifact,opp-objective,solution-kr,task}` bran
 | # | Decision | Recommendation | Main alternative | Revisit if |
 |---|---|---|---|---|
 | D1 | Route | New top-level section `graph`: `/[org]/[ws]/graph?focus=<TYPE>:<id>` | Tab inside Discovery/OKRs; revive `/canvas` | Rick wants it inside an existing nav item |
-| D2 | Data | New read-model `lib/chain-graph/` (server loader + pure builder), reuse `getCanvasOverview` and `buildCanvasEdges` | Query `entity_links` directly | All four read flags are `on` in prod |
+| D2 | Data | New read-model `lib/chain-graph/` (server loader + pure builder), reuse `getCanvasOverview` and `buildCanvasEdges` | Query `entity_links` directly | Never (the read flags were retired; `entity_links` is the only store) |
 | D3 | Delivery | Server component loads workspace graph (capped); Route Handler for focused subgraph | Pure client fetch only | Initial payload exceeds budget |
 | D4 | Renderer | `@xyflow/react` shell + framework-agnostic pure layout/cluster/trace modules, gated by a perf spike | Custom SVG (port prototype); Canvas 2D | Spike fails the 1,000-element budget |
 | D5 | Force layout | `d3-force` (new small dependency) run to settle off the render path | Hand-rolled (prototype); `elkjs` (already a dep) | Rick rejects a new dependency |
@@ -94,7 +94,7 @@ ChainEdge  { from: key, to: key, kind: "primary"|"secondary"|"link"|"task"|"feed
 ChainGraph { nodes, edges, truncated: { byType: Record<type, {shown, total}> } | null, generatedAt }
 ```
 
-- **Edge source rule.** Native FK edges come from `buildCanvasEdges` as is. Typed-link and task-link edges come from a single adapter `loadLinkRows(tx, workspaceId, family)` that returns legacy rows now and `entity_links` rows when that family's `getLinkReadMode` is `on`, so this feature never needs a second change when the flip happens. In `shadow` mode serve legacy (same rule as every other reader). The adapter is the only place that knows.
+- **Edge source rule.** Native FK edges come from `buildCanvasEdges` as is. Typed-link and task-link edges come from `entity_links` through the existing canvas readers (the legacy tables are frozen and never read).
 - **Tenant isolation.** Every query starts with `where: { workspaceId }` (or the existing relation filter for KR / Assumption: `objective: { workspaceId }`, `solution: { workspaceId }`), and both ends of every edge must be in the loaded node set or the edge is dropped (same fail-closed rule as `resolveEndpoints` and `buildLinkEdges`). NULL-workspace Solution and Objective rows never match. The page and the Route Handler both gate on session plus `getWorkspace(org, ws, userId)` before the loader runs (copy the `/api/panels/entity` two-layer pattern). PM-interview studies, restricted-visibility records and archived objects are excluded by the same predicates the detail and link read models use.
 - **Pagination is the wrong tool for a graph;** a partial page of nodes yields dangling edges and a misleading chain. Use scope plus caps instead:
   - `scope=workspace` returns the structural OST (Objective through Experiment, roadmap items) up to per-type caps and a global cap of **1,500 nodes**, ordered deterministically (`sortOrder`, `createdAt`, `id`), archived excluded by default.
@@ -191,7 +191,7 @@ stateDiagram-v2
 | Unit (pure) | `build.ts`: FK edges, secondary roadmap parents, typed-link edges, cycle-safe, dangling-edge drop, display ID and status mapping, cap and `truncated` accounting, deterministic order | `__tests__/chain-graph/build.test.ts` (plain fixtures, no `vi.mock`) |
 | Unit (pure) | `trace.ts`: up/down BFS, cycles (the Solution-KR loop), diamonds (multi-parent roadmap), self-loops, isolated node, depth limit | `__tests__/chain-graph/trace.test.ts` |
 | Unit (pure) | `cluster.ts`: collapse aggregation and edge weights, no self-edges, group-by modes, hidden types, collapse of a group containing the selection | `__tests__/chain-graph/cluster.test.ts` |
-| Unit | link adapter: legacy rows when read mode `off`/`shadow`, `entity_links` rows when `on`; parity with `lib/links/read-compare` expectations | `__tests__/chain-graph/link-adapter.test.ts` |
+| Unit | link adapter: `entity_links` rows only; both endpoints live in the workspace | `__tests__/chain-graph/link-adapter.test.ts` |
 | Tenant isolation | Using `createTenantFakePrisma` (`WS_A`/`WS_B`, as `__tests__/tenant-isolation/link-surfaces-detail.test.ts`): workspace A's graph contains no B node or edge; an A edge pointing at a B endpoint is dropped; NULL-workspace Solution/Objective absent; PM-interview study absent; `focus` on a B id returns the same 404 as a missing id; route returns 401 without session and 404 for non-member | `__tests__/tenant-isolation/chain-graph.test.ts` |
 | Integration | Loader against real Postgres alongside `entity-links.integration.test.ts`: flat queries return expected counts, caps hold under a seeded oversized workspace | `__tests__/chain-graph/loader.integration.test.ts` |
 | Component | Cluster toggle by keyboard, trace announces live text, LOD bands switch classes (jsdom; React Flow mocked at the store boundary as the docs canvas tests do) | `components/chain-graph/*.test.tsx` |
@@ -238,7 +238,7 @@ Q1 panel-only entry in v1, no sidebar item. Q2 `d3-force` added. Q3 core chain o
 
 ### 10.2 Deviations from sections 3 to 6 (all accepted)
 
-- **Link adapter.** No separate `loadLinkRows`. `getCanvasOverview` already reads Opportunity-Objective and Solution-Key Result links through `readByFamilyMode`, so the loader is correct before and after the read flip with no extra seam.
+- **Link adapter.** No separate `loadLinkRows`. `getCanvasOverview` reads Opportunity-Objective and Solution-Key Result links from `entity_links` (lib/typed-links.ts `getCanvasLinkRows`), so the loader needs no extra seam.
 - **Key Results are folded into their Objective.** v1 shows the core chain only, so KR -> Opportunity becomes Objective -> Opportunity; self-loops and duplicates from the contraction are dropped and the strongest edge kind wins.
 - **Edges are oriented parent to child by chain rank.** The typed Solution -> Key Result link points up the chain in the canvas; as built it is Objective -> Solution (kind `link`). Downstream therefore always means further along the chain, and tracing from a Solution does not pull in the Objective's whole subtree.
 - **Archived definition.** Opportunity `ARCHIVED`, Solution `KILLED`, Experiment `KILLED` or `NOT_PURSUED`. Objectives and assumptions have no archived state; roadmap items are loaded active-only.

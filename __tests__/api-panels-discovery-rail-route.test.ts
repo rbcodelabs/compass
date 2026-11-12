@@ -13,11 +13,20 @@ const mockSquad = { findMany: vi.fn() };
 const mockOrgMember = { findFirst: vi.fn() };
 const mockLinks = { findMany: vi.fn() };
 const mockObjective = { findMany: vi.fn() };
+// A Key Result is live when its id is asked for (the pointer reader's liveness check).
+const mockKeyResult = { findMany: vi.fn(async ({ where }: { where: { id: { in: string[] } } }) => where.id.in.map((id) => ({ id, title: id }))) };
+
+/** entity_links rows, by link type: Opportunity <-> Objective links and Opportunity -> Key Result pointers. */
+const linkRows = { objectives: [] as Array<{ opportunityId: string; objectiveId: string }>, pointers: [] as Array<{ opportunityId: string; keyResultId: string }> };
+const entityRow = (linkType: string, toType: string, fromId: string, toId: string, n: number) => ({
+  id: `l${n}`, linkType, fromType: "OPPORTUNITY", fromId, toType, toId, origin: "DIRECT", source: "UI", createdById: null, createdAt: new Date(n),
+});
 
 const mockPrisma = {
   workspace: mockWorkspace,
   opportunity: mockOpportunity,
-  opportunityObjectiveLink: mockLinks,
+  entityLink: mockLinks,
+  keyResult: mockKeyResult,
   objective: mockObjective,
   squad: mockSquad,
   organizationMember: mockOrgMember,
@@ -45,7 +54,13 @@ function makeRequest(query: string) {
 beforeEach(() => {
   vi.clearAllMocks();
   mockOrgMember.findFirst.mockResolvedValue({ role: "MEMBER" });
-  mockLinks.findMany.mockResolvedValue([]);
+  linkRows.objectives = [];
+  linkRows.pointers = [];
+  mockLinks.findMany.mockImplementation(async ({ where }: { where: { linkType: string } }) =>
+    where.linkType === "OPPORTUNITY_TARGETS_OBJECTIVE"
+      ? linkRows.objectives.map((l, i) => entityRow(where.linkType, "OBJECTIVE", l.opportunityId, l.objectiveId, i + 1))
+      : linkRows.pointers.map((l, i) => entityRow(where.linkType, "KEY_RESULT", l.opportunityId, l.keyResultId, i + 1)),
+  );
   mockObjective.findMany.mockResolvedValue([]);
 });
 
@@ -87,22 +102,21 @@ describe("GET /api/panels/discovery-rail", () => {
         title: "Improve onboarding",
         status: "EXPLORING",
         squadId: "squad-1",
-        linkedKeyResultId: "kr-1",
       },
       {
         id: "opp-2",
         title: "No squad opportunity",
         status: "ACTIVE",
         squadId: null,
-        linkedKeyResultId: null,
       },
     ]);
     mockSquad.findMany.mockResolvedValue([
       { id: "squad-1", name: "Growth", color: "#6366f1" },
     ]);
 
-    // The same opportunity query serves the typed-link verification read.
-    mockLinks.findMany.mockResolvedValue([{ id: "l1", opportunityId: "opp-1", objectiveId: "obj-1", createdAt: new Date(1) }]);
+    // The same opportunity query serves the typed-link liveness read; the Key Result pointer comes from entity_links, not the row.
+    linkRows.objectives = [{ opportunityId: "opp-1", objectiveId: "obj-1" }];
+    linkRows.pointers = [{ opportunityId: "opp-1", keyResultId: "kr-1" }];
     mockObjective.findMany.mockResolvedValue([{ id: "obj-1", title: "Grow revenue" }]);
 
     const res = await GET(makeRequest("?orgSlug=acme&workspaceSlug=ws"));
@@ -129,7 +143,10 @@ describe("GET /api/panels/discovery-rail", () => {
       },
     ]);
     // Links are read under the workspace, and their objectives are read under it too.
-    expect(mockLinks.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { workspaceId: "ws-1", opportunityId: { in: ["opp-1", "opp-2"] } } }));
+    expect(mockLinks.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ workspaceId: "ws-1", linkType: "OPPORTUNITY_TARGETS_OBJECTIVE", fromId: { in: ["opp-1", "opp-2"] } }) }));
+    expect(mockLinks.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ workspaceId: "ws-1", linkType: "OPPORTUNITY_TARGETS_KEY_RESULT", fromId: { in: ["opp-1", "opp-2"] } }) }));
+    // The opportunity query no longer selects the (unused) linked_key_result_id column.
+    expect(mockOpportunity.findMany.mock.calls[0][0].select).not.toHaveProperty("linkedKeyResultId");
     expect(mockObjective.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { id: { in: ["obj-1"] }, workspaceId: "ws-1" } }));
     expect(data.squads).toEqual([{ id: "squad-1", name: "Growth", color: "#6366f1" }]);
   });

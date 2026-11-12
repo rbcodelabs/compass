@@ -10,6 +10,7 @@
 import type { AppPrismaClient } from "@/lib/db"
 import { isScoreStale } from "@/lib/score-summary"
 import { resolveWorkspaceScoringModel } from "@/lib/scoring-model"
+import { readEntityLinksOpportunityKeyResultPointer } from "@/lib/links/readers"
 import { getLinkedOpportunitiesByObjective } from "@/lib/typed-links"
 
 export type LinkedOpportunityInput = {
@@ -116,7 +117,7 @@ export async function loadObjectiveLinkedOpportunities(
   const directLinks = (await getLinkedOpportunitiesByObjective(db, workspaceId, [objective.id], { preverified: true })).get(objective.id) ?? []
   const krIds = objective.keyResults.map((kr) => kr.id)
   const krLinked = krIds.length
-    ? await db.opportunity.findMany({ where: { workspaceId, linkedKeyResultId: { in: krIds } }, select: { id: true, linkedKeyResultId: true } })
+    ? (await readEntityLinksOpportunityKeyResultPointer(db, workspaceId, { keyResultIds: krIds })).map((link) => ({ id: link.fromId, keyResultId: link.toId }))
     : []
 
   const ids = [...new Set([...directLinks.map((o) => o.id), ...krLinked.map((o) => o.id)])]
@@ -133,7 +134,7 @@ export async function loadObjectiveLinkedOpportunities(
   const direct = directLinks.flatMap((o) => inputs.get(o.id) ?? [])
   const viaKeyResults = objective.keyResults.map((keyResult) => ({
     keyResult,
-    opportunities: krLinked.filter((o) => o.linkedKeyResultId === keyResult.id).flatMap((o) => inputs.get(o.id) ?? []),
+    opportunities: krLinked.filter((o) => o.keyResultId === keyResult.id).flatMap((o) => inputs.get(o.id) ?? []),
   }))
   return assembleLinkedOpportunities({ direct, viaKeyResults, liveModelVersion: activeModel ? activeModel.version : null })
 }

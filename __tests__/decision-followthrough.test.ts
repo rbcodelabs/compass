@@ -10,7 +10,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 const prisma = {
   reviewRequest: { findFirst: vi.fn() },
   task: { create: vi.fn(), findFirst: vi.fn() },
-  taskLink: { create: vi.fn(), findFirst: vi.fn() },
   agent: { findUnique: vi.fn() },
   user: { findUnique: vi.fn() },
   $transaction: vi.fn(),
@@ -20,7 +19,9 @@ vi.mock("@/lib/db", () => ({ default: () => prisma }))
 
 // vi.mock is hoisted above module-level consts, so the spy has to be created
 // inside vi.hoisted() or the factory runs before it is initialized.
-const { eligible } = vi.hoisted(() => ({ eligible: vi.fn() }))
+const { eligible, createTaskLinks } = vi.hoisted(() => ({ eligible: vi.fn(), createTaskLinks: vi.fn() }))
+// The link writer (entity_links) has its own tests; here only what the follow-up flow asks of it.
+vi.mock("@/lib/task-link-writes", () => ({ createTaskLinks }))
 vi.mock("@/lib/task-assignment", () => ({ eligibleTaskAssignees: eligible }))
 
 import {
@@ -94,7 +95,7 @@ describe("createDecisionFollowUpTask", () => {
     prisma.reviewRequest.findFirst.mockResolvedValue({ id: "request-1", workspaceId: "ws-1", gateType: "TRACKED_DECISION", state: "DECIDED" })
     prisma.task.findFirst.mockResolvedValue(null)
     prisma.task.create.mockResolvedValue({ id: "task-1", title: "Do the thing" })
-    prisma.taskLink.create.mockResolvedValue({ id: "link-1" })
+    createTaskLinks.mockResolvedValue([{ id: "link-1" }])
     eligible.mockResolvedValue([{ type: "USER", id: "user-1", displayName: "Rick", available: true }])
   })
 
@@ -102,7 +103,8 @@ describe("createDecisionFollowUpTask", () => {
     const result = await createDecisionFollowUpTask({ workspaceId: "ws-1", requestId: "request-1", title: "Do the thing", description: "why", assignee: null })
     expect(prisma.$transaction).toHaveBeenCalled()
     expect(prisma.task.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ workspaceId: "ws-1", title: "Do the thing" }) }))
-    expect(prisma.taskLink.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ taskId: "task-1", linkedType: "DECISION", linkedId: "request-1" }) }))
+    // Written through the transaction client, so the link commits or rolls back with the task.
+    expect(createTaskLinks).toHaveBeenCalledWith(prisma, { workspaceId: "ws-1", taskId: "task-1", links: [{ linkedType: "DECISION", linkedId: "request-1", source: "UI" }] })
     expect(result).toEqual(expect.objectContaining({ taskId: "task-1", linkId: "link-1" }))
   })
 

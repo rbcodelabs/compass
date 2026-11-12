@@ -20,7 +20,7 @@ import {
 import { isPmInterviewEnabled } from "@/lib/research-feature"
 import { moduleDisabledMessage } from "@/lib/modules/registry"
 import { instrumentActivityClient } from "@/lib/analytics/activity"
-import { getLinkedObjectivesByOpportunity } from "@/lib/typed-links"
+import { getLinkedObjectivesByOpportunity, getOpportunityKeyResultPointers } from "@/lib/typed-links"
 import { allocateOneSeq, withSequenceTransaction } from "@/lib/work-item-sequence"
 
 export class PmInterviewError extends Error {
@@ -111,6 +111,13 @@ export function outcomeOf(kr: { id: string; title: string; objective: { title: s
   return kr && kr.objective.workspaceId === workspaceId ? { id: kr.id, title: `${kr.objective.title}: ${kr.title}` } : null
 }
 
+/** The outcome label of the Key Result an opportunity points at (the entity_links pointer), under the same workspace rule as outcomeOf. */
+async function pointedOutcome(prisma: AppPrismaClient, workspaceId: string, opportunityId: string) {
+  const keyResultId = (await getOpportunityKeyResultPointers(prisma, workspaceId, [{ id: opportunityId }])).get(opportunityId) ?? null
+  if (!keyResultId) return null
+  return outcomeOf(await prisma.keyResult.findUnique({ where: { id: keyResultId }, include: { objective: true } }), workspaceId)
+}
+
 /** The additive `linkedObjectives` context field for an opportunity (workspace-filtered typed links); omitted when empty. */
 async function linkedObjectivesField(prisma: AppPrismaClient, workspaceId: string, opportunityId: string) {
   const linked = (await getLinkedObjectivesByOpportunity(prisma, workspaceId, [opportunityId])).get(opportunityId) ?? []
@@ -121,21 +128,21 @@ async function linkedObjectivesField(prisma: AppPrismaClient, workspaceId: strin
 export async function targetSnapshot(prisma: AppPrismaClient, workspaceId: string, targetType: PmInterviewTargetType, targetId: string): Promise<PmInterviewContextSnapshot> {
   const capturedAt = new Date().toISOString()
   if (targetType === "OPPORTUNITY") {
-    const item = await prisma.opportunity.findFirst({ where: { id: targetId, workspaceId }, include: { linkedKeyResult: { include: { objective: true } }, evidence: { take: 21, orderBy: { createdAt: "desc" } }, feedback: { where: { workspaceId }, take: 21, orderBy: { createdAt: "desc" } } } })
+    const item = await prisma.opportunity.findFirst({ where: { id: targetId, workspaceId }, include: { evidence: { take: 21, orderBy: { createdAt: "desc" } }, feedback: { where: { workspaceId }, take: 21, orderBy: { createdAt: "desc" } } } })
     if (!item) throw new PmInterviewError("PM interview target not found", 404)
-    return boundPmInterviewContext({ version: 1, capturedAt, target: { type: targetType, id: item.id, fields: { title: item.title, description: item.description, customerSegment: item.customerSegment, status: item.status } }, parents: [], outcome: outcomeOf(item.linkedKeyResult, workspaceId), ...(await linkedObjectivesField(prisma, workspaceId, item.id)), evidence: item.evidence.slice(0, 20).map(row => ({ id: row.id, excerpt: excerpt(row.excerpt) })), feedback: item.feedback.slice(0, 20).map(row => ({ id: row.id, excerpt: excerpt(row.description ?? row.title) })), omissions: [...(item.evidence.length > 20 ? ["Additional directly linked evidence was omitted."] : []), ...(item.feedback.length > 20 ? ["Additional directly linked feedback was omitted."] : [])] })
+    return boundPmInterviewContext({ version: 1, capturedAt, target: { type: targetType, id: item.id, fields: { title: item.title, description: item.description, customerSegment: item.customerSegment, status: item.status } }, parents: [], outcome: await pointedOutcome(prisma, workspaceId, item.id), ...(await linkedObjectivesField(prisma, workspaceId, item.id)), evidence: item.evidence.slice(0, 20).map(row => ({ id: row.id, excerpt: excerpt(row.excerpt) })), feedback: item.feedback.slice(0, 20).map(row => ({ id: row.id, excerpt: excerpt(row.description ?? row.title) })), omissions: [...(item.evidence.length > 20 ? ["Additional directly linked evidence was omitted."] : []), ...(item.feedback.length > 20 ? ["Additional directly linked feedback was omitted."] : [])] })
   }
   if (targetType === "SOLUTION") {
-    const item = await prisma.solution.findFirst({ where: { id: targetId, workspaceId }, include: { opportunity: { include: { linkedKeyResult: { include: { objective: true } }, evidence: { take: 21, orderBy: { createdAt: "desc" } }, feedback: { where: { workspaceId }, take: 21, orderBy: { createdAt: "desc" } } } }, evidence: { take: 21, orderBy: { createdAt: "desc" } } } })
+    const item = await prisma.solution.findFirst({ where: { id: targetId, workspaceId }, include: { opportunity: { include: { evidence: { take: 21, orderBy: { createdAt: "desc" } }, feedback: { where: { workspaceId }, take: 21, orderBy: { createdAt: "desc" } } } }, evidence: { take: 21, orderBy: { createdAt: "desc" } } } })
     if (!item) throw new PmInterviewError("PM interview target not found", 404)
     const evidence = [...item.evidence, ...item.opportunity.evidence].slice(0, 20)
-    return boundPmInterviewContext({ version: 1, capturedAt, target: { type: targetType, id: item.id, fields: { title: item.title, description: item.description, status: item.status } }, parents: [{ type: "OPPORTUNITY", id: item.opportunity.id, title: item.opportunity.title }], outcome: outcomeOf(item.opportunity.linkedKeyResult, workspaceId), ...(await linkedObjectivesField(prisma, workspaceId, item.opportunity.id)), evidence: evidence.map(row => ({ id: row.id, excerpt: excerpt(row.excerpt) })), feedback: item.opportunity.feedback.slice(0, 20).map(row => ({ id: row.id, excerpt: excerpt(row.description ?? row.title) })), omissions: [...(item.evidence.length + item.opportunity.evidence.length > 20 ? ["Additional directly linked evidence was omitted."] : []), ...(item.opportunity.feedback.length > 20 ? ["Additional directly linked feedback was omitted."] : [])] })
+    return boundPmInterviewContext({ version: 1, capturedAt, target: { type: targetType, id: item.id, fields: { title: item.title, description: item.description, status: item.status } }, parents: [{ type: "OPPORTUNITY", id: item.opportunity.id, title: item.opportunity.title }], outcome: await pointedOutcome(prisma, workspaceId, item.opportunity.id), ...(await linkedObjectivesField(prisma, workspaceId, item.opportunity.id)), evidence: evidence.map(row => ({ id: row.id, excerpt: excerpt(row.excerpt) })), feedback: item.opportunity.feedback.slice(0, 20).map(row => ({ id: row.id, excerpt: excerpt(row.description ?? row.title) })), omissions: [...(item.evidence.length + item.opportunity.evidence.length > 20 ? ["Additional directly linked evidence was omitted."] : []), ...(item.opportunity.feedback.length > 20 ? ["Additional directly linked feedback was omitted."] : [])] })
   }
   if (targetType === "ASSUMPTION") {
-    const item = await prisma.assumption.findFirst({ where: { id: targetId, solution: { workspaceId } }, include: { evidence: { take: 21, orderBy: { createdAt: "desc" } }, solution: { include: { opportunity: { include: { linkedKeyResult: { include: { objective: true } }, feedback: { where: { workspaceId }, take: 21, orderBy: { createdAt: "desc" } } } } } } } })
+    const item = await prisma.assumption.findFirst({ where: { id: targetId, solution: { workspaceId } }, include: { evidence: { take: 21, orderBy: { createdAt: "desc" } }, solution: { include: { opportunity: { include: { feedback: { where: { workspaceId }, take: 21, orderBy: { createdAt: "desc" } } } } } } } })
     if (!item) throw new PmInterviewError("PM interview target not found", 404)
     const opportunity = item.solution.opportunity
-    return boundPmInterviewContext({ version: 1, capturedAt, target: { type: targetType, id: item.id, fields: { title: item.title, description: item.description, riskLevel: item.riskLevel, status: item.status } }, parents: [{ type: "SOLUTION", id: item.solution.id, title: item.solution.title }, { type: "OPPORTUNITY", id: opportunity.id, title: opportunity.title }], outcome: outcomeOf(opportunity.linkedKeyResult, workspaceId), ...(await linkedObjectivesField(prisma, workspaceId, opportunity.id)), evidence: item.evidence.slice(0, 20).map(row => ({ id: row.id, excerpt: excerpt(row.excerpt) })), feedback: opportunity.feedback.slice(0, 20).map(row => ({ id: row.id, excerpt: excerpt(row.description ?? row.title) })), omissions: [...(item.evidence.length > 20 ? ["Additional directly linked evidence was omitted."] : []), ...(opportunity.feedback.length > 20 ? ["Additional directly linked feedback was omitted."] : [])] })
+    return boundPmInterviewContext({ version: 1, capturedAt, target: { type: targetType, id: item.id, fields: { title: item.title, description: item.description, riskLevel: item.riskLevel, status: item.status } }, parents: [{ type: "SOLUTION", id: item.solution.id, title: item.solution.title }, { type: "OPPORTUNITY", id: opportunity.id, title: opportunity.title }], outcome: await pointedOutcome(prisma, workspaceId, opportunity.id), ...(await linkedObjectivesField(prisma, workspaceId, opportunity.id)), evidence: item.evidence.slice(0, 20).map(row => ({ id: row.id, excerpt: excerpt(row.excerpt) })), feedback: opportunity.feedback.slice(0, 20).map(row => ({ id: row.id, excerpt: excerpt(row.description ?? row.title) })), omissions: [...(item.evidence.length > 20 ? ["Additional directly linked evidence was omitted."] : []), ...(opportunity.feedback.length > 20 ? ["Additional directly linked feedback was omitted."] : [])] })
   }
   const item = await prisma.experiment.findFirst({
     where: { id: targetId, workspaceId },
@@ -148,7 +155,6 @@ export async function targetSnapshot(prisma: AppPrismaClient, workspaceId: strin
               evidence: { take: 21, orderBy: { createdAt: "desc" } },
               opportunity: {
                 include: {
-                  linkedKeyResult: { include: { objective: true } },
                   evidence: { take: 21, orderBy: { createdAt: "desc" } },
                   feedback: { where: { workspaceId }, take: 21, orderBy: { createdAt: "desc" } },
                 },
@@ -161,10 +167,10 @@ export async function targetSnapshot(prisma: AppPrismaClient, workspaceId: strin
   })
   if (!item) throw new PmInterviewError("PM interview target not found", 404)
   const parents = item.assumption ? [{ type: "ASSUMPTION", id: item.assumption.id, title: item.assumption.title }, { type: "SOLUTION", id: item.assumption.solution.id, title: item.assumption.solution.title }, { type: "OPPORTUNITY", id: item.assumption.solution.opportunity.id, title: item.assumption.solution.opportunity.title }] : []
-  const linked = item.assumption?.solution.opportunity.linkedKeyResult
+  const linked = item.assumption ? await pointedOutcome(prisma, workspaceId, item.assumption.solution.opportunity.id) : null
   const evidence = item.assumption ? [...item.assumption.evidence, ...item.assumption.solution.evidence, ...item.assumption.solution.opportunity.evidence] : []
   const feedback = item.assumption?.solution.opportunity.feedback ?? []
-  return boundPmInterviewContext({ version: 1, capturedAt, target: { type: targetType, id: item.id, fields: { title: item.title, hypothesis: item.hypothesis, method: item.method, killCondition: item.killCondition, status: item.status } }, parents, outcome: outcomeOf(linked, workspaceId), ...(item.assumption ? await linkedObjectivesField(prisma, workspaceId, item.assumption.solution.opportunity.id) : {}), evidence: evidence.slice(0, 20).map(row => ({ id: row.id, excerpt: excerpt(row.excerpt) })), feedback: feedback.slice(0, 20).map(row => ({ id: row.id, excerpt: excerpt(row.description ?? row.title) })), omissions: item.assumption ? [...(evidence.length > 20 ? ["Additional directly linked evidence was omitted."] : []), ...(feedback.length > 20 ? ["Additional directly linked feedback was omitted."] : [])] : ["This experiment has no linked assumption, so no discovery parent chain was available."] })
+  return boundPmInterviewContext({ version: 1, capturedAt, target: { type: targetType, id: item.id, fields: { title: item.title, hypothesis: item.hypothesis, method: item.method, killCondition: item.killCondition, status: item.status } }, parents, outcome: linked, ...(item.assumption ? await linkedObjectivesField(prisma, workspaceId, item.assumption.solution.opportunity.id) : {}), evidence: evidence.slice(0, 20).map(row => ({ id: row.id, excerpt: excerpt(row.excerpt) })), feedback: feedback.slice(0, 20).map(row => ({ id: row.id, excerpt: excerpt(row.description ?? row.title) })), omissions: item.assumption ? [...(evidence.length > 20 ? ["Additional directly linked evidence was omitted."] : []), ...(feedback.length > 20 ? ["Additional directly linked feedback was omitted."] : [])] : ["This experiment has no linked assumption, so no discovery parent chain was available."] })
 }
 
 async function assertEnabled(workspaceId: string) {

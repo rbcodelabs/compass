@@ -6,11 +6,28 @@ import { WS_A, WS_B, createTenantFakePrisma } from "../helpers/tenant-fake-prism
  * The loader runs against the shared two-tenant fake, which models the NULL-workspace
  * Solution/Objective rows (rows that predate the 068 backfill) and a second workspace.
  */
+const OBJECTIVE_LINK = "OPPORTUNITY_TARGETS_OBJECTIVE"
+const SOLUTION_KR_LINK = "SOLUTION_TARGETS_KEY_RESULT"
+const POINTER_LINK = "OPPORTUNITY_TARGETS_KEY_RESULT"
+
+/** entity_links is the only link store; these seed its rows. */
+type Fake = ReturnType<typeof createTenantFakePrisma>
+const entityLink = (fake: Fake, row: Record<string, unknown>) => {
+  const store = fake.state.entityLinks
+  store.push({ id: `l-${store.length}`, source: "UI", createdById: null, attrs: null, createdAt: new Date(10 + store.length), updatedAt: new Date(10), ...row })
+}
+const objectiveLink = (fake: Fake, { opportunityId, objectiveId, ...row }: { workspaceId: string; opportunityId: string; objectiveId: string; origin: string }) =>
+  entityLink(fake, { linkType: OBJECTIVE_LINK, fromType: "OPPORTUNITY", fromId: opportunityId, toType: "OBJECTIVE", toId: objectiveId, ...row })
+const solutionLink = (fake: Fake, { solutionId, keyResultId, ...row }: { workspaceId: string; solutionId: string; keyResultId: string }) =>
+  entityLink(fake, { linkType: SOLUTION_KR_LINK, fromType: "SOLUTION", fromId: solutionId, toType: "KEY_RESULT", toId: keyResultId, origin: null, ...row })
+const pointerLink = (fake: Fake, opportunityId: string, keyResultId: string) =>
+  entityLink(fake, { workspaceId: WS_A.id, linkType: POINTER_LINK, fromType: "OPPORTUNITY", fromId: opportunityId, toType: "KEY_RESULT", toId: keyResultId, origin: "LEGACY" })
+/** The entity_links read calls of one link type. */
+const readsOf = (spy: { mock: { calls: unknown[][] } }, linkType: string) => spy.mock.calls.filter(([args]) => (args as { where: { linkType: string } }).where.linkType === linkType)
+
 function setup() {
   const fake = createTenantFakePrisma()
-  const link = (store: Record<string, unknown>[], row: Record<string, unknown>) =>
-    store.push({ id: `l-${store.length}`, source: "UI", createdById: null, createdAt: new Date(10 + store.length), ...row })
-  return { fake, db: fake.client as never, link }
+  return { fake, db: fake.client as never }
 }
 
 describe("loadOutcomeTreeInput (tenant scoping)", () => {
@@ -31,26 +48,27 @@ describe("loadOutcomeTreeInput (tenant scoping)", () => {
   })
 
   it("keeps a link only when BOTH endpoints are in the workspace (foreign, NULL and drifted endpoints are dropped)", async () => {
-    const { fake, db, link } = setup()
-    link(fake.state.opportunityObjectiveLinks, { workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a", origin: "DIRECT" })
+    const { fake, db } = setup()
+    objectiveLink(fake, { workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a", origin: "DIRECT" })
     // A link row in A that points at B's objective, and at an unbackfilled objective.
-    link(fake.state.opportunityObjectiveLinks, { workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-b", origin: "DIRECT" })
-    link(fake.state.opportunityObjectiveLinks, { workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-null", origin: "DIRECT" })
+    objectiveLink(fake, { workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-b", origin: "DIRECT" })
+    objectiveLink(fake, { workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-null", origin: "DIRECT" })
     // A drifted row whose own workspaceId says B but names A's endpoints.
-    link(fake.state.opportunityObjectiveLinks, { workspaceId: WS_B.id, opportunityId: "opp-a", objectiveId: "obj-a", origin: "LEGACY" })
-    link(fake.state.solutionKeyResultLinks, { workspaceId: WS_A.id, solutionId: "sol-a", keyResultId: "kr-a" })
-    link(fake.state.solutionKeyResultLinks, { workspaceId: WS_A.id, solutionId: "sol-a", keyResultId: "kr-b" })
-    link(fake.state.solutionKeyResultLinks, { workspaceId: WS_A.id, solutionId: "sol-a", keyResultId: "kr-null" })
+    objectiveLink(fake, { workspaceId: WS_B.id, opportunityId: "opp-a", objectiveId: "obj-a", origin: "LEGACY" })
+    solutionLink(fake, { workspaceId: WS_A.id, solutionId: "sol-a", keyResultId: "kr-a" })
+    solutionLink(fake, { workspaceId: WS_A.id, solutionId: "sol-a", keyResultId: "kr-b" })
+    solutionLink(fake, { workspaceId: WS_A.id, solutionId: "sol-a", keyResultId: "kr-null" })
 
     const input = await loadOutcomeTreeInput(db, WS_A.id)
     expect(input.objectiveOpportunityLinks).toEqual([{ objectiveId: "obj-a", opportunityId: "opp-a" }])
     expect(input.solutionKeyResultEdges).toEqual([{ solutionId: "sol-a", keyResultId: "kr-a" }])
   })
 
-  it("passes legacy pointers through and excludes archived opportunities at the query", async () => {
+  it("passes the Key Result pointers (read from entity_links) through and excludes archived opportunities at the query", async () => {
     const { fake, db } = setup()
-    fake.state.opportunities[0].linkedKeyResultId = "kr-a"
-    fake.state.opportunities.push({ ...fake.state.opportunities[0], id: "opp-archived", status: "ARCHIVED", linkedKeyResultId: null })
+    pointerLink(fake, "opp-a", "kr-a")
+    fake.state.opportunities.push({ ...fake.state.opportunities[0], id: "opp-archived", status: "ARCHIVED" })
+    pointerLink(fake, "opp-archived", "kr-a")
     const input = await loadOutcomeTreeInput(db, WS_A.id)
     expect(input.legacyPointers).toEqual([{ opportunityId: "opp-a", keyResultId: "kr-a" }])
     expect(input.opportunities.map((o) => o.id)).toEqual(["opp-a"])
@@ -66,14 +84,15 @@ describe("loadOutcomeTreeInput (tenant scoping)", () => {
   })
 
   it("is read-only and filters every query by workspaceId (no unscoped read)", async () => {
-    const { fake, db, link } = setup()
-    link(fake.state.opportunityObjectiveLinks, { workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a", origin: "DIRECT" })
+    const { fake, db } = setup()
+    objectiveLink(fake, { workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a", origin: "DIRECT" })
     const spies = ["objective", "oKRCycle", "keyResult", "opportunity", "solution"].map((model) =>
       vi.spyOn((fake.client as unknown as Record<string, { findMany: (a: { where: Record<string, unknown> }) => Promise<unknown> }>)[model], "findMany"),
     )
     await loadOutcomeTreeInput(db, WS_A.id)
-    // objective is read twice by design: the loader, then the link readers' title join (also workspace-filtered).
-    spies.forEach((spy, index) => expect(spy).toHaveBeenCalledTimes(index === 0 ? 2 : 1))
+    // objective is read three times by design: the loader, the link reader's liveness check and its title join (all workspace-filtered);
+    // opportunity twice: the loader and the same liveness check. The other tables are read once.
+    spies.forEach((spy, index) => expect(spy).toHaveBeenCalledTimes([3, 1, 1, 2, 1][index]))
     for (const spy of spies) {
       for (const call of spy.mock.calls) expect(JSON.stringify(call[0].where)).toContain(WS_A.id)
     }
@@ -81,51 +100,54 @@ describe("loadOutcomeTreeInput (tenant scoping)", () => {
   })
 
   it("issues one query per table, not one per row (no N+1)", async () => {
-    const { fake, db, link } = setup()
-    link(fake.state.opportunityObjectiveLinks, { workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a", origin: "DIRECT" })
+    const { fake, db } = setup()
+    objectiveLink(fake, { workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a", origin: "DIRECT" })
     for (let i = 0; i < 40; i++) {
       fake.state.opportunities.push({ ...fake.state.opportunities[0], id: `opp-many-${i}` })
       fake.state.solutions.push({ ...fake.state.solutions[0], id: `sol-many-${i}`, opportunityId: `opp-many-${i}` })
     }
     const client = fake.client as unknown as Record<string, { findMany: (a: unknown) => Promise<unknown> }>
-    const counted = ["objective", "oKRCycle", "keyResult", "opportunity", "solution", "opportunityObjectiveLink", "solutionKeyResultLink"]
+    const counted = ["objective", "oKRCycle", "keyResult", "opportunity", "solution", "entityLink"]
     const spies = counted.map((model) => vi.spyOn(client[model], "findMany"))
     await loadOutcomeTreeInput(db, WS_A.id)
-    // 40 extra opportunities and solutions add no queries: at most one per table, two for objective (loader + link title join).
-    for (const spy of spies) expect(spy.mock.calls.length).toBeLessThanOrEqual(2)
-    expect(spies[counted.indexOf("opportunity")].mock.calls.length).toBe(1)
+    // 40 extra opportunities and solutions add no queries: at most one per table, a few more for the reads that join through the
+    // link endpoints (objective: loader + liveness + titles; entity_links: one per link type).
+    for (const spy of spies.slice(0, 5)) expect(spy.mock.calls.length).toBeLessThanOrEqual(3)
     expect(spies[counted.indexOf("solution")].mock.calls.length).toBe(1)
-    expect(spies[counted.indexOf("opportunityObjectiveLink")].mock.calls.length).toBe(1)
+    const linkSpy = spies[counted.indexOf("entityLink")]
+    expect(linkSpy.mock.calls.length).toBe(3)
+    for (const linkType of [OBJECTIVE_LINK, SOLUTION_KR_LINK, POINTER_LINK]) expect(readsOf(linkSpy, linkType)).toHaveLength(1)
   })
 })
 
 describe("link reads with real links (chunking, no N+1)", () => {
   it("reads 1,201 linked opportunities in three link queries and a bounded number of objective queries, not one per row", async () => {
-    const { fake, db, link } = setup()
+    const { fake, db } = setup()
     for (let i = 0; i < 1200; i++) {
       const id = `opp-bulk-${i}`
       fake.state.opportunities.push({ ...fake.state.opportunities[0], id, sortOrder: i + 1 })
-      link(fake.state.opportunityObjectiveLinks, { workspaceId: WS_A.id, opportunityId: id, objectiveId: "obj-a", origin: "DIRECT" })
+      objectiveLink(fake, { workspaceId: WS_A.id, opportunityId: id, objectiveId: "obj-a", origin: "DIRECT" })
     }
-    link(fake.state.opportunityObjectiveLinks, { workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a", origin: "DIRECT" })
+    objectiveLink(fake, { workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a", origin: "DIRECT" })
     const client = fake.client as unknown as Record<string, { findMany: (a: unknown) => Promise<unknown> }>
-    const linkReads = vi.spyOn(client.opportunityObjectiveLink, "findMany")
+    const linkReads = vi.spyOn(client.entityLink, "findMany")
     const objectiveReads = vi.spyOn(client.objective, "findMany")
     const input = await loadOutcomeTreeInput(db, WS_A.id)
     expect(input.opportunities).toHaveLength(1201)
     expect(input.objectiveOpportunityLinks).toHaveLength(1201)
-    // 1,201 ids in chunks of 500: three link reads, and one title read per chunk plus the loader's own.
-    expect(linkReads).toHaveBeenCalledTimes(3)
-    expect(objectiveReads.mock.calls.length).toBeLessThanOrEqual(4)
+    // 1,201 ids in chunks of 500: three objective-link reads (and three Key Result pointer reads), and per chunk one liveness and one
+    // title read of the objectives, plus the loader's own.
+    expect(readsOf(linkReads, OBJECTIVE_LINK)).toHaveLength(3)
+    expect(readsOf(linkReads, POINTER_LINK)).toHaveLength(3)
+    expect(objectiveReads.mock.calls.length).toBeLessThanOrEqual(7)
   })
 })
 
-describe("link table missing (migration 071 not applied) fails loudly", () => {
-  const missingTable = () => Object.assign(new Error("relation \"opportunity_objective_links\" does not exist"), { code: "42P01" })
+describe("link table missing fails loudly", () => {
+  const missingTable = () => Object.assign(new Error("relation \"entity_links\" does not exist"), { code: "42P01" })
   const breakLinkTables = (fake: ReturnType<typeof createTenantFakePrisma>) => {
     const client = fake.client as unknown as Record<string, { findMany: unknown }>
-    client.opportunityObjectiveLink.findMany = async () => { throw missingTable() }
-    client.solutionKeyResultLink.findMany = async () => { throw missingTable() }
+    client.entityLink.findMany = async () => { throw missingTable() }
   }
 
   it("the tree loader throws the database error instead of presenting every opportunity as unlinked", async () => {
@@ -160,17 +182,18 @@ describe("link table missing (migration 071 not applied) fails loudly", () => {
 })
 
 describe("loadOutcomesIndex (the lighter read)", () => {
-  it("agrees with the tree on linked counts, including the legacy pointer fallback, and skips solutions", async () => {
-    const { fake, db, link } = setup()
-    fake.state.opportunities.push({ ...fake.state.opportunities[0], id: "opp-legacy", linkedKeyResultId: "kr-a", sortOrder: 1 })
+  it("agrees with the tree on linked counts, including the Key Result pointer fallback, and skips solutions", async () => {
+    const { fake, db } = setup()
+    fake.state.opportunities.push({ ...fake.state.opportunities[0], id: "opp-legacy", sortOrder: 1 })
+    pointerLink(fake, "opp-legacy", "kr-a")
     fake.state.opportunities.push({ ...fake.state.opportunities[0], id: "opp-b-links", sortOrder: 2 })
     fake.state.objectives.push({ id: "obj-a2", workspaceId: WS_A.id, cycleId: null, title: "A2", status: "ON_TRACK", sortOrder: 1 })
-    link(fake.state.opportunityObjectiveLinks, { workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a", origin: "DIRECT" })
-    link(fake.state.opportunityObjectiveLinks, { workspaceId: WS_A.id, opportunityId: "opp-b-links", objectiveId: "obj-a", origin: "DIRECT" })
-    link(fake.state.opportunityObjectiveLinks, { workspaceId: WS_A.id, opportunityId: "opp-b-links", objectiveId: "obj-a2", origin: "DIRECT" })
+    objectiveLink(fake, { workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a", origin: "DIRECT" })
+    objectiveLink(fake, { workspaceId: WS_A.id, opportunityId: "opp-b-links", objectiveId: "obj-a", origin: "DIRECT" })
+    objectiveLink(fake, { workspaceId: WS_A.id, opportunityId: "opp-b-links", objectiveId: "obj-a2", origin: "DIRECT" })
     const client = fake.client as unknown as Record<string, { findMany: (a: unknown) => Promise<unknown> }>
     const solutionReads = vi.spyOn(client.solution, "findMany")
-    const solutionLinkReads = vi.spyOn(client.solutionKeyResultLink, "findMany")
+    const linkReads = vi.spyOn(client.entityLink, "findMany")
     const index = await loadOutcomesIndex(db, WS_A.id)
     const tree = await loadOutcomeTree(db, WS_A.id)
     expect(index.rows).toEqual(tree.roots.map((r) => ({ id: r.id, title: r.title, status: r.status, cycle: r.cycle, linkedOpportunityCount: r.linkedOpportunityCount })))
@@ -178,7 +201,7 @@ describe("loadOutcomesIndex (the lighter read)", () => {
     expect(index.rows.find((r) => r.id === "obj-a2")!.cycle).toBeNull()
     // Only the full tree load read solutions (once each): the index read none.
     expect(solutionReads).toHaveBeenCalledTimes(1)
-    expect(solutionLinkReads).toHaveBeenCalledTimes(1)
+    expect(readsOf(linkReads, SOLUTION_KR_LINK)).toHaveLength(1)
   })
 
   it("hides NULL-workspace objectives and is scoped to the workspace", async () => {
@@ -190,9 +213,9 @@ describe("loadOutcomesIndex (the lighter read)", () => {
 
 describe("loadOutcomeTree", () => {
   it("builds the tree: linked opportunity under its objective, the rest in the pool", async () => {
-    const { fake, db, link } = setup()
+    const { fake, db } = setup()
     fake.state.opportunities.push({ ...fake.state.opportunities[0], id: "opp-a2", title: "Unlinked", sortOrder: 1 })
-    link(fake.state.opportunityObjectiveLinks, { workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a", origin: "DIRECT" })
+    objectiveLink(fake, { workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a", origin: "DIRECT" })
     const tree = await loadOutcomeTree(db, WS_A.id)
     expect(tree.roots.map((r) => r.id)).toEqual(["obj-a"])
     expect(tree.roots[0].children).toEqual([{ opportunityId: "opp-a", placement: "home", homeObjective: null }])

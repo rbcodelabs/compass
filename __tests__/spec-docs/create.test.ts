@@ -116,14 +116,15 @@ describe("createSpecCore", () => {
 
   it("generates the sections from the scope's real records, in the caller's workspace only", async () => {
     const s = state()
-    s.solutionKeyResultLinks.push({ id: "skr-1", workspaceId: WS_A.id, solutionId: "sol-a", keyResultId: "kr-a", createdAt: new Date(1) })
+    s.entityLinks.push({ id: "skr-1", workspaceId: WS_A.id, linkType: "SOLUTION_TARGETS_KEY_RESULT", fromType: "SOLUTION", fromId: "sol-a", toType: "KEY_RESULT", toId: "kr-a", origin: "DIRECT", source: "UI", createdById: null, createdAt: new Date(1), updatedAt: new Date(1) })
     s.assumptions.push({ id: "asm-a2", solutionId: "sol-a", title: "Second", sortOrder: 5, createdAt: new Date(5) })
     Object.assign(s.assumptions[0], { sortOrder: 1, createdAt: new Date(1) })
     s.experiments.push({ id: "exp-on-asm", workspaceId: WS_A.id, title: "Tests asm", status: "DESIGNING", assumptionId: "asm-a", createdAt: new Date(1), updatedAt: new Date(1) })
     s.experiments.push({ id: "exp-foreign", workspaceId: WS_B.id, title: "Foreign", status: "DESIGNING", assumptionId: "asm-a", createdAt: new Date(1), updatedAt: new Date(1) })
-    s.artifactLinks.push({ id: "al-1", workspaceId: WS_A.id, artifactId: "art-a", linkedType: "SOLUTION", linkedId: "sol-a" })
-    s.artifactLinks.push({ id: "al-2", workspaceId: WS_A.id, artifactId: "art-a-archived", linkedType: "SOLUTION", linkedId: "sol-a" })
-    s.artifactLinks.push({ id: "al-3", workspaceId: WS_B.id, artifactId: "art-b", linkedType: "SOLUTION", linkedId: "sol-a" })
+    const attached = (id: string, workspaceId: string, artifactId: string) => ({
+      id, workspaceId, linkType: "ARTIFACT_ATTACHED_TO_SOLUTION", fromType: "ARTIFACT", fromId: artifactId, toType: "SOLUTION", toId: "sol-a", origin: "DIRECT", source: "UI", createdById: null, createdAt: new Date(1), updatedAt: new Date(1),
+    })
+    s.entityLinks.push(attached("al-1", WS_A.id, "art-a"), attached("al-2", WS_A.id, "art-a-archived"), attached("al-3", WS_B.id, "art-b"))
     expect((await create()).ok).toBe(true)
     const body = String(docs()[0].content)
     const order = ["keyResult/kr-a", "solution/sol-a", "assumption/asm-a)", "assumption/asm-a2", "experiment/exp-on-asm", "artifact/art-a)"].map((needle) => body.indexOf(`compass://${needle}`))

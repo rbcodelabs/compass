@@ -1,26 +1,33 @@
 import { describe, expect, it, vi } from "vitest"
 
-const { getLinkedKeyResultsBySolution } = vi.hoisted(() => ({
+const { getLinkedKeyResultsBySolution, readEntityLinksTaskReferences } = vi.hoisted(() => ({
   getLinkedKeyResultsBySolution: vi.fn(async () => new Map([["s1", [{ id: "kr-1", title: "KR", objectiveId: "obj-2" }]]])),
+  // Task references to solutions (entity_links), already workspace-filtered and ordered (created_at, id) by the reader.
+  readEntityLinksTaskReferences: vi.fn(async (..._args: unknown[]) => [{ fromId: "t1", toId: "s1" }, { fromId: "t-cancelled", toId: "s1" }]),
 }))
 vi.mock("@/lib/typed-links", () => ({ getLinkedKeyResultsBySolution }))
+vi.mock("@/lib/links/readers", () => ({ readEntityLinksTaskReferences }))
 import { loadOpportunityChainExtras } from "@/lib/thinking-model/opportunity-chain-data"
 import { resolveThinkingModel } from "@/lib/thinking-model/resolve"
 
 const fakePrisma = () => {
-  const taskLink = { findMany: vi.fn(async (_args: { where: Record<string, unknown> }) => [{ linkedId: "s1", createdAt: new Date(), task: { id: "t1", title: "T", status: "TODO" } }]) }
+  // The workspace filter already excludes the cancelled task, so only t1 comes back.
+  const task = { findMany: vi.fn(async (_args: { where: Record<string, unknown> }) => [{ id: "t1", title: "T", status: "TODO" }]) }
   const objective = { findMany: vi.fn(async (_args: { where: { id: { in: string[] } } & Record<string, unknown> }) => [{ id: "obj-1", title: "O1", keyResults: [] }]) }
-  return { prisma: { taskLink, objective } as never, taskLink, objective }
+  return { prisma: { task, objective } as never, task, objective }
 }
 const opportunity = { linkedObjectives: [{ id: "obj-1" }], linkedKeyResult: { objective: { id: "obj-3" } } }
 
 describe("loadOpportunityChainExtras", () => {
   it("scopes every read to the workspace and batches by id (no per-solution queries)", async () => {
     getLinkedKeyResultsBySolution.mockClear()
-    const { prisma, taskLink, objective } = fakePrisma()
+    readEntityLinksTaskReferences.mockClear()
+    const { prisma, task, objective } = fakePrisma()
     const out = await loadOpportunityChainExtras(prisma, "ws-1", resolveThinkingModel({ thinkingModel: "TORRES_OST" }), opportunity, [{ id: "s1" }, { id: "s2" }])
-    expect(taskLink.findMany).toHaveBeenCalledTimes(1)
-    expect(taskLink.findMany.mock.calls[0][0].where).toMatchObject({ linkedType: "SOLUTION", linkedId: { in: ["s1", "s2"] }, task: { workspaceId: "ws-1" } })
+    expect(readEntityLinksTaskReferences).toHaveBeenCalledTimes(1)
+    expect(readEntityLinksTaskReferences).toHaveBeenCalledWith(prisma, "ws-1", { target: { type: "SOLUTION", ids: ["s1", "s2"] } })
+    expect(task.findMany).toHaveBeenCalledTimes(1)
+    expect(task.findMany.mock.calls[0][0].where).toMatchObject({ workspaceId: "ws-1", status: { not: "CANCELLED" }, id: { in: ["t1", "t-cancelled"] } })
     expect(objective.findMany).toHaveBeenCalledTimes(1)
     expect(objective.findMany.mock.calls[0][0].where).toMatchObject({ workspaceId: "ws-1" })
     expect([...objective.findMany.mock.calls[0][0].where.id.in].sort()).toEqual(["obj-1", "obj-2", "obj-3"])
@@ -38,8 +45,10 @@ describe("loadOpportunityChainExtras", () => {
   })
 
   it("reads nothing for an opportunity with no solutions", async () => {
-    const { prisma, taskLink } = fakePrisma()
+    readEntityLinksTaskReferences.mockClear()
+    const { prisma, task } = fakePrisma()
     await loadOpportunityChainExtras(prisma, "ws-1", resolveThinkingModel({ thinkingModel: "OPPORTUNITY_FIRST_OKR" }), { linkedObjectives: [], linkedKeyResult: null }, [])
-    expect(taskLink.findMany).not.toHaveBeenCalled()
+    expect(readEntityLinksTaskReferences).not.toHaveBeenCalled()
+    expect(task.findMany).not.toHaveBeenCalled()
   })
 })

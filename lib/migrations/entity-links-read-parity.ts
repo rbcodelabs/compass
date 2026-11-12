@@ -1,17 +1,19 @@
 /**
- * Read-only read-parity status for GET /api/admin/migrate (ADR "One generic entity_links table", section 6 tail: shadow-compare before the
- * read flip). It answers, per family, "would a reader flipped to entity_links show the same links as the legacy reader?" by diffing, in SQL,
- * the LIVE legacy rows against the LIVE mirror rows. "Live" is what the workspace-filtered readers show: both endpoints exist in the link's
- * workspace (a dangling, foreign or NULL-workspace endpoint is absent). The same rules are in lib/links/read-compare.ts (the TypeScript
- * comparator readers will call in shadow mode); this module is the durable, instance-independent counter source for the status endpoint.
+ * Read-only parity status for GET /api/admin/migrate (ADR "One generic entity_links table", section 6 tail). It diffs, in SQL, the LIVE rows
+ * of each legacy table against the LIVE entity_links rows of the matching link types. "Live" is what the workspace-filtered readers show:
+ * both endpoints exist in the link's workspace (a dangling, foreign or NULL-workspace endpoint is absent).
  *
- * Counts and capped ids only (no titles or content). Nothing here writes. Cost: each family reads its legacy table plus the mirror rows of
- * its link types once (entity_links has no index that leads with link_type, so that part is a scan filtered by the workspace index), so
+ * AFTER THE CODE CLEANUP (entity_links is the only store; the legacy tables are frozen and no code writes them) this is a historical
+ * check, not a gate: links created after the cleanup exist only in entity_links, so `onlyEntityLinks` grows by design, and a link
+ * removed after the cleanup leaves its frozen legacy row behind, so `onlyLegacy` can too. It is still the way to prove the backfills
+ * landed before the legacy tables are dropped.
+ *
+ * Counts and capped ids only (no titles or content). Nothing here writes. Cost: each family reads its legacy table plus the rows of its
+ * link types once (entity_links has no index that leads with link_type, so that part is a scan filtered by the workspace index), so
  * poll it sparingly, like the entityLinks*Backfill statuses it sits next to.
  */
 import type { PoolClient } from "pg"
 import { usesPlainPostgres } from "@/lib/db-url"
-import { getLinkReadMode, type LinkReadFamily, type LinkReadMode } from "@/lib/links/registry"
 
 const ID_CAP = 20
 /** Per-family cap on the parity query; a timeout surfaces as the status's {error} field, never a hung request. */
@@ -53,7 +55,9 @@ const TASK_TARGETS: readonly { legacy: string; stored: string }[] = [
   { legacy: "DECISION", stored: "REVIEW_REQUEST" },
 ]
 
-type Spec = { name: string; family: LinkReadFamily; sets: (s: string) => SetSql }
+type LinkFamily = "SOLUTION_KR" | "OPPORTUNITY" | "ARTIFACT" | "TASK"
+
+type Spec = { name: string; family: LinkFamily; sets: (s: string) => SetSql }
 
 const mirror = (s: string, linkType: string, fromType: string, toType: string, origin: string, extra = "") =>
   `SELECT e.from_id AS f, e.to_type AS tt, e.to_id AS t, ${origin} AS o, e.id::text AS id FROM "${s}"."entity_links" AS e
@@ -135,10 +139,9 @@ export type ReadParityEntry = {
 }
 
 export type EntityLinksReadParityStatus = {
-  readModes: Record<LinkReadFamily, LinkReadMode>
-  /** Zero across the board means every family would read identically from entity_links. */
+  /** Zero across the board means every legacy row has its entity_links twin and nothing was written since (see the header). */
   totalMismatches: number
-  families: Record<string, ReadParityEntry & { family: LinkReadFamily }>
+  families: Record<string, ReadParityEntry & { family: LinkFamily }>
 }
 
 async function parityFor(client: PoolClient, schema: string, spec: Spec): Promise<ReadParityEntry> {
@@ -192,7 +195,6 @@ export async function getEntityLinksReadParityStatus(client: PoolClient, schema:
     families[spec.name] = { family: spec.family, ...entry }
   }
   return {
-    readModes: { SOLUTION_KR: getLinkReadMode("SOLUTION_KR"), OPPORTUNITY: getLinkReadMode("OPPORTUNITY"), ARTIFACT: getLinkReadMode("ARTIFACT"), TASK: getLinkReadMode("TASK") },
     totalMismatches,
     families,
   }

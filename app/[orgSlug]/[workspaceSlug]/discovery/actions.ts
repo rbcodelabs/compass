@@ -378,7 +378,7 @@ export async function linkOpportunityToKeyResult(
   if (keyResultId) await requireProductEntity("keyResult", keyResultId, workspaceId);
   const session = await auth();
   const prisma = getPrisma();
-  // Dual-write in ONE transaction: the legacy column and its LEGACY Opportunity<->Objective link.
+  // The Key Result pointer and its LEGACY Opportunity<->Objective link, in ONE transaction.
   await captureWorkspaceMutation(
     prisma,
     "opportunity",

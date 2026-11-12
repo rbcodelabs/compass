@@ -6,7 +6,7 @@ vi.mock("@/lib/document-service", () => ({ hydrateDocument: mocks.hydrate, docum
 vi.mock("next/headers", () => ({ cookies: async () => ({ get: mocks.cookie }) }))
 vi.mock("@/auth", () => ({ auth: mocks.auth }))
 vi.mock("next/navigation", () => ({ redirect: () => { throw Error("redirect") }, notFound: () => { throw Error("not found") } }))
-vi.mock("@/lib/db", () => ({ default: () => ({ workspace: { findFirst: mocks.workspace }, doc: { findFirst: mocks.doc }, docVersion: { findMany: mocks.versions }, docComment: { findMany: mocks.comments }, task: { findMany: vi.fn().mockResolvedValue([]) }, workspaceMember: { findMany: vi.fn().mockResolvedValue([]) } }) }))
+vi.mock("@/lib/db", () => ({ default: () => ({ workspace: { findFirst: mocks.workspace }, doc: { findFirst: mocks.doc }, docVersion: { findMany: mocks.versions }, docComment: { findMany: mocks.comments }, task: { findMany: vi.fn().mockResolvedValue([]) }, entityLink: { findMany: async () => [] }, workspaceMember: { findMany: vi.fn().mockResolvedValue([]) } }) }))
 vi.mock("@/lib/tracked-decisions", () => ({ listDocDecisions: mocks.lookup }))
 vi.mock("@/lib/doc-comment-tasks", () => ({
   loadMentionCandidates: async () => ({ people: [{ kind: "user", id: "u1", name: "Quinn", detail: null }], agents: [], outside: [] }),

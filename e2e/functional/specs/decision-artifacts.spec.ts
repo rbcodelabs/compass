@@ -92,7 +92,7 @@ test.describe("Decision supporting artifacts", () => {
       await expect(page.getByText("Archived", { exact: true }).first()).toBeVisible()
       await page.getByRole("button", { name: /Unlink/ }).click()
       await expect(artifactLink).toHaveCount(0)
-      expect(await prisma.artifactLink.count({ where: { artifactId, linkedType: "REVIEW_REQUEST", linkedId: revision.requestId } })).toBe(0)
+      expect(await prisma.entityLink.count({ where: { linkType: "ARTIFACT_SUPPORTS_DECISION", fromId: artifactId, toId: revision.requestId } })).toBe(0)
       expect(await snapshot()).toEqual(before)
       await page.goto(artifactUrl)
       await expect(page.getByRole("link", { name: question, exact: true })).toHaveCount(0)

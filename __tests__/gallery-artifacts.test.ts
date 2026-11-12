@@ -2,8 +2,6 @@ import { describe, expect, it, vi } from "vitest"
 import { MAX_GALLERY_ARTIFACTS_PER_ITEM, isCapturableSource } from "@/lib/gallery/artifacts"
 import { loadGalleryArtifactSets } from "@/lib/gallery/artifacts-server"
 
-vi.mock("@/lib/links/read-mode", () => ({ getLinkReadMode: () => "off" }))
-
 const rev = (id: string, thumb: boolean) => ({ id, thumbnailPathname: thumb ? "p" : null, thumbnailWidth: thumb ? 800 : null, thumbnailHeight: thumb ? 500 : null, thumbnailCapturedAt: thumb ? new Date(5) : null })
 const row = (id: string, over: Record<string, unknown> = {}) => ({ id, title: id, sourceType: "HTML_UPLOAD", kind: null, currentRevision: null, ...over })
 

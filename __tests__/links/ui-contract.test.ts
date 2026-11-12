@@ -16,13 +16,13 @@ vi.mock("@/lib/workspace-updates-capture", () => ({
 import { changeEntityLink, readEntityLinks } from "@/app/[orgSlug]/[workspaceSlug]/links/actions";
 
 describe("every registry type with a UI is fully described", () => {
-  // Legacy-mirrored types have no UI: reads stay on the legacy table until a later phase flips them.
+  // Types with a dedicated writer have no generic UI: their dedicated tools and surfaces own it.
   // A type with no `candidates` has no UI at all (getLinkedEntitiesView returns null for it, see lib/links/read-models.ts), for example
   // DOC_SPECIFIES_SCOPE, whose only writer is createSpecCore. It must then declare no summaries either: a half-described UI is the failure.
-  it.each(Object.values(LINK_TYPES).filter((def) => !def.legacy && !def.candidates))("$key has no UI, so it declares no summaries", (def) => {
+  it.each(Object.values(LINK_TYPES).filter((def) => !def.dedicatedWriter && !def.candidates))("$key has no UI, so it declares no summaries", (def) => {
     expect(def.summaries).toEqual({});
   });
-  it.each(Object.values(LINK_TYPES).filter((def) => !def.legacy && def.candidates))("$key has candidates and summary loaders for its endpoints", (def) => {
+  it.each(Object.values(LINK_TYPES).filter((def) => !def.dedicatedWriter && def.candidates))("$key has candidates and summary loaders for its endpoints", (def) => {
     expect(typeof def.candidates).toBe("function");
     const specs = [def.summaries.onFrom ? toTypesOf(def)[0] : null, def.summaries.onTo ? def.from : null].filter(Boolean);
     for (const type of specs) expect(SUMMARISED_ENTITY_TYPES).toContain(type);

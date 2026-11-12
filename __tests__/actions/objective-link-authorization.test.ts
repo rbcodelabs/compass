@@ -31,14 +31,18 @@ const DENIED = { ok: false, error: "Entity not found or access denied" }
 const BASE = `/${WS_A.org}/${WS_A.slug}`
 const SCREENS = [`${BASE}/discovery/opp-a`, `${BASE}/discovery/tree`, `${BASE}/okrs`]
 const state = () => fake.current!.state
-const links = () => state().opportunityObjectiveLinks
+const OPPORTUNITY_OBJECTIVE = "OPPORTUNITY_TARGETS_OBJECTIVE"
+const links = () => state().entityLinks.filter((l) => l.linkType === OPPORTUNITY_OBJECTIVE)
+const linkRow = (row: Record<string, unknown>) => ({
+  linkType: OPPORTUNITY_OBJECTIVE, fromType: "OPPORTUNITY", toType: "OBJECTIVE", attrs: null, updatedAt: new Date(10), ...row,
+})
 const linkWrites = () => state().writes.filter((w) => /Link\./.test(w))
 
 beforeEach(() => {
   fake.current = createTenantFakePrisma()
   session.userId = USERS.alice
   revalidate.mockClear()
-  // A second objective in A, and an opportunity-side pointer fixture for the legacy case.
+  // A second objective in A, and a key result under it for the pointer case.
   state().objectives.push({ id: "obj-a2", workspaceId: WS_A.id, cycleId: "cycle-a", title: "A objective 2", status: "ON_TRACK", sortOrder: 1 })
   state().keyResults.push({ id: "kr-a2", objectiveId: "obj-a2", title: "A key result 2", target: 1, current: 0, sortOrder: 0 })
 })
@@ -50,8 +54,8 @@ describe("linkOpportunityToObjectiveAction", () => {
     expect(links()).toHaveLength(1)
     expect(links()[0]).toMatchObject({
       workspaceId: WS_A.id,
-      opportunityId: "opp-a",
-      objectiveId: "obj-a",
+      fromId: "opp-a",
+      toId: "obj-a",
       origin: "DIRECT",
       source: "UI",
       createdById: USERS.alice,
@@ -154,28 +158,28 @@ describe("infrastructure failures are not reported as not-found", () => {
 
   it("a failure inside the write transaction is also generic, and the authorization message stays for real denials", async () => {
     const logged = vi.spyOn(console, "error").mockImplementation(() => {})
-    const original = fake.current!.client.opportunityObjectiveLink.findFirst
-    fake.current!.client.opportunityObjectiveLink.findFirst = (async () => {
+    const original = fake.current!.client.entityLink.findFirst
+    fake.current!.client.entityLink.findFirst = (async () => {
       throw Object.assign(new Error("connection terminated"), { name: "Error", code: "ECONNRESET" })
     }) as never
     expect(await linkOpportunityToObjectiveAction("opp-a", "obj-a")).toEqual({ ok: false, error: "Something went wrong. Please try again." })
-    fake.current!.client.opportunityObjectiveLink.findFirst = original
+    fake.current!.client.entityLink.findFirst = original
     expect(await linkOpportunityToObjectiveAction("opp-a", "obj-b")).toEqual(DENIED)
     expect(JSON.stringify(logged.mock.calls)).toContain("ECONNRESET")
     logged.mockRestore()
   })
 })
 
-describe("a missing link table (migration 071 not applied) fails the write with the generic message", () => {
+describe("a missing link table (entity_links not created) fails the write with the generic message", () => {
   it("link and unlink both answer generically and log only the name and code", async () => {
     const logged = vi.spyOn(console, "error").mockImplementation(() => {})
-    const original = fake.current!.client.opportunityObjectiveLink.findFirst
-    fake.current!.client.opportunityObjectiveLink.findFirst = (async () => {
-      throw Object.assign(new Error("relation \"opportunity_objective_links\" does not exist ROW-DATA"), { name: "PrismaClientKnownRequestError", code: "P2021" })
+    const original = fake.current!.client.entityLink.findFirst
+    fake.current!.client.entityLink.findFirst = (async () => {
+      throw Object.assign(new Error("relation \"entity_links\" does not exist ROW-DATA"), { name: "PrismaClientKnownRequestError", code: "P2021" })
     }) as never
     expect(await linkOpportunityToObjectiveAction("opp-a", "obj-a")).toEqual({ ok: false, error: "Something went wrong. Please try again." })
     expect(await unlinkOpportunityFromObjectiveAction("opp-a", "obj-a")).toEqual({ ok: false, error: "Something went wrong. Please try again." })
-    fake.current!.client.opportunityObjectiveLink.findFirst = original
+    fake.current!.client.entityLink.findFirst = original
     const text = JSON.stringify(logged.mock.calls)
     expect(text).toContain("P2021")
     expect(text).not.toContain("ROW-DATA")
@@ -186,7 +190,7 @@ describe("a missing link table (migration 071 not applied) fails the write with 
 
 describe("unlinkOpportunityFromObjectiveAction", () => {
   const seedLink = (row: Record<string, unknown> = {}) =>
-    links().push({ id: "l-1", workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a", origin: "DIRECT", source: "UI", createdById: null, createdAt: new Date(10), ...row })
+    state().entityLinks.push(linkRow({ id: "l-1", workspaceId: WS_A.id, fromId: "opp-a", toId: "obj-a", origin: "DIRECT", source: "UI", createdById: null, createdAt: new Date(10), ...row }))
 
   it("removes a DIRECT link", async () => {
     seedLink()
@@ -199,8 +203,11 @@ describe("unlinkOpportunityFromObjectiveAction", () => {
     expect(await unlinkOpportunityFromObjectiveAction("opp-a", "obj-a")).toEqual({ ok: true, changed: false })
   })
 
-  it("keeps the link and says so while the legacy key result pointer still leads to the objective", async () => {
-    state().opportunities[0].linkedKeyResultId = "kr-a"
+  it("keeps the link and says so while the key result pointer still leads to the objective", async () => {
+    state().entityLinks.push({
+      id: "p-1", workspaceId: WS_A.id, linkType: "OPPORTUNITY_TARGETS_KEY_RESULT", fromType: "OPPORTUNITY", fromId: "opp-a", toType: "KEY_RESULT", toId: "kr-a",
+      origin: null, source: "UI", createdById: null, attrs: null, createdAt: new Date(9), updatedAt: new Date(9),
+    })
     seedLink({ origin: "LEGACY" })
     expect(await unlinkOpportunityFromObjectiveAction("opp-a", "obj-a")).toEqual({ ok: true, changed: false, stillLinkedViaKeyResult: true })
     expect(links()).toHaveLength(1)
@@ -212,7 +219,7 @@ describe("unlinkOpportunityFromObjectiveAction", () => {
     ["an objective with a NULL workspaceId", "opp-a", "obj-null"],
   ])("denies %s and leaves every link untouched", async (_label, opportunityId, objectiveId) => {
     seedLink()
-    links().push({ id: "l-b", workspaceId: WS_B.id, opportunityId: "opp-b", objectiveId: "obj-b", origin: "DIRECT", source: "UI", createdById: null, createdAt: new Date(11) })
+    seedLink({ id: "l-b", workspaceId: WS_B.id, fromId: "opp-b", toId: "obj-b", createdAt: new Date(11) })
     expect(await unlinkOpportunityFromObjectiveAction(opportunityId, objectiveId)).toEqual(DENIED)
     expect(links()).toHaveLength(2)
     expect(linkWrites()).toEqual([])

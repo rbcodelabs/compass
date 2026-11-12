@@ -9,8 +9,9 @@ import { deleteWorkspaceNotifications } from "@/lib/follow-cleanup";
 import { deleteWorkspaceResearchData } from "@/lib/research-workspace-cleanup";
 import { assertDocumentPilotCleanupReviewed } from "@/lib/document-cleanup";
 import { deleteWorkspaceAnalytics } from "@/lib/analytics/service";
-import { drainLinksFor, deleteWorkspaceLinks } from "@/lib/typed-links";
-import { deleteLinksForEntity, deleteWorkspaceLinks as deleteWorkspaceEntityLinks } from "@/lib/links/service";
+import { drainLinksFor } from "@/lib/typed-links";
+import { deleteLinksForEntity, deleteWorkspaceLinks } from "@/lib/links/service";
+import { deleteLinksOfTasks } from "@/lib/task-link-writes";
 import { updateInBatches } from "@/lib/batched-delete";
 import { sweepWorkspaceOwnedRows } from "@/lib/workspace-export/sweep";
 
@@ -42,14 +43,12 @@ export function chunked<T>(list: readonly T[], size: number = CASCADE_CHUNK_SIZE
 export async function deleteWorkspaceCascade(prisma: AppPrismaClient, workspaceId: string, options: { skipBlobCleanup?: boolean } = {}) {
   await assertDocumentPilotCleanupReviewed(prisma, workspaceId);
 
-  // 0. Typed links (opportunity-to-objective, solution-to-key-result), FIRST. No foreign key or emulated relation reaches these tables, so
-  //    they are deleted explicitly: by the workspaceId stamped on the row (indexed, in passes of at most 500 links because each link is 4
-  //    DSQL-modified rows), then by endpoint id in steps 9 and 11 for rows whose workspaceId drifted. It is first on purpose: this is the
-  //    one step that fails when the link tables do not exist yet (code deployed before migration 071), and failing here mutates nothing,
-  //    where failing later would leave the objective parentKeyResultId pointers already nulled.
+  // 0. entity_links, FIRST: the only store of every link family (opportunity-to-objective, solution-to-key-result, task references, artifact and
+  //    generic links). No foreign key or emulated relation reaches the table, so rows are deleted explicitly: by the workspaceId stamped on the
+  //    row (indexed, in committed passes because each link is several DSQL-modified rows), then by endpoint id in the steps below for rows whose
+  //    workspaceId drifted. It is first on purpose: failing here mutates nothing, where failing later would leave the objective
+  //    parentKeyResultId pointers already nulled.
   await deleteWorkspaceLinks(prisma, workspaceId);
-  // Generic entity_links (ADR phase 2), same reasoning: stamped rows now, endpoint-keyed sweeps for experiments and studies below.
-  await deleteWorkspaceEntityLinks(prisma, workspaceId);
   const ids = async (
     rows: Promise<{ id: string }[]>
   ): Promise<string[]> => (await rows).map((r) => r.id);
@@ -108,9 +107,9 @@ export async function deleteWorkspaceCascade(prisma: AppPrismaClient, workspaceI
     prisma.task.findMany({ where: { workspaceId }, select: { id: true } })
   );
   if (taskIds.length > 0) {
-    // The entity_links mirror of task links (ADR phase 7) goes first, by endpoint, whatever the flag says.
-    await deleteLinksForEntity(prisma, "TASK", taskIds);
-    await prisma.taskLink.deleteMany({ where: { taskId: { in: taskIds } } });
+    // Task references (associations) live in entity_links and go first, by endpoint. task_links keeps only the residual kinds
+    // (COMMENT, AGENT_CONVERSATION) and TaskLink.task is Restrict, so those rows are deleted before the tasks.
+    await deleteLinksOfTasks(prisma, taskIds);
   }
   await updateInBatches(prisma.task, { workspaceId, parentTaskId: { not: null } }, { parentTaskId: null });
   await prisma.task.deleteMany({ where: { workspaceId } });
@@ -284,7 +283,7 @@ export async function deleteWorkspaceCascade(prisma: AppPrismaClient, workspaceI
   await prisma.feedbackSource.deleteMany({ where: { workspaceId } });
 
   // 12. Artifacts: links → current pointer → revisions → stable identity,
-  // followed by best-effort private Blob cleanup. The entity_links mirror of artifact_links (ADR phase 6) is swept by endpoint first, so
+  // followed by best-effort private Blob cleanup. Artifact links (entity_links) are swept by endpoint first, so
   // rows whose workspaceId drifted go too; the stamped ones are already gone with step 0.
   await deleteLinksForEntity(prisma, "ARTIFACT", await ids(prisma.artifact.findMany({ where: { workspaceId }, select: { id: true } })));
   await deleteWorkspaceArtifacts(prisma, workspaceId, getArtifactStorage(), !options.skipBlobCleanup);

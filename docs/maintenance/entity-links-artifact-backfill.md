@@ -1,5 +1,10 @@
 # entity_links phase 6: ArtifactLink (Artifact -> Solution, Artifact -> Decision)
 
+> **Status: historical (entity_links cleanup, runbook step 7).** entity_links is now the only store for Artifact -> Solution and Artifact -> Decision links. The dual-write mirror, the
+> `COMPASS_ENTITY_LINKS_*_MIRROR` / `*_READ` flags and the shadow-compare code are gone; this runbook describes how the one-time backfill
+> moved the old rows and is kept for deployments that have not run it yet. The legacy table is frozen (nothing reads or writes it) until a
+> later change drops it. `GET /api/admin/migrate` still reports `entityLinksReadParity`, now a historical check (see the runbook).
+
 Runbook for migration `096_entity_links_backfill_artifact` (ADR "One generic entity_links table", phase 6). Nothing here applies
 anything by itself.
 
@@ -55,20 +60,9 @@ here because nothing yet calls for it.
 - A live writer inserting a pair between 096's select and insert makes the unique index refuse that batch; the hook re-selects (bounded), and a
   re-POST resumes anyway.
 
-## Read flag and read parity (entity_links read flip)
+## Read flag and read parity (retired)
 
-`COMPASS_ENTITY_LINKS_ARTIFACT_READ` = `off | shadow | on` decides how readers treat `ARTIFACT_ATTACHED_TO_SOLUTION` and `ARTIFACT_SUPPORTS_DECISION` (a decision link counts only while the review request is a TRACKED_DECISION). Fail-closed: only the exact strings `shadow` and `on` count (in production
-exactly; elsewhere trimmed and case-insensitive), anything else, including unset, is `off`, and unlike the `*_MIRROR` flag there is no
-default-on outside production. Semantics: `off` reads the legacy table only; `shadow` serves the legacy result and compares it with
-`entity_links` (counts and ids only, never content), `on` serves `entity_links`. Rollback is always the flag set to `off`. The flag moves
-`LegacyAdapter.mode` from `mirror` to `shadow` / `read` (`effectiveLegacyMode` in `lib/links/registry.ts`).
-
-This change ships the flag, the comparator (`lib/links/read-compare.ts`) and the status below, and routes NO reader through them yet, so setting
-the flag changes nothing until the reader PR for this family lands.
-
-`GET /api/admin/migrate` reports `entityLinksReadParity` (read-only, counts and ids capped at 20): the read modes, `totalMismatches`, and per
-type `legacyLive`, `mirrorLive`, `onlyLegacy` (a flipped reader would hide the link), `onlyEntityLinks` (it would show an extra link) and
-`originDrift`. "Live" means both endpoints exist in the link's workspace, i.e. what the workspace-filtered readers show, so quarantined
-rows (dangling, cross-workspace) are absent on both sides. Cost: one scan of the legacy table plus the mirror rows of the family's types
-(`entity_links` has no index that leads with `link_type`); poll sparingly. Require zero mismatches (or an explained, repaired cause) before
-setting the flag to `on`. Types in this family: `artifactSolution`, `artifactDecision`.
+The per-family read flag and the shadow comparator were removed with the cleanup: readers always serve entity_links. `GET /api/admin/migrate`
+still reports `entityLinksReadParity` (read-only, counts and ids capped at 20) as a historical check: per link type `legacyLive`,
+`mirrorLive`, `onlyLegacy`, `onlyEntityLinks` and `originDrift`, where "live" means both endpoints exist in the link's workspace. Links
+created after the cleanup exist only in entity_links, so `onlyEntityLinks` grows by design.

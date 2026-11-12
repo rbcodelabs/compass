@@ -180,8 +180,8 @@ test.describe("Re-QA 1a240774", () => {
   const taskRows = async (docId: string) =>
     (await pool.query(
       `SELECT t.id, t.title, t.status, t.assignee_user_id, t.assignee_agent_id
-         FROM "${S}".tasks t JOIN "${S}".task_links l ON l.task_id = t.id
-        WHERE l.linked_type = 'DOC' AND l.linked_id = $1 ORDER BY t.created_at`,
+         FROM "${S}".tasks t JOIN "${S}".entity_links l ON l.from_id = t.id AND l.link_type = 'TASK_REFERENCES'
+        WHERE l.to_type = 'DOC' AND l.to_id = $1 ORDER BY t.created_at`,
       [docId],
     )).rows as Array<{ id: string; title: string; status: string; assignee_user_id: string | null; assignee_agent_id: string | null }>;
 
@@ -270,8 +270,8 @@ test.describe("Re-QA 1a240774", () => {
   test.afterAll(async () => {
     if (pool) {
       for (const docId of seededDocIds) {
-        await pool.query(`DELETE FROM "${S}".tasks WHERE id IN (SELECT task_id FROM "${S}".task_links WHERE linked_type = 'DOC' AND linked_id = $1)`, [docId]).catch(() => undefined);
-        await pool.query(`DELETE FROM "${S}".task_links WHERE linked_type = 'DOC' AND linked_id = $1`, [docId]).catch(() => undefined);
+        await pool.query(`DELETE FROM "${S}".tasks WHERE id IN (SELECT from_id FROM "${S}".entity_links WHERE link_type = 'TASK_REFERENCES' AND to_type = 'DOC' AND to_id = $1)`, [docId]).catch(() => undefined);
+        await pool.query(`DELETE FROM "${S}".entity_links WHERE link_type = 'TASK_REFERENCES' AND to_type = 'DOC' AND to_id = $1`, [docId]).catch(() => undefined);
       }
       for (const id of [agentId, readAgentId, revokedAgentId, ghostAgentId]) {
         await pool.query(`DELETE FROM "${S}".agent_workspace_grants WHERE agent_id = $1`, [id]).catch(() => undefined);

@@ -219,7 +219,7 @@ export async function getCanvasOverview(
     getLinkedKeyResultsBySolution(prisma, workspaceId, solutionIds, { preverified: true }),
     // Link rows for the edge layer (ids only; endpoints are filtered against the workspace-scoped nodes above when edges are built).
     getCanvasLinkRows(prisma, workspaceId, { opportunityIds, solutionIds, origins: options.linkOrigins ?? "ALL" }),
-    // The Opportunity -> Key Result pointer (the legacy column unless the OPPORTUNITY read flag moves it to entity_links).
+    // The Opportunity -> Key Result pointer, read from entity_links.
     getOpportunityKeyResultPointers(prisma, workspaceId, opportunitiesRaw),
   ]);
 

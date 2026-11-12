@@ -51,7 +51,7 @@ export async function loadOutcomeTreeInput(
     // ARCHIVED never shows in the tree, so it is not even read.
     prisma.opportunity.findMany({
       where: { workspaceId, status: { not: "ARCHIVED" } },
-      select: { id: true, title: true, status: true, sortOrder: true, createdAt: true, linkedKeyResultId: true },
+      select: { id: true, title: true, status: true, sortOrder: true, createdAt: true },
     }),
     prisma.solution.findMany({
       where: { workspaceId },
@@ -154,7 +154,7 @@ export async function loadOutcomesIndex(prisma: AppPrismaClient, workspaceId: st
     prisma.keyResult.findMany({ where: { objective: { workspaceId } }, select: { id: true, objectiveId: true } }),
     prisma.opportunity.findMany({
       where: { workspaceId, status: { not: "ARCHIVED" } },
-      select: { id: true, title: true, status: true, sortOrder: true, createdAt: true, linkedKeyResultId: true },
+      select: { id: true, title: true, status: true, sortOrder: true, createdAt: true },
     }),
   ])
   const opportunityIds = opportunityRows.map((o) => o.id)

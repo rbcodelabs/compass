@@ -285,7 +285,7 @@ export const TOOL_GATES: Record<string, Gate> = {
   get_opportunity: async (a, x) => void (await assertEntityAccess(a, "opportunity", x.opportunityId)),
   create_opportunity: async (a, x) => {
     await assertWorkspaceMember(a, x.workspaceId)
-    // The key result becomes this opportunity's legacy pointer AND a typed link, so it must be in this workspace.
+    // The key result becomes this opportunity's Key Result pointer (and the objective link derived from it), so it must be in this workspace.
     if (x.keyResultId) await assertChildInDeclaredWorkspace(a, "keyResult", x.keyResultId, x.workspaceId)
   },
   // Members only; each item's parent is re-verified against workspaceId inside its own transaction (lib/opportunity-batch-create.ts).

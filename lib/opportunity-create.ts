@@ -18,7 +18,7 @@ import {
   isNewOpportunityStatus,
   type NewOpportunityStatus,
 } from "@/lib/opportunity-draft"
-import { TypedLinkError, linkOpportunityToObjective, syncLegacyLink } from "@/lib/typed-links"
+import { TypedLinkError, linkOpportunityToObjective, setKeyResultPointer } from "@/lib/typed-links"
 import { captureWorkspaceMutation } from "@/lib/workspace-update-mutations"
 import { allocateOneSeq } from "@/lib/work-item-sequence"
 
@@ -30,7 +30,7 @@ export type NewOpportunityInput = {
   squadId?: string | null
   linkedKeyResultId?: string | null
   feedbackIds?: string[]
-  /** Objectives to link (DIRECT) in the same transaction (Phase 4B). The legacy `linkedKeyResultId` behavior is unchanged. */
+  /** Objectives to link (DIRECT) in the same transaction. */
   objectiveIds?: string[]
 }
 
@@ -122,7 +122,7 @@ export async function createOpportunityWithLinks(
 ) {
   const normalized = normalizeNewOpportunityInput(input)
   if (!normalized.ok) throw new OpportunityCreateError(normalized.error)
-  const { feedbackIds, objectiveIds, ...fields } = normalized.data
+  const { feedbackIds, objectiveIds, linkedKeyResultId, ...fields } = normalized.data
 
   return captureWorkspaceMutation(
     prisma,
@@ -137,9 +137,9 @@ export async function createOpportunityWithLinks(
         throw new OpportunityCreateError("That squad is not in this workspace.")
       }
       if (
-        fields.linkedKeyResultId &&
+        linkedKeyResultId &&
         !(await tx.keyResult.findFirst({
-          where: { id: fields.linkedKeyResultId, objective: { workspaceId } },
+          where: { id: linkedKeyResultId, objective: { workspaceId } },
           select: { id: true },
         }))
       ) {
@@ -160,19 +160,19 @@ export async function createOpportunityWithLinks(
 
       const opportunity = await tx.opportunity.create({ data: { workspaceId, ...(await allocateOneSeq(tx, workspaceId, "opportunity")), ...fields } })
 
-      // Dual-write: the legacy pointer's LEGACY Opportunity<->Objective link, in this same transaction.
-      if (fields.linkedKeyResultId) {
-        await syncLegacyLink(tx, {
+      // The Key Result pointer and the LEGACY Opportunity<->Objective link derived from it, in this same transaction.
+      if (linkedKeyResultId) {
+        await setKeyResultPointer(tx, {
           opportunityId: opportunity.id,
           workspaceId,
-          keyResultId: fields.linkedKeyResultId,
+          keyResultId: linkedKeyResultId,
           // Derived from the pointer, so unattributed: it is not a link anyone chose to make.
           ctx: { source: "UI", createdById: null },
         })
       }
 
       // Typed Opportunity<->Objective links the author chose: DIRECT, in this same transaction, through the typed-link module.
-      // Run after the legacy sync, so an Objective that is also the pointer's own flips its LEGACY link to DIRECT (a deliberate choice).
+      // Run after the pointer is set, so an Objective that is also the pointer's own flips its LEGACY link to DIRECT (a deliberate choice).
       for (const objectiveId of objectiveIds) {
         try {
           await linkOpportunityToObjective(tx, {
@@ -196,7 +196,7 @@ export async function createOpportunityWithLinks(
           throw new OpportunityCreateError("One or more feedback items could not be linked. Nothing was created.")
         }
       }
-      return opportunity
+      return { ...opportunity, linkedKeyResultId }
     },
     { atomic: true },
   )

@@ -6,7 +6,10 @@ import { DEFAULT_ROADMAP_DISPLAY } from "@/lib/roadmap-views/schema"
 import { resolveWorkspaceRoadmapState, workspacePageParams, workspaceStateToParams } from "@/lib/roadmap-views/workspace"
 import type { RoadmapCardData } from "@/components/roadmap/roadmap-card"
 
-vi.mock("@/lib/links/read-mode", () => ({ getLinkReadMode: () => "off" }))
+// The Solution -> Artifact link read goes through the entity_links readers; stub it at that seam.
+const links = vi.hoisted(() => ({ readEntityLinksArtifact: vi.fn() }))
+vi.mock("@/lib/links/readers", () => ({ readEntityLinksArtifact: links.readEntityLinksArtifact }))
+const artifactLink = (artifactId: string, solutionId: string) => ({ linkType: "ARTIFACT_ATTACHED_TO_SOLUTION", fromType: "ARTIFACT", fromId: artifactId, toType: "SOLUTION", toId: solutionId })
 
 const card = (id: string, over: Partial<RoadmapCardData> = {}): RoadmapCardData => ({
   id, title: id, description: null, horizon: "NOW", sortOrder: 0, isPrivate: false, solutionId: null, keyResultId: null, opportunityId: null,
@@ -48,11 +51,10 @@ describe("loadRoadmapGalleryExtras", () => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let db: any
   beforeEach(() => {
+    links.readEntityLinksArtifact.mockReset()
+    links.readEntityLinksArtifact.mockResolvedValue([artifactLink("a1", "sol1"), artifactLink("a2", "sol1"), artifactLink("a1", "sol1"), artifactLink("a3", "sol2")])
     db = {
       solution: { findMany: vi.fn(async () => [{ id: "sol1", status: "IN_DELIVERY" }, { id: "sol2", status: "IDEA" }]) },
-      artifactLink: { findMany: vi.fn(async () => [
-        { artifactId: "a1", linkedId: "sol1" }, { artifactId: "a2", linkedId: "sol1" }, { artifactId: "a1", linkedId: "sol1" }, { artifactId: "a3", linkedId: "sol2" },
-      ]) },
       artifact: { findMany: vi.fn(async () => [
         { id: "a2", title: "Newer", sourceType: "EXTERNAL_LINK", kind: null, currentRevision: rev("r2", false) },
         { id: "a1", title: "Older", sourceType: "HTML_UPLOAD", kind: "SLIDE_DECK", currentRevision: rev("r1", true) },
@@ -64,7 +66,8 @@ describe("loadRoadmapGalleryExtras", () => {
   it("batches: one solution, one link and one artifact query regardless of item count", async () => {
     await loadRoadmapGalleryExtras(db, WS, [{ id: "i1", solutionId: "sol1" }, { id: "i2", solutionId: "sol2" }, { id: "i3", solutionId: "sol1" }])
     expect(db.solution.findMany).toHaveBeenCalledTimes(1)
-    expect(db.artifactLink.findMany).toHaveBeenCalledTimes(1)
+    expect(links.readEntityLinksArtifact).toHaveBeenCalledTimes(1)
+    expect(links.readEntityLinksArtifact).toHaveBeenCalledWith(db, WS, { solutionIds: ["sol1", "sol2"] })
     expect(db.artifact.findMany).toHaveBeenCalledTimes(1)
     expect(db.artifact.findMany.mock.calls[0][0].where).toMatchObject({ workspaceId: WS, status: "ACTIVE" })
   })
@@ -86,7 +89,7 @@ describe("loadRoadmapGalleryExtras", () => {
   })
   it("caps artifacts per item and reports the remainder", async () => {
     const many = Array.from({ length: MAX_GALLERY_ARTIFACTS_PER_ITEM + 2 }, (_, i) => `x${i}`)
-    db.artifactLink.findMany = vi.fn(async () => many.map((id) => ({ artifactId: id, linkedId: "sol1" })))
+    links.readEntityLinksArtifact.mockResolvedValue(many.map((id) => artifactLink(id, "sol1")))
     db.artifact.findMany = vi.fn(async () => many.map((id) => ({ id, title: id, sourceType: "HTML_UPLOAD", kind: null, currentRevision: null })))
     const out = await loadRoadmapGalleryExtras(db, WS, [{ id: "i1", solutionId: "sol1" }])
     expect(out.i1.artifacts).toHaveLength(MAX_GALLERY_ARTIFACTS_PER_ITEM)

@@ -22,6 +22,7 @@
  */
 import getPrisma from "../lib/db"
 import { allocateOneSeq, allocateSeq, withSeq } from "../lib/work-item-sequence"
+import { deleteWorkspaceLinks, runTypedLinkTransaction, setKeyResultPointer } from "../lib/typed-links"
 
 if (!process.env.DATABASE_URL) {
   console.error("refusing to run without DATABASE_URL (local dev only; never Aurora DSQL)")
@@ -151,10 +152,13 @@ async function main() {
       title: "Admins struggle to bring teammates on board",
       description: "Team admins say inviting colleagues takes too many steps.",
       status: "EXPLORING",
-      linkedKeyResultId: upgrades.id,
       sortOrder: 1,
     },
   })
+  // The Key Result pointer lives in entity_links; set it through the app's own writer.
+  await runTypedLinkTransaction(prisma, (tx) =>
+    setKeyResultPointer(tx, { opportunityId: invite.id, workspaceId, keyResultId: upgrades.id, ctx: { source: "UI", createdById: null } }),
+  )
   const sharing = await prisma.opportunity.create({
     data: {
       ...(await allocateOneSeq(prisma, workspaceId, "opportunity")),
@@ -243,6 +247,8 @@ async function wipeWorkspace(prisma: Prisma, workspaceId: string) {
   await prisma.assumption.deleteMany({ where: { id: { in: assumptions.map((a) => a.id) } } })
   await prisma.solutionComment.deleteMany({ where: { solutionId: { in: solutionIds } } })
   await prisma.feedbackItem.deleteMany(byWorkspace)
+  // Links (the Key Result pointer and the objective link derived from it) have no foreign keys; remove them before their endpoints.
+  await deleteWorkspaceLinks(prisma, workspaceId)
   await prisma.solution.deleteMany(byWorkspace)
   await prisma.opportunity.deleteMany(byWorkspace)
   await prisma.checkIn.deleteMany({ where: { keyResultId: { in: keyResults.map((k) => k.id) } } })

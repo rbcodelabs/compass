@@ -10,6 +10,7 @@ import { getWorkspace } from "@/lib/workspace";
 import { assertWorkspaceWritable } from "@/lib/workspace-context";
 import { getKeyResultMoveTargets, moveKeyResultToObjective, OKRHierarchyError, setObjectiveParentKeyResult } from "@/lib/okr-hierarchy";
 import { drainAfterParentDelete, drainLegacyLinksForOpportunities, drainLinksFor } from "@/lib/typed-links";
+import { readEntityLinksOpportunityKeyResultPointer } from "@/lib/links/readers";
 import { requireProductEntity, requireProductWorkspace, requireProductWorkspaceBySlug } from "@/lib/product-action-auth";
 import { allocateOneSeq, withSequenceTransaction } from "@/lib/work-item-sequence"
 
@@ -323,9 +324,11 @@ export async function deleteKeyResult(
 ) {
   await requireProductEntity("keyResult", keyResultId);
   const prisma = getPrisma();
-  // Read BEFORE the delete: the relation's SetNull clears these pointers, and the LEGACY links they implied are what goes afterwards.
-  const keyResult = await prisma.keyResult.findUnique({ where: { id: keyResultId }, select: { objectiveId: true } });
-  const pointing = await prisma.opportunity.findMany({ where: { linkedKeyResultId: keyResultId }, select: { id: true } });
+  // Read BEFORE the delete: the pointer links are removed with the key result, and the LEGACY objective links they implied go with them afterwards.
+  const keyResult = await prisma.keyResult.findUnique({ where: { id: keyResultId }, select: { objectiveId: true, objective: { select: { workspaceId: true } } } });
+  const pointing = keyResult?.objective.workspaceId
+    ? (await readEntityLinksOpportunityKeyResultPointer(prisma, keyResult.objective.workspaceId, { keyResultIds: [keyResultId] })).map((link) => ({ id: link.fromId }))
+    : [];
   // Delete the key result FIRST. It can be refused under relationMode="prisma" (Restrict: supporting objectives, check-ins); a refusal
   // throws here and no link has been touched. Links are drained AFTER (see deleteObjective): the LEGACY links implied by the pointers
   // (DIRECT links are the user's own and stay) and every solution link to this key result. A failed drain is logged and swallowed.

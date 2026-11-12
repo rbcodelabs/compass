@@ -226,30 +226,13 @@ export async function reviseTrackedDecisionRequest(input: { workspaceId: string;
 export type TrackedDecisionListInput = { workspaceId: string; tab?: "PENDING" | "DECIDED" | "AWAITING_FOLLOW_THROUGH"; subjectType?: TrackedSubjectType; outcome?: "APPROVE" | "REQUEST_CHANGES" | "REJECT"; reviewerId?: string; query?: string; from?: Date; to?: Date; page?: number; pageSize?: number; includeLegacy?: boolean }
 
 /**
- * True when a DECIDED decision already has follow-up work linked to it
- * (a TaskLink with linkedType "DECISION" pointing at this request), or has
- * been explicitly closed with "no action needed". Either one means the
- * decision is no longer "awaiting follow-through" -- see
- * `listAwaitingFollowThrough` and `recordDecisionNoAction` below.
- *
- * TaskLink has no Prisma relation back to ReviewRequest (bare linkedId, same
- * reasoning as every other TaskLink target -- see lib/task-tool-handlers.ts),
- * so this can't be expressed as a nested Prisma filter and is checked with a
- * direct batch query instead.
+ * The ids, among `requestIds`, of DECIDED decisions that already have follow-up work linked to them (a task link of kind
+ * "DECISION", stored in entity_links as TASK_REFERENCES -> REVIEW_REQUEST). Either that or an explicit "no action needed" close-out
+ * means the decision is no longer "awaiting follow-through" -- see `listAwaitingFollowThrough` and `recordDecisionNoAction` below.
  */
-async function linkedRequestIds(prisma: ReturnType<typeof getPrisma>, requestIds: string[]): Promise<Set<string>> {
+async function linkedRequestIds(prisma: ReturnType<typeof getPrisma>, workspaceId: string, requestIds: string[]): Promise<Set<string>> {
   if (!requestIds.length) return new Set()
-  const links = await prisma.taskLink.findMany({ where: { linkedType: "DECISION", linkedId: { in: requestIds } }, select: { linkedId: true } })
-  return new Set(links.map((link) => link.linkedId))
-}
-
-/**
- * The display-listing form of linkedRequestIds (the "awaiting follow-through" lens): follows the TASK read-mode flag. The
- * recordDecisionNoAction guard keeps the legacy linkedRequestIds above on purpose: it decides a write, so it reads the source of truth.
- */
-async function linkedRequestIdsForListing(prisma: ReturnType<typeof getPrisma>, workspaceId: string, requestIds: string[]): Promise<Set<string>> {
-  if (!requestIds.length) return new Set()
-  return getLinkedTargetIds(prisma, { workspaceIds: [workspaceId], linkedType: "DECISION", linkedIds: requestIds }, () => prisma.taskLink.findMany({ where: { linkedType: "DECISION", linkedId: { in: requestIds } }, select: { linkedId: true } }))
+  return getLinkedTargetIds(prisma, { workspaceIds: [workspaceId], linkedType: "DECISION", linkedIds: requestIds })
 }
 
 /**
@@ -269,7 +252,7 @@ async function listAwaitingFollowThrough(prisma: ReturnType<typeof getPrisma>, w
     orderBy: { updatedAt: "desc" },
     take: MAX_CANDIDATES,
   })
-  const linked = await linkedRequestIdsForListing(prisma, workspaceId, candidates.map((request) => request.id))
+  const linked = await linkedRequestIds(prisma, workspaceId, candidates.map((request) => request.id))
   const requests = candidates.filter((request) => !linked.has(request.id))
   const total = requests.length
   return { requests: requests.slice((page - 1) * pageSize, page * pageSize), total, page, pageSize, pageCount: Math.max(1, Math.ceil(total / pageSize)) }
@@ -290,8 +273,7 @@ export async function recordDecisionNoAction(input: { workspaceId: string; reque
   if (!request) throw new TrackedDecisionError("REQUEST_NOT_FOUND", "The decision was not found.")
   if (request.state !== "DECIDED") throw new TrackedDecisionError("NOT_DECIDED", "Only a decided decision can be closed as no action needed.")
   if (request.noActionAt) throw new TrackedDecisionError("ALREADY_CLOSED", "This decision was already closed as no action needed.")
-  // Stays on task_links (not the TASK read flip): this guard decides a write, so it reads the source of truth.
-  const linked = await linkedRequestIds(prisma, [request.id])
+  const linked = await linkedRequestIds(prisma, input.workspaceId, [request.id])
   if (linked.has(request.id)) throw new TrackedDecisionError("HAS_LINKED_WORK", "This decision already has follow-up work linked to it. Unlink it first if it truly needs no action.")
   return prisma.reviewRequest.update({
     where: { id: request.id },

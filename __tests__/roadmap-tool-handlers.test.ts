@@ -65,6 +65,9 @@ vi.mock("@/lib/db", () => ({
   default: () => mockPrisma,
 }))
 
+// The Opportunity -> Key Result pointer is an entity_links read (its own tests cover it); here it is fed from the fixture rows.
+vi.mock("@/lib/typed-links", async (importOriginal) => (await import("./lib/roadmap-fake-prisma")).typedLinksWithPointerFixtures(await importOriginal<object>()))
+
 // Import handlers AFTER the mock is in place
 import {
   createChecklistTemplate,
@@ -208,7 +211,7 @@ describe("promoteSolutionToRoadmap", () => {
 
   beforeEach(() => {
     mockSolution.findFirst.mockResolvedValue(solutionRow)
-    mockSolution.findMany.mockResolvedValue([{ id: "solution-1", title: "Ship", opportunityId: "opportunity-1", opportunity: { id: "opportunity-1", squadId: "squad-1", linkedKeyResultId: "kr-1" } }])
+    mockSolution.findMany.mockResolvedValue([{ id: "solution-1", title: "Ship", opportunityId: "opportunity-1", opportunity: { id: "opportunity-1", squadId: "squad-1", keyResultPointer: "kr-1" } }])
     mockSquad.findMany.mockResolvedValue([{ id: "squad-1" }])
     mockRoadmapItem.findMany.mockResolvedValue([])
     mockRoadmapItem.findFirst.mockResolvedValue(null)
@@ -247,7 +250,7 @@ describe("promoteSolutionToRoadmap", () => {
 describe("createRoadmapItem (add_to_roadmap) with a solutionId", () => {
   const asActor = <T,>(run: () => Promise<T>) => runWithMcpActor({ userId: "user-1", purpose: "USER" }, run)
   const workspaceRow = { name: "Compass", slug: "compass", organization: { slug: "acme" } }
-  const solutionForBatch = { id: "solution-1", title: "Ship", opportunityId: "opportunity-1", opportunity: { id: "opportunity-1", squadId: "squad-1", linkedKeyResultId: "kr-1" } }
+  const solutionForBatch = { id: "solution-1", title: "Ship", opportunityId: "opportunity-1", opportunity: { id: "opportunity-1", squadId: "squad-1", keyResultPointer: "kr-1" } }
 
   beforeEach(() => {
     mockWorkspace.findUnique.mockResolvedValue(workspaceRow)
