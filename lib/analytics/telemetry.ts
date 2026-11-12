@@ -1,3 +1,4 @@
+import { compassEnv } from "@/lib/runtime-env"
 import { createHmac, timingSafeEqual } from "node:crypto"
 import { z } from "zod"
 import { ACTIVITY_ACTIONS } from "./activity-policy"
@@ -16,7 +17,7 @@ export function telemetrySignature(body: string, timestamp: string): string | nu
   return key ? createHmac("sha256", key).update("compass-activity-relay-v1\n" + timestamp + "\n" + body).digest("hex") : null
 }
 export function verifyTelemetry(body: string, timestamp: string | null, signature: string | null, now = Date.now()) {
-  if (process.env.VERCEL_ENV !== "production" || process.env.PREVIEW_AUTOMATION_ENABLED === "1") return false
+  if (compassEnv() !== "production" || process.env.PREVIEW_AUTOMATION_ENABLED === "1") return false
   if (!timestamp || !/^\d{13}$/.test(timestamp) || Math.abs(now - Number(timestamp)) > 60_000 || !signature || !/^[a-f0-9]{64}$/.test(signature)) return false
   const expected = telemetrySignature(body, timestamp)
   return expected !== null && timingSafeEqual(Buffer.from(expected, "hex"), Buffer.from(signature, "hex"))
@@ -27,7 +28,7 @@ export function telemetryOrigin() {
   return `https://${host}`
 }
 export async function sendActivityEvent(event: ActivityEvent) {
-  if (process.env.VERCEL_ENV !== "production" || process.env.PREVIEW_AUTOMATION_ENABLED === "1") return
+  if (compassEnv() !== "production" || process.env.PREVIEW_AUTOMATION_ENABLED === "1") return
   const origin = telemetryOrigin()
   const body = JSON.stringify(activityEventSchema.parse(event))
   const timestamp = String(Date.now())

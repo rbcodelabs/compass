@@ -24,7 +24,9 @@ pnpm install
 Compass isolates environments by **PostgreSQL schema inside one database**, not
 by separate databases. `lib/schema.ts` resolves the active schema from the
 environment: `NODE_ENV=development` → `compass_dev`, preview → `compass_preview`,
-production → `compass_prod`.
+production → `compass_prod`. Deployed environments are chosen by `COMPASS_ENV`, which falls back to
+`VERCEL_ENV` so Vercel needs no configuration; see
+[docs/maintenance/environment-resolution.md](docs/maintenance/environment-resolution.md).
 
 Point `DATABASE_URL` at your local Postgres in `.env.local`:
 

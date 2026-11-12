@@ -1,3 +1,4 @@
+import { compassEnv } from "@/lib/runtime-env"
 import { Sandbox } from "@vercel/sandbox"
 import { researchVoiceWorkerCallbackBaseUrl } from "@/lib/compass-url"
 import { MAX_RESEARCH_VOICE_LEASE_MS } from "@/lib/research-voice-control-plane"
@@ -102,7 +103,7 @@ export async function launchResearchVoiceSandbox({
 }) {
   const callbackBase = researchVoiceWorkerCallbackBaseUrl()
   if (callbackBase.username || callbackBase.password ||
-      (process.env.VERCEL_ENV === "production" && (callbackBase.protocol !== "https:" || callbackBase.port))) {
+      (compassEnv() === "production" && (callbackBase.protocol !== "https:" || callbackBase.port))) {
     throw new Error("Research voice callback origin is not trusted")
   }
   const remainingMs = leaseExpiresAt.getTime() - Date.now()

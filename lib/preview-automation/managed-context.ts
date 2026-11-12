@@ -1,4 +1,5 @@
 /** Explicit risk-accepted pilot. This validates routing, not database permissions. */
+import { compassEnv } from "@/lib/runtime-env"
 export interface ManagedPilotContext {
   schema: string;
   pr: string;
@@ -15,7 +16,7 @@ export function getManagedPilotContext(env: NodeJS.ProcessEnv = process.env): Ma
   const { VERCEL_GIT_PULL_REQUEST_ID: pr = "", VERCEL_GIT_COMMIT_SHA: sha = "",
     VERCEL_DEPLOYMENT_ID: deploymentId = "", VERCEL_URL: hostname = "",
     PREVIEW_MANAGED_RUN_ID: runId = "", PREVIEW_MANAGED_WORKSPACE_ID: workspaceId = "" } = env;
-  if (env.PREVIEW_DATABASE_MODE !== "vercel-managed" || env.VERCEL_ENV !== "preview" ||
+  if (env.PREVIEW_DATABASE_MODE !== "vercel-managed" || compassEnv(env) !== "preview" ||
     env.PREVIEW_AUTOMATION_ENABLED !== "1" || pr !== "276" || !/^[a-f0-9]{40}$/.test(sha) ||
     env.VERCEL_GIT_REPO_OWNER !== "rbcodelabs" || env.VERCEL_GIT_REPO_SLUG !== "compass" ||
     env.VERCEL_GIT_COMMIT_REF !== "feat/geode-docs-preview-pilot" || !/^dpl_[A-Za-z0-9]+$/.test(deploymentId) ||

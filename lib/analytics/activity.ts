@@ -1,3 +1,4 @@
+import { compassEnv } from "@/lib/runtime-env"
 import { AsyncLocalStorage } from "node:async_hooks"
 import getPrisma, { type AppPrismaClient, type AppTransactionClient } from "@/lib/db"
 import { getToolPrisma, hasToolTransaction } from "@/lib/mcp-tool-db"
@@ -17,7 +18,7 @@ async function flushEvents(events: Event[]) {
 
 export function collectionEpoch(): Date | null {
   const value = process.env.COMPASS_ANALYTICS_COLLECTION_STARTED_AT
-  return analyticsCollectionEnabled(process.env.VERCEL_ENV, value, process.env.PREVIEW_AUTOMATION_ENABLED) ? new Date(value!) : null
+  return analyticsCollectionEnabled(compassEnv(), value, process.env.PREVIEW_AUTOMATION_ENABLED) ? new Date(value!) : null
 }
 export async function withActivityCommit<T>(handler: () => Promise<T>): Promise<T> {
   if (eventQueue.getStore()) return handler()

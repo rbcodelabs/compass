@@ -7,8 +7,9 @@ describe("chainGraphEnabled", () => {
     expect(chainGraphEnabled({ NODE_ENV: "production", VERCEL_ENV: "preview" })).toBe(true)
     expect(chainGraphEnabled({ NODE_ENV: "production", COMPASS_CHAIN_GRAPH: "1" })).toBe(true)
     expect(chainGraphEnabled({ NODE_ENV: "production", VERCEL_ENV: "production" })).toBe(false)
-    expect(chainGraphEnabled({ NODE_ENV: "production", COMPASS_CHAIN_GRAPH: "true" })).toBe(false)
-    expect(chainGraphEnabled({ NODE_ENV: "production", COMPASS_CHAIN_GRAPH: " 1" })).toBe(false)
+    expect(chainGraphEnabled({ NODE_ENV: "production", VERCEL_ENV: "production", COMPASS_CHAIN_GRAPH: "true" })).toBe(false)
+    expect(chainGraphEnabled({ NODE_ENV: "production", VERCEL_ENV: "production", COMPASS_CHAIN_GRAPH: " 1" })).toBe(false)
+    expect(chainGraphEnabled({ NODE_ENV: "production", COMPASS_ENV: "preview" })).toBe(true)
   })
   it("keeps the benchmark page off in preview", () => {
     expect(chainGraphBenchEnabled({ NODE_ENV: "production", VERCEL_ENV: "preview" })).toBe(false)
