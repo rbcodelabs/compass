@@ -16,7 +16,7 @@ import CodeBlock from "@tiptap/extension-code-block";
 import { NodeViewContent, NodeViewWrapper, ReactNodeViewRenderer, type NodeViewProps } from "@tiptap/react";
 import { MermaidDiagram } from "@/components/mermaid-diagram";
 
-type Mode = "preview" | "source";
+export type Mode = "preview" | "source";
 
 function ModeButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: string }) {
   return (
@@ -31,13 +31,21 @@ function ModeButton({ active, onClick, children }: { active: boolean; onClick: (
   );
 }
 
+/**
+ * The mode an editable block starts in. A fresh, empty block opens in source mode so the author can start typing, and it must STAY
+ * there until they choose Preview: the mode is decided once, at mount, not re-derived from the text on every render (which flipped the
+ * block to Preview after the first typed character and hid the source being typed into). Returns null when the default applies
+ * (preview for a block that already has source; read-only editors can only ever preview). Clicking Preview or Source overrides it.
+ */
+export function initialMermaidMode(source: string, editable: boolean): Mode | null {
+  return editable && !source.trim() ? "source" : null;
+}
+
 function MermaidBlockView({ node, editor }: NodeViewProps) {
   const source = node.textContent;
-  const [chosen, setChosen] = useState<Mode | null>(null);
   const editable = editor.isEditable;
-  // A fresh, empty block opens in source mode so the author can start typing;
-  // read-only editors can only ever preview.
-  const mode: Mode = !editable ? "preview" : (chosen ?? (source.trim() ? "preview" : "source"));
+  const [chosen, setChosen] = useState<Mode | null>(() => initialMermaidMode(source, editable));
+  const mode: Mode = !editable ? "preview" : (chosen ?? "preview");
 
   return (
     <NodeViewWrapper className="mermaid-block my-3" data-mermaid-block="">
