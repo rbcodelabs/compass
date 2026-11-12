@@ -45,6 +45,7 @@ import { ENTITY_LINKS_SOLUTION_KEY_RESULT_BACKFILL_MIGRATION, assertEntityLinksS
 import { ENTITY_LINKS_CONVERSATION_BACKFILL_MIGRATION, assertEntityLinksConversationBackfill, backfillEntityLinksConversation, getEntityLinksConversationStatus } from "@/lib/migrations/entity-links-conversation-backfill";
 import { ENTITY_LINKS_TASK_BACKFILL_MIGRATION, assertEntityLinksTaskBackfill, backfillEntityLinksTask, getEntityLinksTaskStatus } from "@/lib/migrations/entity-links-task-backfill";
 import { getEntityLinksReadParityStatus } from "@/lib/migrations/entity-links-read-parity";
+import { getEntityLinksRowDetailStatus } from "@/lib/migrations/entity-links-row-detail";
 import { ENTITY_LINKS_TASK_LINK_MOVE_MIGRATION, assertEntityLinksTaskLinkMove, getEntityLinksTaskLinkMoveStatus, moveTaskLinksToEntityLinks } from "@/lib/migrations/entity-links-task-link-move";
 import { ENTITY_LINKS_OPPORTUNITY_BACKFILL_MIGRATION, ENTITY_LINKS_OPPORTUNITY_RESIDUAL_MIGRATION, assertEntityLinksOpportunityBackfill, backfillEntityLinksOpportunity, getEntityLinksOpportunityStatus } from "@/lib/migrations/entity-links-opportunity-backfill";
 import { ENTITY_LINKS_ARTIFACT_BACKFILL_MIGRATION, assertEntityLinksArtifactBackfill, backfillEntityLinksArtifact, getEntityLinksArtifactStatus } from "@/lib/migrations/entity-links-artifact-backfill";
@@ -1963,6 +1964,9 @@ export async function getMigrationStatus(pool: Pool, schema: string) {
     const typedLinks = await getTypedLinkStatus(client, schema)
       .catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error) }))
 
+    // Computed once: the row-detail block reads its ids (the parity query needs the legacy tables; the detail block does not).
+    const entityLinksReadParity = await getEntityLinksReadParityStatus(client, schema).catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error) }))
+
     return NextResponse.json({
       schema,
       schemaEnvironment: environment,
@@ -1997,7 +2001,9 @@ export async function getMigrationStatus(pool: Pool, schema: string) {
       // Counts and capped quarantine ids for 098_entity_links_backfill_solution_key_result, readable before it is POSTed.
       entityLinksSolutionKeyResultBackfill: await getEntityLinksSolutionKeyResultStatus(client, schema).catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error) })),
       // Read-flip parity (PR A of the entity_links read flip): per family, live legacy rows vs live mirror rows, plus the read modes. Counts and capped ids only.
-      entityLinksReadParity: await getEntityLinksReadParityStatus(client, schema).catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error) })),
+      entityLinksReadParity,
+      // READ-ONLY metadata (no content) of the entity_links rows the parity ids name, plus task-owned rows the task readers would drop. Never fails the GET.
+      entityLinksRowDetail: await getEntityLinksRowDetailStatus(client, schema, entityLinksReadParity).catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error) })),
       workItemIdsBackfill: await getWorkItemIdsBackfillStatus(client, schema).catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error) })),
       workspaceIdBackfill: await getWorkspaceIdBackfillStatus(client, schema).catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error) })),
       linkIntegrity: "error" in typedLinks ? typedLinks : typedLinks.linkIntegrity,
