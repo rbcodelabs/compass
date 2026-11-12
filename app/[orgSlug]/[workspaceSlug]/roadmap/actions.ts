@@ -590,3 +590,20 @@ export async function undoRoadmapCreate(workspaceId: string, itemIds: string[]):
   revalidateRoadmap();
   return { archived: items.map((item) => item.id) };
 }
+
+/**
+ * Gallery "Capture preview": screenshots an Artifact linked to a roadmap item's Solution
+ * so its card can show it. Workspace-member gated, like every other roadmap write; the
+ * capture itself only accepts artifacts of this workspace.
+ */
+export async function captureGalleryPreview(workspaceId: string, artifactId: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  await requireWorkspaceMember(workspaceId);
+  try {
+    const { captureAndStoreArtifactThumbnail } = await import("@/lib/artifact-thumbnail");
+    await captureAndStoreArtifactThumbnail({ artifactId, workspaceId });
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "Could not capture a preview" };
+  }
+  revalidateRoadmap();
+  return { ok: true };
+}

@@ -474,6 +474,26 @@ export async function getSolutionArtifactIds(db: AppTransactionClient, workspace
   })
 }
 
+/** Artifact ids per Solution for many Solutions at once (the roadmap gallery). Same read-mode switch as getSolutionArtifactIds, one query per read path. */
+export async function getSolutionsArtifactIds(db: AppTransactionClient, workspaceId: string, solutionIds: readonly string[]): Promise<Map<string, string[]>> {
+  const bySolution = new Map<string, string[]>()
+  if (solutionIds.length === 0) return bySolution
+  const pairs = await readByFamilyMode("ARTIFACT", {
+    legacy: async () => (await db.artifactLink.findMany({ where: { workspaceId, linkedType: "SOLUTION", linkedId: { in: [...solutionIds] } }, select: { artifactId: true, linkedId: true } })).map((link) => ({ artifactId: link.artifactId, solutionId: link.linkedId })),
+    shadowScope: (rows) => ({
+      legacy: rows.map((row) => solutionPair(row.artifactId, row.solutionId)),
+      readEntityLinks: async () => (await readCompare()).readEntityLinksArtifact(db, workspaceId, { solutionIds }),
+    }),
+    entityLinks: async () => (await (await readCompare()).readEntityLinksArtifact(db, workspaceId, { solutionIds })).map((link) => ({ artifactId: link.fromId, solutionId: link.toId })),
+  })
+  for (const { artifactId, solutionId } of pairs) {
+    const ids = bySolution.get(solutionId) ?? []
+    if (!ids.includes(artifactId)) ids.push(artifactId)
+    bySolution.set(solutionId, ids)
+  }
+  return bySolution
+}
+
 /**
  * The Artifacts attached to a Decision. Callers only ask for TRACKED_DECISION requests; entity_links reads apply that rule themselves
  * (read-compare's readEntityLinksArtifact), the legacy read relied on the caller.

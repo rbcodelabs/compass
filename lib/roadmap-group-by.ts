@@ -10,7 +10,7 @@ import type { CustomFieldDefinitionData } from "@/lib/types"
  * entirely on the server.
  */
 
-export type RoadmapGroupByParam = "phase" | "squad" | "none" | { customFieldId: string }
+export type RoadmapGroupByParam = "phase" | "squad" | "none" | "status" | { customFieldId: string }
 
 /**
  * Parses the raw `groupBy` search param. Follows the existing
@@ -24,6 +24,7 @@ export function parseGroupByParam(raw: string | string[] | undefined): RoadmapGr
   if (!value || value === "phase") return "phase"
   if (value === "squad") return "squad"
   if (value === "none") return "none"
+  if (value === "status") return "status"
   return { customFieldId: value }
 }
 
@@ -31,6 +32,8 @@ export type ResolvedRoadmapGroupBy =
   | { mode: "phase" }
   | { mode: "squad" }
   | { mode: "none" }
+  /** Gallery only: group by the linked Solution's status. The board and timeline treat it as Phase. */
+  | { mode: "status" }
   | { mode: "customField"; field: CustomFieldDefinitionData }
 
 /**
@@ -49,6 +52,7 @@ export function resolveRoadmapGroupBy(
   if (param === "phase") return { mode: "phase" }
   if (param === "squad") return { mode: "squad" }
   if (param === "none") return { mode: "none" }
+  if (param === "status") return { mode: "status" }
   const field = roadmapFieldDefs.find((candidate) => candidate.id === param.customFieldId && candidate.fieldType === "SELECT")
   return field ? { mode: "customField", field } : { mode: "phase" }
 }

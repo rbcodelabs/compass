@@ -11,6 +11,7 @@
  * e2e/functional/specs/doc-version-history.spec.ts.
  */
 import { test, expect } from "../fixtures/index";
+import { clickNewDoc } from "../fixtures/docs";
 
 test.describe("Doc Inline Comments", () => {
   test(
@@ -27,7 +28,7 @@ test.describe("Doc Inline Comments", () => {
       await page.goto(`${base}/docs`);
       await page.waitForLoadState("networkidle");
       const previousDocUrl = page.url();
-      await page.getByRole("button", { name: "New" }).click();
+      await clickNewDoc(page)
       // /docs may already have redirected to an existing document. Wait for
       // the newly created document, not merely any document-shaped URL.
       await page.waitForURL(url => url.href !== previousDocUrl && /\/docs\/[0-9a-f-]+$/.test(url.pathname), { timeout: 15_000 });

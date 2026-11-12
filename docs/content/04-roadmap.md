@@ -95,6 +95,16 @@ Private items are visible to workspace members here and on the board; only the p
 
 ![Roadmap item on a phone](/screenshots/docs/roadmap-item-overlay-mobile.png)
 
+## Gallery View
+
+Toggle to **Gallery** beside Board and Timeline (or open `?view=gallery`) to browse the roadmap as large, image-first cards. Each card shows a screenshot of an Artifact linked to the roadmap item's Solution, with the item's title, its Opportunity › Solution trail, squad, horizon and delivery status beneath it.
+
+- **Several artifacts.** When the Solution has more than one Artifact, a small filmstrip of up to three thumbnails sits on the preview (plus a **+N** count for the rest). Hover, focus or click a thumbnail to swap the preview. Newest artifacts come first.
+- **No preview yet.** If an Artifact is linked but has no screenshot, the card shows a placeholder with **Capture preview** (HTML uploads and external links) to take one. v0 chats cannot be screenshotted and link to the artifact instead.
+- **Nothing linked.** An item with no Solution, or a Solution with no Artifacts, still appears with a hatched placeholder, so the gallery always shows the whole roadmap.
+- **Group by** — Horizon (default), Solution status, Squad, or None. Group headings are collapsible and show counts. Solution status is Gallery-only; Board and Timeline treat it as Phase.
+- Click a card to open the usual roadmap item panel. Squad and custom-field filters, and Saved views, work in Gallery like the other views. Private items show a **Private** badge. The All Roadmaps (cross-workspace) page has no Gallery.
+
 ## Timeline View
 
 Toggle between **Board** and **Timeline** at the top of the Roadmap page. Board remains the default. Use **Filters** beside the view control to focus either view on a squad. The Timeline view is linkable: `?view=timeline` takes you straight there, and the squad filter carries over from the Board.
@@ -185,7 +195,7 @@ Checklist templates themselves (create_checklist_template, list_checklist_templa
 
 ## Saved Views
 
-Save the way you like to look at the roadmap and come back to it with one click. On a workspace roadmap, open the **Saved views** menu to save the current squad, custom-field filter, grouping, Board/Timeline choice and, on the Board, your column layout (which columns are pinned or collapsed, and their order). Opening a saved view applies those settings to the URL, so you can still change or clear any of them afterwards.
+Save the way you like to look at the roadmap and come back to it with one click. On a workspace roadmap, open the **Saved views** menu to save the current squad, custom-field filter, grouping, Board/Timeline/Gallery choice and, on the Board, your column layout (which columns are pinned or collapsed, and their order). Opening a saved view applies those settings to the URL, so you can still change or clear any of them afterwards.
 
 Views are **personal** by default. The owner can share a view with the workspace or the whole organization. Only the owner can edit a view; the owner (or an admin, for shared views) can delete it. Sharing a view never widens access to the items themselves.
 
