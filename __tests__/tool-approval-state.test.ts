@@ -92,12 +92,12 @@ describe("every outcome message is one grammatical sentence run (copy)", () => {
     { status: "UNKNOWN_OUTCOME", receiptStatus: "PENDING", needsOperator: true },
     ...refusals.map((reason) => ({ status: "REFUSED", reason })),
   ] as const
-  const check = (text: string) => {
+  const check = (text: string, { label = false } = {}) => {
     expect(text, text).toMatch(/^[A-Z]/)
     expect(text, text).not.toMatch(/ {2}/)
     expect(text, text).not.toMatch(/\b[Bb]ut [A-Z]/)
     expect(text, text).toMatch(/\.$/)
-    expect(text, text).not.toMatch(/[:,;] [A-Z]/) // a capital right after a colon, comma or semicolon is a glued sentence
+    if (!label) expect(text, text).not.toMatch(/[:,;] [A-Z]/) // a capital right after a colon, comma or semicolon is a glued sentence (the note's "for <tool>: <State>." label is the one intended colon)
     expect(text, text).not.toMatch(/\.\.|:\./)
   }
   it.each(outcomes.map((o, i) => [i, o]))("outcome %#", (_i, outcome) => check(describeExecution(outcome as never).message))
@@ -110,7 +110,7 @@ describe("every outcome message is one grammatical sentence run (copy)", () => {
   })
   it("every conversation note passes", () => {
     const id = "11111111-2222-4333-8444-555555555555"
-    for (const key of Object.keys(APPROVAL_STATES) as ApprovalStateKey[]) check(conversationUpdateText({ state: key, requestId: id, displayId: "DEC-1", tool: "t" }).replace(/^\[Approval update\] /, ""))
+    for (const key of Object.keys(APPROVAL_STATES) as ApprovalStateKey[]) check(conversationUpdateText({ state: key, requestId: id, displayId: "DEC-1", tool: "t" }).replace(/^\[Approval update\] /, ""), { label: true })
   })
 })
 
