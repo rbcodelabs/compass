@@ -79,6 +79,41 @@ describe("describeExecution maps executor outcomes to wording", () => {
     })
 })
 
+describe("every outcome message is one grammatical sentence run (copy)", () => {
+  const refusals = ["NO_DECISION", "WRONG_GATE", "NOT_CURRENT", "OPTION_MISMATCH", "NOT_AN_APPROVAL", "PACKET_INVALID", "FINGERPRINT_MISMATCH", "WORKSPACE_MISMATCH", "TOOL_NOT_REGISTERED", "TOOL_MISMATCH", "APPROVER_NOT_ADMIN_NOW", "EXPIRED", "APPROVAL_STALE"] as const
+  const outcomes = [
+    null,
+    { status: "EXECUTED", receiptId: "r", result: null },
+    { status: "FAILED", receiptId: "r", error: "Error: boom" },
+    { status: "FAILED", receiptId: "r", error: "Error: no trailing period." },
+    { status: "STALE", receiptId: "r" },
+    { status: "BLOCKED", receiptId: "r", floors: ["limit one", "limit two."] },
+    { status: "ALREADY_APPLIED", receiptStatus: "APPLIED" },
+    { status: "UNKNOWN_OUTCOME", receiptStatus: "PENDING", needsOperator: true },
+    ...refusals.map((reason) => ({ status: "REFUSED", reason })),
+  ] as const
+  const check = (text: string) => {
+    expect(text, text).toMatch(/^[A-Z]/)
+    expect(text, text).not.toMatch(/ {2}/)
+    expect(text, text).not.toMatch(/\b[Bb]ut [A-Z]/)
+    expect(text, text).toMatch(/\.$/)
+    expect(text, text).not.toMatch(/[:,;] [A-Z]/) // a capital right after a colon, comma or semicolon is a glued sentence
+    expect(text, text).not.toMatch(/\.\.|:\./)
+  }
+  it.each(outcomes.map((o, i) => [i, o]))("outcome %#", (_i, outcome) => check(describeExecution(outcome as never).message))
+  it("the refusal an unregistered tool produces reads as two sentences, not 'but This'", () => {
+    expect(describeExecution({ status: "REFUSED", reason: "TOOL_NOT_REGISTERED" }).message).toBe("Approved, but the action did not run. This tool is not available for approval right now, so nothing ran.")
+  })
+  it("every decision error and every state explanation also passes", () => {
+    for (const code of ["REVISION_NOT_PENDING", "ALREADY_DECIDED", "REVISION_EXPIRED", "ADMIN_REQUIRED", "ACCESS_DENIED", "STALE_FINGERPRINT", "IDEMPOTENCY_KEY_CONFLICT", "HUMAN_ACTOR_REQUIRED", "REQUEST_NOT_FOUND", "UNKNOWN"]) check(describeDecisionError(code).message)
+    for (const info of Object.values(APPROVAL_STATES)) check(info.explanation)
+  })
+  it("every conversation note passes", () => {
+    const id = "11111111-2222-4333-8444-555555555555"
+    for (const key of Object.keys(APPROVAL_STATES) as ApprovalStateKey[]) check(conversationUpdateText({ state: key, requestId: id, displayId: "DEC-1", tool: "t" }).replace(/^\[Approval update\] /, ""))
+  })
+})
+
 describe("describeDecisionError", () => {
   it("maps known codes and falls back safely", () => {
     expect(describeDecisionError("ADMIN_REQUIRED").message).toMatch(/admin/i)

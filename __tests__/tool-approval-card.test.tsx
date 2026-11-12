@@ -240,8 +240,11 @@ describe("ToolApprovalCard: fallbacks and review gate (A1, A3)", () => {
     await screen.findByTestId("tool-approval-card")
     expect((screen.getByTestId("approve-button") as HTMLButtonElement).disabled).toBe(true)
     expect((screen.getByTestId("deny-button") as HTMLButtonElement).disabled).toBe(false)
-    expect(screen.getByTestId("approval-review-reason").textContent).toMatch(/review the full details/i)
+    expect(screen.getByTestId("approval-review-reason").textContent).toMatch(/not all changes are shown/i)
     expect(screen.getByTestId("approval-review-link").getAttribute("href")).toBe(`/acme/product/approvals/${REQ}`)
+    // Said once: the notice is not a second "Review the full details" next to the link.
+    expect(screen.getAllByText(/review the full details/i)).toHaveLength(1)
+    expect(screen.getByTestId("approval-review-reason").textContent).not.toMatch(/review the full details/i)
   })
 
   it("disables Approve when the diff was cut off or the arguments are too long to show", async () => {
