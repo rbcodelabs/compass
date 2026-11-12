@@ -35,7 +35,7 @@ function ModeButton({ active, onClick, children }: { active: boolean; onClick: (
  * The mode an editable block starts in. A fresh, empty block opens in source mode so the author can start typing, and it must STAY
  * there until they choose Preview: the mode is decided once, at mount, not re-derived from the text on every render (which flipped the
  * block to Preview after the first typed character and hid the source being typed into). Returns null when the default applies
- * (preview for a block that already has source; read-only editors can only ever preview).
+ * (preview for a block that already has source; read-only editors can only ever preview). Clicking Preview or Source overrides it.
  */
 export function initialMermaidMode(source: string, editable: boolean): Mode | null {
   return editable && !source.trim() ? "source" : null;
