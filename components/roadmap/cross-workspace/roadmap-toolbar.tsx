@@ -42,8 +42,11 @@ type Props = {
 }
 
 const LINK_LABELS = { linked: "Linked", unlinked: "Not linked" } as const
-const VIEW_MODE_LABELS: Record<RoadmapViewDisplay["view"], string> = { board: "Board", timeline: "Timeline" }
-const GROUP_LABELS: Record<RoadmapViewDisplay["groupBy"], string> = {
+// The cross-workspace roadmap has no Gallery view and no Solution-status grouping (workspace-roadmap only); see withoutGalleryOnlyDisplay.
+type CrossView = Exclude<RoadmapViewDisplay["view"], "gallery">
+type CrossGroupBy = Exclude<RoadmapViewDisplay["groupBy"], "status">
+const VIEW_MODE_LABELS: Record<CrossView, string> = { board: "Board", timeline: "Timeline" }
+const GROUP_LABELS: Record<CrossGroupBy, string> = {
   horizon: "Horizon", workspace: "Workspace", squad: "Squad", none: "None",
 }
 const SORT_LABELS: Record<RoadmapViewDisplay["sort"], string> = {
@@ -295,7 +298,7 @@ export function RoadmapToolbar({
 
         <DropdownMenu>
           <DropdownMenuTrigger render={<Button variant="outline" size="sm" className="min-h-11 md:min-h-0" data-testid="display-menu" />}>
-            {VIEW_MODE_LABELS[display.view]} · {GROUP_LABELS[display.groupBy]}
+            {VIEW_MODE_LABELS[display.view as CrossView]} · {GROUP_LABELS[display.groupBy as CrossGroupBy]}
             <ChevronDown />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-52">

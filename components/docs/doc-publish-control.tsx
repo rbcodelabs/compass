@@ -5,7 +5,6 @@ import { Check, Info, Link2 } from "lucide-react"
 import { Switch } from "@/components/ui/switch"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import { StatusBadge } from "@/components/patterns/status-badge"
 import { pushUndoToast } from "@/lib/ui/undo-toast"
 
 export const PUBLISH_INFO_COPY = "Visible to anyone with the portal link. Unpublishing removes it immediately."
@@ -28,7 +27,7 @@ export function portalDocUrl(origin: string, orgSlug: string, workspaceSlug: str
 }
 
 /**
- * Publish control in the doc header: a switch, a state badge, "Copy public link" and an info popover.
+ * Publish control in the doc header: a small switch, a short state word, an info popover and, once published, "Copy link".
  * Optimistic: the switch flips immediately and rolls back with an error toast if POST /api/docs/[id]/publish
  * fails. Authorization is enforced by that route; disabling here is only explanation, never the gate.
  */
@@ -39,7 +38,6 @@ export function DocPublishControl({ docId, orgSlug, workspaceSlug, initialPublis
   const [copied, setCopied] = useState(false)
   const [infoOpen, setInfoOpen] = useState(false)
   const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const labelId = useId()
   const infoId = useId()
 
   const disabledReason = !publishable
@@ -95,55 +93,56 @@ export function DocPublishControl({ docId, orgSlug, workspaceSlug, initialPublis
       checked={published}
       disabled={pending || disabledReason !== null}
       onCheckedChange={(next) => void toggle(next === true)}
-      aria-labelledby={labelId}
+      aria-label="Publish to portal"
       data-testid="doc-publish-switch"
     />
   )
 
   return (
-    <div className="mx-auto w-full max-w-4xl px-4 pb-2 sm:px-8" data-testid="doc-publish-control" data-published={published}>
-      <div className="rounded-lg border border-border-default bg-surface-inset px-3 py-2" onKeyDown={(event) => { if (event.key === "Escape") setInfoOpen(false) }}>
-      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger render={<span tabIndex={disabledReason ? 0 : -1} className="inline-flex items-center gap-2" />}>
-                {switchEl}
-                <span id={labelId} className="text-sm font-medium text-text-primary">Publish to portal</span>
-              </TooltipTrigger>
-              {disabledReason ? <TooltipContent>{disabledReason}</TooltipContent> : null}
-            </Tooltip>
-          </TooltipProvider>
-          {published ? (
-            <StatusBadge status="success" icon={<Check aria-hidden />} data-testid="doc-publish-badge">Published to portal</StatusBadge>
-          ) : (
-            <StatusBadge status="neutral" data-testid="doc-publish-badge">{disabledReason && !publishable ? "Not publishable" : "Not published · Draft"}</StatusBadge>
-          )}
-        </div>
-        <div className="flex items-center gap-1.5">
-          {/* An inline disclosure, not a floating popover: the sticky editor toolbar sits directly below this row, and a popover covered its buttons. */}
-          <button
-            type="button"
-            aria-label="About publishing"
-            aria-expanded={infoOpen}
-            aria-controls={infoId}
-            onClick={() => setInfoOpen((open) => !open)}
-            className="inline-flex size-7 items-center justify-center rounded-md text-text-subtle hover:bg-muted hover:text-text-primary focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none aria-expanded:bg-muted aria-expanded:text-text-primary"
-          >
-            <Info className="size-4" aria-hidden />
-          </button>
-          {published ? (
-            <Button type="button" variant="outline" size="sm" onClick={() => void copyLink()} data-testid="doc-publish-copy">
-              {copied ? <Check aria-hidden /> : <Link2 aria-hidden />}
-              {copied ? "Link copied" : "Copy public link"}
-            </Button>
-          ) : null}
-        </div>
+    <div className="relative shrink-0" data-testid="doc-publish-control" data-published={published} onKeyDown={(event) => { if (event.key === "Escape") setInfoOpen(false) }}>
+      <div className="flex items-center gap-1.5">
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger render={<span tabIndex={disabledReason ? 0 : -1} className="inline-flex items-center gap-1.5" />}>
+              {switchEl}
+              <span className="text-xs font-medium text-text-secondary max-sm:sr-only">Publish</span>
+            </TooltipTrigger>
+            {disabledReason ? <TooltipContent>{disabledReason}</TooltipContent> : null}
+          </Tooltip>
+        </TooltipProvider>
+        {published ? (
+          <span className="inline-flex items-center gap-1 text-xs font-medium text-status-success" data-testid="doc-publish-badge">
+            <Check className="size-3" aria-hidden />
+            <span className="max-sm:sr-only">Published</span>
+            <span className="sr-only"> to portal</span>
+          </span>
+        ) : (
+          <span className="text-xs text-text-subtle" data-testid="doc-publish-badge">
+            <span aria-hidden className="max-sm:hidden">{disabledReason && !publishable ? "Not publishable" : "Draft"}</span>
+            <span className="sr-only">{disabledReason && !publishable ? "Not publishable" : "Not published · Draft"}</span>
+          </span>
+        )}
+        {/* A small popover under the control: the page header has no sticky toolbar below it on desktop to cover. */}
+        <button
+          type="button"
+          aria-label="About publishing"
+          aria-expanded={infoOpen}
+          aria-controls={infoId}
+          onClick={() => setInfoOpen((open) => !open)}
+          className="inline-flex size-6 items-center justify-center rounded-md max-sm:hidden text-text-subtle hover:bg-muted hover:text-text-primary focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+        >
+          <Info className="size-3.5" aria-hidden />
+        </button>
+        {published ? (
+          <Button type="button" variant="ghost" size="xs" onClick={() => void copyLink()} data-testid="doc-publish-copy" aria-label="Copy public link">
+            {copied ? <Check aria-hidden /> : <Link2 aria-hidden />}
+            <span className="max-sm:sr-only">{copied ? "Copied" : "Copy link"}</span>
+          </Button>
+        ) : null}
       </div>
       {infoOpen ? (
-        <p id={infoId} className="mt-2 border-t border-border-default pt-2 text-sm leading-5 text-text-secondary" data-testid="doc-publish-info">{PUBLISH_INFO_COPY}</p>
+        <p id={infoId} className="absolute right-0 top-full z-30 mt-1 w-64 rounded-lg border border-border-default bg-surface-card p-3 text-xs leading-5 text-text-secondary shadow-md" data-testid="doc-publish-info">{PUBLISH_INFO_COPY}</p>
       ) : null}
-      </div>
       <p className="sr-only" role="status" aria-live="polite">{status}</p>
     </div>
   )

@@ -16,8 +16,8 @@ export const ROADMAP_HORIZONS = ["NOW", "NEXT", "LATER", "LAUNCHING", "LAUNCHED"
 export const ROADMAP_DELIVERY_STATUSES = ["NOT_STARTED", "IN_DEVELOPMENT", "IN_REVIEW", "BLOCKED", "COMPLETE"] as const satisfies readonly RoadmapDeliveryStatus[]
 export const ROADMAP_LINK_FILTERS = ["linked", "unlinked"] as const
 export const ROADMAP_VIEW_VISIBILITIES = ["PERSONAL", "SHARED"] as const
-export const ROADMAP_VIEW_MODES = ["board", "timeline"] as const
-export const ROADMAP_VIEW_GROUPINGS = ["horizon", "workspace", "squad", "none"] as const
+export const ROADMAP_VIEW_MODES = ["board", "timeline", "gallery"] as const
+export const ROADMAP_VIEW_GROUPINGS = ["horizon", "workspace", "squad", "none", "status"] as const
 export const ROADMAP_VIEW_SORTS = ["manual", "startDate", "endDate", "title", "updated"] as const
 
 export const MAX_VIEW_NAME_LENGTH = 120
@@ -253,4 +253,11 @@ export function roadmapHref(basePath: string, state: RoadmapState, options: { sa
   }
   const query = params.toString()
   return query ? `${basePath}?${query}` : basePath
+}
+
+/** The cross-workspace roadmap renders only Board and Timeline and has no Solution status to group by; Gallery-only values fall back to the defaults. */
+export function withoutGalleryOnlyDisplay<T extends { display: RoadmapViewDisplay }>(state: T): T {
+  const { view, groupBy } = state.display
+  if (view !== "gallery" && groupBy !== "status") return state
+  return { ...state, display: { ...state.display, view: view === "gallery" ? "board" : view, groupBy: groupBy === "status" ? "horizon" : groupBy } }
 }
