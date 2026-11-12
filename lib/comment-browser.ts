@@ -1,6 +1,6 @@
 import { auth } from "@/auth"
 import getPrisma from "@/lib/db"
-import { deleteResidualLinksTo } from "@/lib/task-link-writes"
+import { deleteOriginLinksTo } from "@/lib/task-link-writes"
 import { resolveCommentAuthors } from "@/lib/comment-authors"
 import { COMMENT_TARGET_TYPES, resolveCommentTarget, type CommentTargetType } from "@/lib/comments"
 import { isOrgAdminRole, normalizeWorkspaceRole } from "@/lib/roles"
@@ -107,8 +107,8 @@ export async function deleteBrowserComment(commentId: string, actor: Pick<Commen
     // one left behind turns this delete into a 500.
     await tx.commentElementAnchor.deleteMany({ where: { commentId: { in: ids } } })
     await tx.commentExternalAuthor.deleteMany({ where: { commentId: { in: ids } } })
-    // Tasks made from these comments keep living; only their pointer to the deleted comment goes (COMMENT is a residual kind in task_links).
-    await deleteResidualLinksTo(tx, { linkedType: "COMMENT", linkedIds: ids })
+    // Tasks made from these comments keep living; only their pointer to the deleted comment goes (COMMENT is a TASK_CREATED_FROM link).
+    await deleteOriginLinksTo(tx, { linkedType: "COMMENT", linkedIds: ids })
     if (replies.length) await tx.comment.deleteMany({ where: { parentId: commentId } })
     await tx.comment.delete({ where: { id: commentId } })
     return { id: commentId, deletedReplies: replies.length }

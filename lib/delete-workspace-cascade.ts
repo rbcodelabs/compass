@@ -107,8 +107,8 @@ export async function deleteWorkspaceCascade(prisma: AppPrismaClient, workspaceI
     prisma.task.findMany({ where: { workspaceId }, select: { id: true } })
   );
   if (taskIds.length > 0) {
-    // Task references (associations) live in entity_links and go first, by endpoint. task_links keeps only the residual kinds
-    // (COMMENT, AGENT_CONVERSATION) and TaskLink.task is Restrict, so those rows are deleted before the tasks.
+    // Every task link (references and origins) lives in entity_links and goes first, by endpoint. The frozen task_links rows are
+    // removed too: TaskLink.task is Restrict, so they must go before the tasks.
     await deleteLinksOfTasks(prisma, taskIds);
   }
   await updateInBatches(prisma.task, { workspaceId, parentTaskId: { not: null } }, { parentTaskId: null });

@@ -302,8 +302,8 @@ test.describe("Doc comment @mention -> task", () => {
     expect(tasks[0]).toMatchObject({ title: "Draft rollout checklist and rollback criterion", priority: "HIGH", assignee_user_id: bUserId, assignee_agent_id: null });
     expect(new Date(tasks[0].due_date).toISOString().slice(0, 10)).toBe("2026-10-23");
     const taskId = tasks[0].id as string;
-    // The COMMENT link is residual (task_links); the DOC link is an association (entity_links).
-    const { rows: links } = await pool.query(`SELECT linked_type, linked_id FROM "${S}".task_links WHERE task_id = $1 ORDER BY linked_type`, [taskId]);
+    // The COMMENT link is a TASK_CREATED_FROM link and the DOC link a TASK_REFERENCES association, both in entity_links.
+    const { rows: links } = await pool.query(`SELECT to_type AS linked_type, to_id AS linked_id FROM "${S}".entity_links WHERE link_type = 'TASK_CREATED_FROM' AND from_id = $1 ORDER BY to_type`, [taskId]);
     expect(links.map((l) => l.linked_type)).toEqual(["COMMENT"]);
     const { rows: docLinks } = await pool.query(`SELECT to_type, to_id FROM "${S}".entity_links WHERE link_type = 'TASK_REFERENCES' AND from_id = $1`, [taskId]);
     expect(docLinks.map((l) => l.to_type)).toEqual(["DOC"]);

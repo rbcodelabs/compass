@@ -17,6 +17,7 @@ import {
   type CommentTaskRequest, type PostCommentError,
 } from "@/lib/doc-comment-tasks"
 import { resolveTaskAssignees } from "@/lib/task-assignment"
+import { getTasksLinkedToOrigin } from "@/lib/task-links-read"
 import { createWorkspaceTask } from "@/lib/task-create"
 import { runAfterCommit } from "@/lib/following-commit"
 import { getFollowable, isSubjectTypeActive } from "@/lib/followable"
@@ -64,8 +65,10 @@ export async function agentIdsAssignedOnTarget(workspaceId: string, targetType: 
   const prisma = getPrisma()
   const commentIds = (await prisma.comment.findMany({ where: { workspaceId, targetType, targetId }, select: { id: true } })).map(c => c.id)
   if (commentIds.length === 0) return []
+  const linkedTaskIds = [...new Set((await getTasksLinkedToOrigin(prisma, { workspaceId, linkedType: "COMMENT", linkedIds: commentIds })).map(link => link.taskId))]
+  if (linkedTaskIds.length === 0) return []
   const tasks = await prisma.task.findMany({
-    where: { workspaceId, assigneeAgentId: { not: null }, links: { some: { linkedType: "COMMENT", linkedId: { in: commentIds } } } },
+    where: { workspaceId, assigneeAgentId: { not: null }, id: { in: linkedTaskIds } },
     select: { assigneeAgentId: true },
   })
   return [...new Set(tasks.flatMap(t => (t.assigneeAgentId ? [t.assigneeAgentId] : [])))]

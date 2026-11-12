@@ -16,7 +16,7 @@
  */
 
 import getPrisma from "@/lib/db"
-import { deleteResidualLinksTo } from "@/lib/task-link-writes"
+import { deleteOriginLinksTo } from "@/lib/task-link-writes"
 import { resolveCommentAuthors } from "@/lib/comment-authors"
 import type { DocComment } from "@prisma/client"
 import { createCommentRows, followAfterComment, type CommentSource } from "@/lib/comments"
@@ -185,8 +185,8 @@ export async function deleteDocCommentCore(
     await tx.solutionPlanProposal.deleteMany({ where: { commentId: { in: ids } } })
     await tx.commentElementAnchor.deleteMany({ where: { commentId: { in: ids } } })
     await tx.commentExternalAuthor.deleteMany({ where: { commentId: { in: ids } } })
-    // Tasks made from these comments keep living; only their pointer to the deleted comment goes (COMMENT is a residual kind in task_links).
-    await deleteResidualLinksTo(tx, { linkedType: "COMMENT", linkedIds: ids })
+    // Tasks made from these comments keep living; only their pointer to the deleted comment goes (COMMENT is a TASK_CREATED_FROM link).
+    await deleteOriginLinksTo(tx, { linkedType: "COMMENT", linkedIds: ids })
     if (wasRoot) await tx.comment.deleteMany({ where: { parentId: commentId } })
     await tx.comment.deleteMany({ where: { id: commentId } })
     if (wasRoot) await tx.docComment.deleteMany({ where: { parentId: commentId } })

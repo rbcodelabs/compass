@@ -64,7 +64,7 @@ export async function createWorkspaceTask(workspaceId: string, data: NewTaskInpu
         sortOrder,
       },
     })
-    // Same transaction as the task: associations land in entity_links, COMMENT (residual) in task_links.
+    // Same transaction as the task: every link (associations and the COMMENT origin) lands in entity_links.
     if (data.links?.length) await createTaskLinks(tx, { workspaceId, taskId: created.id, links: data.links })
     return created
   })

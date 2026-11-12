@@ -22,7 +22,7 @@
  */
 import getPrisma from "@/lib/db"
 import { setDocCommentStatusCore, type CommentStatus } from "@/lib/doc-comments"
-import { getResidualTargetIds } from "@/lib/task-links-read"
+import { getOriginTargetIds, getTasksLinkedToOrigin } from "@/lib/task-links-read"
 
 /** A task in one of these states no longer holds a thread open. */
 const FINISHED = ["DONE", "CANCELLED"]
@@ -78,8 +78,8 @@ async function reconcile(taskId: string): Promise<ThreadSyncResult> {
   const result: ThreadSyncResult = { resolved: [], reopened: [] }
   try {
     const prisma = getPrisma()
-    // COMMENT is a residual link kind (not an association), so it lives only in task_links (see lib/task-link-writes.ts).
-    const commentIds = await getResidualTargetIds(prisma, { taskId, linkedType: "COMMENT" })
+    // COMMENT is a TASK_CREATED_FROM link (see lib/task-link-writes.ts).
+    const commentIds = await getOriginTargetIds(prisma, { taskId, linkedType: "COMMENT" })
     if (commentIds.length === 0) return result
     const linked = await prisma.docComment.findMany({
       where: { id: { in: commentIds } },
@@ -102,13 +102,11 @@ async function reconcile(taskId: string): Promise<ThreadSyncResult> {
           // One thread can carry several tasks (the root and a reply each made one).
           // Only resolve once none of the others is still live.
           const threadIds = [rootId, ...(await prisma.docComment.findMany({ where: { parentId: rootId }, select: { id: true } })).map(reply => reply.id)]
-          const stillOpen = await prisma.task.count({
-            where: {
-              id: { not: taskId },
-              status: { notIn: FINISHED },
-              links: { some: { linkedType: "COMMENT", linkedId: { in: threadIds } } },
-            },
-          })
+          const task = await prisma.task.findUnique({ where: { id: taskId }, select: { workspaceId: true } })
+          const siblingIds = task
+            ? [...new Set((await getTasksLinkedToOrigin(prisma, { workspaceId: task.workspaceId, linkedType: "COMMENT", linkedIds: threadIds })).map(link => link.taskId))].filter(id => id !== taskId)
+            : []
+          const stillOpen = siblingIds.length === 0 ? 0 : await prisma.task.count({ where: { id: { in: siblingIds }, status: { notIn: FINISHED } } })
           if (stillOpen > 0) continue
         }
 

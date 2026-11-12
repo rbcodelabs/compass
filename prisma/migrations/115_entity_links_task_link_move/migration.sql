@@ -1,0 +1,17 @@
+-- Migration 115: move the COMMENT and AGENT_CONVERSATION task links into entity_links, so the
+-- task_links table can be dropped without losing them.
+--
+-- NO DDL, and EXPLICIT-ONLY: an untargeted POST never runs it. POST it by name
+-- ({"script":"115_entity_links_task_link_move"}) AFTER the code that writes and reads TASK_CREATED_FROM is deployed. Until
+-- this migration's receipt exists the readers fall back to the not-yet-moved task_links rows, so no link vanishes in between.
+--
+--   TASK_CREATED_FROM <- task_links WHERE linked_type IN ('COMMENT', 'AGENT_CONVERSATION')
+--                        (task -> comment | conversation; origin MIGRATION; id, source, created_by_id and created_at are copied,
+--                        the workspace is the task's)
+--
+-- INSERT-ONLY: nothing in task_links or entity_links is changed or deleted. Batched at 500 rows (keyset-paged) with an
+-- anti-join and no ON CONFLICT. Dangling and cross-workspace legacy rows are not copied and are REPORTED. Before the receipt the
+-- hook proves, per type, pair-set and row-count equality with the legacy rows, zero duplicate pairs and the workspace stamp.
+--
+-- This file intentionally contains no executable statement; the work is the hook
+-- (lib/migrations/entity-links-task-link-move.ts).

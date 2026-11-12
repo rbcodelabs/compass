@@ -556,7 +556,7 @@ test.describe("Doc comment mentions: adversarial", () => {
     await live.getByTitle("Delete thread").click();
     await expect(live).toHaveCount(0, { timeout: 10_000 });
     const afterDelete = await taskRows(docId);
-    const links = (await pool.query(`SELECT COUNT(*)::int AS n FROM "${S}".task_links WHERE linked_type = 'COMMENT' AND task_id = ANY($1)`, [[t1.id, t2.id]])).rows[0].n as number;
+    const links = (await pool.query(`SELECT COUNT(*)::int AS n FROM "${S}".entity_links WHERE link_type = 'TASK_CREATED_FROM' AND to_type = 'COMMENT' AND from_id = ANY($1)`, [[t1.id, t2.id]])).rows[0].n as number;
     finding("finding: delete thread with live tasks", `tasks still exist=${afterDelete.length}, comment links left=${links}, statuses=${afterDelete.map((t) => t.status).join(",")}` );
     expect(links, "no dangling COMMENT links after deleting the thread").toBe(0);
     await page.reload();

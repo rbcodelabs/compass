@@ -395,7 +395,7 @@ export const TASK_REFERENCE_TARGET_TYPES = [
  * A Task references the objects it delivers or discusses: ONE type whose target varies (the ADR's `TASK_REFERENCES`), because the nine
  * targets share every rule. entity_links is the only store for these (migration 097 moved the old rows): lib/task-link-writes.ts writes
  * them. Many-to-many; a repeat link is an error in link_task (`duplicatePolicy: "error"`), while the dedicated writer reconciles a
- * replay silently. Link kinds that are not associations (COMMENT, AGENT_CONVERSATION) stay in task_links.
+ * replay silently. Link kinds that are not associations (COMMENT, AGENT_CONVERSATION) are the separate TASK_CREATED_FROM type below.
  */
 const taskReferences: LinkTypeDef = {
   key: "TASK_REFERENCES",
@@ -412,6 +412,41 @@ const taskReferences: LinkTypeDef = {
   restrictedContexts: "deny",
   dedicatedWriter: { module: "lib/task-link-writes.ts", backfillMigration: TASK_LINKS_BACKFILL_MIGRATION },
   compat: { mcpTools: ["link_task", "unlink_task", "list_task_links"], restOps: ["linkTaskResource", "unlinkTaskResource", "listTaskLinks"] },
+}
+
+// ── TASK_CREATED_FROM (moved from task_links by 115) ────────
+
+/** The explicit-only move of the COMMENT and AGENT_CONVERSATION task links (lib/migrations/entity-links-task-link-move.ts). */
+export const TASK_ORIGIN_MOVE_MIGRATION = "115_entity_links_task_link_move"
+export const TASK_CREATED_FROM_LINK_TYPE = "TASK_CREATED_FROM"
+/** The legacy `task_links.linked_type` values this type carries; the stored `to_type` is the same word. */
+export const TASK_ORIGIN_TARGET_TYPES = ["COMMENT", "AGENT_CONVERSATION"] as const satisfies readonly LinkableEntityType[]
+
+/**
+ * Where a Task came from: the Comment it was made from (a Doc thread or any commentable object's thread) or the agent conversation whose
+ * TaskCreate tool made it. These two were the only task_links kinds that never became TASK_REFERENCES associations, because neither is a
+ * user-facing association; migration 115 moved them into entity_links so the task_links table can be dropped. A separate type (not more
+ * TASK_REFERENCES targets) keeps the nine-target association contract and its MCP/REST tools unchanged. Internal and dedicated-writer:
+ * lib/task-link-writes.ts is the only writer (task creation, the agent's task tools) and lib/task-links-read.ts the only reader, the
+ * generic tools cannot name a Comment or a conversation, and the task screen shows these links alongside the associations.
+ * Many-to-many; a repeat is idempotent.
+ */
+const taskCreatedFrom: LinkTypeDef = {
+  key: TASK_CREATED_FROM_LINK_TYPE,
+  from: "TASK",
+  to: TASK_ORIGIN_TARGET_TYPES,
+  direction: "directed",
+  cardinality: { from: "many", to: "many" },
+  labels: { forward: "Created from", inverse: "Created tasks" },
+  origins: ["DIRECT", "MIGRATION"],
+  duplicatePolicy: "idempotent",
+  authorize: defaultAuthorize,
+  lifecycle: { onFromDeleted: "delete", onToDeleted: "delete", onArchive: "keep" },
+  summaries: {},
+  restrictedContexts: "deny",
+  internal: true,
+  dedicatedWriter: { module: "lib/task-link-writes.ts", backfillMigration: TASK_ORIGIN_MOVE_MIGRATION },
+  compat: { mcpTools: [], restOps: [] },
 }
 
 // ── DOC_SPECIFIES_SCOPE (spec docs phase 2: a Spec / Discovery Plan doc is scoped to the Solution or Opportunity it specifies) ──
@@ -498,6 +533,7 @@ const DEFINITIONS: readonly LinkTypeDef[] = [
   artifactSupportsDecision,
   artifactAttachedToExperiment,
   taskReferences,
+  taskCreatedFrom,
   docSpecifiesScope,
   conversationCreated,
   conversationMentions,

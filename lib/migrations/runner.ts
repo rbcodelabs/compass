@@ -45,6 +45,7 @@ import { ENTITY_LINKS_SOLUTION_KEY_RESULT_BACKFILL_MIGRATION, assertEntityLinksS
 import { ENTITY_LINKS_CONVERSATION_BACKFILL_MIGRATION, assertEntityLinksConversationBackfill, backfillEntityLinksConversation, getEntityLinksConversationStatus } from "@/lib/migrations/entity-links-conversation-backfill";
 import { ENTITY_LINKS_TASK_BACKFILL_MIGRATION, assertEntityLinksTaskBackfill, backfillEntityLinksTask, getEntityLinksTaskStatus } from "@/lib/migrations/entity-links-task-backfill";
 import { getEntityLinksReadParityStatus } from "@/lib/migrations/entity-links-read-parity";
+import { ENTITY_LINKS_TASK_LINK_MOVE_MIGRATION, assertEntityLinksTaskLinkMove, getEntityLinksTaskLinkMoveStatus, moveTaskLinksToEntityLinks } from "@/lib/migrations/entity-links-task-link-move";
 import { ENTITY_LINKS_OPPORTUNITY_BACKFILL_MIGRATION, ENTITY_LINKS_OPPORTUNITY_RESIDUAL_MIGRATION, assertEntityLinksOpportunityBackfill, backfillEntityLinksOpportunity, getEntityLinksOpportunityStatus } from "@/lib/migrations/entity-links-opportunity-backfill";
 import { ENTITY_LINKS_ARTIFACT_BACKFILL_MIGRATION, assertEntityLinksArtifactBackfill, backfillEntityLinksArtifact, getEntityLinksArtifactStatus } from "@/lib/migrations/entity-links-artifact-backfill";
 import { assertWorkItemIdsBackfill, backfillWorkItemIds, getWorkItemIdsBackfillStatus, WORK_ITEM_IDS_BACKFILL_MIGRATION, WORK_ITEM_IDS_RESIDUAL_MIGRATION } from "@/lib/migrations/work-item-ids-backfill";
@@ -785,6 +786,14 @@ const MIGRATIONS: readonly MigrationEntry[] = [
     // portal_home_layouts.draft_template / published_template (nullable VARCHAR, no default: DSQL; NULL = editorial). Hook asserts both.
     name: "114_portal_home_template",
     filePath: path.join(process.cwd(), "prisma/migrations/114_portal_home_template/migration.sql"),
+  },
+  {
+    // No DDL, EXPLICIT-ONLY. Moves the COMMENT and AGENT_CONVERSATION task_links rows into entity_links (TASK_CREATED_FROM), insert-only, so
+    // task_links can be dropped without losing them. Inconsistent legacy rows are reported, never copied or deleted. The hook proves its
+    // postconditions (per-type pair-set and row-count equality) before the receipt. POST it by name after the code that writes and reads
+    // TASK_CREATED_FROM is live; never untargeted. Until it runs the readers fall back to the not-yet-moved task_links rows.
+    name: "115_entity_links_task_link_move",
+    filePath: path.join(process.cwd(), "prisma/migrations/115_entity_links_task_link_move/migration.sql"),
   },
 ];
 
@@ -1982,6 +1991,8 @@ export async function getMigrationStatus(pool: Pool, schema: string) {
       entityLinksArtifactBackfill: await getEntityLinksArtifactStatus(client, schema).catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error) })),
       // Counts and capped quarantine ids for 097 (task links), readable before it is POSTed.
       entityLinksTaskBackfill: await getEntityLinksTaskStatus(client, schema).catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error) })),
+      // Counts and capped quarantine ids for 115 (COMMENT and AGENT_CONVERSATION task links); `unmoved` must be 0 before task_links is dropped.
+      entityLinksTaskLinkMove: await getEntityLinksTaskLinkMoveStatus(client, schema).catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error) })),
       entityLinksConversationBackfill: await getEntityLinksConversationStatus(client, schema).catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error) })),
       // Counts and capped quarantine ids for 098_entity_links_backfill_solution_key_result, readable before it is POSTed.
       entityLinksSolutionKeyResultBackfill: await getEntityLinksSolutionKeyResultStatus(client, schema).catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error) })),
@@ -1999,10 +2010,10 @@ export async function getMigrationStatus(pool: Pool, schema: string) {
 }
 
 /** Migrations that an untargeted run must NOT pick up on its own: they are only correct at a moment a human chooses. */
-const EXPLICIT_ONLY_MIGRATIONS: readonly string[] = [WORKSPACE_ID_RESIDUAL_MIGRATION, TYPED_LINK_RESIDUAL_MIGRATION, WORK_ITEM_IDS_RESIDUAL_MIGRATION, ENTITY_LINKS_OPPORTUNITY_BACKFILL_MIGRATION, ENTITY_LINKS_OPPORTUNITY_RESIDUAL_MIGRATION, ENTITY_LINKS_ARTIFACT_BACKFILL_MIGRATION, ENTITY_LINKS_TASK_BACKFILL_MIGRATION, ENTITY_LINKS_CONVERSATION_BACKFILL_MIGRATION, ENTITY_LINKS_SOLUTION_KEY_RESULT_BACKFILL_MIGRATION, SHARED_COMPASS_AGENT_BOOTSTRAP_MIGRATION, WORKSPACE_MODULES_LEGACY_FLAG_BACKFILL_MIGRATION];
+const EXPLICIT_ONLY_MIGRATIONS: readonly string[] = [WORKSPACE_ID_RESIDUAL_MIGRATION, TYPED_LINK_RESIDUAL_MIGRATION, WORK_ITEM_IDS_RESIDUAL_MIGRATION, ENTITY_LINKS_OPPORTUNITY_BACKFILL_MIGRATION, ENTITY_LINKS_OPPORTUNITY_RESIDUAL_MIGRATION, ENTITY_LINKS_ARTIFACT_BACKFILL_MIGRATION, ENTITY_LINKS_TASK_BACKFILL_MIGRATION, ENTITY_LINKS_TASK_LINK_MOVE_MIGRATION, ENTITY_LINKS_CONVERSATION_BACKFILL_MIGRATION, ENTITY_LINKS_SOLUTION_KEY_RESULT_BACKFILL_MIGRATION, SHARED_COMPASS_AGENT_BOOTSTRAP_MIGRATION, WORKSPACE_MODULES_LEGACY_FLAG_BACKFILL_MIGRATION];
 
 /**
- * Which pending migrations a POST runs: the named one, or everything except the explicit-only one-shots (069, 072, 094, 095, 096, 097, 098_entity_links_backfill_solution_key_result, 103, 106_entity_links_residual_opportunity).
+ * Which pending migrations a POST runs: the named one, or everything except the explicit-only one-shots (069, 072, 094, 095, 096, 097, 115_entity_links_task_link_move, 098_entity_links_backfill_solution_key_result, 103, 106_entity_links_residual_opportunity).
  * `includeExplicitOnly` is for callers that provision a FRESH schema (the scoped preview worker): there is no old
  * deployment to drain, so applying 069 straight after 068 is correct and required for the schema to reach "ready".
  * Production-style callers (the admin route, an untargeted POST) never set it.
@@ -2368,6 +2379,12 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
         // leaves an unfinished attempt and the next POST resumes.
         await backfillEntityLinksTask(client, schema, log)
         await assertEntityLinksTaskBackfill(client, schema)
+      }
+      if (migration.name === ENTITY_LINKS_TASK_LINK_MOVE_MIGRATION) {
+        // Data half: copy the COMMENT and AGENT_CONVERSATION task links into entity_links (insert-only, quarantining the inconsistent ones), then
+        // prove per-type pair-set and row-count equality. Before the receipt below, so a failure leaves an unfinished attempt and the next POST resumes.
+        await moveTaskLinksToEntityLinks(client, schema, log)
+        await assertEntityLinksTaskLinkMove(client, schema)
       }
       if (migration.name === ENTITY_LINKS_CONVERSATION_BACKFILL_MIGRATION) {
         // Data half: link the legacy AGENT_CONVERSATION task links as CONVERSATION_CREATED (quarantining the inconsistent ones), then prove it. Before

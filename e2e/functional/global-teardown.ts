@@ -286,15 +286,7 @@ export default async function globalTeardown() {
         [wsId]
       );
 
-      // task_links → tasks (self-referencing parent_task_id has no DB FK, so
-      // no ordering constraint between tasks themselves — just delete links first)
-      await pool.query(
-        `DELETE FROM "${S}".task_links
-         WHERE task_id IN (
-           SELECT id FROM "${S}".tasks WHERE workspace_id = $1
-         )`,
-        [wsId]
-      );
+      // Task links live in entity_links (swept by workspace above); nothing writes the frozen task_links table any more.
       await pool.query(
         `DELETE FROM "${S}".tasks WHERE workspace_id = $1`,
         [wsId]

@@ -30,7 +30,8 @@ All seven registered link types are merged on `origin/main` (`lib/links/registry
 | `OPPORTUNITY_TARGETS_OBJECTIVE` | Opportunity to Objective | `entity_links` only (legacy table frozen) |
 | `OPPORTUNITY_TARGETS_KEY_RESULT` | Opportunity to KR (to-one) | `entity_links` only (`Opportunity.linkedKeyResultId` is no longer read or written) |
 | `ARTIFACT_ATTACHED_TO_SOLUTION`, `ARTIFACT_SUPPORTS_DECISION` | Artifact to Solution / Decision | `entity_links` only (legacy table frozen) |
-| `TASK_REFERENCES` | Task to Opp/Sol/Roadmap/Obj/KR/Doc/Exp/Feedback/Decision | `entity_links` only (COMMENT / AGENT_CONVERSATION task links stay in `task_links`) |
+| `TASK_REFERENCES` | Task to Opp/Sol/Roadmap/Obj/KR/Doc/Exp/Feedback/Decision | `entity_links` only (legacy table frozen) |
+| `TASK_CREATED_FROM` | Task to the Comment / agent conversation it was made from (internal) | `entity_links` only after migration 115 (`task_links` frozen; until it runs the readers fall back to the unmoved rows) |
 
 Update (entity_links cleanup): the per-family read flags and the mirror are gone. Every link type above is read from `entity_links` only, so the graph reads them directly through the existing canvas readers. The note below is the original design-time analysis, kept for the record.
 

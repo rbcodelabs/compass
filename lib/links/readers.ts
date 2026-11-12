@@ -4,13 +4,13 @@
  * row of THAT workspace (dangling, foreign, NULL-workspace), so nothing outside the workspace is ever shown. Rows come back oldest
  * first, ties broken by id.
  *
- * COMMENT task links (the Doc comment a task was made from) are not an association and never lived in entity_links; they stay in
- * task_links (lib/task-link-writes.ts).
+ * COMMENT and AGENT_CONVERSATION task links (the comment a task was made from, the conversation that made it) are the separate
+ * TASK_CREATED_FROM type, read by readEntityLinksTaskOrigins.
  */
 import type { AppTransactionClient } from "@/lib/db"
 import { ENTITY_TYPE_ALIASES, type LinkableEntityType } from "@/lib/entity-types"
 import { resolveEndpoints } from "@/lib/links/endpoints"
-import { TASK_REFERENCE_TARGET_TYPES } from "@/lib/links/registry"
+import { TASK_CREATED_FROM_LINK_TYPE, TASK_ORIGIN_TARGET_TYPES, TASK_REFERENCE_TARGET_TYPES } from "@/lib/links/registry"
 
 type Tx = AppTransactionClient
 
@@ -37,6 +37,8 @@ const TASK_REFERENCES = "TASK_REFERENCES"
 const ARTIFACT_EXPERIMENT = "ARTIFACT_ATTACHED_TO_EXPERIMENT"
 
 const ID_CHUNK = 500
+
+const isTaskOriginType = (value: string): value is (typeof TASK_ORIGIN_TARGET_TYPES)[number] => (TASK_ORIGIN_TARGET_TYPES as readonly string[]).includes(value)
 
 const isTaskTargetType = (value: string): value is (typeof TASK_REFERENCE_TARGET_TYPES)[number] => (TASK_REFERENCE_TARGET_TYPES as readonly string[]).includes(value)
 
@@ -173,8 +175,8 @@ export async function readEntityLinksArtifactExperiment(
 }
 
 /**
- * Task references (stored spelling REVIEW_REQUEST for a DECISION). Scope by task, or by one target type and its ids. COMMENT links are
- * legacy-only and never appear here.
+ * Task references (stored spelling REVIEW_REQUEST for a DECISION). Scope by task, or by one target type and its ids. COMMENT and
+ * AGENT_CONVERSATION links never appear here (see readEntityLinksTaskOrigins).
  */
 export async function readEntityLinksTaskReferences(
   tx: Tx,
@@ -185,4 +187,19 @@ export async function readEntityLinksTaskReferences(
   const stored = scope.target ? (Object.prototype.hasOwnProperty.call(ENTITY_TYPE_ALIASES, scope.target.type) ? ENTITY_TYPE_ALIASES[scope.target.type] : scope.target.type) : null
   if (!scope.target || !stored || !isTaskTargetType(stored)) return []
   return retainLiveEndpoints(tx, workspaceId, withoutOrigin(await entityLinkRows(tx, workspaceId, TASK_REFERENCES, { toIds: scope.target.ids }, [stored])))
+}
+
+/**
+ * Where tasks came from (TASK_CREATED_FROM): the Comment a task was made from, the agent conversation that made it. Scope by task, or by one
+ * origin type (COMMENT | AGENT_CONVERSATION) and its ids. Same liveness rule as every reader here: a link whose task or origin is gone, or in
+ * another workspace, is absent. Existence only; who may SEE a conversation is the caller's rule, as it always was for the task screen.
+ */
+export async function readEntityLinksTaskOrigins(
+  tx: Tx,
+  workspaceId: string,
+  scope: { taskIds?: readonly string[]; target?: { type: string; ids: readonly string[] } },
+): Promise<LinkView[]> {
+  if (scope.taskIds) return retainLiveEndpoints(tx, workspaceId, withoutOrigin(await entityLinkRows(tx, workspaceId, TASK_CREATED_FROM_LINK_TYPE, { fromIds: scope.taskIds })))
+  if (!scope.target || !isTaskOriginType(scope.target.type)) return []
+  return retainLiveEndpoints(tx, workspaceId, withoutOrigin(await entityLinkRows(tx, workspaceId, TASK_CREATED_FROM_LINK_TYPE, { toIds: scope.target.ids }, [scope.target.type])))
 }

@@ -24,7 +24,7 @@ describe("registration and shape", () => {
   });
 
   it("covers every legacy-backed link type exactly once and writes nothing", () => {
-    expect([...READ_PARITY_SPEC_NAMES].sort()).toEqual(["artifactDecision", "artifactSolution", "opportunityKeyResultPointer", "opportunityObjective", "solutionKeyResult", "taskReferences"]);
+    expect([...READ_PARITY_SPEC_NAMES].sort()).toEqual(["artifactDecision", "artifactSolution", "opportunityKeyResultPointer", "opportunityObjective", "solutionKeyResult", "taskCreatedFrom", "taskReferences"]);
     const source = read("lib/migrations/entity-links-read-parity.ts");
     expect(source).not.toMatch(/\b(INSERT|UPDATE|DELETE|ALTER|DROP|CREATE|TRUNCATE)\b\s/);
     for (const name of READ_PARITY_SPEC_NAMES) {
@@ -43,6 +43,24 @@ describe("registration and shape", () => {
   });
 });
 
+describe("taskCreatedFrom (the COMMENT and AGENT_CONVERSATION move, migration 115)", () => {
+  it("diffs exactly the two origin kinds of task_links against TASK_CREATED_FROM, live on both ends", () => {
+    const { legacy, mirror } = readParitySetsSql("taskCreatedFrom", "s");
+    for (const type of ["COMMENT", "AGENT_CONVERSATION"]) {
+      expect(legacy).toContain(`l.linked_type = '${type}'`);
+      expect(mirror).toContain(`e.to_type = '${type}'`);
+    }
+    expect(legacy).not.toContain("'DOC'");
+    expect(mirror).toContain("e.link_type = 'TASK_CREATED_FROM'");
+    expect(legacy).toContain('"s"."comments"');
+    expect(legacy).toContain('"s"."agent_conversations"');
+  });
+
+  it("reports the live legacy rows still waiting for the move as unmovedTaskOriginLinks", () => {
+    expect(read("lib/migrations/entity-links-read-parity.ts")).toContain("unmovedTaskOriginLinks: families.taskCreatedFrom?.onlyLegacy ?? 0");
+  });
+});
+
 const databaseUrl = integrationDatabaseUrl;
 
 describe.skipIf(!databaseUrl)("against a real Postgres", () => {
@@ -52,7 +70,7 @@ describe.skipIf(!databaseUrl)("against a real Postgres", () => {
   const id = () => randomUUID();
   const q = (sql: string, params: unknown[] = []) => pool.query(sql.replaceAll("{S}", `"${schema}"`), params);
 
-  const ws = { solA: id(), solB: id(), oppA: id(), oppB: id(), objA: id(), objB: id(), krA: id(), krB: id(), krA2: id(), artA: id(), tskA: id(), tskB: id(), rrTracked: id(), rrOther: id(), docA: id() };
+  const ws = { cmtA: id(), cmtA2: id(), cmtB: id(), convA: id(), solA: id(), solB: id(), oppA: id(), oppB: id(), objA: id(), objB: id(), krA: id(), krB: id(), krA2: id(), artA: id(), tskA: id(), tskB: id(), rrTracked: id(), rrOther: id(), docA: id() };
 
   beforeAll(async () => {
     await pool.query(`CREATE SCHEMA "${schema}"`);
@@ -63,6 +81,8 @@ describe.skipIf(!databaseUrl)("against a real Postgres", () => {
       CREATE TABLE {S}.key_results (id uuid PRIMARY KEY, objective_id uuid);
       CREATE TABLE {S}.artifacts (id uuid PRIMARY KEY, workspace_id uuid);
       CREATE TABLE {S}.tasks (id uuid PRIMARY KEY, workspace_id uuid);
+      CREATE TABLE {S}.comments (id uuid PRIMARY KEY, workspace_id uuid);
+      CREATE TABLE {S}.agent_conversations (id uuid PRIMARY KEY, workspace_id uuid);
       CREATE TABLE {S}.roadmap_items (id uuid PRIMARY KEY, workspace_id uuid);
       CREATE TABLE {S}.docs (id uuid PRIMARY KEY, workspace_id uuid);
       CREATE TABLE {S}.experiments (id uuid PRIMARY KEY, workspace_id uuid);
@@ -79,6 +99,10 @@ describe.skipIf(!databaseUrl)("against a real Postgres", () => {
       artifacts: [[ws.artA, WS_A]], tasks: [[ws.tskA, WS_A], [ws.tskB, WS_B]], docs: [[ws.docA, WS_A]],
     })) for (const row of rows) await ins(table, table === "opportunities" ? ["id", "workspace_id", "linked_key_result_id"] : ["id", "workspace_id"], row);
     for (const [k, o] of [[ws.krA, ws.objA], [ws.krA2, ws.objA], [ws.krB, ws.objB]]) await ins("key_results", ["id", "objective_id"], [k, o]);
+    await ins("comments", ["id", "workspace_id"], [ws.cmtA, WS_A]);
+    await ins("comments", ["id", "workspace_id"], [ws.cmtB, WS_B]);
+    await ins("comments", ["id", "workspace_id"], [ws.cmtA2, WS_A]);
+    await ins("agent_conversations", ["id", "workspace_id"], [ws.convA, WS_A]);
     await ins("review_requests", ["id", "workspace_id", "gate_type"], [ws.rrTracked, WS_A, "TRACKED_DECISION"]);
     await ins("review_requests", ["id", "workspace_id", "gate_type"], [ws.rrOther, WS_A, "PRODUCT_LAUNCH"]);
   });
@@ -151,6 +175,29 @@ describe.skipIf(!databaseUrl)("against a real Postgres", () => {
     expect(result.totalMismatches).toBe(3);
     expect(result.families.solutionKeyResult.ids.onlyLegacy).toHaveLength(1);
     expect(JSON.stringify(result)).not.toMatch(/title|content/i);
+  });
+
+  it("taskCreatedFrom: live COMMENT and AGENT_CONVERSATION task_links count as unmoved until their TASK_CREATED_FROM twin exists", async () => {
+    const before = await status();
+    expect(before.unmovedTaskOriginLinks).toBe(0);
+    // Two live legacy rows, one dangling comment, one comment of another workspace: only the first two are live.
+    await q(`INSERT INTO {S}.task_links (task_id, linked_type, linked_id) VALUES ($1,'COMMENT',$2),($1,'AGENT_CONVERSATION',$3),($1,'COMMENT',$4),($1,'COMMENT',$5)`, [ws.tskA, ws.cmtA, ws.convA, id(), ws.cmtB]);
+    const waiting = await status();
+    expect(waiting.unmovedTaskOriginLinks).toBe(2);
+    expect(waiting.families.taskCreatedFrom).toMatchObject({ legacyLive: 2, mirrorLive: 0, onlyLegacy: 2 });
+    await mirror("TASK_CREATED_FROM", "TASK", ws.tskA, "COMMENT", ws.cmtA);
+    await mirror("TASK_CREATED_FROM", "TASK", ws.tskA, "AGENT_CONVERSATION", ws.convA);
+    const moved = await status();
+    expect(moved.unmovedTaskOriginLinks).toBe(0);
+    expect(moved.families.taskCreatedFrom).toMatchObject({ legacyLive: 2, mirrorLive: 2, onlyLegacy: 0, onlyEntityLinks: 0 });
+    // A link made by the deployed code has no legacy row: it shows as onlyEntityLinks, never as unmoved.
+    await mirror("TASK_CREATED_FROM", "TASK", ws.tskA, "COMMENT", ws.cmtA2);
+    const afterDeploy = await status();
+    expect(afterDeploy.unmovedTaskOriginLinks).toBe(0);
+    expect(afterDeploy.families.taskCreatedFrom).toMatchObject({ onlyLegacy: 0, onlyEntityLinks: 1 });
+    // Clean up so the later tests see the counts they expect.
+    await q(`DELETE FROM {S}.task_links WHERE linked_type IN ('COMMENT','AGENT_CONVERSATION')`);
+    await q(`DELETE FROM {S}.entity_links WHERE link_type = 'TASK_CREATED_FROM'`);
   });
 
   it("ids are capped", async () => {

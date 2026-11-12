@@ -298,9 +298,9 @@ export async function drainLinksFromEntities(
  * links, through the reverse index (to_id, link_type, from_id). For a dedicated writer: the drain of the links after a delete that
  * removes the links to a deleted target (a Key Result or Objective). Removal never depends on the flag. Idempotent.
  */
-export async function drainLinksToEntities(db: Tx, input: { linkType: string; toType: LinkableEntityType; toIds: readonly string[] }): Promise<number> {
+export async function drainLinksToEntities(db: Tx, input: { linkType: string; toType: LinkableEntityType; toIds: readonly string[]; viaInternalWriter?: boolean }): Promise<number> {
   const def = requireLinkType(input.linkType)
-  assertWritableHere(def, true)
+  assertWritableHere(def, true, input.viaInternalWriter)
   let removed = 0
   for (const part of chunk([...new Set(input.toIds)], LINK_WRITE_CHUNK)) {
     const where = { linkType: def.key, toType: input.toType, toId: { in: part } }

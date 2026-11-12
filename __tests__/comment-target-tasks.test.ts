@@ -6,13 +6,14 @@ const mocks = vi.hoisted(() => ({
     workspaceMember: { findFirst: vi.fn() },
     comment: { findMany: vi.fn(), deleteMany: vi.fn() },
     task: { findMany: vi.fn() },
-    taskLink: { findMany: vi.fn() },
     user: { findMany: vi.fn() },
     agent: { findMany: vi.fn() },
     agentWorkspaceGrant: { findMany: vi.fn() },
     workspace: { findUnique: vi.fn() },
     organizationMember: { findMany: vi.fn() },
   },
+  // COMMENT links are TASK_CREATED_FROM rows in entity_links (lib/task-links-read.ts has its own tests); this file pins what the lookup asks of it.
+  linkedTo: vi.fn(),
   createComment: vi.fn(),
   createTask: vi.fn(),
   eligible: vi.fn(),
@@ -32,6 +33,7 @@ vi.mock("@/lib/comments", async () => ({
 }))
 vi.mock("@/lib/doc-comments", () => ({ createDocCommentCore: vi.fn(), deleteDocCommentCore: vi.fn() }))
 vi.mock("@/lib/task-create", () => ({ createWorkspaceTask: mocks.createTask }))
+vi.mock("@/lib/task-links-read", () => ({ getTasksLinkedToOrigin: mocks.linkedTo }))
 vi.mock("@/lib/task-assignment", () => ({ eligibleTaskAssignees: mocks.eligible, resolveTaskAssignees: mocks.resolveAssignees }))
 vi.mock("@/lib/follows", () => ({ autoFollow: mocks.autoFollow }))
 vi.mock("@/lib/notifications", () => ({ emitSubjectEvent: mocks.emit }))
@@ -65,6 +67,7 @@ beforeEach(() => {
   mocks.db.comment.findMany.mockResolvedValue([])
   mocks.db.comment.deleteMany.mockResolvedValue({ count: 1 })
   mocks.db.task.findMany.mockResolvedValue([])
+  mocks.linkedTo.mockResolvedValue([])
   mocks.active.mockReturnValue(true)
   mocks.resolveDisplay.mockResolvedValue(new Map([[TARGET, { title: "Q4 launch", path: "x" }]]))
   mocks.eligible.mockResolvedValue([
@@ -180,16 +183,19 @@ describe("agent scope confirmation", () => {
 
   it("skips the step for an agent already assigned from this target's comments", async () => {
     mocks.db.comment.findMany.mockResolvedValue([{ id: "c0" }])
+    mocks.linkedTo.mockResolvedValue([{ linkedId: "c0", taskId: "t0" }])
     mocks.db.task.findMany.mockResolvedValue([{ assigneeAgentId: BOT }])
     expect((await postTargetCommentWithOptionalTask({ ...base, body: bot, task: withTask })).ok).toBe(true)
   })
 
   it("scopes the known-agents lookup to this target's comments", async () => {
     mocks.db.comment.findMany.mockResolvedValue([{ id: "c0" }, { id: "c1" }])
+    mocks.linkedTo.mockResolvedValue([{ linkedId: "c0", taskId: "t0" }, { linkedId: "c1", taskId: "t1" }])
     mocks.db.task.findMany.mockResolvedValue([{ assigneeAgentId: BOT }, { assigneeAgentId: BOT }])
     expect(await agentIdsAssignedOnTarget(WS, "ROADMAP_ITEM", TARGET)).toEqual([BOT])
     expect(mocks.db.comment.findMany).toHaveBeenCalledWith({ where: { workspaceId: WS, targetType: "ROADMAP_ITEM", targetId: TARGET }, select: { id: true } })
-    expect(mocks.db.task.findMany.mock.calls[0][0].where.links.some).toEqual({ linkedType: "COMMENT", linkedId: { in: ["c0", "c1"] } })
+    expect(mocks.linkedTo).toHaveBeenCalledWith(mocks.db, { workspaceId: WS, linkedType: "COMMENT", linkedIds: ["c0", "c1"] })
+    expect(mocks.db.task.findMany.mock.calls[0][0].where).toMatchObject({ workspaceId: WS, id: { in: ["t0", "t1"] } })
   })
 })
 

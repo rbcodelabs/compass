@@ -37,6 +37,8 @@ function live(s: string, type: string, idExpr: string, wsExpr: string): string {
     case "EXPERIMENT": return t("experiments")
     case "FEEDBACK_ITEM": return t("feedback")
     case "REVIEW_REQUEST": return t("review_requests")
+    case "COMMENT": return t("comments")
+    case "AGENT_CONVERSATION": return t("agent_conversations")
     case "KEY_RESULT": return `EXISTS (SELECT 1 FROM "${s}"."key_results" AS x JOIN "${s}"."objectives" AS xo ON xo.id = x.objective_id WHERE x.id = ${idExpr} AND xo.workspace_id = ${wsExpr})`
     default: throw new Error(`entity-links-read-parity: no liveness rule for ${type}`)
   }
@@ -56,6 +58,9 @@ const TASK_TARGETS: readonly { legacy: string; stored: string }[] = [
 ]
 
 type LinkFamily = "SOLUTION_KR" | "OPPORTUNITY" | "ARTIFACT" | "TASK"
+
+/** The task_links kinds migration 115 moves into TASK_CREATED_FROM (the stored to_type is the same word). */
+const TASK_ORIGIN_TYPES: readonly string[] = ["COMMENT", "AGENT_CONVERSATION"]
 
 type Spec = { name: string; family: LinkFamily; sets: (s: string) => SetSql }
 
@@ -123,6 +128,19 @@ const SPECS: readonly Spec[] = [
           AND (${TASK_TARGETS.map((target) => `(e.to_type = '${target.stored}' AND ${live(s, target.stored, "e.to_id", "e.workspace_id")})`).join(" OR ")})`,
     }),
   },
+  {
+    // Where a task came from (migration 115). `onlyLegacy` is the number of LIVE task_links rows still waiting for the move: it must be 0
+    // before task_links is dropped. `onlyEntityLinks` grows by design (links made after the code deploy have no legacy row).
+    name: "taskCreatedFrom",
+    family: "TASK",
+    sets: (s) => ({
+      legacy: TASK_ORIGIN_TYPES.map((type) => `SELECT l.task_id AS f, '${type}' AS tt, l.linked_id AS t, NULL::text AS o, l.id::text AS id FROM "${s}"."task_links" AS l
+        WHERE l.linked_type = '${type}' AND EXISTS (SELECT 1 FROM "${s}"."tasks" AS tk WHERE tk.id = l.task_id AND ${live(s, type, "l.linked_id", "tk.workspace_id")})`).join("\n      UNION ALL\n      "),
+      mirror: `SELECT e.from_id AS f, e.to_type AS tt, e.to_id AS t, NULL::text AS o, e.id::text AS id FROM "${s}"."entity_links" AS e
+        WHERE e.link_type = 'TASK_CREATED_FROM' AND ${live(s, "TASK", "e.from_id", "e.workspace_id")}
+          AND (${TASK_ORIGIN_TYPES.map((type) => `(e.to_type = '${type}' AND ${live(s, type, "e.to_id", "e.workspace_id")})`).join(" OR ")})`,
+    }),
+  },
 ]
 
 export type ReadParityEntry = {
@@ -139,6 +157,8 @@ export type ReadParityEntry = {
 }
 
 export type EntityLinksReadParityStatus = {
+  /** Live task_links rows of the COMMENT and AGENT_CONVERSATION kinds that migration 115 has not moved yet. Zero means task_links can be dropped. */
+  unmovedTaskOriginLinks: number
   /** Zero across the board means every legacy row has its entity_links twin and nothing was written since (see the header). */
   totalMismatches: number
   families: Record<string, ReadParityEntry & { family: LinkFamily }>
@@ -196,6 +216,7 @@ export async function getEntityLinksReadParityStatus(client: PoolClient, schema:
   }
   return {
     totalMismatches,
+    unmovedTaskOriginLinks: families.taskCreatedFrom?.onlyLegacy ?? 0,
     families,
   }
 }

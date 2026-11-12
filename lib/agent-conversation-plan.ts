@@ -1,11 +1,12 @@
 /**
  * The agent's plan for one conversation, read back from the Compass tasks it created with TaskCreate
- * (source AGENT, linked via AGENT_CONVERSATION). This is what lets the chat's plan card survive a reload and
+ * (source AGENT, linked via a TASK_CREATED_FROM link to the conversation). This is what lets the chat's plan card survive a reload and
  * be seen by participants, which the per-turn TodoWrite list never could.
  */
 import type { AppPrismaClient } from "@/lib/db"
 import { resolveConversationAccess } from "@/lib/agent-conversation-access"
 import { toAgentStatus } from "@/lib/agent-task-tools"
+import { getTaskIdsLinkedTo } from "@/lib/task-links-read"
 
 export type ConversationPlanItem = { taskId: string; content: string; activeForm: string; status: "pending" | "in_progress" | "completed" }
 
@@ -15,8 +16,9 @@ export async function listConversationPlan(
   { conversationId, workspaceId, userId }: { conversationId: string; workspaceId: string; userId: string },
 ): Promise<ConversationPlanItem[] | null> {
   if (!(await resolveConversationAccess(prisma, { conversationId, workspaceId, userId }))) return null
+  const linked = await getTaskIdsLinkedTo(prisma, { workspaceId, linkedType: "AGENT_CONVERSATION", linkedId: conversationId })
   const rows = await prisma.task.findMany({
-    where: { workspaceId, status: { not: "CANCELLED" }, links: { some: { linkedType: "AGENT_CONVERSATION", linkedId: conversationId } } },
+    where: { workspaceId, status: { not: "CANCELLED" }, id: { in: linked } },
     select: { id: true, title: true, status: true },
     orderBy: [{ createdAt: "asc" }, { id: "asc" }],
   })
