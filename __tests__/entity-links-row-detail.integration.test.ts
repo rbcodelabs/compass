@@ -130,7 +130,7 @@ describe.skipIf(!databaseUrl)("entityLinksRowDetail (read-only status block) on 
     for (const row of (await detail()).rows) {
       expect(Object.keys(row).sort()).toEqual([
         "createdAt", "createdById", "fromExists", "fromId", "fromResolves", "fromType", "hiddenTaskLink", "id", "linkType", "origin", "parity", "sameWorkspace",
-        "source", "toExists", "toId", "toResolves", "toType", "wouldBeReturnedByTaskLinkReaders", "workspaceId",
+        "source", "toExists", "toId", "toResolves", "toType", "workspaceId", "wouldBeReturnedByTaskLinkReaders",
       ])
     }
   })
