@@ -806,24 +806,14 @@ describe("071_typed_link_tables", () => {
     expect(krLinks).not.toContain("origin");
   });
 
-  it("schema.prisma declares both models with snake_case maps, matching index names, and NO relation fields", () => {
+  it("schema.prisma no longer declares the legacy link models, the Task.links relation or opportunities.linked_key_result_id (dropped by 116)", () => {
     const schema = readFileSync(path.join(ROOT, "prisma/schema.prisma"), "utf-8");
-    const links = schema.match(/model OpportunityObjectiveLink \{[\s\S]*?\n\}/)?.[0] ?? "";
-    const krLinks = schema.match(/model SolutionKeyResultLink \{[\s\S]*?\n\}/)?.[0] ?? "";
-    expect(links).toContain('@@map("opportunity_objective_links")');
-    expect(krLinks).toContain('@@map("solution_key_result_links")');
-    expect(links).toContain('@@unique([opportunityId, objectiveId], map: "idx_opportunity_objective_links_pair")');
-    expect(links).toContain('@@index([objectiveId, opportunityId], map: "idx_opportunity_objective_links_objective")');
-    expect(links).toContain('@@index([workspaceId], map: "idx_opportunity_objective_links_workspace")');
-    expect(krLinks).toContain('@@unique([solutionId, keyResultId], map: "idx_solution_key_result_links_pair")');
-    expect(krLinks).toContain('@@index([keyResultId, solutionId], map: "idx_solution_key_result_links_key_result")');
-    expect(krLinks).toContain('@@index([workspaceId], map: "idx_solution_key_result_links_workspace")');
-    // Under relationMode = "prisma" a relation field makes Prisma query the child table on parent deletes,
-    // which would make old code paths read these tables.
-    expect(links + krLinks).not.toMatch(/@relation/);
-    for (const parent of ["Opportunity", "Objective", "Solution", "KeyResult"]) {
+    for (const model of ["OpportunityObjectiveLink", "SolutionKeyResultLink", "ArtifactLink", "TaskLink"]) expect(schema).not.toMatch(new RegExp(`model ${model} \\{`));
+    for (const table of ["opportunity_objective_links", "solution_key_result_links", "artifact_links", "task_links"]) expect(schema).not.toContain(`@@map("${table}")`);
+    expect(schema).not.toContain("linked_key_result_id");
+    for (const parent of ["Opportunity", "Objective", "Solution", "KeyResult", "Task", "Artifact"]) {
       const body = schema.match(new RegExp(`model ${parent} \\{[\\s\\S]*?\\n\\}`))?.[0] ?? "";
-      expect(body).not.toMatch(/ObjectiveLink|KeyResultLink/);
+      expect(body, parent).not.toMatch(/ObjectiveLink|KeyResultLink|TaskLink|ArtifactLink|linkedKeyResult/);
     }
   });
 

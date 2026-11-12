@@ -48,7 +48,7 @@ describe("115 registration", () => {
   });
 
   it("is reported by GET /api/admin/migrate before it is POSTed", () => {
-    expect(runner).toContain("entityLinksTaskLinkMove: await getEntityLinksTaskLinkMoveStatus(client, schema)");
+    expect(runner).toContain("entityLinksTaskLinkMove: await statusUnlessLegacyDropped(client, schema, LEGACY_STATUS_SOURCES.task, () => getEntityLinksTaskLinkMoveStatus(client, schema))");
   });
 
   it("is pinned in the managed manifest (SQL and hook)", () => {
