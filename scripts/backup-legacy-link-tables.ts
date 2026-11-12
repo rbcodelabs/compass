@@ -48,7 +48,7 @@ const dir = path.resolve(out)
 
 if (command === "verify") {
   const manifest = verifyBackup(dir, schema)
-  console.log(`OK ${schema}: ${Object.entries(manifest.relations).map(([name, entry]) => `${name}=${"absent" in entry ? "absent" : entry.rows}`).join(" ")} (entity_links rows at backup time: ${manifest.entityLinksRows})`)
+  console.log(`OK ${schema}: ${Object.entries(manifest.relations).map(([name, entry]) => `${name}=${"absent" in entry ? "absent" : entry.rows}`).join(" ")} (rows of the surviving link store at backup time: ${manifest.entityLinksRows})`)
 } else if (command === "export" || command === "restore") {
   if (command === "restore" && !process.argv.includes("--yes")) throw new Error("restore writes to the database; pass --yes once you have recreated the tables")
   if (command === "export") mkdirSync(dir, { recursive: true, mode: 0o700 })
@@ -60,7 +60,7 @@ if (command === "verify") {
       verifyBackup(dir, schema)
       console.log(`Exported and verified ${schema} to ${dir}`)
       for (const [name, entry] of Object.entries(manifest.relations)) console.log(`  ${name}: ${"absent" in entry ? "absent (already dropped)" : `${entry.rows} rows, sha256 ${entry.sha256}`}`)
-      console.log(`  entity_links rows now: ${manifest.entityLinksRows}`)
+      console.log(`  rows of the surviving link store now: ${manifest.entityLinksRows}`)
     } else {
       console.log(JSON.stringify(await restoreLegacyLinks(query, schema, dir)))
     }
