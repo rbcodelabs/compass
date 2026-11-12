@@ -65,8 +65,11 @@ harness); never print it. Never omit `script` from a POST.
 2. **Merge and deploy** (production deploys carry `[deploy]` in the merge commit as usual). Wait for the deployment; the app keeps working with the tables still in place.
 3. **GET** `/api/admin/migrate`. Record: `appliedMigrations` contains 115; `116_entity_links_drop_legacy_tables` is in `explicitOnlyPending`;
    `entityLinksLegacyDrop` = `{ ready: true, blockers: [] }`; `entityLinksReadParity.families.*.onlyLegacy` all 0 and `entityLinksTaskLinkMove.unmoved` = 0.
-4. **Re-check the one open anomaly**: `entity_links` row `d8faeeb4-6fc0-4ac5-a6d7-f0ac7b9cc817` (`TASK_REFERENCES`, no `task_links` twin) is
-   resolved or explained (it never blocks the preflight, which ignores `entity_links`-only rows, but it must be understood first).
+4. **Known hidden rows (tolerated, do not touch).** Two `entity_links` rows are present but not returned by `list_task_links` on any task:
+   `5be2ddd1-b67e-4b82-9aa9-e90dc7eb752d` (a moved `COMMENT` link) and `d8faeeb4-6fc0-4ac5-a6d7-f0ac7b9cc817` (a `TASK_REFERENCES` row with no
+   `task_links` twin). The preflight deliberately ignores `entity_links`-only rows, so neither blocks the drop, and nothing in this change
+   deletes, repairs or rewrites them (the drop never writes `entity_links`; `__tests__/entity-links-legacy-drop*.test.ts` prove it). Any
+   cleanup is a separate, owner-decided step. A decision on adding row detail to the status GET is pending with the owner and is not part of this change.
 5. **Backup, immediately before the POST** (a long gap lets new writes make it stale). Two equivalent options on plain Postgres:
    ```sh
    # A. the repository script (NDJSON + checksummed manifest; works on DSQL too). DATABASE_MIGRATION_URL = session pooler, port 5432.
