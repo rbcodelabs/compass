@@ -57,13 +57,13 @@ function CardBody({ data, actions }: { data: ApprovalCardData; actions: ReactNod
       )}
       <p className="m-0 text-xs text-text-subtle">{view.state.explanation}</p>
       {canDecide && view.state.key === "PENDING" && !review.ok && (
-        <p data-testid="approval-review-reason" className="m-0 text-xs text-status-warning">
-          {review.reason} Review the full details before approving.{" "}
+        <div className="flex min-w-0 flex-col gap-1">
+          <p data-testid="approval-review-reason" className="m-0 text-xs text-status-warning">{review.reason} Approve stays off until the full request has been reviewed.</p>
           <Link data-testid="approval-review-link" href={view.path} className={linkClass}>Review the full details</Link>
-        </p>
+        </div>
       )}
       {actions}
-      {canDecide && view.path && <Link href={view.path} className={linkClass}>Open the full approval page</Link>}
+      {canDecide && view.path && review.ok && <Link href={view.path} className={linkClass}>Open the full approval page</Link>}
     </>
   )
 }

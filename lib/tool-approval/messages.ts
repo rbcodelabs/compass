@@ -15,6 +15,10 @@ export type ApprovalActionResult = {
   state?: ApprovalStateKey
 }
 
+/** Trims trailing sentence punctuation and spaces so the caller can end the clause with exactly one period. */
+const endClause = (text: string): string => text.trim().replace(/[\s.;:,]+$/, "")
+
+/** Each entry is a complete sentence of its own: it is appended after a full sentence, never glued into one. */
 const REFUSALS: Record<RefusalReason, string> = {
   NO_DECISION: "The decision could not be found, so nothing ran.",
   WRONG_GATE: "This is not a tool approval, so nothing ran.",
@@ -36,12 +40,12 @@ export function describeExecution(outcome: ExecuteOutcome | null): ApprovalActio
   if (!outcome) return { ok: true, tone: "neutral", message: "Denied. The action was not performed.", state: "DENIED" }
   switch (outcome.status) {
     case "EXECUTED": return { ok: true, tone: "success", message: "Approved. The action ran once.", state: "APPLIED" }
-    case "FAILED": return { ok: false, tone: "danger", message: `Approved, but the action failed: ${sanitizeText(outcome.error)} It will not be retried; a fresh request is needed.`, state: "FAILED" }
+    case "FAILED": return { ok: false, tone: "danger", message: `Approved, but the action failed (${endClause(sanitizeText(outcome.error))}). It will not be retried; a fresh request is needed.`, state: "FAILED" }
     case "STALE": return { ok: false, tone: "warning", message: `${APPROVAL_STATES.STALE.explanation}`, state: "STALE" }
-    case "BLOCKED": return { ok: false, tone: "danger", message: `Approved, but a hard limit blocks this action: ${outcome.floors.map(sanitizeText).join("; ")}. Nothing ran.`, state: "BLOCKED" }
+    case "BLOCKED": return { ok: false, tone: "danger", message: `Approved, but a hard limit blocks this action: ${endClause(outcome.floors.map(sanitizeText).join("; "))}. Nothing ran.`, state: "BLOCKED" }
     case "ALREADY_APPLIED": return { ok: true, tone: "info", message: `This approval was already processed (${outcome.receiptStatus.toLowerCase()}). It was not run again.` }
     case "UNKNOWN_OUTCOME": return { ok: false, tone: "danger", message: APPROVAL_STATES.UNKNOWN_OUTCOME.explanation, state: "UNKNOWN_OUTCOME" }
-    case "REFUSED": return { ok: false, tone: "warning", message: `Approved, but ${REFUSALS[outcome.reason] ?? "the action did not run."}`, state: "NOT_RUN" }
+    case "REFUSED": return { ok: false, tone: "warning", message: `Approved, but the action did not run. ${REFUSALS[outcome.reason] ?? "Nothing ran."}`, state: "NOT_RUN" }
   }
 }
 
