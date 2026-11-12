@@ -102,6 +102,7 @@ function world(opts: { receipts?: string[]; present?: { tables: string[]; column
       const row = { legacy_live: "1", mirror_live: "1", only_legacy: String(opts.onlyLegacy ?? 0), only_legacy_ids: (opts.onlyLegacy ? ["legacy-1"] : []), only_entity_links: "0", only_entity_links_ids: [], origin_drift: String(opts.originDrift ?? 0), origin_drift_ids: [] }
       return { rows: [row] }
     }
+    if (/GROUP BY cls/.test(sql)) return { rows: [] } // the quarantine breakdowns
     // 115 status: unmatched (unmoved) rows; 113 status: unmatched rows. Both are count(*) AS n over task_links.
     if (/CONVERSATION_CREATED/.test(sql) && /e\.id IS NULL AND/.test(sql)) return { rows: [{ n: String(opts.conversationUnmatched ?? 0) }] }
     if (/TASK_CREATED_FROM/.test(sql) && /e\.id IS NULL OR e\.workspace_id/.test(sql)) return { rows: [{ n: String(opts.unmoved ?? 0) }] }
