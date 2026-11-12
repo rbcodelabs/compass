@@ -39,7 +39,7 @@ describe.skipIf(!databaseUrl)("real PostgreSQL preview lifecycle (not DSQL isola
     url.searchParams.set("schema", schema);
     execFileSync("pnpm", ["exec", "prisma", "db", "push", "--url", url.toString()], { encoding: "utf8", stdio: "pipe", timeout: 60_000 });
     prisma = new PrismaClient({ adapter: new PrismaPg(pool, { schema }) }).$extends(injectUpdatedAtExtension);
-    vi.stubEnv("VERCEL_ENV", "preview"); vi.stubEnv("PREVIEW_AUTOMATION_ENABLED", "1"); vi.stubEnv("VERCEL_DEPLOYMENT_ID", deploymentId);
+    vi.stubEnv("VERCEL_ENV", "preview"); vi.stubEnv("PREVIEW_AUTOMATION_ENABLED", "1"); vi.stubEnv("VERCEL_DEPLOYMENT_ID", deploymentId); vi.stubEnv("VERCEL_URL", "qa-integration.vercel.app");
     console.info(`QA-only PostgreSQL schema: ${schema}`);
   }, 90_000);
   afterAll(async () => {
