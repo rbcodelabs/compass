@@ -1,5 +1,5 @@
 import { test, expect } from "../fixtures/index";
-import { clickNewDoc } from "../fixtures/docs";
+import { clickNewDoc, waitForNewDocEditor } from "../fixtures/docs";
 import type { Page } from "@playwright/test";
 
 async function createDoc(page: Page, base: string) {
@@ -7,6 +7,7 @@ async function createDoc(page: Page, base: string) {
   await clickNewDoc(page)
   await page.waitForURL(/\/docs\/[0-9a-f-]+$/);
   await expect(page.locator(".ProseMirror")).toBeVisible();
+  await waitForNewDocEditor(page);
 }
 
 // Typing the fence opens a code block via tiptap's input rule; an empty
