@@ -4,14 +4,15 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { assertWorkspaceModulesMigration, backfillLaunchWorkflowModules } from "@/lib/migrations/workspace-modules"
 import { applyMigrations } from "@/lib/migrations/runner"
 import { replayAllMigrations } from "./helpers/replay-migrations"
+import { integrationDatabaseUrl } from "@/__tests__/helpers/integration-database"
 
 /**
  * 107 and 108 through the registered runner, on a throwaway schema of this suite's own, after every earlier migration has been replayed.
  *
- * Set WORKSPACE_MODULES_DATABASE_URL to the local compass_e2e database to enable. The guard keeps it from ever pointing anywhere else:
+ * Set INTEGRATION_TEST_DATABASE_URL to the local compass_e2e database to enable. The guard keeps it from ever pointing anywhere else:
  * this suite creates and drops schemas, which must never happen against DSQL or a shared database.
  */
-const databaseUrl = process.env.WORKSPACE_MODULES_DATABASE_URL
+const databaseUrl = integrationDatabaseUrl
 const BACKFILL = "108_workspace_modules_legacy_flag_backfill"
 
 describe.skipIf(!databaseUrl)("workspace modules migrations through the registered runner", () => {

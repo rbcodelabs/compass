@@ -3,7 +3,7 @@
  * (`applyMigrations`) against a throwaway schema in the local compass_e2e database. Never touches
  * Aurora or any shared environment; the schema is dropped in afterAll. Skipped without a URL:
  *
- *   TYPED_LINK_TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5437/compass_e2e \
+ *   INTEGRATION_TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5437/compass_e2e \
  *     npx vitest run __tests__/typed-links-residual-migration.integration.test.ts
  *
  * 072 has no DDL. It re-runs 071's idempotent backfill after the dual-writing code is live, so old
@@ -17,11 +17,12 @@ import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { applyMigrations, getMigrationStatus } from "@/lib/migrations/runner";
 import { getTypedLinkStatus } from "@/lib/migrations/typed-link-tables";
+import { integrationDatabaseUrl } from "@/__tests__/helpers/integration-database"
 
 const RESIDUAL = "072_typed_links_residual_backfill";
 const LINK_TABLES = "071_typed_link_tables";
 const WORKSPACE_ID = "068_workspace_id_on_solution_objective";
-const databaseUrl = process.env.TYPED_LINK_TEST_DATABASE_URL ?? process.env.WORKSPACE_ID_TEST_DATABASE_URL;
+const databaseUrl = integrationDatabaseUrl;
 
 describe.skipIf(!databaseUrl)("072 typed links residual backfill (registered migration)", () => {
   const schema = `tlres_${randomUUID().replaceAll("-", "")}`;

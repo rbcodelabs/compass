@@ -5,7 +5,7 @@
  *   2. the real UI task creator (createWorkspaceTask) mirrors its nested DOC link in the same transaction and leaves a COMMENT link legacy-only;
  *   3. unlinking, deleting a document and the workspace sweep remove the mirror row (deleteLinksForEntity against real SQL).
  *
- *   ENTITY_LINKS_TASK_DATABASE_URL=postgresql://postgres:pw@localhost:5440/compass_e2e \
+ *   INTEGRATION_TEST_DATABASE_URL=postgresql://postgres:pw@localhost:5440/compass_e2e \
  *     npx vitest run __tests__/links/task-link-writes.integration.test.ts
  */
 import { randomUUID } from "node:crypto";
@@ -21,8 +21,9 @@ import { injectUpdatedAtExtension } from "@/lib/prisma-updated-at";
 import { createWorkspaceTask } from "@/lib/task-create";
 import { createTaskLink, deleteTaskLink, drainMirroredTaskLinksTo, mirrorTaskLinks, upsertTaskLink } from "@/lib/task-link-writes";
 import { deleteLinksForEntity } from "@/lib/links/service";
+import { integrationDatabaseUrl } from "@/__tests__/helpers/integration-database"
 
-const databaseUrl = process.env.ENTITY_LINKS_TASK_DATABASE_URL;
+const databaseUrl = integrationDatabaseUrl;
 const KEY = "TASK_REFERENCES";
 
 describe.skipIf(!databaseUrl)("task link writers against a real Prisma client", () => {

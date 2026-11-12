@@ -21,8 +21,9 @@ import { BundleReader } from "@/lib/workspace-export/bundle"
 import { WorkspaceExportRefusal, exportWorkspaceToBuffer } from "@/lib/workspace-export/export"
 import { WorkspaceImportError, importWorkspaceBundle } from "@/lib/workspace-export/import"
 import { MODEL_BUCKETS } from "@/lib/workspace-export/model-registry"
+import { integrationDatabaseUrl } from "@/__tests__/helpers/integration-database"
 
-const databaseUrl = process.env.WORKSPACE_EXPORT_DATABASE_URL
+const databaseUrl = integrationDatabaseUrl
 
 function memoryStorage(): ArtifactStorage & { files: Map<string, Uint8Array> } {
   const files = new Map<string, Uint8Array>()

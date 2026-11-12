@@ -3,8 +3,9 @@ import { readFileSync } from "node:fs"
 import { Pool } from "pg"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { applyMigrations } from "@/lib/migrations/runner"
+import { integrationDatabaseUrl } from "@/__tests__/helpers/integration-database"
 
-const databaseUrl = process.env.RESEARCH_VOICE_MIGRATION_DATABASE_URL
+const databaseUrl = integrationDatabaseUrl
 const run = databaseUrl ? describe : describe.skip
 
 run("047 through the canonical migration runner on isolated PostgreSQL", () => {

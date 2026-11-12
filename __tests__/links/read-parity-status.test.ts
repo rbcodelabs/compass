@@ -4,7 +4,7 @@
  * Part 1 (always runs): registration and shape. Part 2 (needs a throwaway Postgres, any version >= 12): the real SQL against a minimal
  * schema holding only the columns the status reads, seeded with the cases the flip must survive.
  *
- *   READ_PARITY_TEST_DATABASE_URL=postgresql://postgres@localhost:5499/t npx vitest run __tests__/links/read-parity-status.test.ts
+ *   INTEGRATION_TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/compass_e2e npx vitest run __tests__/links/read-parity-status.test.ts
  */
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -12,6 +12,7 @@ import path from "node:path";
 import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { READ_PARITY_SPEC_NAMES, getEntityLinksReadParityStatus, readParitySetsSql } from "@/lib/migrations/entity-links-read-parity";
+import { integrationDatabaseUrl } from "@/__tests__/helpers/integration-database"
 
 const read = (relative: string) => readFileSync(path.join(process.cwd(), relative), "utf8");
 
@@ -42,7 +43,7 @@ describe("registration and shape", () => {
   });
 });
 
-const databaseUrl = process.env.READ_PARITY_TEST_DATABASE_URL;
+const databaseUrl = integrationDatabaseUrl;
 
 describe.skipIf(!databaseUrl)("against a real Postgres", () => {
   const schema = `parity_${randomUUID().replaceAll("-", "")}`;

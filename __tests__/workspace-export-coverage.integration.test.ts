@@ -22,8 +22,9 @@ import { importWorkspaceBundle } from "@/lib/workspace-export/import"
 import { deleteWorkspaceCascade } from "@/lib/delete-workspace-cascade"
 import { encodeRow } from "@/lib/workspace-export/codec"
 import { PARENT, delegateFor, exportOrder, modelHasId, modelHasWorkspaceId } from "@/lib/workspace-export/scope"
+import { integrationDatabaseUrl } from "@/__tests__/helpers/integration-database"
 
-const databaseUrl = process.env.WORKSPACE_EXPORT_DATABASE_URL
+const databaseUrl = integrationDatabaseUrl
 
 function memoryStorage(): ArtifactStorage {
   const files = new Map<string, Uint8Array>()

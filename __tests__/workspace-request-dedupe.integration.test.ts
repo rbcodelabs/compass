@@ -7,6 +7,7 @@ import { PrismaPg } from "@prisma/adapter-pg"
 import { Pool } from "pg"
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import type { AppPrismaClient } from "@/lib/db"
+import { integrationDatabaseUrl } from "@/__tests__/helpers/integration-database"
 
 /**
  * Statement-count proof for the request-scoped workspace resolver.
@@ -150,10 +151,14 @@ function instrumentPool(target: Pool) {
 // 2 (workspaces + organizations) from the narrowed getUserWorkspaces.
 const BASELINE_OPERATIONS = 5
 const BASELINE_SELECTS = 10
-const DEDUPED_OPERATIONS = 3
-const DEDUPED_SELECTS = 4
+// Budget re-measured after #324 (org-wide member read-only workspace access, 6f86a53c), which added intended
+// queries: getUserWorkspaces also reads read-only org memberships (+1 operation, +2 selects through the organization
+// include). The dedupe itself is still proven by the per-key assertions below (Workspace.findFirst once, one session
+// read, no WorkspaceMember walk); this total only guards against new, unintended queries creeping in.
+const DEDUPED_OPERATIONS = 4
+const DEDUPED_SELECTS = 6
 
-const databaseUrl = process.env.WORKSPACE_DEDUPE_DATABASE_URL
+const databaseUrl = integrationDatabaseUrl
 
 describe.skipIf(!databaseUrl).sequential("workspace request dedupe", () => {
   const schema = `ws_dedupe_${randomUUID().replaceAll("-", "")}`
@@ -298,7 +303,10 @@ describe.skipIf(!databaseUrl).sequential("workspace request dedupe", () => {
       await getWorkspaceContext(ORG_SLUG, WS_SLUG)
       await getWorkspaceContext(ORG_SLUG, "some-other-workspace")
     })
-    expect(counts.get("Workspace.findFirst")).toBe(2)
+    // One lookup for the real slug. The unknown slug misses, and because the caller is an org member
+    // getWorkspaceContext then runs the read-only-access fallback findFirst (#324): 1 + 2 = 3. A broken memo
+    // would repeat the first key and show 4.
+    expect(counts.get("Workspace.findFirst")).toBe(3)
   })
 
   it("does NOT persist across request scopes", async () => {

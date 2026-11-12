@@ -3,6 +3,7 @@ import { Pool } from "pg"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { assertCardSortNewEntriesMigration } from "@/lib/migrations/card-sort-new-entries"
 import { applyMigrations } from "@/lib/migrations/runner"
+import { integrationDatabaseUrl } from "@/__tests__/helpers/integration-database"
 
 /**
  * 066 through the registered runner, on a throwaway schema of this suite's own.
@@ -10,7 +11,7 @@ import { applyMigrations } from "@/lib/migrations/runner"
  * `prisma db push` invents its own index names, so only the runner proves the SQL
  * and the postcondition assertion agree.
  */
-const databaseUrl = process.env.CARD_SORT_DATABASE_URL
+const databaseUrl = integrationDatabaseUrl
 
 describe.skipIf(!databaseUrl)("066 card sort new entries migration through the registered runner", () => {
   const schema = `card_sort_ne_${randomUUID().replaceAll("-", "")}`

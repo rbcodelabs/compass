@@ -3,8 +3,9 @@ import { Pool } from "pg"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { applyMigrations } from "@/lib/migrations/runner"
 import { assertProductAnalyticsMigration } from "@/lib/migrations/product-analytics"
+import { integrationDatabaseUrl } from "@/__tests__/helpers/integration-database"
 
-const databaseUrl = process.env.ANALYTICS_MIGRATION_DATABASE_URL
+const databaseUrl = integrationDatabaseUrl
 describe.skipIf(!databaseUrl)("analytics migration through the registered runner", () => {
   const schema = `analytics_test_${randomUUID().replaceAll("-", "")}`
   const pool = new Pool({ connectionString: databaseUrl, max: 2 })

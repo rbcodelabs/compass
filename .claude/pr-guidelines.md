@@ -22,6 +22,7 @@ ssh -o ConnectTimeout=3 -o BatchMode=yes dev-builder 'true' && echo REACHABLE ||
 |---|---|---|
 | Type-check | `tq-check` | `pnpm tsc --noEmit` (profile runs typecheck) |
 | Unit tests | `tq-check` | `pnpm test` |
+| Real-Postgres integration tests | `dev-builder` (throwaway `postgres:16`; CI runs them too) | `INTEGRATION_TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:<port>/compass_e2e pnpm exec vitest run <file>` (see below) |
 | E2E functional | `dev-builder` (no passing `tq` profile) | `pnpm test:e2e:functional` |
 | E2E screenshots | local (needs seeded local dev server + session file) | `pnpm test:e2e` |
 | Build | `dev-builder` | `pnpm build` |
@@ -33,6 +34,21 @@ ssh -o ConnectTimeout=3 -o BatchMode=yes dev-builder 'true' && echo REACHABLE ||
 > `tq-check` and the `compass-unit` profile are being added to `~/projects/testq` in a parallel PR. Until that merges, run the step on `dev-builder` per the `proxmox-devbox` skill, or locally.
 
 If the homelab is unreachable (e.g. off the home LAN), do not ask: run the local command from the table above, after checking load per the user-level Machine Capacity guidance, and state in the PR/report that the step ran locally because the homelab was unreachable. Always report which machine each step ran on. The interactive rev-loop dev server you watch in a browser stays local.
+
+### Real-Postgres integration tests
+
+Suites that need a real database (migrations, backfills, concurrency, tool approval, ...) import `__tests__/helpers/integration-database.ts` and skip themselves unless **`INTEGRATION_TEST_DATABASE_URL`** is set. It is the only opt-in variable: the old per-feature names (`TOOL_APPROVAL_DATABASE_URL`, `UPDATES_TEST_DATABASE_URL`, ...) are no longer read, and the helper prints a rename hint if one is still set. The value must be an isolated local `compass_e2e` URL (`localhost`/`127.0.0.1`, no `?schema=`); anything else throws. Each suite creates and drops its own random schema, so one throwaway database serves every suite.
+
+```sh
+# on dev-builder (or locally with podman); pick a free port and a unique container name
+podman run -d --name compass-itest-pg-$RANDOM -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=compass_e2e -p 127.0.0.1:5600:5432 docker.io/library/postgres:16
+export INTEGRATION_TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5600/compass_e2e PGSSLMODE=disable
+# a few suites clone the `compass_dev` schema, so prepare it once (this is the only place E2E_ISOLATED_DATABASE is needed)
+DATABASE_URL=$INTEGRATION_TEST_DATABASE_URL E2E_ISOLATED_DATABASE=1 pnpm e2e:db:prepare
+pnpm exec vitest run --maxWorkers=2 $(node scripts/integration-tests.mjs list)   # every integration suite
+```
+
+CI runs the same thing in the **Integration tests** workflow (`.github/workflows/integration-tests.yml`: `postgres:16` service, `--maxWorkers=2`). Its final step (`node scripts/integration-tests.mjs check`) fails the job if any opted-in file ran zero tests, so a misspelled variable cannot turn the job into a silent all-skipped green. The normal unit job leaves the variable unset, so these suites skip there. Remove the container when done (`podman rm -fv <name>`).
 
 ## Branch Naming
 

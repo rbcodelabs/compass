@@ -9,10 +9,11 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { bootstrapPreviewRun, cleanupPreviewRun, issuePreviewSession, teardownPreviewRun } from "@/lib/preview-automation/service";
 import { createLazyPrismaAuthAdapter } from "@/lib/lazy-prisma-auth-adapter";
 import type { PreviewGrant } from "@/lib/preview-automation/grants";
+import { integrationDatabaseUrl } from "@/__tests__/helpers/integration-database"
 
 // Explicit opt-in only. Never reuse compass_dev, public, an existing schema,
 // or a non-local/non-disposable database. Retain schema for failure inspection.
-const databaseUrl = process.env.PREVIEW_QA_DATABASE_URL;
+const databaseUrl = integrationDatabaseUrl;
 describe.skipIf(!databaseUrl)("real PostgreSQL preview lifecycle (not DSQL isolation evidence)", () => {
   let pool: Pool;
   let prisma: AppPrismaClient;
@@ -29,7 +30,7 @@ describe.skipIf(!databaseUrl)("real PostgreSQL preview lifecycle (not DSQL isola
   beforeAll(async () => {
     const url = new URL(databaseUrl!);
     if (url.protocol !== "postgresql:" || !["127.0.0.1", "localhost"].includes(url.hostname) || url.pathname !== "/compass_e2e" || url.searchParams.has("schema")) {
-      throw new Error("PREVIEW_QA_DATABASE_URL must be a local compass_e2e database without a schema override");
+      throw new Error("INTEGRATION_TEST_DATABASE_URL must be a local compass_e2e database without a schema override");
     }
     pool = new Pool({ connectionString: url.toString(), max: 5 });
     const existing = await pool.query("SELECT schema_name FROM information_schema.schemata WHERE schema_name=$1", [schema]);
@@ -38,7 +39,7 @@ describe.skipIf(!databaseUrl)("real PostgreSQL preview lifecycle (not DSQL isola
     url.searchParams.set("schema", schema);
     execFileSync("pnpm", ["exec", "prisma", "db", "push", "--url", url.toString()], { encoding: "utf8", stdio: "pipe", timeout: 60_000 });
     prisma = new PrismaClient({ adapter: new PrismaPg(pool, { schema }) }).$extends(injectUpdatedAtExtension);
-    vi.stubEnv("VERCEL_ENV", "preview"); vi.stubEnv("PREVIEW_AUTOMATION_ENABLED", "1"); vi.stubEnv("VERCEL_DEPLOYMENT_ID", deploymentId);
+    vi.stubEnv("VERCEL_ENV", "preview"); vi.stubEnv("PREVIEW_AUTOMATION_ENABLED", "1"); vi.stubEnv("VERCEL_DEPLOYMENT_ID", deploymentId); vi.stubEnv("VERCEL_URL", "qa-integration.vercel.app");
     console.info(`QA-only PostgreSQL schema: ${schema}`);
   }, 90_000);
   afterAll(async () => {

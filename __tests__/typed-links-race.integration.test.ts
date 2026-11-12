@@ -6,7 +6,7 @@
  *      reports created: true (an idempotent no-op for the loser, not a raw error);
  *   2. draining a parent with more than one chunk of links runs as several committed statements of at most 500 links.
  *
- *   TYPED_LINK_TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5437/compass_e2e \
+ *   INTEGRATION_TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5437/compass_e2e \
  *     npx vitest run __tests__/typed-links-race.integration.test.ts
  */
 import { randomUUID } from "node:crypto";
@@ -23,8 +23,9 @@ import {
   linkSolutionToKeyResult,
   runTypedLinkTransaction,
 } from "@/lib/typed-links";
+import { integrationDatabaseUrl } from "@/__tests__/helpers/integration-database"
 
-const databaseUrl = process.env.TYPED_LINK_TEST_DATABASE_URL ?? process.env.WORKSPACE_ID_TEST_DATABASE_URL;
+const databaseUrl = integrationDatabaseUrl;
 
 describe.skipIf(!databaseUrl)("typed links against a real Prisma client and unique index", () => {
   const schema = `tlrace_${randomUUID().replaceAll("-", "")}`;

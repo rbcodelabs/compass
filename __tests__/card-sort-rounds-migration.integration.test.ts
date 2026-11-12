@@ -3,6 +3,7 @@ import { Pool } from "pg"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { assertCardSortRoundsMigration } from "@/lib/migrations/card-sort-rounds"
 import { applyMigrations } from "@/lib/migrations/runner"
+import { integrationDatabaseUrl } from "@/__tests__/helpers/integration-database"
 
 /**
  * 065 through the registered runner, on a throwaway schema of this suite's own.
@@ -12,11 +13,11 @@ import { applyMigrations } from "@/lib/migrations/runner"
  * `idx_card_sort_*` names the postcondition assertion actually looks for absent.
  * The only way to know the migration and its assertion agree is to run both.
  *
- * Set CARD_SORT_DATABASE_URL to the local compass_e2e database to enable. The
+ * Set INTEGRATION_TEST_DATABASE_URL to the local compass_e2e database to enable. The
  * guard below is what keeps that var from ever pointing anywhere else — this
  * suite creates and drops schemas, which must never happen against DSQL.
  */
-const databaseUrl = process.env.CARD_SORT_DATABASE_URL
+const databaseUrl = integrationDatabaseUrl
 
 describe.skipIf(!databaseUrl)("065 card sort migration through the registered runner", () => {
   const schema = `card_sort_test_${randomUUID().replaceAll("-", "")}`

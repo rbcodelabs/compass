@@ -8,7 +8,7 @@
  *   3. deleting an entity's links, and a workspace's, runs as committed statements of at most 500 links each;
  *   4. the workspace-filtered endpoint reads and the explicit updatedAt behave against real SQL.
  *
- *   TYPED_LINK_TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5437/compass_e2e \
+ *   INTEGRATION_TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5437/compass_e2e \
  *     npx vitest run __tests__/links/entity-links.integration.test.ts
  */
 import { randomUUID } from "node:crypto";
@@ -25,8 +25,9 @@ import { runWithMcpActor } from "@/lib/mcp-authz";
 import { linkEntitiesTool, listLinksTool, unlinkEntitiesTool } from "@/lib/link-tool-handlers";
 import { LINK_WRITE_CHUNK, deleteLinksForEntity, deleteWorkspaceLinks, linkEntities } from "@/lib/links/service";
 import { isLinkUniqueRace, runTypedLinkTransaction } from "@/lib/typed-links";
+import { integrationDatabaseUrl } from "@/__tests__/helpers/integration-database"
 
-const databaseUrl = process.env.TYPED_LINK_TEST_DATABASE_URL ?? process.env.WORKSPACE_ID_TEST_DATABASE_URL;
+const databaseUrl = integrationDatabaseUrl;
 const TYPE = "EXPERIMENT_INFORMED_BY_STUDY";
 
 describe.skipIf(!databaseUrl)("entity_links against a real Prisma client and unique index", () => {

@@ -10,8 +10,9 @@ import { unzipSync } from "fflate"
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest"
 import type { AppPrismaClient } from "@/lib/db"
 import { injectUpdatedAtExtension } from "@/lib/prisma-updated-at"
+import { integrationDatabaseUrl } from "@/__tests__/helpers/integration-database"
 
-process.env.DATABASE_URL ??= process.env.WORKSPACE_EXPORT_DATABASE_URL
+process.env.DATABASE_URL ??= integrationDatabaseUrl
 delete process.env.VERCEL
 
 const connection = vi.hoisted(() => ({ prisma: null as AppPrismaClient | null, userId: null as string | null }))
@@ -24,7 +25,7 @@ const { POST: importRoute } = await import("@/app/api/workspace-import/[orgSlug]
 const { POST: prepareRoute } = await import("@/app/api/workspace-import/[orgSlug]/prepare/route")
 const { prepareBundleUpload, verifyBundleReceipt } = await import("@/lib/workspace-export/upload")
 
-const databaseUrl = process.env.WORKSPACE_EXPORT_DATABASE_URL
+const databaseUrl = integrationDatabaseUrl
 
 describe.skipIf(!databaseUrl)("workspace export/import routes", () => {
   const schema = `wxr_${randomUUID().replaceAll("-", "")}`

@@ -2,8 +2,9 @@ import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { applyMigrations } from "@/lib/migrations/runner";
+import { integrationDatabaseUrl } from "@/__tests__/helpers/integration-database"
 
-const databaseUrl = process.env.UPDATES_TEST_DATABASE_URL;
+const databaseUrl = integrationDatabaseUrl;
 describe.skipIf(!databaseUrl)("workspace Updates registered migration", () => {
   const schema = `updates_${randomUUID().replaceAll("-", "")}`;
   const pool = new Pool({ connectionString: databaseUrl, max: 2 });

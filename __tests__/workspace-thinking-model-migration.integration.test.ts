@@ -9,7 +9,7 @@
  * two things: 073 is a pure additive no-op for existing rows, and the current Prisma
  * client reads and writes the columns once 073 has added them.
  *
- *   THINKING_MODEL_TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5437/compass_e2e \
+ *   INTEGRATION_TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5437/compass_e2e \
  *     npx vitest run __tests__/workspace-thinking-model-migration.integration.test.ts --maxWorkers=2
  */
 import { randomUUID } from "node:crypto";
@@ -20,9 +20,10 @@ import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { applyMigrations, getMigrationStatus } from "@/lib/migrations/runner";
 import { injectUpdatedAtExtension } from "@/lib/prisma-updated-at";
+import { integrationDatabaseUrl } from "@/__tests__/helpers/integration-database"
 
 const MIGRATION = "073_workspace_thinking_model";
-const databaseUrl = process.env.THINKING_MODEL_TEST_DATABASE_URL;
+const databaseUrl = integrationDatabaseUrl;
 
 describe.skipIf(!databaseUrl)("073 workspace thinking_model columns (registered migration)", () => {
   // Prefix must not contain the column name: the index/constraint probes below regex on it.

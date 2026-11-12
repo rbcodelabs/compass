@@ -5,8 +5,9 @@ import { Pool } from "pg"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { applyMigrations } from "@/lib/migrations/runner"
 import type { LegacyDecisionRepairManifest } from "@/lib/legacy-decision-repair"
+import { integrationDatabaseUrl } from "@/__tests__/helpers/integration-database"
 
-const databaseUrl = process.env.LEGACY_DECISION_REPAIR_DATABASE_URL
+const databaseUrl = integrationDatabaseUrl
 const run = databaseUrl ? describe : describe.skip
 
 run("legacy decision repair PostgreSQL transaction", () => {

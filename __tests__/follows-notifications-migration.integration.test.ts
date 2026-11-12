@@ -4,12 +4,13 @@ import { PrismaClient } from "@prisma/client"
 import { PrismaPg } from "@prisma/adapter-pg"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { applyMigrations } from "@/lib/migrations/runner"
+import { integrationDatabaseUrl } from "@/__tests__/helpers/integration-database"
 
 // Runs 068 through the registered runner against a throwaway schema in the
 // local compass_e2e database, then exercises the real Prisma models against the
-// resulting tables. Skipped unless UPDATES_TEST_DATABASE_URL is set (same
+// resulting tables. Skipped unless INTEGRATION_TEST_DATABASE_URL is set (same
 // convention as the 060 workspace-updates integration test).
-const databaseUrl = process.env.UPDATES_TEST_DATABASE_URL
+const databaseUrl = integrationDatabaseUrl
 describe.skipIf(!databaseUrl)("follows and notifications registered migration", () => {
   const schema = `follows_${randomUUID().replaceAll("-", "")}`
   const pool = new Pool({ connectionString: databaseUrl, max: 2 })

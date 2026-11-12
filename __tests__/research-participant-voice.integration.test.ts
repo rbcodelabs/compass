@@ -6,8 +6,9 @@ import { Pool } from "pg"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { appendParticipantVoiceEvent, claimParticipantVoiceLease, releaseParticipantVoiceLease } from "@/lib/research-participant-voice"
 import { hashResearchResumeToken } from "@/lib/research-session"
+import { integrationDatabaseUrl } from "@/__tests__/helpers/integration-database"
 
-const url = process.env.RESEARCH_PARTICIPANT_VOICE_DATABASE_URL
+const url = integrationDatabaseUrl
 const run = url ? describe : describe.skip
 run("participant voice persistence on owned real PostgreSQL", () => {
   const schema = `participant_events_${randomUUID().replaceAll("-", "")}`

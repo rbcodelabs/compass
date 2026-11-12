@@ -23,6 +23,7 @@ import { Pool } from "pg"
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest"
 import type { AppPrismaClient } from "@/lib/db"
 import { injectUpdatedAtExtension } from "@/lib/prisma-updated-at"
+import { integrationDatabaseUrl } from "@/__tests__/helpers/integration-database"
 
 const connection = vi.hoisted(() => ({
   prisma: null as AppPrismaClient | null,
@@ -63,7 +64,7 @@ const QUARTERS = [
   { label: "Q2", value: "q2" },
 ]
 
-const databaseUrl = process.env.CARD_SORT_DATABASE_URL
+const databaseUrl = integrationDatabaseUrl
 
 describe.skipIf(!databaseUrl)("card sort visibility at the route boundary", () => {
   const schema = `card_sort_vis_${randomUUID().replaceAll("-", "")}`

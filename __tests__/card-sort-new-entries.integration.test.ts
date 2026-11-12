@@ -20,6 +20,7 @@ import { Pool } from "pg"
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest"
 import type { AppPrismaClient } from "@/lib/db"
 import { injectUpdatedAtExtension } from "@/lib/prisma-updated-at"
+import { integrationDatabaseUrl } from "@/__tests__/helpers/integration-database"
 
 const connection = vi.hoisted(() => ({
   prisma: null as AppPrismaClient | null,
@@ -44,7 +45,7 @@ const BUCKETS = [
   { label: "Later", value: "later" },
 ]
 
-const databaseUrl = process.env.CARD_SORT_DATABASE_URL
+const databaseUrl = integrationDatabaseUrl
 
 describe.skipIf(!databaseUrl)("card sort: proposed new entries", () => {
   const schema = `card_sort_new_${randomUUID().replaceAll("-", "")}`

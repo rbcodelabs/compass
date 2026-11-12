@@ -2,7 +2,7 @@
  * Real-PostgreSQL integration check for lib/preview-login.ts's
  * ensureSampleWorkspace/issuePreviewLoginSession, gated the same way as
  * __tests__/preview-automation-qa/postgres-integration.test.ts: explicit
- * opt-in via PREVIEW_QA_DATABASE_URL, a disposable schema in the guarded
+ * opt-in via INTEGRATION_TEST_DATABASE_URL, a disposable schema in the guarded
  * local compass_e2e database, never compass_dev/public/a real schema.
  *
  * Exercises the actual seed path (lib/preview-automation/scenarios.ts's
@@ -18,8 +18,9 @@ import type { AppPrismaClient } from "@/lib/db";
 import { injectUpdatedAtExtension } from "@/lib/prisma-updated-at";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { integrationDatabaseUrl } from "@/__tests__/helpers/integration-database"
 
-const databaseUrl = process.env.PREVIEW_QA_DATABASE_URL;
+const databaseUrl = integrationDatabaseUrl;
 
 describe.skipIf(!databaseUrl)("preview-login sample workspace (not DSQL isolation evidence)", () => {
   let pool: Pool;
@@ -31,7 +32,7 @@ describe.skipIf(!databaseUrl)("preview-login sample workspace (not DSQL isolatio
   beforeAll(async () => {
     const url = new URL(databaseUrl!);
     if (url.protocol !== "postgresql:" || !["127.0.0.1", "localhost"].includes(url.hostname) || url.pathname !== "/compass_e2e" || url.searchParams.has("schema")) {
-      throw new Error("PREVIEW_QA_DATABASE_URL must be a local compass_e2e database without a schema override");
+      throw new Error("INTEGRATION_TEST_DATABASE_URL must be a local compass_e2e database without a schema override");
     }
     pool = new Pool({ connectionString: url.toString(), max: 5 });
     const existing = await pool.query("SELECT schema_name FROM information_schema.schemata WHERE schema_name=$1", [schema]);

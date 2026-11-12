@@ -4,12 +4,13 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { applyMigrations } from "@/lib/migrations/runner"
 import { WORK_ITEM_IDS_BACKFILL_BATCH_SIZE, assertWorkItemIdsBackfill, backfillWorkItemIds, getWorkItemIdsBackfillStatus } from "@/lib/migrations/work-item-ids-backfill"
 import { replayAllMigrations } from "./helpers/replay-migrations"
+import { integrationDatabaseUrl } from "@/__tests__/helpers/integration-database"
 
 /**
  * 093 / 094 through the registered runner on a throwaway schema, with legacy rows seeded first.
- * Set WORK_ITEM_IDS_DATABASE_URL to the local compass_e2e database to enable.
+ * Set INTEGRATION_TEST_DATABASE_URL to the local compass_e2e database to enable.
  */
-const databaseUrl = process.env.WORK_ITEM_IDS_DATABASE_URL
+const databaseUrl = integrationDatabaseUrl
 const BACKFILL = "093_work_item_ids_backfill"
 const RESIDUAL = "094_work_item_ids_residual_backfill"
 
