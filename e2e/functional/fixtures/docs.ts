@@ -25,4 +25,10 @@ export async function clickNewDoc(page: Page): Promise<void> {
   const overlay = page.locator('aside[data-mode="overlay"][aria-label="Library"]');
   if (await overlay.isVisible().catch(() => false)) await page.keyboard.press("Escape");
   await overlay.waitFor({ state: "hidden", timeout: 3_000 }).catch(() => {});
+
+  // The new document's editor can remount just after the URL changes. Wait until it has settled and is empty, or text typed right
+  // away lands in an editor that is then replaced (a typed fence or sentence silently disappears).
+  await page.waitForLoadState("networkidle");
+  await page.locator(".ProseMirror p.is-editor-empty").first().waitFor({ timeout: 10_000 });
+  await page.waitForTimeout(500);
 }
