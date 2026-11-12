@@ -31,13 +31,16 @@ Postconditions, proved BEFORE the receipt is recorded (each refuses the receipt 
 
 A row whose endpoint vanished after the deploy (a deleted comment) is reported, never refused: readers already hide it.
 
+> **History.** The deploy-before-migration fallback described in this section was removed together with `task_links` by migration 116
+> (`entity-links-legacy-drop.md`). 115 must therefore have a receipt in a deployment before the 116 code is deployed there.
+
 ## Order safety: deploy first, migrate after, nothing disappears in between
 
 The code in this change no longer writes `task_links` and reads origin links from `entity_links`. It is deployed BEFORE this migration
 runs, so for a while every origin link made before the deploy exists only in `task_links`. To keep those visible:
 
 - **Reads** (`lib/task-links-read.ts`) merge `entity_links` with the not-yet-moved `task_links` rows (`readUnmovedTaskLinks` in
-  `lib/legacy-link-tables.ts`), by pair, `entity_links` winning. That covers the task screen, `list_task_links`, comment thread sync,
+  `lib/legacy-link-tables.ts`, since deleted), by pair, `entity_links` winning. That covers the task screen, `list_task_links`, comment thread sync,
   comment task cards, the "agents already assigned in this doc/target" lookups and the agent's plan card.
 - **Writes** go to `entity_links` only. A repeat of a link that exists only in `task_links` returns that link instead of creating a copy.
 - **Deletes** (unlink, comment delete, workspace delete) remove the pair from both stores, so the fallback cannot bring a removed link back.
@@ -68,4 +71,4 @@ previous deploy never reads them and `task_links` is untouched.
 
 - `entityLinksTaskLinkMove.unmoved = 0` and `entityLinksReadParity.unmovedTaskOriginLinks = 0` in production.
 - The quarantined ids were reviewed (they are unreachable by any reader).
-- The follow-up deletes `lib/legacy-link-tables.ts` task_links functions (`readUnmovedTaskLinks`, `findLegacyTaskLinkById`, `deleteLegacyTaskLinkPair`, `deleteLegacyTaskLinksTo`, `deleteFrozenTaskLinks`), their call sites in `lib/task-link-writes.ts` and `lib/task-links-read.ts`, the `TaskLink` model and the `Task.links` relation, and the `task_links` branches of `entity-links-read-parity.ts`.
+- Migration 116 (the follow-up) deleted `lib/legacy-link-tables.ts` and its call sites, the `TaskLink` model and the `Task.links` relation. The `task_links` branch of `entity-links-read-parity.ts` stays because 116's own preflight uses it; it reports `legacyDropped` once the table is gone.

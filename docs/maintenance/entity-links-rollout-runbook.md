@@ -1,5 +1,10 @@
 # entity_links rollout runbook
 
+> **STATUS: rollout complete.** All four families read and write `entity_links` only; the mirror and read flags and the shadow comparator
+> are gone from the code. The only remaining work is the irreversible drop of the legacy tables and the `opportunities.linked_key_result_id`
+> column (migration `116_entity_links_drop_legacy_tables`), which has its own runbook: **`entity-links-legacy-drop.md`**. The steps below are
+> kept as history and for a deployment that has not been through them yet.
+
 Operator steps for moving each link family from the legacy tables to `entity_links` (ADR "One generic entity_links table"). It applies per
 deployment: run the whole sequence on each database you operate. Every production change below needs an explicit go-ahead from the owner.
 Authenticate with the `x-migration-secret` header; never print the secret or put it in a file.
@@ -35,15 +40,12 @@ served). Flags are plain env vars: a change needs a redeploy to take effect.
    there (a deployment still on `off` or `shadow` would show empty links after the deploy, because the cleanup code never reads the legacy
    tables again) and the parity GET was 0. The legacy tables, their Prisma models and the migrations stay in place. The
    `COMPASS_ENTITY_LINKS_*_MIRROR` and `*_READ` env vars are ignored and can be deleted from each environment after the deploy.
-   Left for the follow-up change: drop the four legacy tables (`opportunity_objective_links`, `solution_key_result_links`,
-   `artifact_links`, and the association rows of `task_links`) and the `opportunities.linked_key_result_id` column, and delete the env vars.
-   The COMMENT and AGENT_CONVERSATION task links were never mirrored; they move into `entity_links` (`TASK_CREATED_FROM`) by migration
-   `115_entity_links_task_link_move` (see `entity-links-task-link-move.md`). `task_links` can be dropped only after that migration's status
-   reports zero unmoved rows.
-   Two places still touch a frozen table on purpose, because Prisma's emulated `Restrict` (relationMode = "prisma") would otherwise refuse
-   the parent delete: `lib/legacy-link-tables.ts` removes `artifact_links` rows before an Artifact goes, and `deleteLinksOfTasks` in
-   `lib/task-link-writes.ts` removes `task_links` rows before a workspace's tasks go (it now lives in `lib/legacy-link-tables.ts` as `deleteFrozenTaskLinks`). Both disappear
-   with the tables. `lib/legacy-link-tables.ts` also holds the deploy-before-migration-115 read fallback; it is deleted with `task_links`.
+   The follow-up change drops the four legacy tables (`opportunity_objective_links`, `solution_key_result_links`, `artifact_links`,
+   `task_links`) and the `opportunities.linked_key_result_id` column with the explicit-only migration `116_entity_links_drop_legacy_tables`
+   (see `entity-links-legacy-drop.md`), removes their Prisma models, `lib/legacy-link-tables.ts` and the deploy-before-migration-115 read
+   fallback. The COMMENT and AGENT_CONVERSATION task links were never mirrored; they moved into `entity_links` (`TASK_CREATED_FROM`) by
+   migration `115_entity_links_task_link_move` (see `entity-links-task-link-move.md`), which must have run in a deployment before that
+   follow-up code is deployed there.
 
 ## Residual drift
 
@@ -59,7 +61,9 @@ immediately; the mirror keeps writing, so no data is lost and a later flip needs
 
 After the step 7 code is deployed there is no flag to flip: links written since then exist only in `entity_links`, so redeploying the previous
 build (which reads the legacy tables when its flags are `off`, or `entity_links` when they are `on`) is safe only with every family's `*_READ`
-still `on`. Keep those env vars set until the follow-up change deletes them.
+still `on`. Keep those env vars set until the follow-up change (the 116 drop) is deployed AND has been run, then delete them (see
+`entity-links-legacy-drop.md`, "Environment variables"). Once 116 has run, a rollback to a build that reads the legacy tables is impossible
+without restoring the backup.
 
 ## What to verify, per family, before `on` (historical: done before step 7)
 

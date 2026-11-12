@@ -2,8 +2,8 @@
 
 > **Status: historical (entity_links cleanup, runbook step 7).** entity_links is now the only store for Solution <-> Key Result links. The dual-write mirror, the
 > `COMPASS_ENTITY_LINKS_*_MIRROR` / `*_READ` flags and the shadow-compare code are gone; this runbook describes how the one-time backfill
-> moved the old rows and is kept for deployments that have not run it yet. The legacy table is frozen (nothing reads or writes it) until a
-> later change drops it. `GET /api/admin/migrate` still reports `entityLinksReadParity`, now a historical check (see the runbook).
+> moved the old rows and is kept for deployments that have not run it yet. The legacy table is frozen (nothing reads or writes it) until
+> migration 116 drops it (`entity-links-legacy-drop.md`); after that this migration's data half is skipped as "nothing to carry over". `GET /api/admin/migrate` still reports `entityLinksReadParity`, now a historical check (see the runbook).
 
 Runbook for migration `098_entity_links_backfill_solution_key_result` (ADR "One generic entity_links table", phase 4). Nothing here applies
 anything by itself. (The numeric prefix 098 is shared with `098_agent_kind_and_workspace_owner`; duplicate prefixes are accepted, ADR-0012,
