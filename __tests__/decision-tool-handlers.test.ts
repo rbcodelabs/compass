@@ -63,7 +63,7 @@ describe("decision MCP handlers", () => {
     const result = await listReviewRequests({ workspaceId: "workspace-1", state: "PENDING" })
 
     expect(result.content[0].text).toContain("Commit item [PENDING]")
-    expect(mockListRequests).toHaveBeenCalledWith(expect.objectContaining({ where: { workspaceId: "workspace-1", state: "PENDING" } }))
+    expect(mockListRequests).toHaveBeenCalledWith(expect.objectContaining({ where: { workspaceId: "workspace-1", gateType: { not: "TOOL_APPROVAL" }, state: "PENDING" } }))
   })
 
   // The Building-investment gate is retired: its rows survive for audit, but

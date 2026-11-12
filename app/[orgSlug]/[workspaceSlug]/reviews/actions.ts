@@ -5,6 +5,7 @@ import { auth } from "@/auth"
 import getPrisma from "@/lib/db"
 import { recordDecision } from "@/lib/decision-service"
 import { isOrgAdminRole } from "@/lib/roles"
+import { TOOL_APPROVAL_SURFACE_MESSAGE, isToolApprovalGate, toolApprovalPath } from "@/lib/tool-approval/gate"
 import { queueAuthorizedRelease } from "@/lib/release-authorization"
 import { getReleaseSourceRevalidator } from "@/lib/github-release-source-revalidator"
 import { createTrackedDecisionRequest, reviseTrackedDecisionRequest, recordDecisionNoAction, type TrackedDecisionOptionInput, type TrackedDecisionQuestionInput, type TrackedSubjectType } from "@/lib/tracked-decisions"
@@ -76,6 +77,12 @@ export async function decideReviewAction(input: {
   const revision = await prisma.reviewRevision.findUnique({ where: { id: input.revisionId }, include: { request: true } })
   if (!revision) throw new Error("Review revision not found")
   if (RETIRED_GATE_TYPES.has(revision.request.gateType)) throw new Error("This legacy review is read-only.")
+  if (isToolApprovalGate(revision.request.gateType)) {
+    // Never record a decision here: nothing on this path would execute the approved action.
+    const where = await prisma.workspace.findUnique({ where: { id: revision.request.workspaceId }, select: { slug: true, organization: { select: { slug: true } } } })
+    const path = where?.organization ? ` Open ${toolApprovalPath(where.organization.slug, where.slug, revision.request.id)}.` : ""
+    throw new Error(`${TOOL_APPROVAL_SURFACE_MESSAGE}${path}`)
+  }
   const userId = await requireWorkspaceMember(revision.request.workspaceId)
   const decision = await recordDecision({
     actor: { kind: "USER", userId },

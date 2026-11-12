@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto"
+import { excludeToolApprovals } from "@/lib/tool-approval/gate"
 import { getLinkedTargetIds } from "@/lib/task-links-read"
 import getPrisma from "@/lib/db"
 
@@ -417,7 +418,7 @@ export async function listTrackedDecisions(input: TrackedDecisionListInput) {
     ...((input.outcome || input.reviewerId || input.from || input.to) ? [{ decisions: { some: decisionWhere } }] : []),
     ...(input.subjectType ? [{ packetJson: { contains: `\"type\":\"${input.subjectType}\"` } }] : []),
   ]
-  const where = { workspaceId: input.workspaceId, ...(input.includeLegacy ? {} : { gateType: TRACKED_GATE }), ...(input.tab ? { state: input.tab } : {}), ...(revisionPredicates.length ? { currentRevision: { is: { AND: revisionPredicates } } } : {}) }
+  const where = { workspaceId: input.workspaceId, ...(input.includeLegacy ? excludeToolApprovals : { gateType: TRACKED_GATE }), ...(input.tab ? { state: input.tab } : {}), ...(revisionPredicates.length ? { currentRevision: { is: { AND: revisionPredicates } } } : {}) }
   const [requests, total] = await Promise.all([prisma.reviewRequest.findMany({ where, include: { currentRevision: { include: { options: { orderBy: { sortOrder: "asc" } }, decisions: { include: { option: true } } } } }, orderBy: { updatedAt: "desc" }, skip: (page - 1) * pageSize, take: pageSize }), prisma.reviewRequest.count({ where })])
   return { requests, total, page, pageSize, pageCount: Math.max(1, Math.ceil(total / pageSize)) }
 }

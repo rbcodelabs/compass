@@ -17,6 +17,7 @@ import { eligibleTaskAssignees } from "@/lib/task-assignment"
 import { isChoiceActionKey, parseDecisionAnswers, parsePacketQuestions } from "@/lib/tracked-decision-types"
 import { resolveThinkingModel } from "@/lib/thinking-model/resolve"
 import { DecisionAnswerList, DecisionQuestionList } from "@/components/decisions/decision-answers"
+import { TOOL_APPROVAL_SURFACE_MESSAGE, isToolApprovalGate, toolApprovalPath } from "@/lib/tool-approval/gate"
 
 function parsePacket(raw: string): Record<string, unknown> {
   try { return JSON.parse(raw) as Record<string, unknown> } catch { return {} }
@@ -83,6 +84,7 @@ export default async function ReviewRequestPage({ params, searchParams }: { para
   const isRevocation = request.gateType === "BUILDING_INVESTMENT_REVOCATION"
   const isPolicyActivation = request.gateType === "NOW_POLICY_ACTIVATION"
   const isTracked = request.gateType === "TRACKED_DECISION"
+  const isToolApproval = isToolApprovalGate(request.gateType)
   const trackedPacket = isTracked ? parseTrackedDecisionPacket(revision.packetJson) : null
   // The Building-investment gate is retired alongside NOW commitment and native
   // policy activation. Historical rows still render read-only for audit; no new
@@ -90,6 +92,21 @@ export default async function ReviewRequestPage({ params, searchParams }: { para
   const isRetired = request.gateType === "NOW_COMMITMENT" || isPolicyActivation || isInvestment
   const canDecide = canDecideReview(request.workspace.members[0]?.role, request.workspace.organization.members[0]?.role)
   const canEditArtifacts = request.workspace.members.length > 0
+  if (isToolApproval) {
+    // Nothing about an approval (title, summary, arguments) is shown on this generic page: members get a 404, admins a pointer to
+    // the dedicated approval page, which is the only place that can decide it.
+    if (!canDecide) notFound()
+    return (
+      <main className="mx-auto w-full min-w-0 max-w-3xl space-y-6 overflow-x-hidden p-4 sm:p-6">
+        <p className="text-sm text-muted-foreground">Tool approval</p>
+        <section className="space-y-2 rounded-lg border p-4 text-sm">
+          <strong>This approval is decided on its own page.</strong>
+          <p className="text-muted-foreground">{TOOL_APPROVAL_SURFACE_MESSAGE}</p>
+          <a className="font-medium text-primary underline" href={toolApprovalPath(orgSlug, workspaceSlug, request.id)}>Open the approval page</a>
+        </section>
+      </main>
+    )
+  }
   const artifacts = isTracked ? await getDecisionArtifacts(request.workspaceId, requestId) : []
   const availableArtifacts = isTracked && canEditArtifacts ? await prisma.artifact.findMany({
     where: { workspaceId: request.workspaceId, status: "ACTIVE", id: { notIn: artifacts.map((artifact) => artifact.id) } },

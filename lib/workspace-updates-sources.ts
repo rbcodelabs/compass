@@ -1,6 +1,7 @@
 import type { AppTransactionClient } from "./db";
 import type { WorkspaceUpdateEvent } from "@prisma/client";
 import type { UpdateItem } from "./workspace-updates-model";
+import { excludeToolApprovals } from "./tool-approval/gate";
 
 type Source = { title: string; path: string };
 export async function resolveUpdateSources(
@@ -157,7 +158,7 @@ export async function resolveUpdateSources(
       }),
     tx.reviewRequest
       .findMany({
-        where: { workspaceId, id: { in: ids("DECISION") } },
+        where: { workspaceId, id: { in: ids("DECISION") }, ...excludeToolApprovals },
         select: { id: true, currentRevision: { select: { title: true } } },
       })
       .then((rows) => {

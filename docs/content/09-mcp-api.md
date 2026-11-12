@@ -1063,6 +1063,36 @@ These tools read Slack through the Compass bot's Vercel Connect credential. They
 | `get_solution_score` | Get a solution's saved score, the model version it was scored under, and a `stale` flag if the live model has since been updated |
 | `list_top_opportunities` | List scored opportunities ranked by normalized score (0-100); pass `orgSlug` for a cross-workspace comparability view or `workspaceId` for a single workspace |
 
+## Tools that need human approval
+
+A tool can be set up so that calling it never performs the action directly. Instead the call files an **approval request** for a workspace admin and returns without doing anything. No tool requires approval yet; this describes the mechanism a tool opts in to.
+
+**What a caller sees.** The result has `status: "APPROVAL_REQUIRED"` and `executed: false`, plus the request `requestId`, its `displayId` (a `DEC-n` number), a `path` to the approval page, and the current and proposed state side by side. Tell the admin where to look and do not retry: an identical call made while the request is waiting returns the same request instead of a new one, and each workspace holds at most 25 waiting requests. A call that is blocked outright (a hard limit that no approval can override) or that could not be filed returns `ok: false` and is also not performed. Whoever calls the tool, a service key, an agent key or a person, gets this result; none of them can approve their own call.
+
+**Who approves and what happens next.** A workspace or organization admin approves or denies on the approval page. An approval runs the action once, as that admin, only if everything still holds when it is executed: the approver is still an admin, the request has not expired and was approved within the last 15 minutes, the request has not been altered, and the state it would change is exactly what the admin saw. Otherwise nothing runs and a fresh approval is needed. A failed run is final too: it is recorded and never retried, so the call must be approved again.
+
+**Where approvals appear.** Approvals are not decisions. They are kept out of the Decisions list, `list_review_requests`, `get_review_request`, `list_decisions` and `get_decision`, and `apply_recorded_decision` refuses them. They share the `DEC-n` numbering.
+
+### For developers: opting a tool in
+
+Add one entry to the registry in `lib/tool-approval/registry.ts` (empty in production until each tool's pilot and its security review). An entry gives the tool name, a stable `capabilityClass`, and these functions:
+
+- `describe(args, ctx)`: the title and summary shown to the admin.
+- `readBefore(args, ctx)`: the current state the call would change, read live. It is read again at execution and must be unchanged.
+- `computeAfter(args, before)`: the state the call would leave behind.
+- `floors(args, before, ctx)` (optional): reasons the call must be refused no matter who approves it.
+- `execute(args, ctx)`: the real write, the same code path the tool used before it opted in.
+- `redact(kind, value)` (optional): drops incidental sensitive fields from the packet's `args`, `before` and `after`, and so from everything stored, shown to admins and returned over MCP. `execute` receives the redacted `args`, and the executor applies it to the live before-state before comparing, so never redact a field `execute` needs.
+
+The contract has four rules that the platform cannot enforce for you:
+
+1. **No secrets in arguments.** Arguments, before and after are stored verbatim and shown to admins. Do not opt in a tool that takes a credential; `redact` is a safety net, not a licence.
+2. **`execute` is a compare-and-set.** The executor re-reads `before` once and compares it, but that check and your write are not one atomic step. Make the write conditional on the state you read (an `updateMany` with the before-values in its `where`, in one transaction) and treat zero rows changed as a failure.
+3. **Re-validate every referenced entity.** The approver's authority is not the requester's. `readBefore` and `execute` must check that each id in the arguments belongs to the workspace, instead of trusting that whoever asked could see it.
+4. **Hard limits go in `floors`.** They run at request time and again at execution, regardless of who approved.
+
+The MCP `register()` wrapper (`app/api/mcp/route.ts`) then intercepts the tool after its authorization gate; the REST executor refuses the matching REST operation. Any other entry point that calls the handler directly (an in-app agent, a job) does not pass through either guard and must be checked before a tool opts in.
+
 ## Recency filtering and sorting
 
 `list_opportunities`, `list_solutions`, `list_assumptions`, `list_experiments`,

@@ -44,6 +44,7 @@ import type { ScoringModelData } from "@/lib/types";
 import { resolveThinkingModel } from "@/lib/thinking-model/resolve";
 import { loadObjectiveLinkedOpportunities } from "@/lib/objective-linked-opportunities";
 import { loadOpportunityChainExtras } from "@/lib/thinking-model/opportunity-chain-data";
+import { excludeToolApprovals } from "@/lib/tool-approval/gate"
 
 /**
  * ADR-0012 step 6a — the three OST detail fetchers that carry Evidence resolve
@@ -562,7 +563,7 @@ async function fetchTask(id: string, workspaceId: string) {
       // model-lookup dispatch below.
       if (linkedType === "DECISION") {
         const rows = await prisma.reviewRequest.findMany({
-          where: { id: { in: ids }, workspaceId },
+          where: { id: { in: ids }, workspaceId, ...excludeToolApprovals },
           select: { id: true, currentRevision: { select: { title: true } } },
         });
         for (const row of rows) titleById.set(`DECISION:${row.id}`, row.currentRevision?.title ?? "Untitled decision");
