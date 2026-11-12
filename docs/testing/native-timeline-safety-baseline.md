@@ -32,7 +32,7 @@ Use a disposable local PostgreSQL 16 instance. The database name is intentionall
 Example with the project Podman workflow (choose an unused host port):
 
 ```sh
-podman run -d \
+podman run -d --rm \
   --name compass-native-timeline-e2e-pg \
   -e POSTGRES_PASSWORD=postgres \
   -e POSTGRES_DB=compass_e2e \
@@ -43,6 +43,8 @@ export DATABASE_URL='postgresql://postgres:postgres@localhost:5437/compass_e2e?s
 export E2E_ISOLATED_DATABASE=1
 pnpm e2e:db:prepare
 ```
+
+When you are done, remove the container **with its volume**: `podman rm -fv compass-native-timeline-e2e-pg`. The `postgres` image declares an anonymous data volume, so a plain `podman rm -f` orphans it (about 70 MB per run; dev-builder accumulated 133 of them in five weeks). `--rm` above covers the case where the container is simply stopped.
 
 `e2e:db:prepare` validates the target before connecting, creates `compass_dev`, projects the existing Prisma model into only that disposable schema, and installs a control sentinel in `public`. It is safe to rerun; two consecutive preparations must both report that the database is in sync. This local projection is test bootstrap only—it does not create or modify a repository migration.
 
