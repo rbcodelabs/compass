@@ -25,6 +25,7 @@ import { DecisionsFilters } from "@/components/decisions/decisions-filters"
 import { DecisionsTabs } from "@/components/decisions/decisions-tabs"
 import { buttonVariants } from "@/components/ui/button"
 import { isOrgAdminRole } from "@/lib/roles"
+import { isWorkspaceAdminUser } from "@/lib/agent-ownership"
 import { isChoiceActionKey, parseDecisionAnswers, trackedSubjectLabels } from "@/lib/tracked-decision-types"
 
 const SUBJECT_ICON: Record<TrackedSubjectType, ComponentType<{ className?: string }>> = {
@@ -90,6 +91,8 @@ export default async function DecisionsPage({ params, searchParams }: {
     reviewerId: query.reviewer && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(query.reviewer) ? query.reviewer : undefined, query: query.q, from: dateValue(query.from), to: dateValue(query.to, true), page, pageSize: 20, includeLegacy: true,
   })
   const prisma = getPrisma()
+  // Tool approvals are not decisions and never appear in this list; admins get a link to their own page.
+  const canSeeToolApprovals = await isWorkspaceAdminUser(prisma, session.user.id, workspace.id)
   const [workspaceMembers, organizationAdmins] = await Promise.all([
     prisma.workspaceMember.findMany({ where: { workspaceId: workspace.id }, select: { userId: true, user: { select: { name: true, email: true } } }, orderBy: { user: { name: "asc" } } }),
     prisma.organizationMember.findMany({ where: { organizationId: workspace.organizationId }, select: { userId: true, role: true, user: { select: { name: true, email: true } } }, orderBy: { user: { name: "asc" } } }),
@@ -108,6 +111,7 @@ export default async function DecisionsPage({ params, searchParams }: {
       description="Request, review, and revisit product decisions in one place."
       actions={
         <Suspense>
+          {canSeeToolApprovals && <Link href={`/${orgSlug}/${workspaceSlug}/approvals`} className={buttonVariants({ variant: "outline", size: "sm", className: "h-11 md:h-8" })}>Tool approvals</Link>}
           <DecisionsFilters reviewers={members.map((member) => ({ id: member.userId, name: member.user.name ?? member.user.email }))} />
           {/* Primary action: the label collapses to the icon under `sm` (docs/design/workspace-header.md). */}
           <RequestDecisionLink

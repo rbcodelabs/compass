@@ -3,6 +3,14 @@ import fs from "node:fs";
 import path from "node:path";
 import { getWorkspaceSwitchPath, orderPrimaryNav, TOP_LEVEL_SECTIONS } from "@/lib/workspace-nav";
 
+describe("getWorkspaceSwitchPath: tool approvals (A10)", () => {
+  const id = "33333333-3333-4333-8333-333333333333"
+  it("keeps the approvals landing page but never carries a request id into another workspace", () => {
+    expect(getWorkspaceSwitchPath(`/acme/a/approvals/${id}`, "acme", "a", "acme", "b")).toBe("/acme/b/approvals")
+    expect(getWorkspaceSwitchPath("/acme/a/approvals", "acme", "a", "other", "c")).toBe("/other/c/approvals")
+  })
+})
+
 describe("getWorkspaceSwitchPath", () => {
   it("drops a workspace-scoped entity ID when switching workspaces (the reported bug)", () => {
     // e.g. viewing an opportunity detail page in Workspace A, then switching to Workspace B

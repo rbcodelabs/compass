@@ -27,6 +27,7 @@ import { fetchArchivedConversations, setConversationArchived, type ArchivedConve
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { APPROVAL_UPDATE_PREFIX, isApprovalUpdateMessage } from "@/lib/tool-approval/messages"
 import { type PlanItem, type SerializedRun, type Subagent, type ToolStep } from "@/lib/agent-run-stream"
 import { AgentActivity, PlanCard } from "@/components/agent/agent-activity"
 import { LinkedObjectsCard } from "@/components/agent/linked-objects-card"
@@ -804,7 +805,7 @@ export function AgentChat({
             )}
 
             {messages.map((m) => (
-              <MessageRow key={m.id} message={m} userInitials={userInitials} userId={userId} shared={shared} />
+              <MessageRow key={m.id} message={m} userInitials={userInitials} userId={userId} shared={shared} workspaceId={workspaceId} conversationId={activeConversationId} basePath={basePath} />
             ))}
 
             {isStreaming && (
@@ -814,6 +815,9 @@ export function AgentChat({
                 userId={userId}
                 shared={shared}
                 phaseLabel={phaseLabel}
+                workspaceId={workspaceId}
+                conversationId={activeConversationId}
+                basePath={basePath}
               />
             )}
 
@@ -985,12 +989,18 @@ function MessageRow({
   userId,
   shared,
   phaseLabel,
+  workspaceId,
+  conversationId,
+  basePath,
 }: {
   message: Message
   userInitials: string
   userId: string
   shared: boolean
   phaseLabel?: string | null
+  workspaceId: string
+  conversationId: string | null
+  basePath: string
 }) {
   const isUser = message.role === "user"
   // A message with no recorded author is this tab's own, not yet reported back.
@@ -1014,8 +1024,13 @@ function MessageRow({
               : "border border-default bg-surface-card text-text-primary"
           }`}
         >
-          {!isUser && <AgentActivity toolCalls={message.toolCalls} plan={message.plan} subagents={message.subagents} running={message.id === "streaming"} />}
-          {isUser ? (
+          {!isUser && <AgentActivity toolCalls={message.toolCalls} plan={message.plan} subagents={message.subagents} running={message.id === "streaming"} workspaceId={workspaceId} conversationId={conversationId} basePath={basePath} />}
+          {isUser && isApprovalUpdateMessage(message.content) ? (
+            <div data-testid="approval-update-message">
+              <p className="mb-1 text-xs font-medium text-text-subtle">Approval update (system-generated)</p>
+              <p className="whitespace-pre-wrap break-words">{message.content.slice(APPROVAL_UPDATE_PREFIX.length)}</p>
+            </div>
+          ) : isUser ? (
             <p className="whitespace-pre-wrap break-words">{message.content}</p>
           ) : message.content ? (
             <Markdown>{message.content}</Markdown>
