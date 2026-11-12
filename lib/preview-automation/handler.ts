@@ -1,3 +1,4 @@
+import { compassEnv } from "@/lib/runtime-env";
 import { NextResponse } from "next/server";
 import getPrisma from "@/lib/db";
 import { getActiveSchema } from "@/lib/schema";
@@ -28,7 +29,7 @@ async function readBody(request: Request): Promise<Record<string, unknown>> {
 
 export async function handlePreviewAutomation(request: Request, operation: PreviewOperation): Promise<Response> {
   // Deliberately precedes metadata validation, auth parsing, and all database work.
-  if (process.env.VERCEL_ENV !== "preview" || process.env.PREVIEW_AUTOMATION_ENABLED !== "1") return reply({ error: "Not found" }, 404);
+  if (compassEnv() !== "preview" || process.env.PREVIEW_AUTOMATION_ENABLED !== "1") return reply({ error: "Not found" }, 404);
   let grant: PreviewGrant;
   try {
     getActiveSchema();

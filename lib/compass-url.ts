@@ -1,3 +1,4 @@
+import { compassEnv } from "@/lib/runtime-env"
 import { entityPath, type EntityLinkInput } from "@/lib/entity-links"
 
 /**
@@ -37,13 +38,13 @@ function parseVercelOrigin(raw: string): URL {
  * from this one resolver rather than from a second, drift-prone copy.
  */
 export function trustedCompassBaseUrl(): URL {
-  if (process.env.VERCEL_ENV === "preview") {
+  if (compassEnv() === "preview") {
     const previewHost = process.env.VERCEL_BRANCH_URL ?? process.env.VERCEL_URL
     if (!previewHost) throw new CompassUrlNotConfiguredError("Compass preview URL is not configured.")
     return parseVercelOrigin(previewHost)
   }
 
-  if (process.env.VERCEL_ENV === "production") {
+  if (compassEnv() === "production") {
     if (process.env.NEXT_PUBLIC_APP_URL) return parseTrustedOrigin(process.env.NEXT_PUBLIC_APP_URL, false)
     // Deliberately no fallback to VERCEL_PROJECT_PRODUCTION_URL: that host sits
     // behind Vercel's deployment-protection SSO wall, so silently building a
@@ -62,7 +63,7 @@ export function trustedCompassBaseUrl(): URL {
 
 export function researchVoiceWorkerCallbackBaseUrl(): URL {
   const base = trustedCompassBaseUrl()
-  if (process.env.VERCEL_ENV === "production" && base.port) {
+  if (compassEnv() === "production" && base.port) {
     throw new Error("Compass production callback URL must use the default HTTPS port.")
   }
   return new URL("/api/internal/research/voice", base)
