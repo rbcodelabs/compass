@@ -21,7 +21,7 @@ import { createDocCommentCore, deleteDocCommentCore, type CommentAnchorFields } 
 import { mentionRoles, uniqueMentions, type MentionRef } from "@/lib/comment-mentions"
 import { eligibleTaskAssignees, resolveTaskAssignees } from "@/lib/task-assignment"
 import { createWorkspaceTask } from "@/lib/task-create"
-import { getTasksLinkedToResidual } from "@/lib/task-links-read"
+import { getTasksLinkedToOrigin } from "@/lib/task-links-read"
 import { startRunForAssignedTask, type AgentRunOutcome } from "@/lib/agent-task-trigger"
 import { displayIdFromRow } from "@/lib/work-item-ids"
 import { runAfterCommit } from "@/lib/following-commit"
@@ -103,9 +103,9 @@ export function toCard(task: {
 /** Task card per comment id (one task per comment; the earliest link wins if data ever has more). */
 export async function loadCommentTaskCards(workspaceId: string, commentIds: string[]): Promise<Record<string, CommentTaskCardData>> {
   if (commentIds.length === 0) return {}
-  // COMMENT is a residual link kind (not an association), so it lives only in task_links (see lib/task-link-writes.ts).
+  // COMMENT is a TASK_CREATED_FROM link (see lib/task-link-writes.ts).
   const prisma = getPrisma()
-  const links = await getTasksLinkedToResidual(prisma, { workspaceId, linkedType: "COMMENT", linkedIds: commentIds })
+  const links = await getTasksLinkedToOrigin(prisma, { workspaceId, linkedType: "COMMENT", linkedIds: commentIds })
   if (links.length === 0) return {}
   const rows = await prisma.task.findMany({ where: { workspaceId, id: { in: [...new Set(links.map(link => link.taskId))] } } })
   const tasks = await resolveTaskAssignees(workspaceId, rows)
@@ -149,8 +149,10 @@ export async function agentIdsAssignedInDoc(workspaceId: string, docId: string):
   const prisma = getPrisma()
   const commentIds = (await prisma.docComment.findMany({ where: { docId }, select: { id: true } })).map(c => c.id)
   if (commentIds.length === 0) return []
+  const linkedTaskIds = [...new Set((await getTasksLinkedToOrigin(prisma, { workspaceId, linkedType: "COMMENT", linkedIds: commentIds })).map(link => link.taskId))]
+  if (linkedTaskIds.length === 0) return []
   const tasks = await prisma.task.findMany({
-    where: { workspaceId, assigneeAgentId: { not: null }, links: { some: { linkedType: "COMMENT", linkedId: { in: commentIds } } } },
+    where: { workspaceId, assigneeAgentId: { not: null }, id: { in: linkedTaskIds } },
     select: { assigneeAgentId: true },
   })
   return [...new Set(tasks.flatMap(t => (t.assigneeAgentId ? [t.assigneeAgentId] : [])))]

@@ -7,13 +7,14 @@ const mocks = vi.hoisted(() => ({
     workspaceMember: { findFirst: vi.fn() },
     docComment: { findMany: vi.fn() },
     task: { findMany: vi.fn() },
-    taskLink: { findMany: vi.fn() },
     user: { findMany: vi.fn() },
     agent: { findMany: vi.fn() },
     agentWorkspaceGrant: { findMany: vi.fn() },
     workspace: { findUnique: vi.fn() },
     organizationMember: { findMany: vi.fn() },
   },
+  // COMMENT links are TASK_CREATED_FROM rows in entity_links (lib/task-links-read.ts has its own tests); this file pins what the loaders ask of it.
+  linkedTo: vi.fn(),
   createComment: vi.fn(),
   deleteComment: vi.fn(),
   createTask: vi.fn(),
@@ -27,6 +28,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/lib/db", () => ({ default: () => mocks.db }))
 vi.mock("@/lib/doc-comments", () => ({ createDocCommentCore: mocks.createComment, deleteDocCommentCore: mocks.deleteComment }))
 vi.mock("@/lib/task-create", () => ({ createWorkspaceTask: mocks.createTask }))
+vi.mock("@/lib/task-links-read", () => ({ getTasksLinkedToOrigin: mocks.linkedTo }))
 vi.mock("@/lib/task-assignment", () => ({ eligibleTaskAssignees: mocks.eligible, resolveTaskAssignees: mocks.resolveAssignees }))
 vi.mock("@/lib/agent-task-trigger", () => ({ startRunForAssignedTask: mocks.trigger }))
 vi.mock("@/lib/follows", () => ({ autoFollow: mocks.autoFollow }))
@@ -58,7 +60,7 @@ beforeEach(() => {
   mocks.db.workspaceMember.findFirst.mockResolvedValue({ id: "m1" })
   mocks.db.docComment.findMany.mockResolvedValue([])
   mocks.db.task.findMany.mockResolvedValue([])
-  mocks.db.taskLink.findMany.mockResolvedValue([])
+  mocks.linkedTo.mockResolvedValue([])
   mocks.eligible.mockResolvedValue([
     { type: "USER", id: QUINN, displayName: "Quinn Morales", available: true },
     { type: "USER", id: QUENTIN, displayName: "Quentin Okafor", available: true },
@@ -199,6 +201,7 @@ describe("agent assignment", () => {
 
   it("skips the confirmation when that agent already holds a task from this doc", async () => {
     mocks.db.docComment.findMany.mockResolvedValue([{ id: "older-comment" }])
+    mocks.linkedTo.mockResolvedValue([{ linkedId: "older-comment", taskId: "older-task" }])
     mocks.db.task.findMany.mockResolvedValue([{ assigneeAgentId: BOT }])
     const result = await postDocCommentWithOptionalTask({ ...base, body: `Again ${bot}`, task: withTask })
     expect(result.ok).toBe(true)
@@ -271,10 +274,12 @@ describe("agent kind on the card and the candidates (drives the queue-vs-run cop
 describe("agentIdsAssignedInDoc", () => {
   it("only counts tasks linked to comments of this doc and dedupes", async () => {
     mocks.db.docComment.findMany.mockResolvedValue([{ id: "c1" }, { id: "c2" }])
+    mocks.linkedTo.mockResolvedValue([{ linkedId: "c1", taskId: "t1" }, { linkedId: "c2", taskId: "t2" }, { linkedId: "c2", taskId: "t1" }])
     mocks.db.task.findMany.mockResolvedValue([{ assigneeAgentId: BOT }, { assigneeAgentId: BOT }])
     expect(await agentIdsAssignedInDoc(WS, DOC)).toEqual([BOT])
+    expect(mocks.linkedTo).toHaveBeenCalledWith(mocks.db, { workspaceId: WS, linkedType: "COMMENT", linkedIds: ["c1", "c2"] })
     expect(mocks.db.task.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: expect.objectContaining({ workspaceId: WS, links: { some: { linkedType: "COMMENT", linkedId: { in: ["c1", "c2"] } } } }),
+      where: expect.objectContaining({ workspaceId: WS, id: { in: ["t1", "t2"] } }),
     }))
   })
 
@@ -320,19 +325,17 @@ describe("notifications for mentions", () => {
 
 describe("loadCommentTaskCards", () => {
   it("returns one card per comment, scoped to the workspace", async () => {
-    // COMMENT is a residual link kind (task_links), read through lib/task-links-read.ts.
-    mocks.db.taskLink.findMany.mockResolvedValue([{ taskId: TASK, linkedId: COMMENT }])
+    // COMMENT is a TASK_CREATED_FROM link (entity_links), read through lib/task-links-read.ts.
+    mocks.linkedTo.mockResolvedValue([{ taskId: TASK, linkedId: COMMENT }])
     mocks.db.task.findMany.mockResolvedValue([{ id: TASK, seqPrefix: "TASK", seqNumber: 5, title: "Draft", status: "IN_PROGRESS", priority: "HIGH", dueDate: new Date("2026-10-23T00:00:00Z"), assigneeUserId: QUINN, assigneeAgentId: null }])
     const cards = await loadCommentTaskCards(WS, [COMMENT])
-    expect(mocks.db.taskLink.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: { linkedType: "COMMENT", linkedId: { in: [COMMENT] }, task: { workspaceId: WS } },
-    }))
+    expect(mocks.linkedTo).toHaveBeenCalledWith(mocks.db, { workspaceId: WS, linkedType: "COMMENT", linkedIds: [COMMENT] })
     expect(mocks.db.task.findMany).toHaveBeenCalledWith({ where: { workspaceId: WS, id: { in: [TASK] } } })
     expect(cards[COMMENT]).toMatchObject({ taskId: TASK, displayId: "TASK-5", status: "IN_PROGRESS", priority: "HIGH", dueDate: "2026-10-23T00:00:00.000Z" })
   })
 
   it("keeps the last known name for an assignee who is no longer available", async () => {
-    mocks.db.taskLink.findMany.mockResolvedValue([{ taskId: TASK, linkedId: COMMENT }])
+    mocks.linkedTo.mockResolvedValue([{ taskId: TASK, linkedId: COMMENT }])
     mocks.db.task.findMany.mockResolvedValue([{ id: TASK, seqPrefix: "TASK", seqNumber: 5, title: "Draft", status: "TODO", priority: "HIGH", dueDate: null, assigneeUserId: QUINN, assigneeAgentId: null }])
     mocks.resolveAssignees.mockImplementation(async (_ws: string, tasks: Array<Record<string, unknown>>) =>
       tasks.map(t => ({ ...t, assignee: { type: "USER", id: QUINN, displayName: "Unavailable person", available: false } })))
@@ -343,7 +346,7 @@ describe("loadCommentTaskCards", () => {
 
   it("does no query for no comments", async () => {
     expect(await loadCommentTaskCards(WS, [])).toEqual({})
-    expect(mocks.db.taskLink.findMany).not.toHaveBeenCalled()
+    expect(mocks.linkedTo).not.toHaveBeenCalled()
   })
 })
 

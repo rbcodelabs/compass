@@ -2,8 +2,8 @@
  * The agent's own task list, exposed under the Claude Code tool names the model already knows
  * (TaskCreate / TaskUpdate / TaskList / TaskGet) and backed by Compass tasks.
  *
- * Every task is stored as a normal Task row with source = "AGENT" and a TaskLink of linkedType
- * AGENT_CONVERSATION, so the task screen can show it and the chat can read the plan back from the server.
+ * Every task is stored as a normal Task row with source = "AGENT" and a TASK_CREATED_FROM link (linkedType
+ * AGENT_CONVERSATION, lib/task-link-writes.ts), so the task screen can show it and the chat can read the plan back from the server.
  * The conversation is never a tool argument: it is resolved from the calling turn key's live AgentRun
  * (AgentRun.apiKeyId), so a model cannot read or touch another conversation's tasks.
  */
@@ -11,6 +11,7 @@ import getPrisma from "@/lib/db"
 import { currentAgentConversation, type AgentTurnConversation } from "@/lib/agent-turn-conversation"
 import { ok, fail } from "@/lib/mcp-output"
 import { createTaskLink } from "@/lib/task-link-writes"
+import { getTaskIdsLinkedTo } from "@/lib/task-links-read"
 import { createTask, moveTaskStatus, updateTask } from "@/lib/task-tool-handlers"
 import type { TaskStatus } from "@/lib/types"
 
@@ -32,8 +33,10 @@ const NOT_IN_CONVERSATION = "Task tools are only available inside an agent conve
 /** The task, only if it is linked to this conversation. A foreign or unknown id reads as not found. */
 async function conversationTask(ctx: Conversation, taskId: string) {
   if (!/^[0-9a-f-]{36}$/i.test(taskId)) return null
-  return getPrisma().task.findFirst({
-    where: { id: taskId, workspaceId: ctx.workspaceId, links: { some: { linkedType: "AGENT_CONVERSATION", linkedId: ctx.conversationId } } },
+  const prisma = getPrisma()
+  if (!(await getTaskIdsLinkedTo(prisma, { workspaceId: ctx.workspaceId, linkedType: "AGENT_CONVERSATION", linkedId: ctx.conversationId })).includes(taskId)) return null
+  return prisma.task.findFirst({
+    where: { id: taskId, workspaceId: ctx.workspaceId },
     select: { id: true, title: true, description: true, status: true },
   })
 }
@@ -73,8 +76,10 @@ export async function agentTaskUpdate({ taskId, subject, description, status }: 
 export async function agentTaskList() {
   const ctx = await currentConversation()
   if (!ctx) return fail(NOT_IN_CONVERSATION)
-  const rows = await getPrisma().task.findMany({
-    where: { workspaceId: ctx.workspaceId, status: { not: "CANCELLED" }, links: { some: { linkedType: "AGENT_CONVERSATION", linkedId: ctx.conversationId } } },
+  const prisma = getPrisma()
+  const linked = await getTaskIdsLinkedTo(prisma, { workspaceId: ctx.workspaceId, linkedType: "AGENT_CONVERSATION", linkedId: ctx.conversationId })
+  const rows = await prisma.task.findMany({
+    where: { workspaceId: ctx.workspaceId, status: { not: "CANCELLED" }, id: { in: linked } },
     select: { id: true, title: true, description: true, status: true },
     orderBy: [{ createdAt: "asc" }, { id: "asc" }],
   })

@@ -4,15 +4,12 @@ import { describe, expect, it } from "vitest";
 
 /**
  * entity_links is the ONLY store for the Opportunity <-> Objective, Opportunity -> Key Result, Solution <-> Key Result, Artifact and
- * task-reference links. The tables they replaced (opportunity_objective_links, solution_key_result_links, artifact_links, and the
- * association rows of task_links) are frozen until a later change drops them, so NOTHING in app code may name those models or tables:
- * not a model delegate, not a table, not a generic delegate lookup. The migration hooks and SQL (lib/migrations, prisma/migrations),
- * schema.prisma, the workspace export module and lib/legacy-link-tables.ts (which deletes the frozen artifact_links rows that would Restrict an
- * Artifact delete) legitimately do, and so do tests.
- *
- * One legacy table is still live: task_links holds the residual link kinds that are not associations (COMMENT, AGENT_CONVERSATION), and
- * is reached only through lib/task-link-writes.ts and lib/task-links-read.ts (plus the Task.links relation filters on those residual
- * kinds, which name no model).
+ * task links (the nine associations and the COMMENT / AGENT_CONVERSATION origins). The tables they replaced (opportunity_objective_links,
+ * solution_key_result_links, artifact_links, task_links) are frozen until a later change drops them, so NOTHING in app code may name those
+ * models or tables: not a model delegate, not a table, not a generic delegate lookup, and no filter on the Task.links relation. The migration
+ * hooks and SQL (lib/migrations, prisma/migrations), schema.prisma, the workspace export module and lib/legacy-link-tables.ts (which
+ * deletes the frozen rows that would Restrict a delete, and holds the deploy-before-migration-115 fallback read of task_links) legitimately
+ * do, and so do tests.
  */
 const ROOT = process.cwd();
 const SKIP_DIRS = new Set(["node_modules", ".next", ".git", "generated", ".worktrees", ".claude", ".pnpm-store"]);
@@ -62,10 +59,10 @@ const isMigrationOwned = (file: string) => relPosix(file).startsWith("lib/migrat
  */
 const isWorkspaceExportModule = (file: string) => relPosix(file).startsWith("lib/workspace-export/");
 const isSchema = (file: string) => relPosix(file) === "prisma/schema.prisma" || relPosix(file) === "lib/legacy-link-tables.ts";
-/** Residual task_links (COMMENT, AGENT_CONVERSATION): the only live legacy table, behind two modules. */
-const TASK_LINK_MODULES = new Set(["lib/task-link-writes.ts", "lib/task-links-read.ts"]);
 const FROZEN_LINK = /\.(?:opportunityObjectiveLink|solutionKeyResultLink|artifactLink)\b|\bartifact_links\b/;
-const TASK_LINK_DELEGATE = /\.taskLink\b/;
+const TASK_LINK_DELEGATE = /\.taskLink\b|\btask_links\b/;
+/** A filter on the Task.links relation (`links: { some: ... }`) reads task_links without naming the model. */
+const TASK_LINKS_RELATION = /\blinks\s*:\s*\{\s*(?:some|every|none)\b|\binclude\s*:\s*\{[^}]*\blinks\s*:\s*true\b|\bselect\s*:\s*\{[^}]*\blinks\s*:\s*(?:true|\{)/;
 
 // Files that legitimately use non-literal Prisma delegates or model introspection today, each over a fixed
 // model list that does not include the link models (the name check above still covers those lists).
@@ -140,14 +137,15 @@ describe("typed link models are reached only through lib/typed-links.ts", () => 
     expect(offenders).toEqual([]);
   });
 
-  it("no code names the frozen artifact / opportunity / solution link models or task_links except the migrations, the schema and workspace export, and task_links only through the two task-link modules", () => {
+  it("no code names the frozen artifact / opportunity / solution / task link models or tables, or filters the Task.links relation, except the migrations, the schema, workspace export and lib/legacy-link-tables.ts", () => {
     const offenders = files
       .filter((file) => !isMigrationOwned(file) && !isSchema(file) && !isWorkspaceExportModule(file))
       .flatMap((file) => {
         const text = stripComments(readFileSync(file, "utf-8"));
         const hits: string[] = [];
         if (FROZEN_LINK.test(text)) hits.push("frozen link model/table");
-        if (TASK_LINK_DELEGATE.test(text) && !TASK_LINK_MODULES.has(relPosix(file))) hits.push("task_links accessor");
+        if (TASK_LINK_DELEGATE.test(text)) hits.push("task_links accessor");
+        if (TASK_LINKS_RELATION.test(text)) hits.push("Task.links relation");
         return hits.map((hit) => `${rel(file)}: ${hit}`);
       });
     expect(offenders).toEqual([]);

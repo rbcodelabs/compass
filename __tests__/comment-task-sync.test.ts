@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => ({
+  // COMMENT links are TASK_CREATED_FROM rows in entity_links (lib/task-links-read.ts has its own tests); this file pins what the sync asks of it.
+  origin: { targetIds: vi.fn(), tasksLinkedTo: vi.fn() },
   db: {
-    taskLink: { findMany: vi.fn() },
     docComment: { findMany: vi.fn(), findUnique: vi.fn() },
     task: { count: vi.fn(), findUnique: vi.fn() },
   },
@@ -11,6 +12,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/lib/db", () => ({ default: () => mocks.db }))
 vi.mock("@/lib/doc-comments", () => ({ setDocCommentStatusCore: mocks.setStatus }))
+vi.mock("@/lib/task-links-read", () => ({ getOriginTargetIds: mocks.origin.targetIds, getTasksLinkedToOrigin: mocks.origin.tasksLinkedTo }))
 
 import { syncCommentThreadsForTaskStatus, threadStatusForTaskStatus, transitionTouchesThreads } from "@/lib/comment-task-sync"
 
@@ -21,11 +23,11 @@ const REPLY = "comment-reply"
 /** A thread whose status is mutable, and a task whose current status is `taskStatus`. */
 function world(threadStatus: "OPEN" | "RESOLVED", taskStatus: string, linked: Array<{ id: string; parentId: string | null }> = [{ id: ROOT, parentId: null }]) {
   const state = { thread: threadStatus, task: taskStatus }
-  mocks.db.taskLink.findMany.mockResolvedValue(linked.map(c => ({ linkedId: c.id })))
+  mocks.origin.targetIds.mockResolvedValue(linked.map(c => c.id))
   mocks.db.docComment.findMany.mockImplementation(async ({ where }: { where: { id?: unknown; parentId?: string } }) =>
     where.id ? linked : where.parentId ? [{ id: REPLY }] : [])
   mocks.db.docComment.findUnique.mockImplementation(async () => ({ id: ROOT, status: state.thread }))
-  mocks.db.task.findUnique.mockImplementation(async () => ({ status: state.task }))
+  mocks.db.task.findUnique.mockImplementation(async () => ({ status: state.task, workspaceId: "ws-1" }))
   mocks.setStatus.mockImplementation(async (id: string, next: "OPEN" | "RESOLVED") => { state.thread = next; return { id, status: next } })
   return state
 }
@@ -33,6 +35,7 @@ function world(threadStatus: "OPEN" | "RESOLVED", taskStatus: string, linked: Ar
 beforeEach(() => {
   vi.resetAllMocks()
   mocks.db.task.count.mockResolvedValue(0)
+  mocks.origin.tasksLinkedTo.mockResolvedValue([])
 })
 
 describe("transitionTouchesThreads / threadStatusForTaskStatus", () => {
@@ -128,11 +131,14 @@ describe("syncCommentThreadsForTaskStatus", () => {
 
   it("keeps the thread open while another task in it is still live", async () => {
     const w = world("OPEN", "DONE")
+    // Another task was made from a reply in the same thread (the task itself is among the linked ones and is ignored).
+    mocks.origin.tasksLinkedTo.mockResolvedValue([{ linkedId: REPLY, taskId: "task-2" }, { linkedId: ROOT, taskId: TASK }])
     mocks.db.task.count.mockResolvedValue(1)
     await syncCommentThreadsForTaskStatus(TASK, "TODO", "DONE")
     expect(w.thread).toBe("OPEN")
+    expect(mocks.origin.tasksLinkedTo).toHaveBeenCalledWith(mocks.db, { workspaceId: "ws-1", linkedType: "COMMENT", linkedIds: [ROOT, REPLY] })
     expect(mocks.db.task.count).toHaveBeenCalledWith({
-      where: expect.objectContaining({ id: { not: TASK }, status: { notIn: ["DONE", "CANCELLED"] } }),
+      where: { id: { in: ["task-2"] }, status: { notIn: ["DONE", "CANCELLED"] } },
     })
   })
 
@@ -143,19 +149,19 @@ describe("syncCommentThreadsForTaskStatus", () => {
   })
 
   it("does nothing for a task with no comment links", async () => {
-    mocks.db.taskLink.findMany.mockResolvedValue([])
+    mocks.origin.targetIds.mockResolvedValue([])
     expect(await syncCommentThreadsForTaskStatus(TASK, "TODO", "DONE")).toEqual({ resolved: [], reopened: [] })
     expect(mocks.setStatus).not.toHaveBeenCalled()
   })
 
   it("skips the database entirely when the transition does not cross DONE", async () => {
     await syncCommentThreadsForTaskStatus(TASK, "TODO", "IN_PROGRESS")
-    expect(mocks.db.taskLink.findMany).not.toHaveBeenCalled()
+    expect(mocks.origin.targetIds).not.toHaveBeenCalled()
   })
 
   it("never throws: a sync failure is logged and the task edit stands", async () => {
     const log = vi.spyOn(console, "error").mockImplementation(() => {})
-    mocks.db.taskLink.findMany.mockRejectedValue(new Error("db down"))
+    mocks.origin.targetIds.mockRejectedValue(new Error("db down"))
     await expect(syncCommentThreadsForTaskStatus(TASK, "TODO", "DONE")).resolves.toEqual({ resolved: [], reopened: [] })
     expect(log).toHaveBeenCalled()
   })

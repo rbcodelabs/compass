@@ -37,10 +37,13 @@ served). Flags are plain env vars: a change needs a redeploy to take effect.
    `COMPASS_ENTITY_LINKS_*_MIRROR` and `*_READ` env vars are ignored and can be deleted from each environment after the deploy.
    Left for the follow-up change: drop the four legacy tables (`opportunity_objective_links`, `solution_key_result_links`,
    `artifact_links`, and the association rows of `task_links`) and the `opportunities.linked_key_result_id` column, and delete the env vars.
-   `task_links` itself stays while COMMENT and AGENT_CONVERSATION task links (never mirrored) live there; moving those is a separate change.
+   The COMMENT and AGENT_CONVERSATION task links were never mirrored; they move into `entity_links` (`TASK_CREATED_FROM`) by migration
+   `115_entity_links_task_link_move` (see `entity-links-task-link-move.md`). `task_links` can be dropped only after that migration's status
+   reports zero unmoved rows.
    Two places still touch a frozen table on purpose, because Prisma's emulated `Restrict` (relationMode = "prisma") would otherwise refuse
    the parent delete: `lib/legacy-link-tables.ts` removes `artifact_links` rows before an Artifact goes, and `deleteLinksOfTasks` in
-   `lib/task-link-writes.ts` removes `task_links` rows before a workspace's tasks go. Both disappear with the tables.
+   `lib/task-link-writes.ts` removes `task_links` rows before a workspace's tasks go (it now lives in `lib/legacy-link-tables.ts` as `deleteFrozenTaskLinks`). Both disappear
+   with the tables. `lib/legacy-link-tables.ts` also holds the deploy-before-migration-115 read fallback; it is deleted with `task_links`.
 
 ## Residual drift
 

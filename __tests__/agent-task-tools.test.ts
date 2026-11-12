@@ -8,10 +8,12 @@ const prisma = vi.hoisted(() => ({
 }))
 const handlers = vi.hoisted(() => ({ createTask: vi.fn(), updateTask: vi.fn(), moveTaskStatus: vi.fn() }))
 const links = vi.hoisted(() => ({ createTaskLink: vi.fn() }))
+const reads = vi.hoisted(() => ({ getTaskIdsLinkedTo: vi.fn() }))
 
 vi.mock("@/lib/db", () => ({ default: () => prisma }))
 vi.mock("@/lib/task-tool-handlers", () => handlers)
 vi.mock("@/lib/task-link-writes", () => links)
+vi.mock("@/lib/task-links-read", () => reads)
 
 import { agentTaskCreate, agentTaskGet, agentTaskList, agentTaskUpdate, toAgentStatus } from "@/lib/agent-task-tools"
 
@@ -24,6 +26,7 @@ const as = <T,>(actor: McpActor, fn: () => Promise<T>) => runWithMcpActor(actor,
 beforeEach(() => {
   vi.clearAllMocks()
   prisma.agentRun.findFirst.mockResolvedValue({ conversationId: CONV, workspaceId: WS })
+  reads.getTaskIdsLinkedTo.mockResolvedValue([TASK])
 })
 
 describe("agent task tools", () => {
@@ -49,10 +52,12 @@ describe("agent task tools", () => {
   })
 
   it("only touches tasks linked to this conversation", async () => {
-    prisma.task.findFirst.mockResolvedValue(null)
+    // The links come from entity_links (TASK_CREATED_FROM), asked for THIS conversation in THIS workspace; a task outside that set is not found.
+    reads.getTaskIdsLinkedTo.mockResolvedValue(["some-other-task"])
     const res = await as(turn, () => agentTaskUpdate({ taskId: TASK, status: "completed" }))
     expect(res.structuredContent.ok).toBe(false)
-    expect(prisma.task.findFirst.mock.calls[0][0].where.links.some).toEqual({ linkedType: "AGENT_CONVERSATION", linkedId: CONV })
+    expect(reads.getTaskIdsLinkedTo).toHaveBeenCalledWith(prisma, { workspaceId: WS, linkedType: "AGENT_CONVERSATION", linkedId: CONV })
+    expect(prisma.task.findFirst).not.toHaveBeenCalled()
     expect(handlers.moveTaskStatus).not.toHaveBeenCalled()
     expect((await as(turn, () => agentTaskGet({ taskId: "not-a-uuid" }))).structuredContent.ok).toBe(false)
   })
@@ -69,7 +74,7 @@ describe("agent task tools", () => {
   it("lists this conversation's non-cancelled tasks", async () => {
     prisma.task.findMany.mockResolvedValue([{ id: TASK, title: "A", description: "x", status: "IN_PROGRESS" }])
     const res = await as(turn, () => agentTaskList())
-    expect(prisma.task.findMany.mock.calls[0][0].where.status).toEqual({ not: "CANCELLED" })
+    expect(prisma.task.findMany.mock.calls[0][0].where).toMatchObject({ workspaceId: WS, status: { not: "CANCELLED" }, id: { in: [TASK] } })
     expect(res.structuredContent.data).toMatchObject({ count: 1, items: [{ subject: "A", status: "in_progress" }] })
   })
 })

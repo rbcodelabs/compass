@@ -105,9 +105,9 @@ describe("endpoints are resolvable and tenant-scoped", () => {
   });
 
   it.each(defs.flatMap((def) => [def.from, ...toTypesOf(def)].map((type) => [def.key, type] as const)))("%s: endpoint type %s has an access-control mapping for the MCP gate", (_key, type) => {
-    // The conversation link types are internal: the generic tools must NOT be able to name a conversation, so AGENT_CONVERSATION
-    // deliberately has no mapping and the MCP gate refuses it ("cannot be linked").
-    if (type === "AGENT_CONVERSATION") {
+    // The conversation link types and TASK_CREATED_FROM are internal: the generic tools must NOT be able to name a conversation or a
+    // comment, so AGENT_CONVERSATION and COMMENT deliberately have no mapping and the MCP gate refuses them ("cannot be linked").
+    if (type === "AGENT_CONVERSATION" || type === "COMMENT") {
       expect(getLinkType(_key)?.internal).toBe(true);
       expect(toWorkspaceEntityType(type)).toBeNull();
       return;
@@ -127,7 +127,7 @@ describe("endpoints are resolvable and tenant-scoped", () => {
 
   it("touchEndpoint reports false for the types without an updatedAt column", async () => {
     const real = await vi.importActual<typeof import("@/lib/links/endpoints")>("@/lib/links/endpoints");
-    for (const type of ["REVIEW_REQUEST", "METRIC", "RESEARCH_TURN", "AGENT_CONVERSATION"] as const) expect(await real.touchEndpoint({} as AppTransactionClient, type, "ws", "id")).toBe(false);
+    for (const type of ["REVIEW_REQUEST", "METRIC", "RESEARCH_TURN", "AGENT_CONVERSATION", "COMMENT"] as const) expect(await real.touchEndpoint({} as AppTransactionClient, type, "ws", "id")).toBe(false);
   });
 });
 
@@ -155,7 +155,7 @@ describe("delete paths and the workspace cascade cover every type", () => {
     research: read("lib/research-workspace-cleanup.ts"),
     // The Solution and Key Result sweeps live in the typed-link drains the UI, MCP and cascade deletes call.
     typedLinks: read("lib/typed-links.ts"),
-    // A task delete sweeps both stores (entity_links and the residual task_links) from the one task-link writer.
+    // A task delete sweeps entity_links (both task link types) and the frozen task_links rows from the one task-link writer.
     taskLinks: read("lib/task-link-writes.ts"),
     // Artifact links (phase 6): a single Artifact delete, and the workspace Decision teardown for the Review request end.
     artifacts: read("lib/artifacts.ts"),

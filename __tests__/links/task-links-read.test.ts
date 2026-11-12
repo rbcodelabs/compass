@@ -1,7 +1,8 @@
 /**
  * lib/task-links-read.ts over seeded fake data: the nine association kinds are entity_links TASK_REFERENCES rows (stored spelling
- * REVIEW_REQUEST for DECISION), the residual kinds (COMMENT, AGENT_CONVERSATION) are task_links rows. Pins workspace scoping on both
- * endpoints, (createdAt, id) ordering, dangling targets, the legacy DECISION spelling and the merge of the two stores.
+ * REVIEW_REQUEST for DECISION), the two origins (COMMENT, AGENT_CONVERSATION) are entity_links TASK_CREATED_FROM rows. Pins workspace
+ * scoping on both endpoints, (createdAt, id) ordering, dangling targets, the legacy DECISION spelling, and the deploy-before-migration
+ * fallback: origin links not moved out of task_links yet are still read (and merged by pair with their entity_links twin).
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { WS_A, WS_B, createTenantFakePrisma } from "../helpers/tenant-fake-prisma";
@@ -10,7 +11,7 @@ type Row = Record<string, unknown>;
 const fake = vi.hoisted(() => ({ current: null as null | ReturnType<typeof createTenantFakePrisma> }));
 vi.mock("@/lib/db", () => ({ default: () => fake.current!.client }));
 
-import { getLinkedTargetIds, getTaskIdsLinkedTo, getTaskLinks, getTasksLinkedTo } from "@/lib/task-links-read";
+import { getLinkedTargetIds, getOriginTargetIds, getTaskIdsLinkedTo, getTaskLinks, getTasksLinkedTo, getTasksLinkedToOrigin } from "@/lib/task-links-read";
 import type { AppTransactionClient } from "@/lib/db";
 
 const db = () => fake.current!.client as unknown as AppTransactionClient;
@@ -18,17 +19,20 @@ const state = () => fake.current!.state as unknown as Record<string, Row[]>;
 let clock = 0;
 const at = () => new Date(10_000 + ++clock);
 
-/** One link in the store its kind lives in: a reference in entity_links, a residual kind (COMMENT, AGENT_CONVERSATION) in task_links. */
+const ORIGINS = ["COMMENT", "AGENT_CONVERSATION"];
+
+/** A not-yet-moved origin link: a frozen task_links row (what every link made before migration 115 still is). */
+function legacy(taskId: string, linkedType: string, linkedId: string, opts: { createdAt?: Date; id?: string } = {}) {
+  state().taskLinks.push({ id: opts.id ?? `tl-${++clock}`, taskId, linkedType, linkedId, source: "UI", createdById: null, createdAt: opts.createdAt ?? at() });
+}
+
+/** One link as it is stored now: a reference in entity_links TASK_REFERENCES, an origin (COMMENT, AGENT_CONVERSATION) in TASK_CREATED_FROM. */
 function link(taskId: string, linkedType: string, linkedId: string, opts: { createdAt?: Date; id?: string } = {}) {
   const createdAt = opts.createdAt ?? at();
   const id = opts.id ?? `l-${++clock}`;
-  if (linkedType === "COMMENT" || linkedType === "AGENT_CONVERSATION") {
-    state().taskLinks.push({ id, taskId, linkedType, linkedId, source: "UI", createdById: null, createdAt });
-    return;
-  }
   const task = state().tasks.find((t) => t.id === taskId);
   state().entityLinks.push({
-    id, workspaceId: (task?.workspaceId as string) ?? WS_A.id, linkType: "TASK_REFERENCES", fromType: "TASK", fromId: taskId,
+    id, workspaceId: (task?.workspaceId as string) ?? WS_A.id, linkType: ORIGINS.includes(linkedType) ? "TASK_CREATED_FROM" : "TASK_REFERENCES", fromType: "TASK", fromId: taskId,
     toType: linkedType === "DECISION" ? "REVIEW_REQUEST" : linkedType, toId: linkedId, origin: "DIRECT", source: "UI", createdById: null, createdAt, updatedAt: createdAt,
   });
 }
@@ -111,13 +115,13 @@ describe("DECISION targets (stored as REVIEW_REQUEST)", () => {
 });
 
 describe("getTaskLinks", () => {
-  it("merges references (legacy DECISION spelling) and residual COMMENT rows, ordered by (createdAt, id), with an entry for every task", async () => {
+  it("merges references (legacy DECISION spelling) and COMMENT origins, ordered by (createdAt, id), with an entry for every task", async () => {
     const tie = new Date(5_000);
     link("task-a", "DOC", "doc-a", { createdAt: tie, id: "id-b" });
-    link("task-a", "COMMENT", "cmt-1", { createdAt: tie, id: "id-a" });
+    link("task-a", "COMMENT", "cmt-a", { createdAt: tie, id: "id-a" });
     link("task-a", "DECISION", "rr-a", { createdAt: new Date(4_000), id: "id-z" });
     const map = await getTaskLinks(db(), [{ id: "task-a", workspaceId: WS_A.id }, { id: "task-a2", workspaceId: WS_A.id }]);
-    expect(map.get("task-a")!.map((l) => [l.id, l.linkedType, l.linkedId])).toEqual([["id-z", "DECISION", "rr-a"], ["id-a", "COMMENT", "cmt-1"], ["id-b", "DOC", "doc-a"]]);
+    expect(map.get("task-a")!.map((l) => [l.id, l.linkedType, l.linkedId])).toEqual([["id-z", "DECISION", "rr-a"], ["id-a", "COMMENT", "cmt-a"], ["id-b", "DOC", "doc-a"]]);
     expect(map.get("task-a2")).toEqual([]);
   });
 
@@ -149,9 +153,63 @@ describe("getTaskIdsLinkedTo", () => {
     expect((await getTaskIdsLinkedTo(db(), { workspaceId: WS_A.id, linkedType: "SOLUTION", linkedId: "sol-a" })).sort()).toEqual(["task-a", "task-a2"]);
   });
 
-  it("serves a residual kind from task_links, scoped to the task's workspace", async () => {
-    link("task-a", "COMMENT", "cmt-1");
-    link("task-b", "COMMENT", "cmt-1");
-    expect(await getTaskIdsLinkedTo(db(), { workspaceId: WS_A.id, linkedType: "COMMENT", linkedId: "cmt-1" })).toEqual(["task-a"]);
+  it("serves an origin kind from entity_links, scoped to the task's workspace", async () => {
+    link("task-a", "COMMENT", "cmt-a");
+    link("task-b", "COMMENT", "cmt-a");
+    expect(await getTaskIdsLinkedTo(db(), { workspaceId: WS_A.id, linkedType: "COMMENT", linkedId: "cmt-a" })).toEqual(["task-a"]);
+  });
+
+  it("serves a conversation origin, and hides a link to a conversation of another workspace", async () => {
+    link("task-a", "AGENT_CONVERSATION", "conv-a");
+    link("task-a2", "AGENT_CONVERSATION", "conv-b");
+    expect(await getTaskIdsLinkedTo(db(), { workspaceId: WS_A.id, linkedType: "AGENT_CONVERSATION", linkedId: "conv-a" })).toEqual(["task-a"]);
+    expect(await getTaskIdsLinkedTo(db(), { workspaceId: WS_A.id, linkedType: "AGENT_CONVERSATION", linkedId: "conv-b" })).toEqual([]);
+  });
+
+  it("hides an origin link whose comment is gone", async () => {
+    link("task-a", "COMMENT", "cmt-gone");
+    expect(await getTaskIdsLinkedTo(db(), { workspaceId: WS_A.id, linkedType: "COMMENT", linkedId: "cmt-gone" })).toEqual([]);
+  });
+});
+
+describe("deploy before migration 115: origin links still only in task_links", () => {
+  it("getTaskLinks shows an unmoved COMMENT and AGENT_CONVERSATION link next to the moved ones, in creation order", async () => {
+    legacy("task-a", "COMMENT", "cmt-a", { id: "tl-old", createdAt: new Date(1_000) });
+    legacy("task-a", "AGENT_CONVERSATION", "conv-a", { id: "tl-conv", createdAt: new Date(2_000) });
+    link("task-a", "COMMENT", "cmt-a2", { id: "el-new", createdAt: new Date(3_000) });
+    const map = await getTaskLinks(db(), [{ id: "task-a", workspaceId: WS_A.id }]);
+    expect(map.get("task-a")!.map((l) => [l.id, l.linkedType, l.linkedId])).toEqual([["tl-old", "COMMENT", "cmt-a"], ["tl-conv", "AGENT_CONVERSATION", "conv-a"], ["el-new", "COMMENT", "cmt-a2"]]);
+  });
+
+  it("a pair present in BOTH stores (after the migration copied it) shows once, from entity_links", async () => {
+    legacy("task-a", "COMMENT", "cmt-a", { id: "tl-1", createdAt: new Date(1_000) });
+    link("task-a", "COMMENT", "cmt-a", { id: "tl-1", createdAt: new Date(1_000) });
+    legacy("task-a", "AGENT_CONVERSATION", "conv-a", { id: "tl-2", createdAt: new Date(2_000) });
+    link("task-a", "AGENT_CONVERSATION", "conv-a", { id: "el-2", createdAt: new Date(2_000) });
+    const links = (await getTaskLinks(db(), [{ id: "task-a", workspaceId: WS_A.id }])).get("task-a")!;
+    expect(links.map((l) => [l.id, l.linkedType])).toEqual([["tl-1", "COMMENT"], ["el-2", "AGENT_CONVERSATION"]]);
+  });
+
+  it("does not show an unmoved link of a task read under another workspace", async () => {
+    legacy("task-a", "COMMENT", "cmt-a");
+    expect((await getTaskLinks(db(), [{ id: "task-a", workspaceId: WS_B.id }])).get("task-a")).toEqual([]);
+  });
+
+  it("getTaskIdsLinkedTo finds the tasks of an unmoved link and of a moved one, once each", async () => {
+    legacy("task-a", "COMMENT", "cmt-a");
+    legacy("task-a2", "COMMENT", "cmt-a");
+    link("task-a2", "COMMENT", "cmt-a");
+    legacy("task-b", "COMMENT", "cmt-a");
+    expect((await getTaskIdsLinkedTo(db(), { workspaceId: WS_A.id, linkedType: "COMMENT", linkedId: "cmt-a" })).sort()).toEqual(["task-a", "task-a2"]);
+  });
+
+  it("getOriginTargetIds and getTasksLinkedToOrigin read both stores", async () => {
+    legacy("task-a", "COMMENT", "cmt-a", { createdAt: new Date(1_000) });
+    link("task-a", "COMMENT", "cmt-a2", { createdAt: new Date(2_000) });
+    link("task-a", "AGENT_CONVERSATION", "conv-a", { createdAt: new Date(3_000) });
+    expect(await getOriginTargetIds(db(), { taskId: "task-a", linkedType: "COMMENT" })).toEqual(["cmt-a", "cmt-a2"]);
+    expect(await getOriginTargetIds(db(), { taskId: "task-a", linkedType: "DOC" })).toEqual([]);
+    expect(await getTasksLinkedToOrigin(db(), { workspaceId: WS_A.id, linkedType: "COMMENT", linkedIds: ["cmt-a", "cmt-a2"] })).toEqual([{ linkedId: "cmt-a", taskId: "task-a" }, { linkedId: "cmt-a2", taskId: "task-a" }]);
+    expect(await getTasksLinkedToOrigin(db(), { workspaceId: WS_A.id, linkedType: "DOC", linkedIds: ["cmt-a"] })).toEqual([]);
   });
 });

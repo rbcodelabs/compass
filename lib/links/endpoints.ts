@@ -71,6 +71,12 @@ async function find(tx: Tx, type: LinkableEntityType, workspaceId: string, ids: 
       const rows = await tx.researchTurn.findMany({ where: { id, session: { study: { workspaceId } } }, select: { id: true } })
       return rows.map((row) => ({ id: row.id, title: "Research turn" }))
     }
+    case "COMMENT": {
+      // The shared `comments` table (a Doc thread's comments are mirrored there under the same id, as validateTaskLink and the link titles
+      // already assume). Existence only: who may SEE a comment is decided where it is shown.
+      const rows = await tx.comment.findMany({ where: { id, workspaceId }, select: { id: true } })
+      return rows.map((row) => ({ id: row.id, title: "Comment" }))
+    }
     case "AGENT_CONVERSATION": {
       // Existence only, in the workspace. Who may SEE a conversation is decided by lib/agent-conversation-access.ts at read time.
       const rows = await tx.agentConversation.findMany({ where: { id, workspaceId }, select: { id: true, title: true } })
@@ -140,6 +146,8 @@ export async function touchEndpoint(tx: Tx, type: LinkableEntityType, workspaceI
     case "RESEARCH_TURN":
     // Touching a conversation would reorder the chat list, and no conversation link type is to-one.
     case "AGENT_CONVERSATION":
+    // A comment is only ever the to-side of a many-to-many type.
+    case "COMMENT":
       return false
   }
 }

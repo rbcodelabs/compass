@@ -20,6 +20,9 @@ export const ENTITY_TYPE_VOCABULARY = [
   // Agent conversations: only the CONVERSATION_* link types (lib/agent-conversation-links.ts) use it. It has no access-control
   // mapping on purpose, so the generic link tools can never read or write a conversation endpoint.
   "AGENT_CONVERSATION",
+  // A comment (the shared `comments` table or the Doc `doc_comments` table): only the TASK_CREATED_FROM link type uses it. Like
+  // AGENT_CONVERSATION it has no access-control mapping and is not in the public schemas, so the generic tools never name it.
+  "COMMENT",
 ] as const
 
 export type LinkableEntityType = (typeof ENTITY_TYPE_VOCABULARY)[number]
@@ -29,8 +32,8 @@ export type LinkableEntityType = (typeof ENTITY_TYPE_VOCABULARY)[number]
  * its link types are written and read only by lib/links/conversation-links.ts, which applies the conversation access rules, so it is
  * left out of the public schemas (and the generated REST client stays unchanged).
  */
-export type PublicLinkEntityType = Exclude<LinkableEntityType, "AGENT_CONVERSATION">
-export const PUBLIC_LINK_ENTITY_TYPES = ENTITY_TYPE_VOCABULARY.filter((type): type is PublicLinkEntityType => type !== "AGENT_CONVERSATION") as unknown as readonly [PublicLinkEntityType, ...PublicLinkEntityType[]]
+export type PublicLinkEntityType = Exclude<LinkableEntityType, "AGENT_CONVERSATION" | "COMMENT">
+export const PUBLIC_LINK_ENTITY_TYPES = ENTITY_TYPE_VOCABULARY.filter((type): type is PublicLinkEntityType => type !== "AGENT_CONVERSATION" && type !== "COMMENT") as unknown as readonly [PublicLinkEntityType, ...PublicLinkEntityType[]]
 
 export function isLinkableEntityType(value: unknown): value is LinkableEntityType {
   return typeof value === "string" && (ENTITY_TYPE_VOCABULARY as readonly string[]).includes(value)
@@ -66,6 +69,7 @@ const PANEL_ENTITY_TYPE: Record<LinkableEntityType, EntityType | null> = {
   METRIC: null,
   RESEARCH_TURN: null,
   AGENT_CONVERSATION: null,
+  COMMENT: null,
 }
 
 export function toPanelEntityType(type: LinkableEntityType): EntityType | null {
@@ -97,6 +101,7 @@ const WORKSPACE_ENTITY_TYPE: Record<LinkableEntityType, WorkspaceEntityType | nu
   METRIC: null,
   RESEARCH_TURN: null,
   AGENT_CONVERSATION: null,
+  COMMENT: null,
 }
 
 export function toWorkspaceEntityType(type: LinkableEntityType): WorkspaceEntityType | null {

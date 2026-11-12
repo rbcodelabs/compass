@@ -7,6 +7,8 @@ const tx = {
   // `onDelete: Restrict`, so either one left behind turns the delete into a 500.
   commentElementAnchor: { deleteMany: vi.fn() },
   commentExternalAuthor: { deleteMany: vi.fn() },
+  // COMMENT task links are TASK_CREATED_FROM rows in entity_links; the frozen task_links twin of a not-yet-moved link goes too.
+  entityLink: { findMany: vi.fn(), deleteMany: vi.fn() },
   taskLink: { deleteMany: vi.fn() },
 }
 const runTransaction = async (operation: (client: typeof tx) => unknown, options?: { isolationLevel: string }) => {
@@ -32,6 +34,8 @@ beforeEach(() => {
   tx.commentElementAnchor.deleteMany.mockResolvedValue({ count: 0 })
   tx.commentExternalAuthor.deleteMany.mockResolvedValue({ count: 0 })
   tx.taskLink.deleteMany.mockResolvedValue({ count: 0 })
+  tx.entityLink.findMany.mockResolvedValue([])
+  tx.entityLink.deleteMany.mockResolvedValue({ count: 0 })
 })
 
 describe("atomic browser comment deletion", () => {
@@ -67,7 +71,10 @@ describe("atomic browser comment deletion", () => {
     for (const model of [tx.docCommentAnchor, tx.commentElementAnchor, tx.commentExternalAuthor]) {
       expect(model.deleteMany).toHaveBeenCalledWith({ where: { commentId: { in: ["reply-1", "root-1"] } } })
     }
-    // Tasks made from the thread keep living; only their COMMENT links go.
+    // Tasks made from the thread keep living; only their COMMENT links go, from entity_links and from the frozen task_links.
+    expect(tx.entityLink.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { OR: [{ fromType: "COMMENT", fromId: { in: ["reply-1", "root-1"] } }, { toType: "COMMENT", toId: { in: ["reply-1", "root-1"] } }] },
+    }))
     expect(tx.taskLink.deleteMany).toHaveBeenCalledWith({ where: { linkedType: "COMMENT", linkedId: { in: ["reply-1", "root-1"] } } })
   })
 
