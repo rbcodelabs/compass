@@ -37,7 +37,6 @@ function addTaskTables(base: ReturnType<typeof createTenantFakePrisma>) {
       if (cond !== null && typeof cond === "object" && "in" in (cond as Row)) return ((cond as { in: unknown[] }).in).includes(row[key]);
       return row[key] === cond;
     });
-  let n = 0;
   const table = (rows: Row[]) => ({
     findMany: async ({ where, select }: { where?: Row; select?: Row } = {}) => rows.filter((row) => match(row, where)).map((row) => (select ? Object.fromEntries(Object.keys(select).map((key) => [key, row[key]])) : { ...row })),
     findFirst: async ({ where }: { where?: Row } = {}) => rows.find((row) => match(row, where)) ?? null,

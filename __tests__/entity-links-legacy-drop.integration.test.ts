@@ -19,6 +19,12 @@ import { integrationDatabaseUrl } from "@/__tests__/helpers/integration-database
 const databaseUrl = integrationDatabaseUrl
 const NAME = "116_entity_links_drop_legacy_tables"
 const LEGACY = ["task_links", "artifact_links", "opportunity_objective_links", "solution_key_result_links"]
+type StatusJson = {
+  entityLinksReadParity: { error?: string; totalMismatches: number; families: Record<string, { legacyDropped?: boolean }> }
+  entityLinksLegacyDrop: { dropped: boolean; ready: boolean; blockers: string[]; present: string[] }
+  appliedMigrations: string[]
+  linkIntegrity: unknown
+} & Record<string, unknown>
 
 describe.skipIf(!databaseUrl)("116 entity_links legacy drop through the registered runner", () => {
   const schema = `entity_links_drop_test_${randomUUID().replaceAll("-", "")}`
@@ -127,7 +133,7 @@ describe.skipIf(!databaseUrl)("116 entity_links legacy drop through the register
     expect(await count(`SELECT (SELECT count(*) FROM $S.solution_key_result_links) + (SELECT count(*) FROM $S.task_links) + (SELECT count(*) FROM $S.artifact_links) + (SELECT count(*) FROM $S.opportunity_objective_links) AS n`)).toBe(before.legacy)
 
     // The status GET reports the same verdict without writing.
-    const status = (await (await getMigrationStatus(pool, schema)).json()) as Record<string, any>
+    const status = (await (await getMigrationStatus(pool, schema)).json()) as StatusJson
     expect(status.entityLinksLegacyDrop).toMatchObject({ dropped: false, ready: false })
     expect(status.entityLinksLegacyDrop.blockers.join("\n")).toMatch(/solutionKeyResult/)
     expect([...status.entityLinksLegacyDrop.present].sort()).toEqual([...LEGACY, "opportunities.linked_key_result_id"].sort())
@@ -171,13 +177,13 @@ describe.skipIf(!databaseUrl)("116 entity_links legacy drop through the register
   }, 120_000)
 
   it("the status GET never queries a dropped relation: every block reports legacyDropped, none reports an error", async () => {
-    const status = (await (await getMigrationStatus(pool, schema)).json()) as Record<string, any>
+    const status = (await (await getMigrationStatus(pool, schema)).json()) as StatusJson
     for (const key of ["entityLinksOpportunityBackfill", "entityLinksArtifactBackfill", "entityLinksTaskBackfill", "entityLinksTaskLinkMove", "entityLinksConversationBackfill", "entityLinksSolutionKeyResultBackfill"]) {
       expect(status[key], key).toEqual({ legacyDropped: true, missing: expect.any(Array) })
     }
     expect(status.entityLinksReadParity.error).toBeUndefined()
     expect(status.entityLinksReadParity.totalMismatches).toBe(0)
-    expect(Object.values(status.entityLinksReadParity.families as Record<string, { legacyDropped?: boolean }>).every((f) => f.legacyDropped === true)).toBe(true)
+    expect(Object.values(status.entityLinksReadParity.families).every((f) => f.legacyDropped === true)).toBe(true)
     expect(status.linkIntegrity).toMatchObject({ legacyDropped: true })
     expect(status.entityLinksLegacyDrop).toMatchObject({ dropped: true, ready: true, present: [], blockers: [] })
     expect(status.appliedMigrations).toContain(NAME)
