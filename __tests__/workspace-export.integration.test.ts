@@ -124,7 +124,6 @@ describe.skipIf(!databaseUrl)("workspace export/import round trip", () => {
     const sol = await prisma.solution.create({ data: { workspaceId: ws.id, opportunityId: opp.id, title: "Wizard", createdById: bobId } })
     await prisma.opportunityScore.create({ data: { opportunityId: opp.id, scoringModelId, scoredByUserId: bobId, modelVersion: 1, formulaSnapshot: {}, rawValues: {}, rawScore: 1, normalizedScore: 1 } })
     const task = await prisma.task.create({ data: { workspaceId: wsId, title: "Build wizard", createdById: aliceId, seqPrefix: "TASK", seqNumber: 7 } })
-    await prisma.taskLink.create({ data: { taskId: task.id, linkedType: "SOLUTION", linkedId: sol.id } })
     await prisma.entityLink.create({
       data: { workspaceId: wsId, linkType: "RELATES_TO", fromType: "TASK", fromId: task.id, toType: "OPPORTUNITY", toId: opp.id },
     })

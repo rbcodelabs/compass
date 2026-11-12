@@ -4,7 +4,6 @@ const prisma = {
   workspace: { findUnique: vi.fn() },
   artifact: { create: vi.fn(), findFirst: vi.fn(), findMany: vi.fn(), update: vi.fn(), updateMany: vi.fn(), delete: vi.fn(), deleteMany: vi.fn() },
   artifactRevision: { create: vi.fn(), findFirst: vi.fn(), findMany: vi.fn(), deleteMany: vi.fn() },
-  artifactLink: { deleteMany: vi.fn() },
   artifactBlobCleanup: { upsert: vi.fn(), findMany: vi.fn(), update: vi.fn(), delete: vi.fn() },
   solution: { findFirst: vi.fn(), findMany: vi.fn() },
   $transaction: vi.fn(),
@@ -267,9 +266,6 @@ describe("artifact lifecycle", () => {
     expect(sweep.deleteLinksForEntity).toHaveBeenCalledWith(prisma, "ARTIFACT", ["art-1"])
     const order = sweep.deleteLinksForEntity.mock.invocationCallOrder[0]
     expect(order).toBeLessThan(prisma.artifact.delete.mock.invocationCallOrder[0])
-    // The frozen artifact_links rows would Restrict the delete (relationMode = prisma), so they go too, before the Artifact.
-    expect(prisma.artifactLink.deleteMany).toHaveBeenCalledWith({ where: { artifactId: "art-1" } })
-    expect(prisma.artifactLink.deleteMany.mock.invocationCallOrder[0]).toBeLessThan(prisma.artifact.delete.mock.invocationCallOrder[0])
     vi.clearAllMocks()
     prisma.artifact.findFirst.mockResolvedValue({ id: "art-1", revisions: [] })
     sweep.deleteLinksForEntity.mockRejectedValue(new Error("sweep failed"))
@@ -285,7 +281,6 @@ describe("artifact lifecycle", () => {
     await deleteWorkspaceArtifacts(prisma, "ws-1", storage)
     expect(prisma.artifact.updateMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" }, data: { currentRevisionId: null, updatedAt: expect.any(Date) } })
     expect(prisma.artifactRevision.deleteMany).toHaveBeenCalledWith({ where: { artifactId: { in: ["art-1"] } } })
-    expect(prisma.artifactLink.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" } })
     expect(prisma.artifact.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" } })
     expect(storage.del).toHaveBeenCalledWith("artifacts/ws-1/art-1/rev.html")
     expect(prisma.artifactRevision.deleteMany.mock.invocationCallOrder[0]).toBeLessThan(prisma.artifact.deleteMany.mock.invocationCallOrder[0])

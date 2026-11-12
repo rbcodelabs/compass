@@ -5,11 +5,10 @@ import { describe, expect, it } from "vitest";
 /**
  * entity_links is the ONLY store for the Opportunity <-> Objective, Opportunity -> Key Result, Solution <-> Key Result, Artifact and
  * task links (the nine associations and the COMMENT / AGENT_CONVERSATION origins). The tables they replaced (opportunity_objective_links,
- * solution_key_result_links, artifact_links, task_links) are frozen until a later change drops them, so NOTHING in app code may name those
- * models or tables: not a model delegate, not a table, not a generic delegate lookup, and no filter on the Task.links relation. The migration
- * hooks and SQL (lib/migrations, prisma/migrations), schema.prisma, the workspace export module and lib/legacy-link-tables.ts (which
- * deletes the frozen rows that would Restrict a delete, and holds the deploy-before-migration-115 fallback read of task_links) legitimately
- * do, and so do tests.
+ * solution_key_result_links, artifact_links, task_links) and the opportunities.linked_key_result_id column are dropped by migration 116, and
+ * their Prisma models are gone, so NOTHING in app code may name those tables or columns: not a table, not a generic delegate lookup, no
+ * column. Only the migration hooks and SQL (lib/migrations, prisma/migrations), the workspace export module (which tolerates old bundles that
+ * still carry the retired models) and tests legitimately do.
  */
 const ROOT = process.cwd();
 const SKIP_DIRS = new Set(["node_modules", ".next", ".git", "generated", ".worktrees", ".claude", ".pnpm-store"]);
@@ -58,7 +57,7 @@ const isMigrationOwned = (file: string) => relPosix(file).startsWith("lib/migrat
  * Both are asserted in __tests__/workspace-export*.integration.test.ts.
  */
 const isWorkspaceExportModule = (file: string) => relPosix(file).startsWith("lib/workspace-export/");
-const isSchema = (file: string) => relPosix(file) === "prisma/schema.prisma" || relPosix(file) === "lib/legacy-link-tables.ts";
+const isSchema = (file: string) => relPosix(file) === "prisma/schema.prisma";
 const FROZEN_LINK = /\.(?:opportunityObjectiveLink|solutionKeyResultLink|artifactLink)\b|\bartifact_links\b/;
 const TASK_LINK_DELEGATE = /\.taskLink\b|\btask_links\b/;
 /** A filter on the Task.links relation (`links: { some: ... }`) reads task_links without naming the model. */
@@ -137,7 +136,7 @@ describe("typed link models are reached only through lib/typed-links.ts", () => 
     expect(offenders).toEqual([]);
   });
 
-  it("no code names the frozen artifact / opportunity / solution / task link models or tables, or filters the Task.links relation, except the migrations, the schema, workspace export and lib/legacy-link-tables.ts", () => {
+  it("no code names the frozen artifact / opportunity / solution / task link models or tables, or filters the Task.links relation, except the migrations, the schema and workspace export", () => {
     const offenders = files
       .filter((file) => !isMigrationOwned(file) && !isSchema(file) && !isWorkspaceExportModule(file))
       .flatMap((file) => {
@@ -157,7 +156,7 @@ describe("typed link models are reached only through lib/typed-links.ts", () => 
       .filter((file) => LINK_NAME.test(rejoinConcatenation(readFileSync(file, "utf-8").replaceAll("backfillOpportunityObjectiveLinks", "").replaceAll("pruneStaleLegacyLinks", ""))))
       .map(rel)
       .sort();
-    expect(hits).toEqual(["lib/migrations/entity-links-opportunity-backfill.ts", "lib/migrations/entity-links-read-parity.ts", "lib/migrations/entity-links-solution-key-result-backfill.ts", "lib/migrations/runner.ts", "lib/migrations/typed-link-tables.ts"]);
+    expect(hits).toEqual(["lib/migrations/entity-links-legacy-drop.ts", "lib/migrations/entity-links-opportunity-backfill.ts", "lib/migrations/entity-links-read-parity.ts", "lib/migrations/entity-links-solution-key-result-backfill.ts", "lib/migrations/legacy-link-relations.ts", "lib/migrations/runner.ts", "lib/migrations/typed-link-tables.ts"]);
     const runnerMentions = readFileSync(path.join(ROOT, "lib/migrations/runner.ts"), "utf-8")
       .split("\n")
       .map((line) => line.replaceAll("backfillOpportunityObjectiveLinks", ""))

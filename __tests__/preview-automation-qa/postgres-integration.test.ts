@@ -93,7 +93,7 @@ describe.skipIf(!databaseUrl)("real PostgreSQL preview lifecycle (not DSQL isola
     // The write-path guard allow-lists this exact file (__tests__/tenant-isolation/solution-objective-write-paths.test.ts).
     const solution = await prisma.solution.create({ data: { opportunityId: opportunity.id, title: "Disposable solution" } });
     const task = await prisma.task.create({ data: { workspaceId: a.workspaceId, title: "Disposable task" } });
-    await prisma.taskLink.create({ data: { taskId: task.id, linkedType: "SOLUTION", linkedId: solution.id } });
+    await prisma.entityLink.create({ data: { workspaceId: a.workspaceId, linkType: "TASK_REFERENCES", fromType: "TASK", fromId: task.id, toType: "SOLUTION", toId: solution.id } });
     const doc = await prisma.doc.create({ data: { workspaceId: a.workspaceId, title: "Disposable document" } });
     await prisma.comment.create({ data: { workspaceId: a.workspaceId, targetType: "DOC", targetId: doc.id, body: "Disposable comment", authorName: "Preview Owner" } });
     const preserved = await prisma.opportunity.create({ data: { workspaceId: b.workspaceId, title: "Must survive cleanup" } });
@@ -101,7 +101,7 @@ describe.skipIf(!databaseUrl)("real PostgreSQL preview lifecycle (not DSQL isola
     await expect(cleanupPreviewRun(prisma, runA, deploymentId)).resolves.toMatchObject({ cleaned: true });
     expect(await prisma.workspace.findUnique({ where: { id: a.workspaceId } })).toBeNull();
     expect(await prisma.task.findUnique({ where: { id: task.id } })).toBeNull();
-    expect(await prisma.taskLink.count({ where: { taskId: task.id } })).toBe(0);
+    expect(await prisma.entityLink.count({ where: { fromId: task.id } })).toBe(0);
     expect(await prisma.solution.findUnique({ where: { id: solution.id } })).toBeNull();
     expect(await prisma.comment.count({ where: { workspaceId: a.workspaceId } })).toBe(0);
     expect(await prisma.previewAutomationSession.count({ where: { runId: runA } })).toBe(0);

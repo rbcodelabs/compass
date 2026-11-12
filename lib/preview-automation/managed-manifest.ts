@@ -254,7 +254,9 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   // Postcondition pinned in REVIEWED_MIGRATION_CODE_SHA256. Digest recorded from the shipped SQL after reading it.
   "114_portal_home_template": "009701f53d716a8eb9ae81d0e208631a592c4b2b643ebf8811d75be566698421",
   // Task link move: no executable SQL (comments only). The work is the TypeScript hook pinned in REVIEWED_MIGRATION_CODE_SHA256.
-  "115_entity_links_task_link_move": "48f1b5362241d301cb0cef3065862f778acf89a1f540900e2ba8b2f4198d427b"
+  "115_entity_links_task_link_move": "48f1b5362241d301cb0cef3065862f778acf89a1f540900e2ba8b2f4198d427b",
+  // Legacy link drop: no executable SQL (comments only). The DDL and the preflight are the TypeScript hook pinned in REVIEWED_MIGRATION_CODE_SHA256.
+  "116_entity_links_drop_legacy_tables": "faa6e1761453ebef09e53fb111e7a05f894500142d1059af8c2b4fd84857854e"
 };
 
 /**
@@ -420,7 +422,14 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
   },
   // The 115 hook (task link move) and the OCC retry it imports; editing either re-reviews the migration.
   "115_entity_links_task_link_move": {
-    "lib/migrations/entity-links-task-link-move.ts": "4888e450cf2313c3a095ca09bc7b5c4fa14af85b20d812a68e12661556a442cd",
+    "lib/migrations/entity-links-task-link-move.ts": "a0151baf165cd82d228de052b05a2337c5bd437df0b3a824b87e0b7133c4cd2f",
+    "lib/migrations/workspace-id-on-solution-objective.ts": "43295c27b84b319d6cfcada757c7dab6c598c930e237aa642c8d05fa94a3f8c7",
+  },
+  // The 116 hook (preflight + drop), the legacy-relation catalog it shares with the older hooks, and the parity query its preflight runs; editing any re-reviews the migration.
+  "116_entity_links_drop_legacy_tables": {
+    "lib/migrations/entity-links-legacy-drop.ts": "af35c04bd7c46f836f8839d6cb079ca08a891428ee6c06d36e6179faf12c6933",
+    "lib/migrations/legacy-link-relations.ts": "60ffe4aed01d764fb5fe7eca8b6e45822684ce16fa63ffdb715c3f4fff9ececa",
+    "lib/migrations/entity-links-read-parity.ts": "6d0e397af87aff9f964ecfec34429deea08279792cdcbe7c71781c4cc7fd007f",
     "lib/migrations/workspace-id-on-solution-objective.ts": "43295c27b84b319d6cfcada757c7dab6c598c930e237aa642c8d05fa94a3f8c7",
   },
 };

@@ -43,11 +43,10 @@ beforeEach(() => {
 });
 
 describe("Artifact -> Solution", () => {
-  it("writes one entity_links row with the workspace, actor and source, and nothing in the legacy table", async () => {
+  it("writes one entity_links row with the workspace, actor and source ", async () => {
     expect(await linkArtifactToSolution(solutionInput())).toMatchObject({ created: true, artifactId: "art-a", linkedType: "SOLUTION", linkedId: "sol-a", source: "MCP", createdById: "user-alice" });
     expect(stored()).toHaveLength(1);
     expect(stored()[0]).toMatchObject({ linkType: SOLUTION, workspaceId: WS_A.id, fromType: "ARTIFACT", fromId: "art-a", toType: "SOLUTION", toId: "sol-a", origin: "DIRECT", source: "MCP", createdById: "user-alice" });
-    expect(state().artifactLinks).toHaveLength(0);
   });
 
   it("is idempotent: a repeat reports created:false, keeps the original actor and writes nothing new", async () => {

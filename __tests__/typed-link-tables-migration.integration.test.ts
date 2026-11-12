@@ -415,10 +415,10 @@ describe.skipIf(!databaseUrl)("existing CRUD works against a schema without the 
       const cycle = await prisma.oKRCycle.create({ data: { workspaceId, title: "c", startDate: new Date("2026-01-01"), endDate: new Date("2026-03-31") } });
       const objective = await prisma.objective.create({ data: { cycleId: cycle.id, workspaceId: cycle.workspaceId, title: "o" } });
       const keyResult = await prisma.keyResult.create({ data: { objectiveId: objective.id, title: "k", target: 1 } });
-      const opportunity = await prisma.opportunity.create({ data: { workspaceId, title: "opp", linkedKeyResultId: keyResult.id } });
+      const opportunity = await prisma.opportunity.create({ data: { workspaceId, title: "opp" } });
       const solution = await prisma.solution.create({ data: { opportunityId: opportunity.id, workspaceId: opportunity.workspaceId, title: "s" } });
 
-      await prisma.opportunity.update({ where: { id: opportunity.id }, data: { title: "opp 2", linkedKeyResultId: null } });
+      await prisma.opportunity.update({ where: { id: opportunity.id }, data: { title: "opp 2" } });
       await prisma.objective.update({ where: { id: objective.id }, data: { title: "o 2" } });
       await prisma.keyResult.update({ where: { id: keyResult.id }, data: { title: "k 2" } });
       await prisma.solution.update({ where: { id: solution.id }, data: { title: "s 2" } });

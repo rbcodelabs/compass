@@ -14,8 +14,8 @@ import { WorkspaceIdBackfillRefusal, withOccRetry } from "@/lib/migrations/works
  * writes task_links). task_links is dropped by a later change, after the status here reports zero unmoved rows.
  *
  * EXPLICIT-ONLY: never part of an untargeted run; POST it by name AFTER the code that writes and reads TASK_CREATED_FROM is deployed.
- * Until its receipt exists the readers fall back to the not-yet-moved task_links rows (lib/legacy-link-tables.ts), so no link vanishes
- * between the deploy and this migration; after it that fallback finds only rows that already have a twin.
+ * (History: until its receipt existed the readers fell back to the not-yet-moved task_links rows. That fallback was removed together with
+ * the table by migration 116, so 115 must have run in a deployment before the code that dropped the fallback is deployed there.)
  *
  * Steps, each in committed batches of 500 (a link is 4 DSQL-modified rows, the cap is 3,000), KEYSET-paged by task_links.id so a batch never
  * rescans rows an earlier batch passed:

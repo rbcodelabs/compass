@@ -130,10 +130,6 @@ export function createTenantFakePrisma() {
     { id: "scm-b", solutionId: "sol-b", body: "B comment" },
     { id: "scm-null", solutionId: "sol-null", body: "Comment under an unbackfilled solution" },
   ];
-  // Typed link tables (ADR Phase 2). Scalar ids only, exactly like the Prisma models: no relation fields.
-  // The pair is unique, so a duplicate create throws P2002 the way the real unique index does.
-  const opportunityObjectiveLinks: Graph[] = [];
-  const solutionKeyResultLinks: Graph[] = [];
   // Generic links (ADR phase 2): experiments, research studies and the entity_links rows between them. The pair
   // (fromId, toId) is unique like the real (from_id, link_type, to_id) index; tests use one link type at a time.
   const experiments: Graph[] = [
@@ -168,8 +164,7 @@ export function createTenantFakePrisma() {
     { id: "rr-a-system", workspaceId: WS_A.id, gateType: "PRODUCT_LAUNCH", currentRevisionId: "rev-a-system" },
     { id: "rr-b", workspaceId: WS_B.id, gateType: "TRACKED_DECISION", currentRevisionId: "rev-b" },
   ];
-  const artifactLinks: Graph[] = [];
-  // Task links (ADR phase 7): tasks, roadmap items and the legacy task_links rows (the `task` relation resolves through taskId).
+  // Task links (ADR phase 7): tasks and roadmap items; the links themselves are entity_links rows.
   const tasks: Graph[] = [
     { id: "task-a", workspaceId: WS_A.id, title: "A task", parentTaskId: null, status: "TODO" },
     { id: "task-a2", workspaceId: WS_A.id, title: "A task 2", parentTaskId: null, status: "DONE" },
@@ -181,7 +176,6 @@ export function createTenantFakePrisma() {
     { id: "ri-a2", workspaceId: WS_A.id, title: "A roadmap item 2" },
     { id: "ri-b", workspaceId: WS_B.id, title: "B roadmap item" },
   ];
-  const taskLinks: Graph[] = [];
   // Agent conversations (RM-19): existence + title only; who may SEE one is lib/agent-conversation-access.ts, tested separately.
   const agentConversations: Graph[] = [
     { id: "conv-a", workspaceId: WS_A.id, userId: "user-alice", title: "A chat", archivedAt: null },
@@ -196,16 +190,12 @@ export function createTenantFakePrisma() {
   ];
   const workspaceRows = workspaces as unknown as Graph[];
   const tables: Record<string, Graph[]> = {
-    opportunityObjectiveLink: opportunityObjectiveLinks,
-    solutionKeyResultLink: solutionKeyResultLinks,
     entityLink: entityLinks,
     artifact: artifacts,
     reviewRequest: reviewRequests,
     reviewRevision: reviewRevisions,
-    artifactLink: artifactLinks,
     task: tasks,
     roadmapItem: roadmapItems,
-    taskLink: taskLinks,
     agentConversation: agentConversations,
     comment: comments,
     experiment: experiments,
@@ -230,7 +220,6 @@ export function createTenantFakePrisma() {
     assumption: { solution: { model: "solution", fk: "solutionId" } },
     solutionComment: { solution: { model: "solution", fk: "solutionId" } },
     reviewRequest: { currentRevision: { model: "reviewRevision", fk: "currentRevisionId" } },
-    taskLink: { task: { model: "task", fk: "taskId" } },
   };
   const relatedRow = (model: string, row: Graph, relation: string): { model: string; row: Graph | null } | null => {
     const rel = relations[model]?.[relation];
@@ -258,12 +247,6 @@ export function createTenantFakePrisma() {
       if (model === "workspace" && key === "members") {
         const userId = (cond as { some?: { userId?: string } }).some?.userId;
         if (!(row.members as string[]).includes(userId as string)) return false;
-        continue;
-      }
-      if (model === "artifact" && key === "links") {
-        // Prisma's to-many `links: { some }` over the legacy artifact_links rows.
-        const some = (cond as { some?: Where }).some;
-        if (!tables.artifactLink.some((link) => link.artifactId === row.id && matches("artifactLink", link, some))) return false;
         continue;
       }
       const related = relatedRow(model, row, key);
@@ -316,12 +299,9 @@ export function createTenantFakePrisma() {
   let created = 0;
   let linkClock = 0; // strictly increasing createdAt for link rows, so ordering assertions are deterministic
   const LINK_PAIRS: Record<string, [string, string]> = {
-    opportunityObjectiveLink: ["opportunityId", "objectiveId"],
-    solutionKeyResultLink: ["solutionId", "keyResultId"],
     entityLink: ["fromId", "toId"],
-    artifactLink: ["artifactId", "linkedId"],
   };
-  const PAIR_MODEL_NAMES: Record<string, string> = { opportunityObjectiveLink: "OpportunityObjectiveLink", solutionKeyResultLink: "SolutionKeyResultLink", entityLink: "EntityLink", artifactLink: "ArtifactLink" };
+  const PAIR_MODEL_NAMES: Record<string, string> = { entityLink: "EntityLink" };
   const writes: string[] = [];
   const delegate = (model: string) => ({
     findFirst: async (args: { where?: Where; select?: Record<string, unknown>; include?: Record<string, unknown> } = {}) => {
@@ -520,15 +500,11 @@ export function createTenantFakePrisma() {
     assumption: delegate("assumption"),
     solutionComment: delegate("solutionComment"),
     oKRCycle: delegate("okrCycle"),
-    opportunityObjectiveLink: delegate("opportunityObjectiveLink"),
-    solutionKeyResultLink: delegate("solutionKeyResultLink"),
     entityLink: delegate("entityLink"),
     artifact: delegate("artifact"),
     reviewRequest: delegate("reviewRequest"),
-    artifactLink: delegate("artifactLink"),
     task: delegate("task"),
     roadmapItem: delegate("roadmapItem"),
-    taskLink: delegate("taskLink"),
     agentConversation: delegate("agentConversation"),
     comment: delegate("comment"),
     experiment: delegate("experiment"),
@@ -558,7 +534,7 @@ export function createTenantFakePrisma() {
       const workspace = workspaces.find((w) => w.id === workspaceId);
       if (workspace && !workspace.members.includes(userId)) workspace.members.push(userId);
     },
-    state: { feedback, opportunities, squads, writes, solutions: graphSolutions, objectives, keyResults, assumptions, solutionComments, okrCycles, opportunityObjectiveLinks, solutionKeyResultLinks, workspaces, experiments, researchStudies, entityLinks, artifacts, reviewRequests, artifactLinks, tasks, roadmapItems, taskLinks, docs, agentConversations, comments },
+    state: { feedback, opportunities, squads, writes, solutions: graphSolutions, objectives, keyResults, assumptions, solutionComments, okrCycles, workspaces, experiments, researchStudies, entityLinks, artifacts, reviewRequests, tasks, roadmapItems, docs, agentConversations, comments },
     /** Snapshot of every feedback row, for before/after "nothing changed" assertions. */
     snapshotFeedback: () => JSON.parse(JSON.stringify(feedback)) as unknown,
   };

@@ -180,11 +180,18 @@ export async function seedOpportunities(
       r = await one(
         exec,
         `INSERT INTO "${schema}".opportunities
-         (workspace_id, title, description, status, customer_segment, linked_key_result_id, squad_id)
-         VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
-        [workspaceId, o.title, o.desc, o.status, o.segment, krIds[o.krIdx], growthSquadId]
+         (workspace_id, title, description, status, customer_segment, squad_id)
+         VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
+        [workspaceId, o.title, o.desc, o.status, o.segment, growthSquadId]
       );
     }
+    // The Opportunity -> Key Result pointer lives only in entity_links (the old column was dropped).
+    await exec(
+      `INSERT INTO "${schema}".entity_links (workspace_id, link_type, from_type, from_id, to_type, to_id, origin, source)
+       SELECT $1, 'OPPORTUNITY_TARGETS_KEY_RESULT', 'OPPORTUNITY', $2::uuid, 'KEY_RESULT', $3::uuid, 'LEGACY', 'UI'
+       WHERE NOT EXISTS (SELECT 1 FROM "${schema}".entity_links WHERE from_id = $2::uuid AND link_type = 'OPPORTUNITY_TARGETS_KEY_RESULT' AND to_id = $3::uuid)`,
+      [workspaceId, r.id, krIds[o.krIdx]]
+    );
     oppIds.push(r.id);
   }
   return oppIds;

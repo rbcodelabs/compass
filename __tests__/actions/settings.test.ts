@@ -104,7 +104,6 @@ const mockDocStorageObject = { findFirst: vi.fn() };
 const mockDocOperation = { findFirst: vi.fn() };
 const mockArtifact = { findMany: vi.fn(), updateMany: vi.fn(), deleteMany: vi.fn() };
 const mockArtifactRevision = { findMany: vi.fn(), findFirst: vi.fn(), deleteMany: vi.fn() };
-const mockArtifactLink = { deleteMany: vi.fn() };
 const mockArtifactBlobCleanup = { upsert: vi.fn(), findMany: vi.fn(), update: vi.fn(), delete: vi.fn() };
 const mockWorkspaceScoringConfig = { upsert: vi.fn() };
 const mockWorkspaceCapabilityPack = { deleteMany: vi.fn() };
@@ -176,7 +175,6 @@ const mockPrisma = {
   docOperation: mockDocOperation,
   artifact: mockArtifact,
   artifactRevision: mockArtifactRevision,
-  artifactLink: mockArtifactLink,
   artifactBlobCleanup: mockArtifactBlobCleanup,
   workspaceScoringConfig: mockWorkspaceScoringConfig,
   workspaceCapabilityPack: mockWorkspaceCapabilityPack,
@@ -292,7 +290,6 @@ beforeEach(() => {
   mockArtifact.updateMany.mockResolvedValue({ count: 0 });
   mockArtifact.deleteMany.mockResolvedValue({ count: 0 });
   mockArtifactRevision.deleteMany.mockResolvedValue({ count: 0 });
-  mockArtifactLink.deleteMany.mockResolvedValue({ count: 0 });
   mockArtifactBlobCleanup.findMany.mockResolvedValue([]);
   mockArtifactBlobCleanup.upsert.mockResolvedValue({ id: "cleanup-1" });
   mockCapabilityPack.findMany.mockResolvedValue([]);

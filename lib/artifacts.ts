@@ -4,7 +4,6 @@ import type { ArtifactStorage } from "@/lib/artifact-storage"
 export { ARTIFACT_CSP, buildSandboxedHtml } from "@/lib/artifact-preview-html"
 import { assertKindAllowedForSource, readArtifactKind, storedArtifactKind, type ArtifactKind } from "@/lib/artifact-kind"
 import { runTypedLinkTransaction } from "@/lib/typed-links"
-import { deleteFrozenArtifactLinks, deleteFrozenWorkspaceArtifactLinks } from "@/lib/legacy-link-tables"
 import { allocateOneSeq, withSequenceTransaction } from "@/lib/work-item-sequence"
 
 export const MAX_ARTIFACT_HTML_BYTES = 2 * 1024 * 1024
@@ -659,8 +658,6 @@ export async function deleteArtifact(input: { artifactId: string; workspaceId: s
   // Links go FIRST: a failed sweep leaves the Artifact untouched (the delete is simply retried), while a failed LATER delete leaves an
   // Artifact with no links, which is a valid state.
   await (await entityLinkService()).deleteLinksForEntity(prisma, "ARTIFACT", [artifact.id])
-  // The frozen artifact_links rows of this Artifact would Restrict its delete (relationMode = "prisma").
-  await deleteFrozenArtifactLinks(prisma, { artifactId: artifact.id })
   await prisma.artifact.update({ where: { id: artifact.id }, data: { currentRevisionId: null, updatedAt: new Date() } })
   await prisma.artifactRevision.deleteMany({ where: { artifactId: artifact.id } })
   await prisma.artifact.delete({ where: { id: artifact.id } })
@@ -671,7 +668,6 @@ type PrismaClient = ReturnType<typeof getPrisma>
 type WorkspaceArtifactCleanupClient = {
   artifact: Pick<PrismaClient["artifact"], "findMany" | "updateMany" | "deleteMany">
   artifactRevision: Pick<PrismaClient["artifactRevision"], "findMany" | "findFirst" | "deleteMany">
-  artifactLink: Pick<PrismaClient["artifactLink"], "deleteMany">
   artifactBlobCleanup: Pick<PrismaClient["artifactBlobCleanup"], "upsert" | "findMany" | "update" | "delete">
 }
 
@@ -691,8 +687,7 @@ export async function deleteWorkspaceArtifacts(
   // Content AND thumbnail blobs — see the note in deleteArtifact.
   const pathnames = revisions.flatMap((revision) => [revision.blobPathname, revision.thumbnailPathname].filter((p): p is string => Boolean(p)))
   await enqueueBlobCleanup(prisma, pathnames, "WORKSPACE_DELETE")
-  // entity_links for the workspace are swept by the cascade; the frozen artifact_links rows would Restrict the Artifact delete.
-  await deleteFrozenWorkspaceArtifactLinks(prisma, { workspaceId })
+  // entity_links for the workspace are swept by the cascade.
   await prisma.artifact.updateMany({ where: { workspaceId }, data: { currentRevisionId: null, updatedAt: new Date() } })
   if (artifactIds.length > 0) {
     await prisma.artifactRevision.deleteMany({ where: { artifactId: { in: artifactIds } } })

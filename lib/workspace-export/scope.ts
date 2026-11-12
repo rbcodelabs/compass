@@ -43,7 +43,6 @@ export const PARENT: Readonly<Record<string, { model: string; fk: string }>> = {
   ArtifactRevision: { model: "Artifact", fk: "artifactId" },
   EvidenceResearchSource: { model: "Evidence", fk: "evidenceId" },
   RoadmapVote: { model: "RoadmapItem", fk: "roadmapItemId" },
-  TaskLink: { model: "Task", fk: "taskId" },
   CapabilityPackVersion: { model: "CapabilityPack", fk: "capabilityPackId" },
 }
 

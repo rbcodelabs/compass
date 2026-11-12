@@ -5,13 +5,8 @@
  *
  * Reads are workspace-filtered on BOTH endpoints (lib/links/readers.ts): a link whose task or target is dangling, archived away or in
  * another workspace is absent. Rows are ordered (created_at, id).
- *
- * DEPLOY BEFORE MIGRATION. Origin links made before migration 115 ran exist only in the frozen task_links table, so every origin read
- * also takes the frozen rows (lib/legacy-link-tables.ts) and merges them by pair, entity_links winning. Once 115 has run the frozen rows
- * all have a twin and the merge drops them; the fallback goes with the table.
  */
 import type { AppPrismaClient, AppTransactionClient } from "@/lib/db"
-import { readUnmovedTaskLinks, type UnmovedTaskLink } from "@/lib/legacy-link-tables"
 import { readEntityLinksTaskOrigins, readEntityLinksTaskReferences } from "@/lib/links/readers"
 import { taskLinkedTypeOf, taskOriginTargetType } from "@/lib/task-link-writes"
 
@@ -35,7 +30,7 @@ const pairKey = (taskId: string, linkedType: string, linkedId: string) => `${tas
 
 type OriginLink = { id: string; taskId: string; linkedType: string; linkedId: string; source: string; createdById: string | null; createdAt: Date }
 
-/** Origin links of one workspace's tasks or of one origin target: the entity_links rows plus the frozen rows that have no twin there yet. */
+/** Origin links (TASK_CREATED_FROM) of one workspace's tasks or of one origin target. */
 async function originLinks(
   db: Db,
   workspaceId: string,
@@ -53,8 +48,6 @@ async function originLinks(
       source: link.source ?? "UI", createdById: link.createdById ?? null, createdAt: link.createdAt ?? new Date(0),
     })
   }
-  const frozen: UnmovedTaskLink[] = await readUnmovedTaskLinks(db, "taskIds" in scope ? { taskIds: scope.taskIds, workspaceId } : { linkedType: scope.linkedType, linkedIds: scope.linkedIds, workspaceId })
-  for (const row of frozen) if (!out.has(pairKey(row.taskId, row.linkedType, row.linkedId))) out.set(pairKey(row.taskId, row.linkedType, row.linkedId), row)
   return [...out.values()].sort(byCreatedThenId)
 }
 

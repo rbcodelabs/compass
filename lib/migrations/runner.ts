@@ -45,6 +45,8 @@ import { ENTITY_LINKS_SOLUTION_KEY_RESULT_BACKFILL_MIGRATION, assertEntityLinksS
 import { ENTITY_LINKS_CONVERSATION_BACKFILL_MIGRATION, assertEntityLinksConversationBackfill, backfillEntityLinksConversation, getEntityLinksConversationStatus } from "@/lib/migrations/entity-links-conversation-backfill";
 import { ENTITY_LINKS_TASK_BACKFILL_MIGRATION, assertEntityLinksTaskBackfill, backfillEntityLinksTask, getEntityLinksTaskStatus } from "@/lib/migrations/entity-links-task-backfill";
 import { getEntityLinksReadParityStatus } from "@/lib/migrations/entity-links-read-parity";
+import { ENTITY_LINKS_LEGACY_DROP_MIGRATION, assertLegacyDropped, dropLegacyLinkRelations, getEntityLinksLegacyDropStatus } from "@/lib/migrations/entity-links-legacy-drop";
+import { LEGACY_SOURCES_BY_MIGRATION, LEGACY_STATUS_SOURCES, missingLegacyRelations, type LegacyRelation } from "@/lib/migrations/legacy-link-relations";
 import { ENTITY_LINKS_TASK_LINK_MOVE_MIGRATION, assertEntityLinksTaskLinkMove, getEntityLinksTaskLinkMoveStatus, moveTaskLinksToEntityLinks } from "@/lib/migrations/entity-links-task-link-move";
 import { ENTITY_LINKS_OPPORTUNITY_BACKFILL_MIGRATION, ENTITY_LINKS_OPPORTUNITY_RESIDUAL_MIGRATION, assertEntityLinksOpportunityBackfill, backfillEntityLinksOpportunity, getEntityLinksOpportunityStatus } from "@/lib/migrations/entity-links-opportunity-backfill";
 import { ENTITY_LINKS_ARTIFACT_BACKFILL_MIGRATION, assertEntityLinksArtifactBackfill, backfillEntityLinksArtifact, getEntityLinksArtifactStatus } from "@/lib/migrations/entity-links-artifact-backfill";
@@ -794,6 +796,14 @@ const MIGRATIONS: readonly MigrationEntry[] = [
     // TASK_CREATED_FROM is live; never untargeted. Until it runs the readers fall back to the not-yet-moved task_links rows.
     name: "115_entity_links_task_link_move",
     filePath: path.join(process.cwd(), "prisma/migrations/115_entity_links_task_link_move/migration.sql"),
+  },
+  {
+    // IRREVERSIBLE, EXPLICIT-ONLY, never untargeted. Drops task_links, artifact_links, opportunity_objective_links, solution_key_result_links and the
+    // column opportunities.linked_key_result_id, but only after a hard read-only preflight (115 applied, every live legacy pair present in
+    // entity_links, entityLinksTaskLinkMove.unmoved = 0) passes; otherwise it throws and drops nothing. The DDL lives in the hook, not the .sql file,
+    // so nothing runs before the preflight. Follow docs/maintenance/entity-links-legacy-drop.md, including the backup, before POSTing it.
+    name: "116_entity_links_drop_legacy_tables",
+    filePath: path.join(process.cwd(), "prisma/migrations/116_entity_links_drop_legacy_tables/migration.sql"),
   },
 ];
 
@@ -1960,8 +1970,7 @@ export async function getMigrationStatus(pool: Pool, schema: string) {
 
     // Counts only. linkIntegrity is null while the 071 tables do not exist; the
     // preflight (quarantine sizes) is readable before 071 is posted.
-    const typedLinks = await getTypedLinkStatus(client, schema)
-      .catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error) }))
+    const typedLinks = await statusUnlessLegacyDropped(client, schema, LEGACY_STATUS_SOURCES.typedLinks, () => getTypedLinkStatus(client, schema))
 
     return NextResponse.json({
       schema,
@@ -1986,22 +1995,24 @@ export async function getMigrationStatus(pool: Pool, schema: string) {
       geodeDocumentStorage: await getGeodeDocumentStorageHealth(client, schema, appliedNames.includes("059_geode_document_storage")),
       // Orphan / NULL / parent-drift counts for 068, visible before a human POSTs it.
       // Counts and capped quarantine ids for 095, readable before it is POSTed.
-      entityLinksOpportunityBackfill: await getEntityLinksOpportunityStatus(client, schema).catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error) })),
+      entityLinksOpportunityBackfill: await statusUnlessLegacyDropped(client, schema, LEGACY_STATUS_SOURCES.opportunity, () => getEntityLinksOpportunityStatus(client, schema)),
       // Counts and capped quarantine ids for 096, readable before it is POSTed.
-      entityLinksArtifactBackfill: await getEntityLinksArtifactStatus(client, schema).catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error) })),
+      entityLinksArtifactBackfill: await statusUnlessLegacyDropped(client, schema, LEGACY_STATUS_SOURCES.artifact, () => getEntityLinksArtifactStatus(client, schema)),
       // Counts and capped quarantine ids for 097 (task links), readable before it is POSTed.
-      entityLinksTaskBackfill: await getEntityLinksTaskStatus(client, schema).catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error) })),
+      entityLinksTaskBackfill: await statusUnlessLegacyDropped(client, schema, LEGACY_STATUS_SOURCES.task, () => getEntityLinksTaskStatus(client, schema)),
       // Counts and capped quarantine ids for 115 (COMMENT and AGENT_CONVERSATION task links); `unmoved` must be 0 before task_links is dropped.
-      entityLinksTaskLinkMove: await getEntityLinksTaskLinkMoveStatus(client, schema).catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error) })),
-      entityLinksConversationBackfill: await getEntityLinksConversationStatus(client, schema).catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error) })),
+      entityLinksTaskLinkMove: await statusUnlessLegacyDropped(client, schema, LEGACY_STATUS_SOURCES.task, () => getEntityLinksTaskLinkMoveStatus(client, schema)),
+      entityLinksConversationBackfill: await statusUnlessLegacyDropped(client, schema, LEGACY_STATUS_SOURCES.task, () => getEntityLinksConversationStatus(client, schema)),
       // Counts and capped quarantine ids for 098_entity_links_backfill_solution_key_result, readable before it is POSTed.
-      entityLinksSolutionKeyResultBackfill: await getEntityLinksSolutionKeyResultStatus(client, schema).catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error) })),
+      entityLinksSolutionKeyResultBackfill: await statusUnlessLegacyDropped(client, schema, LEGACY_STATUS_SOURCES.solutionKeyResult, () => getEntityLinksSolutionKeyResultStatus(client, schema)),
       // Read-flip parity (PR A of the entity_links read flip): per family, live legacy rows vs live mirror rows, plus the read modes. Counts and capped ids only.
       entityLinksReadParity: await getEntityLinksReadParityStatus(client, schema).catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error) })),
+      // 116: which legacy relations still exist and whether the drop's preflight would pass right now (blockers listed). Read-only.
+      entityLinksLegacyDrop: await getEntityLinksLegacyDropStatus(client, schema).catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error) })),
       workItemIdsBackfill: await getWorkItemIdsBackfillStatus(client, schema).catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error) })),
       workspaceIdBackfill: await getWorkspaceIdBackfillStatus(client, schema).catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error) })),
-      linkIntegrity: "error" in typedLinks ? typedLinks : typedLinks.linkIntegrity,
-      typedLinkPreflight: "error" in typedLinks ? typedLinks : typedLinks.preflight,
+      linkIntegrity: "error" in typedLinks || "legacyDropped" in typedLinks ? typedLinks : typedLinks.linkIntegrity,
+      typedLinkPreflight: "error" in typedLinks || "legacyDropped" in typedLinks ? typedLinks : typedLinks.preflight,
     });
   } finally {
     client.release();
@@ -2009,11 +2020,25 @@ export async function getMigrationStatus(pool: Pool, schema: string) {
   }
 }
 
+/**
+ * A status block that reads a legacy relation. Once migration 116 dropped it the block reports `{ legacyDropped: true }` instead of querying a
+ * table that is not there (which would surface as a confusing error); any other failure is still reported as `{ error }`.
+ */
+async function statusUnlessLegacyDropped<T>(client: PoolClient, schema: string, needs: readonly LegacyRelation[], read: () => Promise<T>): Promise<T | { legacyDropped: true; missing: string[] } | { error: string }> {
+  try {
+    const missing = await missingLegacyRelations(client, schema, needs)
+    if (missing.length > 0) return { legacyDropped: true, missing }
+    return await read()
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) }
+  }
+}
+
 /** Migrations that an untargeted run must NOT pick up on its own: they are only correct at a moment a human chooses. */
-const EXPLICIT_ONLY_MIGRATIONS: readonly string[] = [WORKSPACE_ID_RESIDUAL_MIGRATION, TYPED_LINK_RESIDUAL_MIGRATION, WORK_ITEM_IDS_RESIDUAL_MIGRATION, ENTITY_LINKS_OPPORTUNITY_BACKFILL_MIGRATION, ENTITY_LINKS_OPPORTUNITY_RESIDUAL_MIGRATION, ENTITY_LINKS_ARTIFACT_BACKFILL_MIGRATION, ENTITY_LINKS_TASK_BACKFILL_MIGRATION, ENTITY_LINKS_TASK_LINK_MOVE_MIGRATION, ENTITY_LINKS_CONVERSATION_BACKFILL_MIGRATION, ENTITY_LINKS_SOLUTION_KEY_RESULT_BACKFILL_MIGRATION, SHARED_COMPASS_AGENT_BOOTSTRAP_MIGRATION, WORKSPACE_MODULES_LEGACY_FLAG_BACKFILL_MIGRATION];
+const EXPLICIT_ONLY_MIGRATIONS: readonly string[] = [WORKSPACE_ID_RESIDUAL_MIGRATION, TYPED_LINK_RESIDUAL_MIGRATION, WORK_ITEM_IDS_RESIDUAL_MIGRATION, ENTITY_LINKS_OPPORTUNITY_BACKFILL_MIGRATION, ENTITY_LINKS_OPPORTUNITY_RESIDUAL_MIGRATION, ENTITY_LINKS_ARTIFACT_BACKFILL_MIGRATION, ENTITY_LINKS_TASK_BACKFILL_MIGRATION, ENTITY_LINKS_TASK_LINK_MOVE_MIGRATION, ENTITY_LINKS_CONVERSATION_BACKFILL_MIGRATION, ENTITY_LINKS_SOLUTION_KEY_RESULT_BACKFILL_MIGRATION, SHARED_COMPASS_AGENT_BOOTSTRAP_MIGRATION, WORKSPACE_MODULES_LEGACY_FLAG_BACKFILL_MIGRATION, ENTITY_LINKS_LEGACY_DROP_MIGRATION];
 
 /**
- * Which pending migrations a POST runs: the named one, or everything except the explicit-only one-shots (069, 072, 094, 095, 096, 097, 115_entity_links_task_link_move, 098_entity_links_backfill_solution_key_result, 103, 106_entity_links_residual_opportunity).
+ * Which pending migrations a POST runs: the named one, or everything except the explicit-only one-shots (069, 072, 094, 095, 096, 097, 115_entity_links_task_link_move, 116_entity_links_drop_legacy_tables, 098_entity_links_backfill_solution_key_result, 103, 106_entity_links_residual_opportunity).
  * `includeExplicitOnly` is for callers that provision a FRESH schema (the scoped preview worker): there is no old
  * deployment to drain, so applying 069 straight after 068 is correct and required for the schema to reach "ready".
  * Production-style callers (the admin route, an untargeted POST) never set it.
@@ -2283,6 +2308,11 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
         log.push(`  ✓ legacy review repair: ${repair.workspaceStatus === "NOT_PRESENT" ? "target workspace not present" : repair.requests.map(({ status }) => status).join(", ")}`)
       }
 
+      // Older link hooks read tables that migration 116 may have dropped. 116 only drops after proving every live row is in entity_links, so a
+      // hook whose source is gone has nothing left to carry over: skip it (the receipt below is still recorded).
+      const missingLegacySources = LEGACY_SOURCES_BY_MIGRATION[migration.name] ? await missingLegacyRelations(client, schema, LEGACY_SOURCES_BY_MIGRATION[migration.name]) : []
+      const legacySourceGone = missingLegacySources.length > 0
+      if (legacySourceGone) log.push(`  ~ ${migration.name}: legacy source ${missingLegacySources.join(", ")} already dropped by ${ENTITY_LINKS_LEGACY_DROP_MIGRATION}; nothing to carry over (data half skipped)`)
       await assertDecisionMigrationPostconditions(client, schema, migration.name)
       if (migration.name === "049_research_participant_voice") {
         await inspectVoiceMigrationCatalog(client, schema, voiceCatalog!, true)
@@ -2342,7 +2372,7 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
         await backfillWorkspaceIdOnSolutionObjective(client, schema, log)
         await assertWorkspaceIdOnSolutionObjective(client, schema, migration.name)
       }
-      if (migration.name === TYPED_LINK_TABLES_MIGRATION || migration.name === TYPED_LINK_RESIDUAL_MIGRATION) {
+      if (!legacySourceGone && (migration.name === TYPED_LINK_TABLES_MIGRATION || migration.name === TYPED_LINK_RESIDUAL_MIGRATION)) {
         // Data half: backfill links from the legacy pointer (orphans are
         // quarantined, not linked), then prove integrity. Both run before the
         // receipt below; a failure leaves an unfinished attempt and the next
@@ -2362,37 +2392,44 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
         await backfillWorkItemIds(client, schema, log)
         await assertWorkItemIdsBackfill(client, schema, migration.name)
       }
-      if (migration.name === ENTITY_LINKS_OPPORTUNITY_BACKFILL_MIGRATION || migration.name === ENTITY_LINKS_OPPORTUNITY_RESIDUAL_MIGRATION) {
+      if (!legacySourceGone && (migration.name === ENTITY_LINKS_OPPORTUNITY_BACKFILL_MIGRATION || migration.name === ENTITY_LINKS_OPPORTUNITY_RESIDUAL_MIGRATION)) {
         // Data half: mirror the legacy rows (quarantining the inconsistent ones), then prove it. Before the receipt below, so a failure
         // leaves an unfinished attempt and the next POST resumes.
         await backfillEntityLinksOpportunity(client, schema, log)
         await assertEntityLinksOpportunityBackfill(client, schema)
       }
-      if (migration.name === ENTITY_LINKS_ARTIFACT_BACKFILL_MIGRATION) {
+      if (!legacySourceGone && migration.name === ENTITY_LINKS_ARTIFACT_BACKFILL_MIGRATION) {
         // Data half: mirror the artifact_links rows (quarantining the inconsistent ones), then prove it. Before the receipt below, so a failure
         // leaves an unfinished attempt and the next POST resumes.
         await backfillEntityLinksArtifact(client, schema, log)
         await assertEntityLinksArtifactBackfill(client, schema)
       }
-      if (migration.name === ENTITY_LINKS_TASK_BACKFILL_MIGRATION) {
+      if (!legacySourceGone && migration.name === ENTITY_LINKS_TASK_BACKFILL_MIGRATION) {
         // Data half: mirror the legacy task links (quarantining the inconsistent ones), then prove it. Before the receipt below, so a failure
         // leaves an unfinished attempt and the next POST resumes.
         await backfillEntityLinksTask(client, schema, log)
         await assertEntityLinksTaskBackfill(client, schema)
       }
-      if (migration.name === ENTITY_LINKS_TASK_LINK_MOVE_MIGRATION) {
+      if (!legacySourceGone && migration.name === ENTITY_LINKS_TASK_LINK_MOVE_MIGRATION) {
         // Data half: copy the COMMENT and AGENT_CONVERSATION task links into entity_links (insert-only, quarantining the inconsistent ones), then
         // prove per-type pair-set and row-count equality. Before the receipt below, so a failure leaves an unfinished attempt and the next POST resumes.
         await moveTaskLinksToEntityLinks(client, schema, log)
         await assertEntityLinksTaskLinkMove(client, schema)
       }
-      if (migration.name === ENTITY_LINKS_CONVERSATION_BACKFILL_MIGRATION) {
+      if (migration.name === ENTITY_LINKS_LEGACY_DROP_MIGRATION) {
+        // IRREVERSIBLE. The hook runs its read-only preflight first and throws (dropping nothing) unless every check passes, then drops the four
+        // legacy tables and the pointer column (one DDL per autocommit statement), then proves they are gone. Before the receipt below, so a
+        // failure leaves an unfinished attempt and the next POST resumes (every drop is IF EXISTS).
+        await dropLegacyLinkRelations(client, schema, log)
+        await assertLegacyDropped(client, schema)
+      }
+      if (!legacySourceGone && migration.name === ENTITY_LINKS_CONVERSATION_BACKFILL_MIGRATION) {
         // Data half: link the legacy AGENT_CONVERSATION task links as CONVERSATION_CREATED (quarantining the inconsistent ones), then prove it. Before
         // the receipt below, so a failure leaves an unfinished attempt and the next POST resumes.
         await backfillEntityLinksConversation(client, schema, log)
         await assertEntityLinksConversationBackfill(client, schema)
       }
-      if (migration.name === ENTITY_LINKS_SOLUTION_KEY_RESULT_BACKFILL_MIGRATION) {
+      if (!legacySourceGone && migration.name === ENTITY_LINKS_SOLUTION_KEY_RESULT_BACKFILL_MIGRATION) {
         // Data half: mirror the legacy Solution-Key Result links (quarantining the inconsistent ones), then prove it. Before the receipt below, so a
         // failure leaves an unfinished attempt and the next POST resumes.
         await backfillEntityLinksSolutionKeyResult(client, schema, log)

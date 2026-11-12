@@ -761,7 +761,6 @@ model KeyResult {
   objective            Objective     @relation(fields: [objectiveId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   checkIns             CheckIn[]
   roadmapItems         RoadmapItem[]
-  opportunities        Opportunity[]
   supportingObjectives Objective[]   @relation("SquadKRSupport")
   createdById          String?       @map("created_by_id") @db.Uuid
   updatedById          String?       @map("updated_by_id") @db.Uuid
@@ -801,12 +800,10 @@ model Opportunity {
   customerSegment   String?           @map("customer_segment") @db.VarChar(255)
   status            String            @default("EXPLORING") @db.VarChar(50)
   sortOrder         Int               @default(0) @map("sort_order")
-  linkedKeyResultId String?           @map("linked_key_result_id") @db.Uuid
   createdAt         DateTime          @default(now()) @map("created_at")
   updatedAt         DateTime          @default(now()) @map("updated_at")
   workspace         Workspace         @relation(fields: [workspaceId], references: [id])
   squad             Squad?            @relation(fields: [squadId], references: [id])
-  linkedKeyResult   KeyResult?        @relation(fields: [linkedKeyResultId], references: [id])
   solutions         Solution[]
   roadmapItems      RoadmapItem[]
   feedback          FeedbackItem[]
@@ -2434,7 +2431,6 @@ model Artifact {
   workspace         Workspace          @relation(fields: [workspaceId], references: [id])
   revisions         ArtifactRevision[] @relation("ArtifactRevisions")
   currentRevision   ArtifactRevision?  @relation("CurrentArtifactRevision", fields: [currentRevisionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
-  links             ArtifactLink[]
   researchStudies   ResearchStudy[]
   feedbackSources   FeedbackSource[]
 
@@ -2484,25 +2480,6 @@ model ArtifactRevision {
   @@unique([artifactId, revisionNumber])
   @@index([artifactId, createdAt])
   @@map("artifact_revisions")
-}
-
-model ArtifactLink {
-  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  workspaceId String   @map("workspace_id") @db.Uuid
-  artifactId  String   @map("artifact_id") @db.Uuid
-  /// One of: SOLUTION | REVIEW_REQUEST. REVIEW_REQUEST links are restricted to
-  /// requests with gateType TRACKED_DECISION and are live supporting material,
-  /// not frozen review evidence -- see ADR-0010 and lib/artifacts.ts.
-  linkedType  String   @map("linked_type") @db.VarChar(30)
-  linkedId    String   @map("linked_id") @db.Uuid
-  createdById String?  @map("created_by_id") @db.Uuid
-  source      String   @default("UI") @db.VarChar(20)
-  createdAt   DateTime @default(now()) @map("created_at")
-  artifact    Artifact @relation(fields: [artifactId], references: [id])
-
-  @@unique([artifactId, linkedType, linkedId])
-  @@index([workspaceId, linkedType, linkedId])
-  @@map("artifact_links")
 }
 
 /// Durable outbox for private Blob deletion. Rows are written before revision
@@ -2682,7 +2659,6 @@ model Task {
   squad      Squad?     @relation(fields: [squadId], references: [id])
   parentTask Task?      @relation("TaskParent", fields: [parentTaskId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   subtasks   Task[]     @relation("TaskParent")
-  links      TaskLink[]
   releaseRunTasks ReleaseRunTask[]
 
   createdById String? @map("created_by_id") @db.Uuid
@@ -2844,38 +2820,6 @@ model AgentToolCall {
   @@index([agentId, createdAt])
   @@index([workspaceId, createdAt])
   @@map("agent_tool_calls")
-}
-
-// ─── Task Links (polymorphic many-to-many) ─────────────────────────────────
-// Deliberately NOT shaped like Evidence (mutually-exclusive nullable FK
-// columns, one parent per row) — a Task can relate to MULTIPLE objects across
-// MULTIPLE types at once (e.g. one Task tied to both a Solution and a Doc).
-// One row per (task, linked object) pair. linkedId carries no Prisma
-// @relation because a single UUID column can't type-safely join into nine
-// different target tables — same reasoning as CustomFieldValue.objectId
-// above. Cross-type reads are resolved in application code (group links by
-// linkedType, batch-fetch each type, stitch results back together), not via
-// a single Prisma `include`.
-
-model TaskLink {
-  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  taskId      String   @map("task_id") @db.Uuid
-  /// One of: OPPORTUNITY | SOLUTION | ROADMAP_ITEM | OBJECTIVE | KEY_RESULT |
-  /// DOC | EXPERIMENT | FEEDBACK_ITEM | DECISION (ReviewRequest — see
-  /// lib/task-tool-handlers.ts LINK_TARGET_MODEL comment for why DECISION is
-  /// handled separately there). Squad is deliberately excluded — a Task's
-  /// squad is its first-class owning Task.squadId column, not a generic link.
-  linkedType  String   @map("linked_type") @db.VarChar(30)
-  linkedId    String   @map("linked_id") @db.Uuid
-  createdAt   DateTime @default(now()) @map("created_at")
-  createdById String?  @map("created_by_id") @db.Uuid
-  source      String   @default("UI") @map("source") @db.VarChar(20)
-
-  task Task @relation(fields: [taskId], references: [id])
-
-  @@unique([taskId, linkedType, linkedId])
-  @@index([linkedType, linkedId])
-  @@map("task_links")
 }
 
 // ─── In-app agent runtime ────────────────────────────────────────────────────
@@ -3670,57 +3614,6 @@ model WorkspaceActivationState {
   learningAt DateTime? @map("learning_at")
   updatedAt DateTime @default(now()) @map("updated_at")
   @@map("workspace_activation_states")
-}
-
-// ─── Typed link tables (migration 071) ────────────────────────────────────────
-// Many-to-many links that replace the single nullable opportunities.linked_key_result_id
-// pointer. Created by migration 071, which backfills Opportunity <-> Objective from
-// that pointer; Solution <-> Key Result starts empty.
-//
-// ONLY lib/typed-links.ts (plus the migration hook in lib/migrations and its SQL) reads or writes
-// these models; __tests__/typed-link-access.test.ts guards that. Code that uses them must not be
-// deployed before migration 071 has created the tables: every read and write fails with the
-// database error until it has (reads included, on purpose: there is no "no links" fallback).
-//
-// Deliberately scalar ids only, no Prisma relation fields: under relationMode = "prisma"
-// a relation makes Prisma query the child table whenever a parent row is deleted or
-// updated, which would make existing Opportunity/Objective/Solution/KeyResult code paths
-// touch these tables before the migration is applied. Integrity is application-level
-// (plus the migration postconditions); there is no foreign key either way.
-
-/// Opportunity <-> Objective. origin is DIRECT (created through the new UI/API) or
-/// LEGACY (copied from opportunities.linked_key_result_id by migration 071).
-model OpportunityObjectiveLink {
-  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  workspaceId   String   @map("workspace_id") @db.Uuid
-  opportunityId String   @map("opportunity_id") @db.Uuid
-  objectiveId   String   @map("objective_id") @db.Uuid
-  /// One of: DIRECT | LEGACY
-  origin        String   @db.VarChar(20)
-  source        String   @default("UI") @db.VarChar(20)
-  createdById   String?  @map("created_by_id") @db.Uuid
-  createdAt     DateTime @default(now()) @map("created_at")
-
-  @@unique([opportunityId, objectiveId], map: "idx_opportunity_objective_links_pair")
-  @@index([objectiveId, opportunityId], map: "idx_opportunity_objective_links_objective")
-  @@index([workspaceId], map: "idx_opportunity_objective_links_workspace")
-  @@map("opportunity_objective_links")
-}
-
-/// Solution <-> Key Result. Starts empty; written only by code that ships after 071.
-model SolutionKeyResultLink {
-  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  workspaceId String   @map("workspace_id") @db.Uuid
-  solutionId  String   @map("solution_id") @db.Uuid
-  keyResultId String   @map("key_result_id") @db.Uuid
-  source      String   @default("UI") @db.VarChar(20)
-  createdById String?  @map("created_by_id") @db.Uuid
-  createdAt   DateTime @default(now()) @map("created_at")
-
-  @@unique([solutionId, keyResultId], map: "idx_solution_key_result_links_pair")
-  @@index([keyResultId, solutionId], map: "idx_solution_key_result_links_key_result")
-  @@index([workspaceId], map: "idx_solution_key_result_links_workspace")
-  @@map("solution_key_result_links")
 }
 
 /// A user's subscription to one subject (Following and in-app notifications,
