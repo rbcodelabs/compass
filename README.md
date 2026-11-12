@@ -118,6 +118,8 @@ pnpm install
 
 # Point at a local Postgres. Environment isolation is by schema, not database:
 # NODE_ENV=development resolves to the `compass_dev` schema (lib/schema.ts).
+# Deployed environments are chosen by COMPASS_ENV (or VERCEL_ENV on Vercel); see
+# docs/maintenance/environment-resolution.md.
 echo 'DATABASE_URL=postgresql://USER:PASSWORD@localhost:5437/compass?sslmode=disable' >> .env.local
 
 # Create the tables in that schema

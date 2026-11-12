@@ -1,3 +1,4 @@
+import { compassEnv } from "@/lib/runtime-env";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { UIRegistry } from "@/components/ui-registry";
@@ -10,7 +11,7 @@ export const metadata: Metadata = {
 function registryEnabled() {
   return (
     process.env.NODE_ENV === "development" ||
-    process.env.VERCEL_ENV === "preview" ||
+    compassEnv() === "preview" ||
     process.env.COMPASS_UI_REGISTRY === "1"
   );
 }

@@ -33,6 +33,30 @@ describe("getActiveSchema", () => {
     expect(getActiveSchema()).toBe("compass_preview");
   });
 
+  it("returns compass_prod when COMPASS_ENV=production on a host without VERCEL_ENV", () => {
+    setNodeEnv("production");
+    delete process.env.VERCEL_ENV;
+    process.env.COMPASS_ENV = "production";
+    delete process.env.PGSCHEMA;
+    expect(getActiveSchema()).toBe("compass_prod");
+  });
+
+  it("lets COMPASS_ENV override VERCEL_ENV", () => {
+    setNodeEnv("production");
+    process.env.VERCEL_ENV = "production";
+    process.env.COMPASS_ENV = "preview";
+    delete process.env.PGSCHEMA;
+    expect(getActiveSchema()).toBe("compass_preview");
+  });
+
+  it("refuses to guess a schema for a production process with no environment configured", () => {
+    setNodeEnv("production");
+    delete process.env.VERCEL_ENV;
+    delete process.env.COMPASS_ENV;
+    delete process.env.PGSCHEMA;
+    expect(() => getActiveSchema()).toThrow(/COMPASS_ENV is not set/);
+  });
+
   it("returns compass_prod when VERCEL_ENV=production", () => {
     setNodeEnv("production");
     process.env.VERCEL_ENV = "production";

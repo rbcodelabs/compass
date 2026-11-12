@@ -1,3 +1,4 @@
+import { compassEnv } from "@/lib/runtime-env";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import type { PrismaClient } from "@prisma/client";
 
@@ -36,7 +37,7 @@ export function createLazyPrismaAuthAdapter(
   const adapter = PrismaAdapter(lazyPrisma);
   async function automationDeadline(row: { sessionToken: string; userId: string }) {
     const managed = getManagedPilotContext();
-    if (process.env.PREVIEW_AUTOMATION_ENABLED !== "1" || process.env.VERCEL_ENV !== "preview") return null;
+    if (process.env.PREVIEW_AUTOMATION_ENABLED !== "1" || compassEnv() !== "preview") return null;
     const association = await lazyPrisma.previewAutomationSession.findUnique({ where: { sessionToken: row.sessionToken } });
     if (!association) return null;
     const run = await lazyPrisma.previewAutomationRun.findUnique({ where: { id: association.runId } });

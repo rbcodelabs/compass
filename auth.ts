@@ -1,3 +1,4 @@
+import { compassEnv } from "@/lib/runtime-env";
 import NextAuth from "next-auth";
 import Resend from "next-auth/providers/resend";
 import { connect } from "@vercel/connect/authjs";
@@ -134,7 +135,7 @@ export const { handlers, auth, signIn, signOut } = isDev
       ],
       adapter: createLazyPrismaAuthAdapter(),
       experimental: { enableWebAuthn: true },
-      ...(process.env.VERCEL_ENV === "preview" && process.env.PREVIEW_AUTOMATION_ENABLED === "1" ? {
+      ...(process.env.PREVIEW_AUTOMATION_ENABLED === "1" && compassEnv() === "preview" ? {
         cookies: { sessionToken: { name: PREVIEW_SESSION_COOKIE, options: PREVIEW_SESSION_OPTIONS } },
       } : {}),
     });

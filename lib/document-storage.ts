@@ -1,3 +1,4 @@
+import { compassEnv } from "@/lib/runtime-env"
 import { createHash, randomUUID } from "node:crypto"
 import { constants } from "node:fs"
 import { link, mkdir, open, realpath, unlink } from "node:fs/promises"
@@ -24,7 +25,7 @@ export function isDocumentPilotWorkspace(workspaceId: string): boolean {
   if (!process.env.GEODE_DOCS_PILOT_WORKSPACE_ID || workspaceId !== process.env.GEODE_DOCS_PILOT_WORKSPACE_ID) return false
   const schema = getActiveSchema()
   // Shared preview/prod schemas are never eligible for the synthetic pilot.
-  const isolatedPreview = process.env.VERCEL_ENV === "preview" && process.env.PREVIEW_AUTOMATION_ENABLED === "1" && /^compass_pr_\d+_[a-f0-9]{12}$/.test(schema)
+  const isolatedPreview = compassEnv() === "preview" && process.env.PREVIEW_AUTOMATION_ENABLED === "1" && /^compass_pr_\d+_[a-f0-9]{12}$/.test(schema)
   const isolatedLocal = isLocalPilot() && schema === "compass_dev"
   if (!isolatedPreview && !isolatedLocal) throw new Error("Geode document pilot requires an isolated preview or local schema")
   return true
