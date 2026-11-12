@@ -2,8 +2,9 @@ import { randomUUID } from "node:crypto"
 import { Pool } from "pg"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { applyMigrations } from "@/lib/migrations/runner"
+import { integrationDatabaseUrl } from "@/__tests__/helpers/integration-database"
 
-const databaseUrl = process.env.PM_AGENT_HANDOFF_DATABASE_URL
+const databaseUrl = integrationDatabaseUrl
 describe.skipIf(!databaseUrl)("051 canonical migration on an owned local schema", () => {
   const schema = `pm_handoff_migration_${randomUUID().replaceAll("-", "")}`
   const pool = new Pool({ connectionString: databaseUrl, max: 2 })

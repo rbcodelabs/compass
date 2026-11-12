@@ -9,11 +9,12 @@ import { injectUpdatedAtExtension } from "@/lib/prisma-updated-at"
 import { runWithMcpActor, type McpActor } from "@/lib/mcp-authz"
 import { finishInterviewProcessing, withInterviewMutation } from "@/lib/pm-agent-service"
 import { updateOpportunity } from "@/lib/opportunity-tool-handlers"
+import { integrationDatabaseUrl } from "@/__tests__/helpers/integration-database"
 
 const connection = vi.hoisted(() => ({ prisma: null as AppPrismaClient | null }))
 vi.mock("@/lib/db", () => ({ default: () => connection.prisma }))
 
-const databaseUrl = process.env.PM_AGENT_HANDOFF_DATABASE_URL
+const databaseUrl = integrationDatabaseUrl
 describe.skipIf(!databaseUrl)("PM handoff atomicity on owned real PostgreSQL", () => {
   const schema = `pm_handoff_${randomUUID().replaceAll("-", "")}`
   let pool: Pool

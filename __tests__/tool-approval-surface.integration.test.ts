@@ -2,7 +2,7 @@
  * The approval surfaces (TASK-149, A3) against a real, disposable PostgreSQL schema: the click path (runApprovalDecision), the
  * read model (loadApprovalView / loadRecentApprovals) and the conversation update. No schema change.
  *
- * Set TOOL_APPROVAL_DATABASE_URL to an isolated localhost compass_e2e URL (no ?schema=) to enable; skipped otherwise.
+ * Set INTEGRATION_TEST_DATABASE_URL to an isolated localhost compass_e2e URL (no ?schema=) to enable; skipped otherwise.
  * The registry is injected with setToolApprovalRegistryForTest (NODE_ENV=test only); the production registry stays empty.
  */
 import { randomUUID } from "node:crypto"
@@ -23,8 +23,9 @@ import { conversationUpdateText } from "@/lib/tool-approval/messages"
 import { setToolApprovalRegistryForTest, type ToolApprovalSpec } from "@/lib/tool-approval/registry"
 import { requestToolApproval } from "@/lib/tool-approval/request"
 import { loadApprovalView, loadRecentApprovals } from "@/lib/tool-approval/view"
+import { integrationDatabaseUrl } from "@/__tests__/helpers/integration-database"
 
-const databaseUrl = process.env.TOOL_APPROVAL_DATABASE_URL
+const databaseUrl = integrationDatabaseUrl
 const TOOL = "set_workspace_description"
 
 describe.skipIf(!databaseUrl)("tool approval surfaces (real PostgreSQL)", () => {

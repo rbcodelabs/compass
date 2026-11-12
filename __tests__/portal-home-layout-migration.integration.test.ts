@@ -7,12 +7,13 @@ import { applyMigrations } from "@/lib/migrations/runner"
 import type { AppPrismaClient } from "@/lib/db"
 import { createWidget } from "@/lib/portal-home/schema"
 import { loadHomeLayout, loadPublishedWidgets, publishDraft, saveDraft } from "@/lib/portal-home/service"
+import { integrationDatabaseUrl } from "@/__tests__/helpers/integration-database"
 
 // Runs 074 through the registered runner against a throwaway schema in the local
 // compass_e2e database, then exercises the real Prisma model and the draft /
 // publish service against the resulting table. Skipped unless
-// UPDATES_TEST_DATABASE_URL is set (same convention as the 068 follows test).
-const databaseUrl = process.env.UPDATES_TEST_DATABASE_URL
+// INTEGRATION_TEST_DATABASE_URL is set (same convention as the 068 follows test).
+const databaseUrl = integrationDatabaseUrl
 describe.skipIf(!databaseUrl)("portal home layout registered migration", () => {
   const schema = `phl_${randomUUID().replaceAll("-", "")}`
   const pool = new Pool({ connectionString: databaseUrl, max: 2 })

@@ -2,15 +2,16 @@ import { randomUUID } from "node:crypto"
 import { Pool } from "pg"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { applyMigrations } from "@/lib/migrations/runner"
+import { integrationDatabaseUrl } from "@/__tests__/helpers/integration-database"
 
 /**
  * Runs 076_research_external_studies through the registered runner (the code
  * behind /api/admin/migrate) on a schema owned by this test, against pre-076
  * research tables that already hold rows. Opt in with
- * RESEARCH_EXTERNAL_MIGRATION_DATABASE_URL pointing at the local compass_e2e
+ * INTEGRATION_TEST_DATABASE_URL pointing at the local compass_e2e
  * database; skipped by default so the normal suite stays hermetic.
  */
-const databaseUrl = process.env.RESEARCH_EXTERNAL_MIGRATION_DATABASE_URL
+const databaseUrl = integrationDatabaseUrl
 const NAME = "076_research_external_studies"
 
 describe.skipIf(!databaseUrl)("076 research external studies registered migration", () => {

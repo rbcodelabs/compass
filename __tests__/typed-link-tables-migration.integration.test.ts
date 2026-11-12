@@ -4,7 +4,7 @@
  * database. Never touches Aurora or any shared environment; the schema is dropped
  * in afterAll.
  *
- *   TYPED_LINK_TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5437/compass_e2e \
+ *   INTEGRATION_TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5437/compass_e2e \
  *     npx vitest run __tests__/typed-link-tables-migration.integration.test.ts
  */
 import { randomUUID } from "node:crypto";
@@ -14,10 +14,11 @@ import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { applyMigrations, getMigrationStatus } from "@/lib/migrations/runner";
 import { TYPED_LINK_BACKFILL_BATCH_SIZE, getTypedLinkStatus } from "@/lib/migrations/typed-link-tables";
+import { integrationDatabaseUrl } from "@/__tests__/helpers/integration-database"
 
 const MIGRATION = "071_typed_link_tables";
 const PREREQUISITE = "068_workspace_id_on_solution_objective";
-const databaseUrl = process.env.TYPED_LINK_TEST_DATABASE_URL ?? process.env.WORKSPACE_ID_TEST_DATABASE_URL;
+const databaseUrl = integrationDatabaseUrl;
 
 describe.skipIf(!databaseUrl)("071 typed link tables (registered migration)", () => {
   const schema = `tlnk_${randomUUID().replaceAll("-", "")}`;

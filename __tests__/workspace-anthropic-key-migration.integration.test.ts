@@ -3,15 +3,16 @@ import { Pool } from "pg"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { applyMigrations } from "@/lib/migrations/runner"
 import { replayAllMigrations } from "./helpers/replay-migrations"
+import { integrationDatabaseUrl } from "@/__tests__/helpers/integration-database"
 
 /**
  * 110 through the registered runner, on a throwaway schema of this suite's own, after every earlier migration has been
  * replayed. Proves the SQL runs, the postcondition passes, the receipt is earned, and a rerun is idempotent.
  *
- * Set ANTHROPIC_KEY_MIGRATION_DATABASE_URL to the local compass_e2e database to enable. The guard keeps it from ever pointing
+ * Set INTEGRATION_TEST_DATABASE_URL to the local compass_e2e database to enable. The guard keeps it from ever pointing
  * anywhere else: this suite creates and drops schemas, which must never happen against DSQL or a shared database.
  */
-const databaseUrl = process.env.ANTHROPIC_KEY_MIGRATION_DATABASE_URL
+const databaseUrl = integrationDatabaseUrl
 const MIGRATION = "110_workspace_anthropic_api_key"
 
 describe.skipIf(!databaseUrl)("110 workspace anthropic api key through the registered runner", () => {

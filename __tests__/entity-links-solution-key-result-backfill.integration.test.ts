@@ -9,12 +9,13 @@ import {
   getEntityLinksSolutionKeyResultStatus,
 } from "@/lib/migrations/entity-links-solution-key-result-backfill"
 import { replayAllMigrations } from "./helpers/replay-migrations"
+import { integrationDatabaseUrl } from "@/__tests__/helpers/integration-database"
 
 /**
  * 098 through the registered runner on a throwaway schema, with legacy rows (good and orphaned) seeded first.
- * Set ENTITY_LINKS_SOLUTION_KR_DATABASE_URL to the local compass_e2e database to enable.
+ * Set INTEGRATION_TEST_DATABASE_URL to the local compass_e2e database to enable.
  */
-const databaseUrl = process.env.ENTITY_LINKS_SOLUTION_KR_DATABASE_URL
+const databaseUrl = integrationDatabaseUrl
 const NAME = "098_entity_links_backfill_solution_key_result"
 const KEY = "SOLUTION_TARGETS_KEY_RESULT"
 

@@ -9,12 +9,13 @@ import {
   getEntityLinksTaskStatus,
 } from "@/lib/migrations/entity-links-task-backfill"
 import { replayAllMigrations } from "./helpers/replay-migrations"
+import { integrationDatabaseUrl } from "@/__tests__/helpers/integration-database"
 
 /**
  * 097 through the registered runner on a throwaway schema, with legacy task links (good and orphaned, every target type) seeded first.
- * Set ENTITY_LINKS_TASK_DATABASE_URL to the local compass_e2e database to enable.
+ * Set INTEGRATION_TEST_DATABASE_URL to the local compass_e2e database to enable.
  */
-const databaseUrl = process.env.ENTITY_LINKS_TASK_DATABASE_URL
+const databaseUrl = integrationDatabaseUrl
 const NAME = "097_entity_links_backfill_task"
 const KEY = "TASK_REFERENCES"
 const TYPES = ["OPPORTUNITY", "SOLUTION", "ROADMAP_ITEM", "OBJECTIVE", "KEY_RESULT", "DOC", "EXPERIMENT", "FEEDBACK_ITEM", "DECISION"] as const

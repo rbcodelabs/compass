@@ -3,6 +3,7 @@ import { Pool } from "pg"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { assertBackgroundAgentRunsMigration } from "@/lib/migrations/background-agent-runs"
 import { applyMigrations } from "@/lib/migrations/runner"
+import { integrationDatabaseUrl } from "@/__tests__/helpers/integration-database"
 
 /**
  * 069 through the registered runner, on a throwaway schema of this suite's own.
@@ -12,11 +13,11 @@ import { applyMigrations } from "@/lib/migrations/runner"
  * postcondition assertion looks for absent. Running the migration and its
  * assertion together is the only way to know they agree.
  *
- * Set AGENT_RUNS_DATABASE_URL to the local compass_e2e database to enable. The
+ * Set INTEGRATION_TEST_DATABASE_URL to the local compass_e2e database to enable. The
  * guard below keeps that var from ever pointing anywhere else -- this suite
  * creates and drops schemas, which must never happen against DSQL.
  */
-const databaseUrl = process.env.AGENT_RUNS_DATABASE_URL
+const databaseUrl = integrationDatabaseUrl
 const MIGRATION = "069_background_agent_runs"
 
 describe.skipIf(!databaseUrl)("069 background agent runs migration through the registered runner", () => {

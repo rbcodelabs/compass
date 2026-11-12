@@ -8,8 +8,9 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest"
 import { reconcilePersistedResearchVoiceCall } from "@/lib/research-voice-control-plane"
 import { terminateResearchVoiceCall } from "@/lib/research-voice-termination"
 import { provisionAllocatedResearchVoiceCall } from "@/lib/research-voice-provisioning"
+import { integrationDatabaseUrl } from "@/__tests__/helpers/integration-database"
 
-const databaseUrl = process.env.RESEARCH_VOICE_TERMINATION_DATABASE_URL
+const databaseUrl = integrationDatabaseUrl
 const run = databaseUrl ? describe : describe.skip
 
 function deferred<T>() {

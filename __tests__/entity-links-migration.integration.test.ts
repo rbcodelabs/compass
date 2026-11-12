@@ -3,15 +3,16 @@ import { Pool } from "pg"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { assertEntityLinksMigration } from "@/lib/migrations/entity-links"
 import { applyMigrations } from "@/lib/migrations/runner"
+import { integrationDatabaseUrl } from "@/__tests__/helpers/integration-database"
 
 /**
  * 091 through the registered runner, on a throwaway schema of this suite's own.
  *
- * Set ENTITY_LINKS_DATABASE_URL to the local compass_e2e database to enable. The guard below
+ * Set INTEGRATION_TEST_DATABASE_URL to the local compass_e2e database to enable. The guard below
  * keeps that var from ever pointing anywhere else: this suite creates and drops schemas, which
  * must never happen against DSQL or a shared database.
  */
-const databaseUrl = process.env.ENTITY_LINKS_DATABASE_URL
+const databaseUrl = integrationDatabaseUrl
 const MIGRATION = "091_entity_links"
 
 describe.skipIf(!databaseUrl)("091 entity links migration through the registered runner", () => {

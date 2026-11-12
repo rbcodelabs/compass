@@ -7,7 +7,7 @@
  * against a throwaway schema in the local compass_e2e database. Never touches
  * Aurora or any shared environment.
  *
- *   WORKSPACE_ID_TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5437/compass_e2e \
+ *   INTEGRATION_TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5437/compass_e2e \
  *     npx vitest run __tests__/workspace-id-on-solution-objective-migration.integration.test.ts
  */
 import { randomUUID } from "node:crypto";
@@ -15,9 +15,10 @@ import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { applyMigrations } from "@/lib/migrations/runner";
 import { WORKSPACE_ID_BACKFILL_BATCH_SIZE, getWorkspaceIdBackfillStatus, repairWorkspaceIdResidual } from "@/lib/migrations/workspace-id-on-solution-objective";
+import { integrationDatabaseUrl } from "@/__tests__/helpers/integration-database"
 
 const MIGRATION = "068_workspace_id_on_solution_objective";
-const databaseUrl = process.env.WORKSPACE_ID_TEST_DATABASE_URL;
+const databaseUrl = integrationDatabaseUrl;
 
 describe.skipIf(!databaseUrl)("068 workspace_id on solutions and objectives (registered migration)", () => {
   const schema = `wsid_${randomUUID().replaceAll("-", "")}`;

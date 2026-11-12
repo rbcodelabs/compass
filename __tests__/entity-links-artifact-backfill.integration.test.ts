@@ -9,12 +9,13 @@ import {
   getEntityLinksArtifactStatus,
 } from "@/lib/migrations/entity-links-artifact-backfill"
 import { replayAllMigrations } from "./helpers/replay-migrations"
+import { integrationDatabaseUrl } from "@/__tests__/helpers/integration-database"
 
 /**
  * 096 through the registered runner on a throwaway schema, with legacy rows (good and orphaned) seeded first.
- * Set ENTITY_LINKS_ARTIFACT_DATABASE_URL to the local compass_e2e database to enable.
+ * Set INTEGRATION_TEST_DATABASE_URL to the local compass_e2e database to enable.
  */
-const databaseUrl = process.env.ENTITY_LINKS_ARTIFACT_DATABASE_URL
+const databaseUrl = integrationDatabaseUrl
 const NAME = "096_entity_links_backfill_artifact"
 const SOL = "ARTIFACT_ATTACHED_TO_SOLUTION"
 const DEC = "ARTIFACT_SUPPORTS_DECISION"

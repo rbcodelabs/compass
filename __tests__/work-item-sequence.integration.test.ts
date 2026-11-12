@@ -7,15 +7,16 @@ import type { AppPrismaClient } from "@/lib/db"
 import { resolveWorkItem } from "@/lib/work-item-resolve"
 import { allocateOneSeq, allocateSeq, withSequenceTransaction } from "@/lib/work-item-sequence"
 import { replayAllMigrations } from "./helpers/replay-migrations"
+import { integrationDatabaseUrl } from "@/__tests__/helpers/integration-database"
 
 /**
  * Real-concurrency check of the allocator on PostgreSQL: N parallel creators in one workspace must
  * get exactly 1..N, a rolled-back create must leave no gap, and workspaces count independently.
  * (DSQL's OCC conflict path is covered by the unit tests' injected OC000/OC001/40001.)
  *
- * Set WORK_ITEM_IDS_DATABASE_URL to the local compass_e2e database to enable.
+ * Set INTEGRATION_TEST_DATABASE_URL to the local compass_e2e database to enable.
  */
-const databaseUrl = process.env.WORK_ITEM_IDS_DATABASE_URL
+const databaseUrl = integrationDatabaseUrl
 
 describe.skipIf(!databaseUrl)("work item sequence allocator on real PostgreSQL", () => {
   const schema = `work_item_seq_test_${randomUUID().replaceAll("-", "")}`

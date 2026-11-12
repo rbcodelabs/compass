@@ -2,7 +2,7 @@
  * TOOL_APPROVAL core (TASK-148, A2) against a real, disposable PostgreSQL schema (repo integration-test pattern).
  * No schema change: the gate reuses ReviewRequest / ReviewRevision / ReviewOption / DecisionRecord / DecisionApplication.
  *
- * Set TOOL_APPROVAL_DATABASE_URL to an isolated localhost compass_e2e URL (no ?schema=) to enable; skipped otherwise.
+ * Set INTEGRATION_TEST_DATABASE_URL to an isolated localhost compass_e2e URL (no ?schema=) to enable; skipped otherwise.
  */
 import { randomUUID } from "node:crypto"
 import { execFileSync } from "node:child_process"
@@ -24,8 +24,9 @@ import { executeApprovedToolCall } from "@/lib/tool-approval/executor"
 import { fingerprintOf, type EffectPacket } from "@/lib/tool-approval/packet"
 import { setToolApprovalRegistryForTest, type ToolApprovalSpec } from "@/lib/tool-approval/registry"
 import { listPendingToolApprovals, MAX_PENDING_PER_REQUESTER, MAX_PENDING_TOOL_APPROVALS, requestToolApproval } from "@/lib/tool-approval/request"
+import { integrationDatabaseUrl } from "@/__tests__/helpers/integration-database"
 
-const databaseUrl = process.env.TOOL_APPROVAL_DATABASE_URL
+const databaseUrl = integrationDatabaseUrl
 const TOOL = "set_workspace_description"
 
 describe.skipIf(!databaseUrl)("tool approval core (real PostgreSQL)", () => {

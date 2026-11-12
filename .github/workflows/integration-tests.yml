@@ -1,0 +1,55 @@
+name: Integration tests
+
+# Runs every real-PostgreSQL integration suite (the ones that import
+# __tests__/helpers/integration-database) against a throwaway postgres:16 service.
+# The normal unit job leaves INTEGRATION_TEST_DATABASE_URL unset, so those suites skip there.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: compass_e2e
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d compass_e2e"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      INTEGRATION_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/compass_e2e
+      PGSSLMODE: disable
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      - run: pnpm exec prisma generate
+      # A few suites clone the `compass_dev` schema (the Playwright fixture schema). e2e:db:prepare refuses anything but a
+      # local compass_e2e database and needs the E2E guard variable, which is set for this one step only.
+      - name: Prepare compass_dev schema
+        run: pnpm e2e:db:prepare
+        env:
+          DATABASE_URL: ${{ env.INTEGRATION_TEST_DATABASE_URL }}
+          E2E_ISOLATED_DATABASE: "1"
+      # Every suite creates its own random schema in the shared database; two workers keep the connection count
+      # (several suites open pools of 20) well under postgres' default max_connections of 100.
+      - name: Run integration suites
+        run: |
+          mapfile -t FILES < <(node scripts/integration-tests.mjs list)
+          echo "Running ${#FILES[@]} integration test files"
+          pnpm exec vitest run --maxWorkers=2 --reporter=default --reporter=json --outputFile.json=integration-results.json "${FILES[@]}"
+      # Vitest reports "all skipped" as success, so assert that the suites really ran.
+      - name: Assert the suites ran (not skipped)
+        if: always()
+        run: node scripts/integration-tests.mjs check integration-results.json

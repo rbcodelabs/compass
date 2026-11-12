@@ -7,6 +7,7 @@ import { PrismaPg } from "@prisma/adapter-pg"
 import { Pool } from "pg"
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import type { AppPrismaClient } from "@/lib/db"
+import { integrationDatabaseUrl } from "@/__tests__/helpers/integration-database"
 
 /**
  * Statement-count proof for the request-scoped workspace resolver.
@@ -153,7 +154,7 @@ const BASELINE_SELECTS = 10
 const DEDUPED_OPERATIONS = 3
 const DEDUPED_SELECTS = 4
 
-const databaseUrl = process.env.WORKSPACE_DEDUPE_DATABASE_URL
+const databaseUrl = integrationDatabaseUrl
 
 describe.skipIf(!databaseUrl).sequential("workspace request dedupe", () => {
   const schema = `ws_dedupe_${randomUUID().replaceAll("-", "")}`

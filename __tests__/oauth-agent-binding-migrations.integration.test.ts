@@ -4,14 +4,15 @@ import { Pool } from "pg"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 
 import { applyMigrations } from "@/lib/migrations/runner"
+import { integrationDatabaseUrl } from "@/__tests__/helpers/integration-database"
 
 /**
  * Exercises the complete agent-scoped OAuth migration sequence against a real
  * PostgreSQL schema owned by this test. Opt in with
- * AGENT_SCOPED_OAUTH_MIGRATIONS_DATABASE_URL pointing at the local
+ * INTEGRATION_TEST_DATABASE_URL pointing at the local
  * compass_e2e database. Skipped by default so the normal suite stays hermetic.
  */
-const databaseUrl = process.env.AGENT_SCOPED_OAUTH_MIGRATIONS_DATABASE_URL
+const databaseUrl = integrationDatabaseUrl
 
 describe.skipIf(!databaseUrl)("056-058 OAuth migrations on an owned local schema", () => {
   const schema = `oauth_agent_binding_${randomUUID().replaceAll("-", "")}`

@@ -9,12 +9,13 @@ import {
   getEntityLinksOpportunityStatus,
 } from "@/lib/migrations/entity-links-opportunity-backfill"
 import { replayAllMigrations } from "./helpers/replay-migrations"
+import { integrationDatabaseUrl } from "@/__tests__/helpers/integration-database"
 
 /**
  * 095 through the registered runner on a throwaway schema, with legacy rows (good and orphaned) seeded first.
- * Set ENTITY_LINKS_OPPORTUNITY_DATABASE_URL to the local compass_e2e database to enable.
+ * Set INTEGRATION_TEST_DATABASE_URL to the local compass_e2e database to enable.
  */
-const databaseUrl = process.env.ENTITY_LINKS_OPPORTUNITY_DATABASE_URL
+const databaseUrl = integrationDatabaseUrl
 const NAME = "095_entity_links_backfill_opportunity"
 const OBJ = "OPPORTUNITY_TARGETS_OBJECTIVE"
 const KR = "OPPORTUNITY_TARGETS_KEY_RESULT"

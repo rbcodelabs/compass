@@ -6,13 +6,14 @@ import {
   backfillEntityLinksConversation,
   getEntityLinksConversationStatus,
 } from "@/lib/migrations/entity-links-conversation-backfill"
+import { integrationDatabaseUrl } from "@/__tests__/helpers/integration-database"
 
 /**
  * 113 against real Postgres on a throwaway schema cloned from `compass_dev` (so the e2e database must have been prepared with
  * `pnpm e2e:db:prepare`), with legacy AGENT_CONVERSATION task links seeded: good, dangling and cross-workspace, plus a MENTIONS row the
- * backfill must remove. Set ENTITY_LINKS_CONVERSATION_DATABASE_URL to the local compass_e2e database to enable.
+ * backfill must remove. Set INTEGRATION_TEST_DATABASE_URL to the local compass_e2e database to enable.
  */
-const databaseUrl = process.env.ENTITY_LINKS_CONVERSATION_DATABASE_URL
+const databaseUrl = integrationDatabaseUrl
 const CREATED = "CONVERSATION_CREATED"
 const MENTIONS = "CONVERSATION_MENTIONS"
 

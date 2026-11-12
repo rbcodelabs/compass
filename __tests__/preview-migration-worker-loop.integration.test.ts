@@ -4,7 +4,7 @@
  * callers, so the worker must opt in (`includeExplicitOnly`), otherwise it burns all 180 attempts on
  * pending: ["069_..."] and provisioning fails for every PR.
  *
- * NOT GATED IN CI: this only runs locally when WORKSPACE_ID_TEST_DATABASE_URL points at the local compass_e2e
+ * NOT GATED IN CI: this only runs locally when INTEGRATION_TEST_DATABASE_URL points at the local compass_e2e
  * database; otherwise it is skipped. It also never exercises the DSQL-only ASYNC-wait paths (DATABASE_URL is set, so
  * ASYNC is stripped and index jobs are not awaited).
  *
@@ -12,7 +12,7 @@
  * The full 001..067 chain cannot be replayed on local PostgreSQL (042 refuses the partial-039 catalog shape, a DSQL
  * artifact), so each schema gets the real 001_init tables and a finished receipt for every other migration ahead of
  * 068. What is under test is exactly the tail that changed: 068 and 069 through the loop and the readiness gate.
- *   WORKSPACE_ID_TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5437/compass_e2e \
+ *   INTEGRATION_TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5437/compass_e2e \
  *     npx vitest run __tests__/preview-migration-worker-loop.integration.test.ts
  */
 import { randomUUID } from "node:crypto";
@@ -20,8 +20,9 @@ import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { applyMigrations, getMigrationStatus } from "@/lib/migrations/runner";
 import { migrateToReady, previewMigrationsReady } from "../scripts/preview-automation/database";
+import { integrationDatabaseUrl } from "@/__tests__/helpers/integration-database"
 
-const databaseUrl = process.env.WORKSPACE_ID_TEST_DATABASE_URL;
+const databaseUrl = integrationDatabaseUrl;
 const RESIDUAL = "069_workspace_id_residual_backfill";
 
 describe.skipIf(!databaseUrl)("preview worker migration loop on a fresh schema", () => {

@@ -4,15 +4,16 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { assertAgentRetentionIndexesMigration } from "@/lib/migrations/agent-retention-indexes"
 import { applyMigrations } from "@/lib/migrations/runner"
 import { replayAllMigrations } from "./helpers/replay-migrations"
+import { integrationDatabaseUrl } from "@/__tests__/helpers/integration-database"
 
 /**
  * 104 through the registered runner, on a throwaway schema of this suite's own, after every earlier migration has been
  * replayed (the indexes need agent_run_events and agent_messages to exist).
  *
- * Set RETENTION_INDEXES_DATABASE_URL to the local compass_e2e database to enable. The guard keeps it from ever pointing
+ * Set INTEGRATION_TEST_DATABASE_URL to the local compass_e2e database to enable. The guard keeps it from ever pointing
  * anywhere else: this suite creates and drops schemas, which must never happen against DSQL or a shared database.
  */
-const databaseUrl = process.env.RETENTION_INDEXES_DATABASE_URL
+const databaseUrl = integrationDatabaseUrl
 const MIGRATION = "104_agent_retention_indexes"
 
 describe.skipIf(!databaseUrl)("101 agent retention indexes through the registered runner", () => {

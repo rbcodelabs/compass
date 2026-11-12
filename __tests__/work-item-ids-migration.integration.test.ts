@@ -4,15 +4,16 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { assertWorkItemIdsMigration } from "@/lib/migrations/work-item-ids"
 import { applyMigrations } from "@/lib/migrations/runner"
 import { replayAllMigrations } from "./helpers/replay-migrations"
+import { integrationDatabaseUrl } from "@/__tests__/helpers/integration-database"
 
 /**
  * 092 through the registered runner on a throwaway schema of this suite's own, after every earlier
  * migration (092 alters 14 tables created by them).
  *
- * Set WORK_ITEM_IDS_DATABASE_URL to the local compass_e2e database to enable. The guard below keeps
+ * Set INTEGRATION_TEST_DATABASE_URL to the local compass_e2e database to enable. The guard below keeps
  * that var from ever pointing anywhere else: this suite creates and drops schemas.
  */
-const databaseUrl = process.env.WORK_ITEM_IDS_DATABASE_URL
+const databaseUrl = integrationDatabaseUrl
 const MIGRATION = "092_work_item_ids"
 
 describe.skipIf(!databaseUrl)("092 work item IDs migration through the registered runner", () => {

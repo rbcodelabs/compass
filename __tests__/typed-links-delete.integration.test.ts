@@ -2,7 +2,7 @@
  * The UI and MCP key result / objective deletes against a REAL Prisma client (relationMode = "prisma" Restrict emulation) and a real
  * Postgres schema, in a throwaway schema of the local compass_e2e database:
  *
- *   TYPED_LINK_TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5437/compass_e2e \
+ *   INTEGRATION_TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5437/compass_e2e \
  *     npx vitest run __tests__/typed-links-delete.integration.test.ts
  *
  * Answers, with evidence: does deleting a key result that has check-ins (or supporting objectives) really throw? (yes, below) And
@@ -30,8 +30,9 @@ vi.mock("@/lib/okr-hierarchy", () => ({ getEligibleParentKeyResults: vi.fn(), se
 import { applyMigrations } from "@/lib/migrations/runner";
 import { deleteKeyResult as deleteKeyResultAction, deleteObjective as deleteObjectiveAction } from "@/app/[orgSlug]/[workspaceSlug]/okrs/actions";
 import { deleteKeyResult as deleteKeyResultTool, deleteObjective as deleteObjectiveTool } from "@/lib/okr-tool-handlers";
+import { integrationDatabaseUrl } from "@/__tests__/helpers/integration-database"
 
-const databaseUrl = process.env.TYPED_LINK_TEST_DATABASE_URL ?? process.env.WORKSPACE_ID_TEST_DATABASE_URL;
+const databaseUrl = integrationDatabaseUrl;
 
 describe.skipIf(!databaseUrl)("key result and objective deletes against a real Prisma client", () => {
   const schema = `tldel_${randomUUID().replaceAll("-", "")}`;

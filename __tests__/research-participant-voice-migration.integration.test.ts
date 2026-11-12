@@ -4,8 +4,9 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { applyMigrations } from "@/lib/migrations/runner"
 import { readFileSync } from "node:fs"
 import { inspectVoiceMigrationCatalog, voiceMigrationCatalog } from "@/lib/research-voice-migration"
+import { integrationDatabaseUrl } from "@/__tests__/helpers/integration-database"
 
-const databaseUrl = process.env.RESEARCH_PARTICIPANT_VOICE_DATABASE_URL
+const databaseUrl = integrationDatabaseUrl
 const run = databaseUrl ? describe : describe.skip
 run("049 canonical migration on an owned local schema", () => {
   const schema = `participant_voice_${randomUUID().replaceAll("-", "")}`
