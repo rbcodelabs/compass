@@ -10,6 +10,7 @@ import { Editor } from "@tiptap/react";
 import type { MarkdownStorage } from "tiptap-markdown";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createDocEditorExtensions } from "@/components/docs/doc-editor-extensions";
+import { initialMermaidMode } from "@/components/docs/mermaid-code-block-extension";
 import { MarkdownContent } from "@/components/markdown-content";
 import { renderMermaid, sanitizeSvg } from "@/lib/mermaid-render";
 
@@ -50,6 +51,23 @@ describe("mermaid fenced blocks in the Docs editor", () => {
   it("does not change a non-mermaid code block", () => {
     const doc = "```js\nlet x = 1;\n```";
     expect(roundTrip(doc).markdown).toBe(doc);
+  });
+});
+
+describe("initialMermaidMode", () => {
+  // A fresh, empty block must open in Source and stay there while the author types: if the mode were derived from the text on every
+  // render, the block would flip to Preview after the first character and hide the source being typed into.
+  it("starts an empty editable block in source mode", () => {
+    expect(initialMermaidMode("", true)).toBe("source");
+    expect(initialMermaidMode("  \n ", true)).toBe("source");
+  });
+
+  it("leaves a block that already has source to default to preview", () => {
+    expect(initialMermaidMode("flowchart LR\n A --> B", true)).toBeNull();
+  });
+
+  it("never forces source mode in a read-only editor", () => {
+    expect(initialMermaidMode("", false)).toBeNull();
   });
 });
 
