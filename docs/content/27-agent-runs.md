@@ -169,6 +169,25 @@ error, the same as a missing key. The Bedrock default is a cross-region inferenc
 profile id; set `AGENT_MODEL_ID` if your account uses a different profile. The model
 recorded on each assistant message is the one the turn actually ran with.
 
+### Web search backend
+
+The agent's `web_search` tool uses Perplexity Search through the Vercel AI Gateway by
+default. A deployment that runs the agent on Bedrock can opt in to Amazon Bedrock Web
+Search instead. Nothing changes unless `AGENT_WEB_SEARCH_BACKEND` is set to `bedrock`.
+
+| Variable | Meaning | Default |
+|---|---|---|
+| `AGENT_WEB_SEARCH_BACKEND` | `bedrock` selects Bedrock Web Search; anything else keeps the AI Gateway | unset |
+| `BEDROCK_API_KEY` | Required for the Bedrock backend (the same key as the model provider) | none |
+| `BEDROCK_WEB_SEARCH_MODEL` | Model that runs the search | `openai.gpt-5.6-terra` |
+| `BEDROCK_WEB_SEARCH_REGION` | Region for the Bedrock endpoint | `AWS_REGION`, else `us-east-1` |
+| `BEDROCK_WEB_SEARCH_BASE_URL` | Overrides the endpoint | `https://bedrock-mantle.<region>.api.aws/openai/v1` |
+
+Results are the URL citations the model returns, with the cited text as the snippet.
+The request sets `external_web_access: false`, so retrieval stays inside AWS. See the
+[Amazon Bedrock web search documentation](https://docs.aws.amazon.com/bedrock/latest/userguide/web-search.html)
+for supported models and regions.
+
 ### Harness and provider
 
 `AGENT_HARNESS` is the outer choice; the model provider only applies inside the
