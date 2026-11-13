@@ -1342,3 +1342,23 @@ describe("workspace module tools", () => {
       .rejects.toThrow(/human identity/)
   })
 })
+
+describe("list_docs (Docs library, filter by kind)", () => {
+  it("is a registered read tool with a gate, available to delegated agents", () => {
+    expect("list_docs" in registeredTools).toBe(true)
+    expect("list_docs" in TOOL_GATES).toBe(true)
+    expect(requiredToolScope("list_docs")).toBe("mcp:read")
+    expect(AGENT_TOOL_POLICY.list_docs).toBe("READ")
+  })
+
+  it("requires membership of the declared workspace", async () => {
+    mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
+    await expect(applyToolGate("list_docs", MEMBER, { workspaceId: "ws-1" })).resolves.toBeUndefined()
+    mockPrisma.workspace.findFirst.mockResolvedValue(null)
+    await expect(applyToolGate("list_docs", MEMBER, { workspaceId: "ws-1" })).rejects.toThrow(/not found or access denied/)
+  })
+
+  it("is not available to public research credentials", async () => {
+    await expect(applyToolGate("list_docs", RESEARCH, { workspaceId: "ws-1" })).rejects.toThrow(/not available to research interviews/)
+  })
+})

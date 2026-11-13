@@ -340,3 +340,10 @@ export async function resolveDocComment({
   if (!comment || comment.docId !== docId) return fail(`Comment "${commentId}" does not belong to the doc at "${path}".`)
   return resolved === false ? reopenDocCommentById({ commentId }) : resolveDocCommentById({ commentId })
 }
+
+// ── list_docs ────────────────────────────────────────────────────────────────
+// Red-phase stub: real implementation lands in the next commit.
+
+export async function listLibraryDocs(_args: { workspaceId: string; kind?: string; limit?: number }) {
+  return fail("list_docs is not implemented yet")
+}
