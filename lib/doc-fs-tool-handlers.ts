@@ -20,6 +20,7 @@ import { safeEntityUrl, withUrlLine } from "@/lib/compass-url"
 import { documentMcpActor } from "@/lib/document-mcp-actor"
 import * as docFs from "@/lib/doc-fs"
 import type { DocType } from "@/lib/doc-types"
+import { DOC_KINDS, isDocKind } from "@/lib/doc-kinds"
 import { DocumentError } from "@/lib/document-service"
 import { restoreDocVersionCore } from "@/lib/doc-versions"
 import { relativeTime } from "@/lib/relative-time"
@@ -84,6 +85,7 @@ export async function writeDoc({
   operationId,
   expectedRevision,
   docType,
+  kind,
 }: {
   workspaceId: string
   path: string
@@ -91,6 +93,8 @@ export async function writeDoc({
   operationId?: string
   expectedRevision?: string
   docType?: DocType
+  /** Library kind; omitted = unset on create and unchanged on update, null = clear. The MCP schema narrows it to DOC_KINDS; docFs refuses anything else. */
+  kind?: string | null
 }) {
   const prisma = getPrisma()
   const workspace = await prisma.workspace.findUnique({ where: { id: workspaceId }, select: { id: true } })
@@ -102,6 +106,7 @@ export async function writeDoc({
       operationId,
       expectedRevision,
       docType,
+      kind,
       // Agent writes are strict about compass:// embeds in SPEC docs; UI saves and Geode sync call doc-fs without this flag.
       strictEmbeds: true,
       ...documentMcpActor(),
@@ -117,6 +122,7 @@ export async function writeDoc({
     path: result.path,
     created: result.created,
     revision: result.revision,
+    kind: result.kind,
     url,
   })
 }
@@ -342,8 +348,37 @@ export async function resolveDocComment({
 }
 
 // ── list_docs ────────────────────────────────────────────────────────────────
-// Red-phase stub: real implementation lands in the next commit.
+// Read-only listing for the Library: every doc (or every doc of one kind) in a workspace, newest first. Paths come from docFs.listPaths, so
+// they are exactly the ones write_doc and the docs:// resource take, collision suffixes included.
 
-export async function listLibraryDocs(_args: { workspaceId: string; kind?: string; limit?: number }) {
-  return fail("list_docs is not implemented yet")
+export const DOC_LIST_DEFAULT_LIMIT = 50
+export const DOC_LIST_MAX_LIMIT = 200
+
+export async function listLibraryDocs({ workspaceId, kind, limit }: { workspaceId: string; kind?: string; limit?: number }) {
+  if (kind !== undefined && !isDocKind(kind)) return fail(`Unknown kind "${kind}". Use one of: ${DOC_KINDS.join(", ")}.`)
+  const workspace = await getPrisma().workspace.findUnique({
+    where: { id: workspaceId },
+    select: { slug: true, organization: { select: { slug: true } } },
+  })
+  if (!workspace) return fail(`No workspace found with id "${workspaceId}".`)
+
+  const wanted = Math.min(Math.max(Math.trunc(limit ?? DOC_LIST_DEFAULT_LIMIT), 1), DOC_LIST_MAX_LIMIT)
+  const nodes = await docFs.listPaths(workspaceId)
+  const matching = nodes
+    .filter((node) => kind === undefined || node.kind === kind)
+    .sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime() || a.path.localeCompare(b.path))
+  const items = matching.slice(0, wanted).map((node) => ({
+    id: node.docId,
+    path: node.path,
+    title: node.title,
+    kind: node.kind,
+    docType: node.docType,
+    updatedAt: node.updatedAt.toISOString(),
+    url: safeEntityUrl({ orgSlug: workspace.organization?.slug, workspaceSlug: workspace.slug, type: "doc", id: node.docId }),
+  }))
+
+  const scope = kind ? `kind ${kind}` : "any kind"
+  const header = `**Docs (${scope}): ${items.length}${matching.length > items.length ? ` of ${matching.length}` : ""}**`
+  const lines = items.map((item) => `- ${item.path} [${item.kind ?? "no kind"}] updated ${item.updatedAt}\n  ID: ${item.id}${item.url ? `\n  URL: ${item.url}` : ""}`)
+  return ok(items.length ? `${header}\n\n${lines.join("\n")}` : `${header}\n\nNo docs match.`, { items, count: items.length, total: matching.length })
 }
