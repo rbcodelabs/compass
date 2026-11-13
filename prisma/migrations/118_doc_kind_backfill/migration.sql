@@ -4,7 +4,8 @@
 -- 117_doc_kind is applied, and only when you have decided to classify the existing docs.
 --
 -- The rules (first match wins, case-insensitive, otherwise the doc is left unset):
---   ADR        title starts with "ADR", or with a four digit number then a space . : or - (not an ISO date such as 2026-11-07)
+--   ADR        title starts with "ADR", or with a zero-padded four digit number (0001 to 0999) then a space . : or - ("0018 Fold ...").
+--              A year or date prefix such as "2026 Roadmap" or "2026-11-07 ..." is never a decision number.
 --   QA_REPORT  title starts with "QA Report", or the parent page is "QA Reports"
 --   DESIGN     parent page is "Design" or "Designs", or the title starts with "Design:" or "Design_"
 -- Only rows whose kind IS NULL are touched, so a kind someone already set (by hand or through write_doc) is never overwritten. Rows

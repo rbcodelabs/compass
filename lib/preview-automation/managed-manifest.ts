@@ -259,7 +259,7 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   // Digest recorded from the shipped SQL after reading it.
   "117_doc_kind": "b38d87998e1e318942d22e15ca6a67b24b0a42a90da6da23528ef02737624f4d",
   // Docs library kind backfill: no executable SQL (comments only), EXPLICIT-ONLY. The work is the TypeScript hook and classifier pinned in REVIEWED_MIGRATION_CODE_SHA256.
-  "118_doc_kind_backfill": "9a6352707d13335b29e5b067f3c8a66a99da639751f097f298004aa93ae9fda2"
+  "118_doc_kind_backfill": "cf98889cac84ca6e077b36ae237146dc4b1e77f3b85d00a96e6599b90d15926b"
 };
 
 /**
