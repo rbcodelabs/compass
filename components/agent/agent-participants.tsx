@@ -120,7 +120,11 @@ export function AgentParticipantsPanel({ conversationId, workspaceId, userId, co
         setError(body?.error ?? `Request failed (${res.status}).`)
         return
       }
-      after?.()
+      // When "after" hands the view over (leaving) the roster is no longer readable, so re-reading it would only 404.
+      if (after) {
+        after()
+        return
+      }
       await load()
     } catch {
       setError("Could not reach the server.")
