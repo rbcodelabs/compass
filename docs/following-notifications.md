@@ -1,7 +1,7 @@
 # Following and in-app notifications (engineering notes)
 
 The decision record is the ADR "Following and in-app notifications" in Compass
-Docs (workspace `rbcodelabs/compass`, under Architecture Decisions). This file
+Docs (workspace `rbcodelabs/compass`, kind ADR, conventionally under Architecture Decisions). This file
 only records how the code is laid out and what slice 2 must know. Do not add ADR
 files to `docs/decisions/`.
 

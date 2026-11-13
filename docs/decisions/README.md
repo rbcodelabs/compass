@@ -3,10 +3,11 @@
 > **Do not add files to this directory.**
 >
 > Compass Docs is the authoritative home for Compass Architecture Decision
-> Records. Create a new architecture decision as a child Doc of
-> [**Architecture Decisions**](https://compass.rbcodelabs.com/rbcodelabs/compass/docs/57218788-1db1-4148-b954-b98fb7055c62) in the `rbcodelabs/compass`
-> workspace, then route it for approval with `request_decision` using
-> `subjectType: "DOC"`.
+> Records. Create a new architecture decision as a Doc with kind `ADR` in the
+> `rbcodelabs/compass` workspace (the kind is how ADRs are found; sitting under
+> [**Architecture Decisions**](https://compass.rbcodelabs.com/rbcodelabs/compass/docs/1a6c874d-3eb0-4603-afc7-6b95a1722a3e)
+> is the usual convention but optional), then route it for approval with
+> `request_decision` using `subjectType: "DOC"`.
 >
 > Never mark your own record "Accepted". Approval is an event that comes back
 > from the configured decision provider — not a line you type.
