@@ -10,10 +10,11 @@ location, is how you find ADRs: `list_docs` with `kind: "ADR"`, or the By Type
 view on the Docs page. The
 [**Architecture Decisions**](https://compass.rbcodelabs.com/rbcodelabs/compass/docs/1a6c874d-3eb0-4603-afc7-6b95a1722a3e)
 parent doc is where they conventionally sit, but placing a new ADR under it is
-optional. Until the kind backfill has run in production, older ADRs may have no
-kind yet; if `list_docs` misses one, look under that parent. `Products/Compass/pm-config.md` routes decisions to Compass already: both
-`review_requests` and `decision_records` resolve to the `compass_decisions`
-provider.
+optional. A decision doc with no kind (for example an older one whose title does
+not start with "ADR") will not show up under ADR; if `list_docs` misses one, look
+under that parent. `Products/Compass/pm-config.md` routes decisions to Compass
+already: both `review_requests` and `decision_records` resolve to the
+`compass_decisions` provider.
 
 - **To record a new architecture decision:** write a Doc with `kind: "ADR"`
   (`write_doc` accepts it, or set the Type in the doc's properties); putting it as
