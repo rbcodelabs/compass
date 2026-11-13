@@ -86,7 +86,7 @@ async function openSeededCanvas(page: Page, base: string, name: string) {
     mimeType: "application/json",
     buffer: Buffer.from(JSON.stringify(CANVAS)),
   });
-  await page.waitForURL(/\/docs\/[0-9a-f-]+$/, { timeout: 15_000 });
+  await page.waitForURL(/\/docs\/(?:[0-9a-f-]+|DOC-\d+)$/, { timeout: 15_000 });
   await expect(page.getByTestId("canvas-doc-editor")).toBeVisible({ timeout: 15_000 });
   await expect(page.locator(".react-flow__node")).toHaveCount(ALL_IDS.length, { timeout: 15_000 });
   // Phones open view-first (locked); unlock so the same editing flows apply.

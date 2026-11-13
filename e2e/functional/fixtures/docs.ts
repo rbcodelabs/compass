@@ -13,7 +13,7 @@ export async function clickNewDoc(page: Page): Promise<void> {
   if ((await toggle.getAttribute("aria-pressed")) !== "true") await toggle.click();
   await page.getByTestId("library-create-menu").click();
   await page.getByRole("menuitem", { name: "New doc" }).click();
-  await page.waitForURL((url) => url.href !== before && /\/docs\/[0-9a-f-]+$/.test(url.pathname), { timeout: 15_000 });
+  await page.waitForURL((url) => url.href !== before && /\/docs\/(?:[0-9a-f-]+|DOC-\d+)$/.test(url.pathname), { timeout: 15_000 });
   // Close the Library rail again so the editor and its controls are reachable: a phone-width overlay drawer covers the page, and a
   // docked rail narrows the editor and puts its resize handle over it. Toggle first (works in both modes), then Escape for a drawer
   // that is still showing. Best effort: nothing here should fail the calling spec.
