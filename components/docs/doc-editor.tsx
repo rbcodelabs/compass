@@ -43,6 +43,7 @@ import { DocBlockHandle } from "@/components/docs/doc-block-handle";
 import { patchEntityField } from "@/components/panels/panel-parts";
 import { createDocumentSaveQueue } from "@/lib/document-save-queue";
 import { DocProperties, type DocMetadata } from "@/components/docs/doc-properties";
+import { normalizeDocKind, type DocKind } from "@/lib/doc-kinds";
 import { LinkedTasksSection, type LinkedTaskData } from "@/components/tasks/linked-tasks-section";
 import type { MemberData } from "@/lib/types";
 import {
@@ -79,6 +80,8 @@ interface DocEditorProps {
     content: string | null;
     icon: string | null;
     revision?: string | null;
+    /** Library kind (migration 117); null or absent when the doc has no type. */
+    kind?: string | null;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     metadata: any;
   };
@@ -142,7 +145,7 @@ const NO_MENTION_OPTIONS: MentionOptions = { people: [], agents: [], outside: []
 
 type SaveStatus = "idle" | "saving" | "saved" | "error";
 type SaveChange =
-  | { kind: "update"; data: { title?: string; content?: string; icon?: string; metadata?: DocMetadata } }
+  | { kind: "update"; data: { title?: string; content?: string; icon?: string; metadata?: DocMetadata; kind?: DocKind | null } }
   | { kind: "snapshot"; label?: string }
   | { kind: "restore"; versionId: string; onDone: (result: Awaited<ReturnType<typeof restoreDocVersion>>) => void };
 
@@ -300,6 +303,9 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
   const [savedVisible, setSavedVisible] = useState(false);
   const lastSavedTitle = useRef(doc.title);
   const shownMetadata = useRef(JSON.stringify(doc.metadata ?? null));
+  // The Library type. Local state so the selector answers at once; a server refresh (our own save settling, or someone else's change) re-seeds it.
+  const [docKind, setDocKind] = useState<DocKind | null>(normalizeDocKind(doc.kind));
+  useEffect(() => { setDocKind(normalizeDocKind(doc.kind)); }, [doc.kind]);
 
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingContent = useRef<string | null>(null);
@@ -969,6 +975,12 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
           key={propertiesVersion}
           disabled={isRestoring}
           onSave={(metadata) => saveQueue.enqueue({ kind: "update", data: { metadata } })}
+          kind={docKind}
+          readOnly={readOnly}
+          onKindChange={(next) => {
+            setDocKind(next);
+            return saveQueue.enqueue({ kind: "update", data: { kind: next } });
+          }}
           docId={doc.id}
           initialMetadata={restoredMetadata === undefined ? (doc.metadata as DocMetadata | null) ?? null : restoredMetadata}
           revalidatePathStr={revalidatePathStr}

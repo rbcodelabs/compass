@@ -4,6 +4,7 @@ import { useState, useRef, useCallback } from "react";
 import { ChevronDown, ChevronRight, Plus, X, Tag } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { updateDocMetadata } from "@/app/[orgSlug]/[workspaceSlug]/docs/actions";
+import { DOC_KINDS, DOC_KIND_LABELS, NO_KIND_LABEL, docKindLabel, normalizeDocKind, type DocKind } from "@/lib/doc-kinds";
 
 // ── types ─────────────────────────────────────────────────────────────────────
 
@@ -15,6 +16,14 @@ interface DocPropertiesProps {
   docId: string;
   initialMetadata: DocMetadata | null;
   revalidatePathStr: string;
+  /**
+   * The doc's Library type. Controlled by the editor, which saves it through the same queue as the title and content. The Type row is shown
+   * only when `onKindChange` is given.
+   */
+  kind?: DocKind | null;
+  onKindChange?: (kind: DocKind | null) => Promise<void> | void;
+  /** Org-wide read-only member: the Type row is shown but cannot be changed. */
+  readOnly?: boolean;
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -223,6 +232,43 @@ function PropertyRow({
   );
 }
 
+/** The Library type of the doc: a plain select so it is as usable by keyboard and on a phone as any native control. */
+function KindRow({
+  docId,
+  kind,
+  disabled,
+  onChange,
+}: {
+  docId: string;
+  kind: DocKind | null;
+  disabled: boolean;
+  onChange: (kind: DocKind | null) => void;
+}) {
+  const id = `doc-kind-${docId}`;
+  return (
+    <div className="flex gap-3 items-center py-1.5">
+      <label htmlFor={id} className="w-28 shrink-0 text-xs font-medium text-text-subtle">
+        Type
+      </label>
+      <select
+        id={id}
+        data-testid="doc-kind-select"
+        value={kind ?? ""}
+        disabled={disabled}
+        onChange={(e) => onChange(normalizeDocKind(e.target.value))}
+        className="h-7 max-w-full rounded-md border border-border-default bg-surface-card px-2 text-xs text-text-secondary outline-none hover:border-border-strong focus-visible:border-border-focus focus-visible:ring-1 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        <option value="">{NO_KIND_LABEL}</option>
+        {DOC_KINDS.map((value) => (
+          <option key={value} value={value}>
+            {DOC_KIND_LABELS[value]}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
 // ── main component ────────────────────────────────────────────────────────────
 
 export function DocProperties({
@@ -231,6 +277,9 @@ export function DocProperties({
   docId,
   initialMetadata,
   revalidatePathStr,
+  kind = null,
+  onKindChange,
+  readOnly = false,
 }: DocPropertiesProps) {
   // Always starts collapsed — properties are reference data, not the primary
   // surface, so they should never consume editor space until asked for.
@@ -301,10 +350,18 @@ export function DocProperties({
             ({Object.keys(metadata).length})
           </span>
         )}
+        {kind && !open && (
+          <span className="text-text-disabled font-normal">
+            · {docKindLabel(kind)}
+          </span>
+        )}
       </button>
 
       {open && (
         <div className="mt-2 ml-0.5">
+          {onKindChange && (
+            <KindRow docId={docId} kind={kind} disabled={Boolean(disabled) || readOnly} onChange={(next) => { void Promise.resolve(onKindChange(next)).catch(() => {}); }} />
+          )}
           {Object.entries(metadata).map(([key, value]) => (
             <PropertyRow
               key={key}
