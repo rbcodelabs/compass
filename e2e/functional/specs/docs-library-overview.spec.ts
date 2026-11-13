@@ -54,62 +54,7 @@ test.describe("Docs library overview", () => {
     expect(await latest.getByRole("link").count()).toBeLessThanOrEqual(8);
     await latest.getByRole("link", { name: names.adr }).click();
     // The first visit to a doc page compiles it on the dev server, which outlasts the default 5s.
-    await expect(page).toHaveURL(new RegExp(`/docs/${ids.adr}import { test, expect } from "../fixtures/index";
-import getPrisma from "../../../lib/db";
-
-/**
- * The Docs index is a Library overview (not a redirect to the first doc), with By type and Recent views, and a doc's type can be set
- * from its properties. Named docs-library-overview: docs-library.spec.ts already covers the rail's Library pane.
- *
- * Seeded docs carry an updatedAt an hour in the future so they lead the Recent list however many other specs have written docs.
- */
-test.describe("Docs library overview", () => {
-  // The tests share one set of seeded docs and the third changes one of them, so they run in order in one worker.
-  test.describe.configure({ mode: "serial" });
-  const stamp = Date.now();
-  const names = {
-    adr: `Overview ADR ${stamp}`,
-    qa: `Overview QA ${stamp}`,
-    untyped: `Overview untyped ${stamp}`,
-  };
-  const ids: Record<keyof typeof names, string> = { adr: "", qa: "", untyped: "" };
-
-  test.beforeAll(async () => {
-    const prisma = getPrisma();
-    const workspace = await prisma.workspace.findFirstOrThrow({ where: { slug: "e2e-workspace", organization: { slug: "e2e-test-org" } } });
-    const future = (minutes: number) => new Date(Date.now() + 3_600_000 + minutes * 60_000);
-    const make = (title: string, kind: string | null, minutes: number) =>
-      prisma.doc.create({ data: { workspaceId: workspace.id, title, content: "Library overview fixture", kind, updatedAt: future(minutes) } });
-    ids.adr = (await make(names.adr, "ADR", 3)).id;
-    ids.qa = (await make(names.qa, "QA_REPORT", 2)).id;
-    ids.untyped = (await make(names.untyped, null, 1)).id;
-  });
-
-  test.afterAll(async () => {
-    const prisma = getPrisma();
-    const docIds = Object.values(ids).filter(Boolean);
-    await prisma.docVersion.deleteMany({ where: { docId: { in: docIds } } });
-    await prisma.doc.deleteMany({ where: { id: { in: docIds } } });
-  });
-
-  test("shows the overview at /docs without redirecting, with counts per type and the latest docs", async ({ page, base }) => {
-    await page.setViewportSize({ width: 1440, height: 900 });
-    await page.goto(`${base}/docs`);
-    await expect(page).toHaveURL(new RegExp(`${base}/docs$`));
-    await expect(page.getByRole("heading", { name: "Docs", level: 1 })).toBeVisible();
-
-    for (const kind of ["ADR", "QA_REPORT", "DESIGN", "NOTE", "none"]) await expect(page.getByTestId(`library-kind-count-${kind}`)).toBeVisible();
-    await expect(page.getByTestId("library-kind-count-ADR")).toContainText("ADR");
-    await expect(page.getByTestId("library-kind-count-QA_REPORT")).toContainText("QA report");
-    await expect(page.getByTestId("library-kind-count-none")).toContainText("No type");
-    expect(Number((await page.getByTestId("library-kind-count-ADR").getAttribute("data-count")) ?? "0")).toBeGreaterThanOrEqual(1);
-
-    const latest = page.getByTestId("library-latest");
-    await expect(latest.getByRole("link", { name: names.adr })).toBeVisible();
-    await expect(latest.getByRole("link", { name: names.untyped })).toBeVisible();
-    expect(await latest.getByRole("link").count()).toBeLessThanOrEqual(8);
-    await latest.getByRole("link", { name: names.adr }).click();
-    ), { timeout: 45_000 });
+    await expect(page).toHaveURL(new RegExp(`/docs/${ids.adr}$`), { timeout: 45_000 });
   });
 
   test("switches to By type and Recent, and files an untyped doc under No type", async ({ page, base }) => {
