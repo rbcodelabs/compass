@@ -2302,6 +2302,9 @@ model Doc {
   /// auto-fills GTM_POSITIONING_BRIEF_TEMPLATE and whether roadmapItemId is
   /// meaningful.
   docType       String?      @default("STANDARD") @map("doc_type") @db.VarChar(50)
+  /// What the doc is in the Library (migration 117): ADR | QA_REPORT | DESIGN | NOTE, validated by lib/doc-kinds.ts. NULL = no type.
+  /// Free-form VarChar, no DB enum, no index. Independent of docType.
+  kind          String?      @map("kind") @db.VarChar(30)
   createdAt     DateTime     @default(now()) @map("created_at")
   updatedAt     DateTime     @default(now()) @map("updated_at")
   workspace     Workspace    @relation(fields: [workspaceId], references: [id])
