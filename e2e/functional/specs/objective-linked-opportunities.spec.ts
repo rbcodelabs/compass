@@ -31,8 +31,8 @@ async function linkViaPicker(page: Page, base: string, opportunityId: string, ob
 
 const TAG = `LinkedOpps ${Date.now()}`;
 
-type Seed = { workspaceId: string; orgId: string; objectiveIds: string[]; opportunityIds: string[]; modelId: string | null; previous: { thinkingModel: string | null } };
-const seed: Seed = { workspaceId: "", orgId: "", objectiveIds: [], opportunityIds: [], modelId: null, previous: { thinkingModel: null } };
+type Seed = { workspaceId: string; orgId: string; objectiveIds: string[]; keyResultIds: string[]; opportunityIds: string[]; modelId: string | null; previous: { thinkingModel: string | null } };
+const seed: Seed = { workspaceId: "", orgId: "", objectiveIds: [], keyResultIds: [], opportunityIds: [], modelId: null, previous: { thinkingModel: null } };
 
 async function createObjective(title: string) {
   const objective = await getPrisma().objective.create({ data: { workspaceId: seed.workspaceId, title, status: "ON_TRACK" } });
@@ -100,12 +100,16 @@ test.afterAll(async () => {
   if (seed.objectiveIds.length) {
     const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
     try {
-      await pool.query(`DELETE FROM "${SCHEMA}".entity_links WHERE workspace_id = $1 AND link_type = 'OPPORTUNITY_TARGETS_OBJECTIVE' AND to_id = ANY($2::uuid[])`, [seed.workspaceId, seed.objectiveIds]);
+      await pool.query(`DELETE FROM "${SCHEMA}".entity_links WHERE workspace_id = $1 AND (to_id = ANY($2::uuid[]) OR from_id = ANY($3::uuid[]))`, [seed.workspaceId, [...seed.objectiveIds, ...seed.keyResultIds], seed.opportunityIds]);
     } finally {
       await pool.end();
     }
   }
-  // Opportunities and objectives live under the e2e org, which global-teardown removes wholesale.
+  // Remove the fixtures themselves, not just the links: cycle-less objectives and their key results count as eligible parents for the
+  // OKR specs that run after this one (okrs.spec.ts asserts a top-level objective has no eligible parent Key Result).
+  if (seed.opportunityIds.length) await prisma.opportunity.deleteMany({ where: { id: { in: seed.opportunityIds } } });
+  if (seed.keyResultIds.length) await prisma.keyResult.deleteMany({ where: { id: { in: seed.keyResultIds } } });
+  if (seed.objectiveIds.length) await prisma.objective.deleteMany({ where: { id: { in: seed.objectiveIds } } });
 });
 
 // The workspace is on the Opportunity-first preset for the first tests (set in beforeAll); the Torres test switches it and afterAll restores it.
@@ -127,6 +131,7 @@ test("20 linked rows are bounded, scrollable and sorted by raw score with unscor
   const keyResult = await getPrisma().keyResult.create({ data: { objectiveId: objective.id, title: `${TAG} KR`, target: 100, current: 0, unit: "%" } });
 
   const keyResult2 = await getPrisma().keyResult.create({ data: { objectiveId: objective.id, title: `${TAG} KR two`, target: 100, current: 0, unit: "%" } });
+  seed.keyResultIds.push(keyResult.id, keyResult2.id);
   // 17 linked through key results only. Raw scores reach 5,000 (multiplicative models): the headline must be the raw number.
   const viaKr: { id: string }[] = [];
   viaKr.push(await createOpportunity(`${TAG} opp kr-top`, 5000, seed.modelId));
@@ -218,6 +223,7 @@ test("a Torres workspace still lists a key-result-linked opportunity (the preset
   await prisma.workspace.update({ where: { id: seed.workspaceId }, data: { thinkingModel: "TORRES_OST" } });
   const objective = await createObjective(`${TAG} torres objective`);
   const keyResult = await prisma.keyResult.create({ data: { objectiveId: objective.id, title: `${TAG} torres KR`, target: 10, current: 0, unit: null } });
+  seed.keyResultIds.push(keyResult.id);
   const viaKr = await createOpportunity(`${TAG} opp torres via-kr`, 777, seed.modelId);
   await pointAt(viaKr.id, keyResult.id, objective.id);
   await page.goto(`${base}/okrs?detail=${encodeURIComponent(`objective:${objective.id}`)}`);

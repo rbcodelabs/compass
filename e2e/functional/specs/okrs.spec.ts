@@ -103,10 +103,11 @@ test.describe("OKRs", () => {
     const statusCombobox = objectiveCard.getByRole("combobox").first();
     await expect(statusCombobox).toBeEnabled({ timeout: 10_000 });
     await statusCombobox.click();
+    // Wait for the updateObjectiveStatus server action itself (its POST carries the Next-Action header), not a fixed delay:
+    // the dev router can show the old value for a while after the action, so the reload below is what reads the persisted state.
+    const statusAction = page.waitForResponse((r) => r.request().method() === "POST" && "next-action" in r.request().headers());
     await page.getByRole("option", { name: "At risk" }).click();
-
-    // The trigger shows the new status once updateObjectiveStatus has applied.
-    await expect(statusCombobox).toContainText(/AT_RISK|At risk/, { timeout: 10_000 });
+    expect((await statusAction).ok()).toBe(true);
     await page.reload();
     await page.waitForLoadState("load");
 
