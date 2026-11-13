@@ -1,0 +1,1 @@
+-- Red-phase placeholder: the real header lands in the next commit.
