@@ -6,13 +6,18 @@ import { readFileSync } from "node:fs"
 import path from "node:path"
 import type { PoolClient } from "pg"
 import { describe, expect, it } from "vitest"
+import { readParitySetsSql } from "@/lib/migrations/entity-links-read-parity"
 import { TASK_ORIGIN_TARGET_TYPES, TASK_REFERENCE_TARGET_TYPES } from "@/lib/links/registry"
 import {
   ROW_DETAIL_CAP,
   ROW_DETAIL_ENDPOINT_TYPES,
   TASK_OWNED_LINK_TYPES,
   collectParityIds,
+  LEGACY_SOURCES,
   getEntityLinksRowDetailStatus,
+  getLegacyOnlyStatus,
+  legacyOnlyCte,
+  legacyOnlySql,
   rowDetailSql,
 } from "@/lib/migrations/entity-links-row-detail"
 
@@ -26,9 +31,12 @@ describe("registration and shape", () => {
   })
 
   it("writes nothing and touches no legacy table, lock or session setting", () => {
-    const source = read("lib/migrations/entity-links-row-detail.ts").replace(/\/\*[\s\S]*?\*\//g, "")
+    const full = read("lib/migrations/entity-links-row-detail.ts").replace(/\/\*[\s\S]*?\*\//g, "")
+    const source = full.slice(0, full.indexOf("// ── Legacy-only rows"))
     expect(source).not.toMatch(/\b(INSERT|UPDATE|DELETE|ALTER|DROP|CREATE|TRUNCATE)\s/)
+    // The hidden-row scan and the id lookups never read a legacy table; only the legacy-only section below does (and tolerates their absence).
     expect(source).not.toMatch(/task_links|artifact_links|opportunity_objective_links|solution_key_result_links/)
+    expect(full).not.toMatch(/\b(INSERT|UPDATE|DELETE|ALTER|DROP|CREATE|TRUNCATE)\s/)
     expect(source).not.toMatch(/statement_timeout|advisory|pg_sleep|SET LOCAL|BEGIN/i)
     const sql = [rowDetailSql.hiddenIds("s"), rowDetailSql.detail("s", "$1::uuid")].join("\n")
     expect(sql).not.toMatch(/\b(INSERT|UPDATE|DELETE|ALTER|DROP|TRUNCATE)\b/)
@@ -126,5 +134,63 @@ describe("cap and truncation", () => {
   it("propagates a database error so the runner's catch reports it as the block's `error` and the GET still succeeds", async () => {
     const client = { query: async () => { throw new Error("relation does not exist") } } as unknown as PoolClient
     await expect(getEntityLinksRowDetailStatus(client, "s")).rejects.toThrow("relation does not exist")
+  })
+})
+
+describe("legacy-only rows", () => {
+  it("covers the four legacy tables and the opportunity pointer", () => {
+    expect([...LEGACY_SOURCES]).toEqual(["artifact_links", "solution_key_result_links", "opportunity_objective_links", "task_links", "opportunities.linked_key_result_id"])
+  })
+
+  it("defines live and twin with the parity check's OWN legacy and mirror sets, per family", () => {
+    const families: Record<string, string[]> = {
+      artifact_links: ["artifactSolution", "artifactDecision"],
+      solution_key_result_links: ["solutionKeyResult"],
+      opportunity_objective_links: ["opportunityObjective"],
+      task_links: ["taskReferences", "taskCreatedFrom"],
+      "opportunities.linked_key_result_id": ["opportunityKeyResultPointer"],
+    }
+    for (const source of LEGACY_SOURCES) {
+      const cte = legacyOnlyCte("s", source)
+      for (const name of families[source]) {
+        const sets = readParitySetsSql(name, "s")
+        expect(cte, `${source}/${name} legacy`).toContain(sets.legacy)
+        expect(cte, `${source}/${name} mirror`).toContain(sets.mirror)
+      }
+      expect(cte).toContain("m.f = r.f AND m.tt = r.tt AND m.t = r.t") // the parity pair match
+    }
+  })
+
+  it("is SELECT only and keeps to the DSQL-safe subset", () => {
+    for (const source of LEGACY_SOURCES) {
+      const sql = `${legacyOnlySql.counts("s", source)}\n${legacyOnlySql.rows("s", source)}`
+      expect(sql).not.toMatch(/\b(INSERT|UPDATE|DELETE|ALTER|DROP|TRUNCATE|LOCK)\b/)
+      expect(sql).not.toMatch(/statement_timeout|advisory/i)
+      expect(sql).toContain(`LIMIT ${ROW_DETAIL_CAP + 1}`)
+    }
+  })
+
+  it("reports legacyDropped for every source whose table is missing, without querying it", async () => {
+    const queries: string[] = []
+    const client = { query: async (sql: string) => { queries.push(sql); return { rows: sql.includes("information_schema.columns") ? [{ n: "0" }] : [] } } } as unknown as PoolClient
+    const status = await getLegacyOnlyStatus(client, "s")
+    for (const source of LEGACY_SOURCES) expect(status.sources[source]).toEqual({ legacyDropped: true, legacyTotalCount: 0, legacyLiveCount: 0, legacyOnlyCount: 0, legacyOnlyLiveCount: 0, legacyOnlyNotLiveCount: 0, rows: [], truncated: false })
+    expect(queries).toHaveLength(2) // only the two catalog reads
+  })
+
+  it("isolates a failing source in its own `error`", async () => {
+    const client = {
+      query: async (sql: string) => {
+        if (sql.includes("information_schema.tables")) return { rows: [{ table_name: "artifact_links" }, { table_name: "task_links" }] }
+        if (sql.includes("information_schema.columns")) return { rows: [{ n: "0" }] }
+        if (sql.includes('"artifact_links"')) throw new Error("boom")
+        if (sql.includes("AS total")) return { rows: [{ total: "3", live_n: "2", only_n: "1", only_live_n: "1" }] }
+        return { rows: [] }
+      },
+    } as unknown as PoolClient
+    const status = await getLegacyOnlyStatus(client, "s")
+    expect(status.sources.artifact_links).toEqual({ error: "boom" })
+    expect(status.sources.task_links).toMatchObject({ legacyDropped: false, legacyTotalCount: 3, legacyLiveCount: 2, legacyOnlyCount: 1, legacyOnlyLiveCount: 1, legacyOnlyNotLiveCount: 0, rows: [], truncated: false })
+    expect(status.sources.solution_key_result_links).toMatchObject({ legacyDropped: true })
   })
 })

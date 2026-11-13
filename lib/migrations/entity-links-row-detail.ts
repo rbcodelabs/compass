@@ -21,7 +21,7 @@
  * and the `find()` branches of endpoints.ts in step.
  */
 import type { PoolClient } from "pg"
-import type { EntityLinksReadParityStatus } from "@/lib/migrations/entity-links-read-parity"
+import { readParitySetsSql, type EntityLinksReadParityStatus } from "@/lib/migrations/entity-links-read-parity"
 import { LINK_TYPES } from "@/lib/links/registry"
 import { TOOL_APPROVAL_GATE } from "@/lib/tool-approval/gate"
 
@@ -130,6 +130,8 @@ export type EntityLinksRowDetailStatus = {
   idsWithoutEntityLinksRow: string[]
   /** Set when the parity status itself failed, so there were no parity ids to look up. */
   parityError?: string
+  /** Legacy rows with no entity_links twin, per legacy source (see LEGACY_SOURCES). `{ error }` if even the table presence check failed. */
+  legacyOnly: LegacyOnlyStatus | { error: string }
 }
 
 type DetailRow = {
@@ -211,5 +213,211 @@ export async function getEntityLinksRowDetailStatus(client: PoolClient, schema: 
     taskOwnedLinkTypes: TASK_OWNED_LINK_TYPES,
     idsWithoutEntityLinksRow,
     ...(parityError ? { parityError } : {}),
+    legacyOnly: await getLegacyOnlyStatus(client, schema).catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error) })),
   }
+}
+
+// ── Legacy-only rows: legacy rows with no entity_links twin ──────────────────────────────────────────────────────────────────────────
+
+/**
+ * For each legacy link source, the rows that have no entity_links twin, so an owner can see WHAT the 116 drop preflight would refuse on
+ * (or would silently tolerate) before choosing between a cleanup and a changed check. Since #547 unlinking deletes only the entity_links
+ * row and leaves the legacy one, so such rows can exist.
+ *
+ * THE MATCHING RULE IS THE PARITY CHECK'S, not a new one. A legacy row is LIVE when it is in the parity status's own legacy set (both
+ * endpoints exist in the link's workspace; readParitySetsSql(...).legacy), and a live row HAS A TWIN when the parity status's own mirror set
+ * holds its (from, to type, to) (readParitySetsSql(...).mirror). So `legacyOnlyLiveCount` equals entityLinksReadParity onlyLegacy for the
+ * same families, and that is the number the 116 preflight refuses on. A legacy row that is NOT live (an endpoint is gone) is never required
+ * to have a twin by the preflight; it is still reported, with `blocksDropPreflight: false`, and has a twin when ANY entity_links row of the
+ * mapped link type joins the same pair.
+ *
+ * A source whose table (or the pointer column) is gone reports `legacyDropped: true` and nothing else: 116 dropped it. Counts and metadata
+ * only; each source is its own try/catch, so one failing source never hides the others.
+ */
+export const LEGACY_SOURCES = ["artifact_links", "solution_key_result_links", "opportunity_objective_links", "task_links", "opportunities.linked_key_result_id"] as const
+export type LegacySource = (typeof LEGACY_SOURCES)[number]
+
+type LegacySourceSpec = {
+  /** Parity families whose legacy and mirror sets define live and twin for this source. */
+  specs: readonly string[]
+  /** The raw legacy rows: id, mapped link type (lt), endpoint types (ft, tt) and ids (f, t), workspace (ws), metadata. */
+  raw: (s: string) => string
+}
+
+const LEGACY_SOURCE_SPECS: Record<LegacySource, LegacySourceSpec> = {
+  artifact_links: {
+    specs: ["artifactSolution", "artifactDecision"],
+    raw: (s) => `SELECT l.id::text AS id, CASE l.linked_type WHEN 'SOLUTION' THEN 'ARTIFACT_ATTACHED_TO_SOLUTION' WHEN 'REVIEW_REQUEST' THEN 'ARTIFACT_SUPPORTS_DECISION' ELSE 'UNMAPPED_' || l.linked_type END AS lt,
+      'ARTIFACT' AS ft, l.artifact_id AS f, l.linked_type AS tt, l.linked_id AS t, l.workspace_id AS ws, l.created_at, l.created_by_id::text AS created_by_id, l.source, NULL::text AS origin
+      FROM "${s}"."artifact_links" AS l`,
+  },
+  solution_key_result_links: {
+    specs: ["solutionKeyResult"],
+    raw: (s) => `SELECT l.id::text AS id, 'SOLUTION_TARGETS_KEY_RESULT' AS lt, 'SOLUTION' AS ft, l.solution_id AS f, 'KEY_RESULT' AS tt, l.key_result_id AS t, l.workspace_id AS ws,
+      l.created_at, l.created_by_id::text AS created_by_id, l.source, NULL::text AS origin FROM "${s}"."solution_key_result_links" AS l`,
+  },
+  opportunity_objective_links: {
+    specs: ["opportunityObjective"],
+    raw: (s) => `SELECT l.id::text AS id, 'OPPORTUNITY_TARGETS_OBJECTIVE' AS lt, 'OPPORTUNITY' AS ft, l.opportunity_id AS f, 'OBJECTIVE' AS tt, l.objective_id AS t, l.workspace_id AS ws,
+      l.created_at, l.created_by_id::text AS created_by_id, l.source, l.origin::text AS origin FROM "${s}"."opportunity_objective_links" AS l`,
+  },
+  task_links: {
+    specs: ["taskReferences", "taskCreatedFrom"],
+    // A task link has no workspace of its own: the task's is the link's (the parity rule). DECISION is stored as REVIEW_REQUEST.
+    raw: (s) => `SELECT l.id::text AS id, CASE WHEN l.linked_type IN ('COMMENT', 'AGENT_CONVERSATION') THEN 'TASK_CREATED_FROM' ELSE 'TASK_REFERENCES' END AS lt,
+      'TASK' AS ft, l.task_id AS f, CASE WHEN l.linked_type = 'DECISION' THEN 'REVIEW_REQUEST' ELSE l.linked_type END AS tt, l.linked_id AS t,
+      (SELECT tk.workspace_id FROM "${s}"."tasks" AS tk WHERE tk.id = l.task_id) AS ws,
+      l.created_at, l.created_by_id::text AS created_by_id, l.source, NULL::text AS origin FROM "${s}"."task_links" AS l`,
+  },
+  "opportunities.linked_key_result_id": {
+    specs: ["opportunityKeyResultPointer"],
+    // The pointer has no row of its own: the legacy id is the opportunity's, and it carries no creation metadata.
+    raw: (s) => `SELECT o.id::text AS id, 'OPPORTUNITY_TARGETS_KEY_RESULT' AS lt, 'OPPORTUNITY' AS ft, o.id AS f, 'KEY_RESULT' AS tt, o.linked_key_result_id AS t, o.workspace_id AS ws,
+      NULL::timestamp AS created_at, NULL::text AS created_by_id, NULL::text AS source, NULL::text AS origin FROM "${s}"."opportunities" AS o WHERE o.linked_key_result_id IS NOT NULL`,
+  },
+}
+
+export type LegacyOnlyRow = {
+  /** The legacy row's id (the opportunity's id for the pointer). */
+  legacyId: string
+  /** The entity_links link type this row maps to. */
+  entityLinkType: string
+  fromType: string
+  fromId: string
+  toType: string
+  toId: string
+  workspaceId: string | null
+  createdAt: string | null
+  createdById: string | null
+  source: string | null
+  origin: string | null
+  fromExists: boolean
+  toExists: boolean
+  sameWorkspace: boolean
+  /** Both endpoints exist in the link's workspace: the parity check counts it, and the 116 preflight refuses on it. */
+  blocksDropPreflight: boolean
+  /** Always false here: these are the rows with no twin (by the parity rule for a live row, by the pair for a row that is not live). */
+  entityLinksTwinPresent: false
+  /** An entity_links row of the mapped type joins the same pair but is not live (for example in another workspace), so the preflight still counts the legacy row. */
+  twinRowExistsButNotLive: boolean
+  /** Link types of entity_links rows joining the same two endpoints in either direction under a DIFFERENT type or direction (a mapping mismatch, not a deleted link). */
+  pairUnderOtherLinkTypes: string[]
+}
+
+export type LegacyOnlySourceStatus =
+  | { error: string }
+  | { legacyDropped: true; legacyTotalCount: 0; legacyLiveCount: 0; legacyOnlyCount: 0; legacyOnlyLiveCount: 0; legacyOnlyNotLiveCount: 0; rows: []; truncated: false }
+  | {
+      legacyDropped: false
+      legacyTotalCount: number
+      /** Live legacy rows. Equals the sum of the parity `legacyLive` of the source's families. */
+      legacyLiveCount: number
+      /** Legacy rows (live or not) with no twin. */
+      legacyOnlyCount: number
+      /** Live legacy rows with no twin: equals entityLinksReadParity onlyLegacy for the source's families, and is what the 116 preflight refuses on. */
+      legacyOnlyLiveCount: number
+      /** Legacy rows whose endpoint is gone and that have no twin: the preflight tolerates them. */
+      legacyOnlyNotLiveCount: number
+      /** At most ROW_DETAIL_CAP, rows that block the preflight first, then by id. */
+      rows: LegacyOnlyRow[]
+      truncated: boolean
+    }
+
+export type LegacyOnlyStatus = { cap: number; sources: Record<LegacySource, LegacyOnlySourceStatus> }
+
+/** The CTE chain shared by the count and the row query of one source. */
+export function legacyOnlyCte(schema: string, source: LegacySource): string {
+  const spec = LEGACY_SOURCE_SPECS[source]
+  const sets = spec.specs.map((name) => readParitySetsSql(name, schema))
+  return `WITH raw AS MATERIALIZED (${spec.raw(schema)}),
+    lv AS MATERIALIZED (SELECT x.id FROM (${sets.map((set) => set.legacy).join("\n UNION ALL\n ")}) AS x),
+    m AS MATERIALIZED (${sets.map((set) => set.mirror).join("\n UNION ALL\n ")}),
+    c AS MATERIALIZED (SELECT r.*, EXISTS (SELECT 1 FROM lv WHERE lv.id = r.id) AS is_live,
+        EXISTS (SELECT 1 FROM m WHERE m.f = r.f AND m.tt = r.tt AND m.t = r.t) AS twin_live,
+        EXISTS (SELECT 1 FROM "${schema}"."entity_links" AS e WHERE e.from_id = r.f AND e.link_type = r.lt AND e.to_id = r.t) AS twin_any
+      FROM raw AS r),
+    o AS MATERIALIZED (SELECT c.*, NOT (CASE WHEN c.is_live THEN c.twin_live ELSE c.twin_any END) AS legacy_only FROM c)`
+}
+
+export const legacyOnlySql = {
+  counts: (schema: string, source: LegacySource): string => `${legacyOnlyCte(schema, source)}
+    SELECT (SELECT count(*) FROM o)::text AS total, (SELECT count(*) FROM o WHERE is_live)::text AS live_n, (SELECT count(*) FROM o WHERE legacy_only)::text AS only_n,
+      (SELECT count(*) FROM o WHERE legacy_only AND is_live)::text AS only_live_n`,
+  rows: (schema: string, source: LegacySource): string => `${legacyOnlyCte(schema, source)}
+    SELECT q.id, q.lt, q.ft, q.f::text AS f, q.tt, q.t::text AS t, q.ws::text AS ws, q.created_at, q.created_by_id, q.source, q.origin, q.is_live,
+      ${endpoint(schema, "q.ft", "q.f", {})} AS from_exists, ${endpoint(schema, "q.tt", "q.t", {})} AS to_exists,
+      ${endpointWorkspace(schema, "q.ft", "q.f")} = q.ws AND ${endpointWorkspace(schema, "q.tt", "q.t")} = q.ws AS same_workspace,
+      (q.twin_any AND NOT q.twin_live) AS twin_not_live,
+      ARRAY(SELECT DISTINCT e.link_type FROM "${schema}"."entity_links" AS e
+        WHERE ((e.from_id = q.f AND e.to_id = q.t) OR (e.from_id = q.t AND e.to_id = q.f)) AND NOT (e.from_id = q.f AND e.link_type = q.lt AND e.to_id = q.t)
+        ORDER BY 1 LIMIT 5) AS other_types
+    FROM (SELECT * FROM o WHERE legacy_only ORDER BY is_live DESC, id LIMIT ${ROW_DETAIL_CAP + 1}) AS q
+    ORDER BY q.is_live DESC, q.id`,
+}
+
+type LegacyOnlyDbRow = {
+  id: string; lt: string; ft: string; f: string; tt: string; t: string; ws: string | null; created_at: Date | string | null; created_by_id: string | null
+  source: string | null; origin: string | null; is_live: boolean; from_exists: boolean | null; to_exists: boolean | null; same_workspace: boolean | null
+  twin_not_live: boolean; other_types: string[] | null
+}
+
+/** Which of the five legacy relations exist (catalog reads only, safe on DSQL and plain Postgres). Never throws for a missing table. */
+async function presentLegacySources(client: PoolClient, schema: string): Promise<Set<LegacySource>> {
+  const tables = await client.query<{ table_name: string }>(
+    `SELECT table_name FROM information_schema.tables WHERE table_schema = $1 AND table_name IN ('artifact_links', 'solution_key_result_links', 'opportunity_objective_links', 'task_links')`,
+    [schema],
+  )
+  const column = await client.query<{ n: string }>(`SELECT count(*)::text AS n FROM information_schema.columns WHERE table_schema = $1 AND table_name = 'opportunities' AND column_name = 'linked_key_result_id'`, [schema])
+  const present = new Set<LegacySource>(tables.rows.map((row) => row.table_name as LegacySource))
+  if (Number(column.rows[0]?.n ?? "0") > 0) present.add("opportunities.linked_key_result_id")
+  return present
+}
+
+async function legacyOnlyForSource(client: PoolClient, schema: string, source: LegacySource): Promise<LegacyOnlySourceStatus> {
+  const counts = (await client.query<{ total: string; live_n: string; only_n: string; only_live_n: string }>(legacyOnlySql.counts(schema, source))).rows[0]
+  const found = (await client.query<LegacyOnlyDbRow>(legacyOnlySql.rows(schema, source))).rows
+  const rows = found.slice(0, ROW_DETAIL_CAP).map((row): LegacyOnlyRow => ({
+    legacyId: row.id,
+    entityLinkType: row.lt,
+    fromType: row.ft,
+    fromId: row.f,
+    toType: row.tt,
+    toId: row.t,
+    workspaceId: row.ws,
+    createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : row.created_at,
+    createdById: row.created_by_id,
+    source: row.source,
+    origin: row.origin,
+    fromExists: row.from_exists === true,
+    toExists: row.to_exists === true,
+    sameWorkspace: row.same_workspace === true,
+    blocksDropPreflight: row.is_live,
+    entityLinksTwinPresent: false,
+    twinRowExistsButNotLive: row.twin_not_live,
+    pairUnderOtherLinkTypes: row.other_types ?? [],
+  }))
+  return {
+    legacyDropped: false,
+    legacyTotalCount: Number(counts.total),
+    legacyLiveCount: Number(counts.live_n),
+    legacyOnlyCount: Number(counts.only_n),
+    legacyOnlyLiveCount: Number(counts.only_live_n),
+    legacyOnlyNotLiveCount: Number(counts.only_n) - Number(counts.only_live_n),
+    rows,
+    truncated: found.length > ROW_DETAIL_CAP,
+  }
+}
+
+/** Per legacy source; a missing table is `legacyDropped: true`, a failing source is its own `{ error }`. */
+export async function getLegacyOnlyStatus(client: PoolClient, schema: string): Promise<LegacyOnlyStatus> {
+  const present = await presentLegacySources(client, schema)
+  const sources = {} as Record<LegacySource, LegacyOnlySourceStatus>
+  for (const source of LEGACY_SOURCES) {
+    if (!present.has(source)) {
+      sources[source] = { legacyDropped: true, legacyTotalCount: 0, legacyLiveCount: 0, legacyOnlyCount: 0, legacyOnlyLiveCount: 0, legacyOnlyNotLiveCount: 0, rows: [], truncated: false }
+      continue
+    }
+    sources[source] = await legacyOnlyForSource(client, schema, source).catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error) }))
+  }
+  return { cap: ROW_DETAIL_CAP, sources }
 }
