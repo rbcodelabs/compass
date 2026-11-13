@@ -370,8 +370,13 @@ test.describe("Feedback DataGrid", () => {
     await expect(page.getByTestId("grid-stale-strip")).toHaveCount(0);
 
     // Inline-edit the status to COMPLETED, which the active `status=OPEN`
-    // filter excludes.
-    await row.getByTestId("grid-cell-status").getByTestId("grid-cell-edit").click();
+    // filter excludes. The grid runs in sheet mode: a status cell is a display
+    // badge until it is activated, and double-click opens the select editor
+    // (the `grid-cell-edit` trigger only exists while editing).
+    await row.getByTestId("grid-cell-status").dblclick();
+    await expect(
+      row.getByTestId("grid-cell-status").getByTestId("grid-cell-edit"),
+    ).toBeVisible();
     await page.getByRole("option", { name: "Completed" }).click();
 
     // THE POINT OF THIS SPEC: the row stays put. Removing it locally would

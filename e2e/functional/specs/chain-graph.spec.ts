@@ -27,6 +27,8 @@ test.describe("Chain graph", () => {
       if (msg.type() !== "error") return;
       const text = msg.text();
       if (KNOWN.some((s) => text.includes(s))) return;
+      // /_vercel/insights/script.js (Vercel Analytics) only exists on Vercel; it 404s locally.
+      if (msg.location().url.includes("/_vercel/insights/")) return;
       consoleErrors.push(text);
     });
     page.on("pageerror", (err) => consoleErrors.push(err.message));
@@ -85,10 +87,13 @@ test.describe("Chain graph", () => {
     }
 
     // ── 3. Escape clears the trace; clicking an outline row traces that object ─
-    await page.getByRole("complementary", { name: "Chain outline" }).getByRole("region", { name: "Downstream" }).getByRole("button", { name: new RegExp(solTitle) }).click();
+    await page.getByRole("complementary", { name: "Chain outline" }).getByRole("region", { name: "Downstream" }).getByRole("button", { name: `Solution · ${solTitle}` }).click();
     await expect(outline.getByRole("region", { name: "Selection" }).getByText(solTitle)).toBeVisible();
     await expect(outline.getByRole("region", { name: "Upstream" }).getByText(oppTitle)).toBeVisible();
-    await page.locator(".chain-graph").press("Escape");
+    // Selecting a row moves it between outline sections, which unmounts the
+    // button that held focus. Press Escape on a control that is actually inside
+    // the graph so the key reaches its keydown handler (the root div is not focusable).
+    await outline.getByRole("region", { name: "Selection" }).getByRole("button").first().press("Escape");
     await expect(outline.getByRole("region", { name: "Selection" })).toHaveCount(0);
 
     // ── 4. Cluster collapse and expand from the keyboard ─────────────────────
@@ -106,6 +111,11 @@ test.describe("Chain graph", () => {
     await expect(page).toHaveURL(/detail=solution/, { timeout: 10_000 });
     await expect(page.locator('[data-slot="sheet-content"]')).toBeVisible();
     await page.keyboard.press("Escape");
+    // Closing the panel is a client-side URL update. Reloading before it lands
+    // re-opens the panel from the stale ?detail= param, and the modal then hides
+    // the outline from the accessibility tree.
+    await expect(page.locator('[data-slot="sheet-content"]')).toBeHidden();
+    await expect(page).not.toHaveURL(/[?&]detail=/);
     await page.reload();
     await page.waitForLoadState("networkidle");
     await expect(page).toHaveURL(/focus=OPPORTUNITY/);

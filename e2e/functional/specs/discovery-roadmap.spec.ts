@@ -74,7 +74,11 @@ test.describe("Discovery → Roadmap", () => {
 
       // ── 7. Promote to roadmap ─────────────────────────────────────────────
       // The "→ Promote to Roadmap" button appears when status is VALIDATED or IN_DELIVERY
-      await panel.getByRole("button", { name: "Roadmap", exact: true }).click();
+      // Moving to IN_DELIVERY auto-adds a linked roadmap item (lib/roadmap/solution-sync),
+      // so the section label carries a count ("Roadmap (1)") once the panel
+      // refreshes and is a bare "Roadmap" before. Match either; the section is
+      // collapsed by default, so a single click opens it.
+      await panel.getByRole("button", { name: /^Roadmap( \(\d+\))?$/ }).click();
       await panel.getByRole("button", { name: /Promote to Roadmap/i }).click();
 
       // Direct creation in NOW is intentionally guarded. Create the delivery

@@ -37,10 +37,9 @@ test.describe("Feedback Bug → Roadmap", () => {
       await page.goto(`${base}/settings`);
       await page.waitForLoadState("networkidle");
 
-      // PortalSettingsPanel renders three toggles in a fixed order: roadmap,
-      // feedback, then (conditionally) portal-auth-required. The feedback
-      // toggle is always the second switch on the page.
-      const toggle = page.getByRole("switch").nth(1);
+      // Address the toggle by test id: its position among the page's switches
+      // is not stable (other settings panels render switches too).
+      const toggle = page.getByTestId("portal-toggle-feedback");
 
       const isChecked = await toggle.getAttribute("aria-checked");
       if (isChecked !== "true") {

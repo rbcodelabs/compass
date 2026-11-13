@@ -31,6 +31,9 @@ test.describe("Entity detail panel", () => {
       if (msg.type() !== "error") return;
       const text = msg.text();
       if (KNOWN.some((s) => text.includes(s))) return;
+      // The Vercel Analytics component injects /_vercel/insights/script.js,
+      // which only exists on Vercel; locally it 404s (environmental, not a panel error).
+      if (msg.location().url.includes("/_vercel/insights/")) return;
       consoleErrors.push(text);
     });
     page.on("pageerror", (err) => consoleErrors.push(err.message));
@@ -74,7 +77,7 @@ test.describe("Entity detail panel", () => {
     await expect(objRow.getByLabel("Target")).not.toBeVisible({ timeout: 60_000 });
 
     // ── 1. Open the panel from the Objective title ──────────────────────────
-    await objRow.getByRole("button", { name: objectiveTitle }).click();
+    await objRow.getByRole("button", { name: objectiveTitle, exact: true }).click();
     // openPanel writes the URL (client push) — assert that, then the render.
     await expect(page).toHaveURL(/detail=objective/, { timeout: 10_000 });
     await expect(panel).toBeVisible();
@@ -97,7 +100,7 @@ test.describe("Entity detail panel", () => {
     await expect(panel).toBeHidden();
 
     // ── 4. Inline-edit the title; it persists ───────────────────────────────
-    await objRow.getByRole("button", { name: objectiveTitle }).click();
+    await objRow.getByRole("button", { name: objectiveTitle, exact: true }).click();
     await expect(panel).toBeVisible();
     await panel.getByRole("button", { name: objectiveTitle }).click(); // enter edit mode
     const titleInput = panel.getByRole("textbox", { name: "Edit title" });
