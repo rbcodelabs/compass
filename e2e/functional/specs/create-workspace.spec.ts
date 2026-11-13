@@ -81,9 +81,11 @@ test.describe("Create Workspace", () => {
     });
     await expect(switcher).toBeVisible({ timeout: 15_000 });
     await switcher.click();
-    await expect(page.getByRole("menuitem", { name: workspaceName })).toBeVisible();
+    // The switcher is a searchable popover whose rows are links (not a menu).
+    const picker = page.getByRole("dialog", { name: "Switch workspace" });
+    await expect(picker.getByRole("link", { name: workspaceName })).toBeVisible();
     // The seeded workspace is still there — this added one, it didn't replace.
-    await expect(page.getByRole("menuitem", { name: "E2E Workspace" })).toBeVisible();
+    await expect(picker.getByRole("link", { name: "E2E Workspace" })).toBeVisible();
     await page.keyboard.press("Escape");
 
     // ── 6. Persisted server-side, not just client state ────────────────────
