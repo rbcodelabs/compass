@@ -15,6 +15,7 @@
  */
 import fs from "node:fs";
 import { test, expect } from "../fixtures/index";
+import { closeLibrary, importCanvasFile } from "../fixtures/docs";
 import type { Locator, Page } from "@playwright/test";
 
 const SCREENSHOT_DIR = "/tmp/qa-canvas";
@@ -81,12 +82,13 @@ async function marqueeFreeRow(page: Page) {
 async function openSeededCanvas(page: Page, base: string, name: string) {
   await page.goto(`${base}/docs`);
   await page.waitForLoadState("networkidle");
-  await page.getByTestId("import-canvas-input").setInputFiles({
+  await importCanvasFile(page, {
     name: `${name}.canvas`,
     mimeType: "application/json",
     buffer: Buffer.from(JSON.stringify(CANVAS)),
   });
   await page.waitForURL(/\/docs\/[0-9a-f-]+$/, { timeout: 15_000 });
+  await closeLibrary(page);
   await expect(page.getByTestId("canvas-doc-editor")).toBeVisible({ timeout: 15_000 });
   await expect(page.locator(".react-flow__node")).toHaveCount(ALL_IDS.length, { timeout: 15_000 });
   // Phones open view-first (locked); unlock so the same editing flows apply.

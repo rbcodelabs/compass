@@ -11,6 +11,7 @@
  */
 import fs from "node:fs";
 import { test, expect } from "../fixtures/index";
+import { closeLibrary, createDiagramFromLibrary, importCanvasFile, openLibrary } from "../fixtures/docs";
 import getPrisma from "../../../lib/db";
 import type { Page } from "@playwright/test";
 
@@ -40,9 +41,7 @@ test.describe("JSON Canvas doc", () => {
     await page.waitForLoadState("networkidle");
 
     // Create a blank diagram from the unified Library menu.
-    await page.getByTestId("library-create-menu").click();
-    await page.getByRole("menuitem", { name: "New diagram" }).click();
-    await page.waitForURL(/\/docs\/[0-9a-f-]+$/, { timeout: 15_000 });
+    await createDiagramFromLibrary(page);
     const editor = page.getByTestId("canvas-doc-editor");
     await expect(editor).toBeVisible({ timeout: 15_000 });
     await expect(page.locator(".react-flow__node")).toHaveCount(0);
@@ -132,12 +131,13 @@ test.describe("JSON Canvas doc", () => {
 
     await page.goto(`${base}/docs`);
     await page.waitForLoadState("networkidle");
-    await page.getByTestId("import-canvas-input").setInputFiles({
+    await importCanvasFile(page, {
       name: "imported-board.canvas",
       mimeType: "application/json",
       buffer: Buffer.from(JSON.stringify(imported)),
     });
     await page.waitForURL(/\/docs\/[0-9a-f-]+$/, { timeout: 15_000 });
+    await closeLibrary(page);
     await expect(page.getByLabel("Canvas title")).toHaveValue("imported-board", { timeout: 15_000 });
     await expect(page.getByTestId("canvas-node-text")).toContainText("hello import");
     // File nodes render as labeled cards (not resolved against Compass docs).
@@ -155,13 +155,13 @@ test.describe("JSON Canvas doc", () => {
   test("rejects an invalid .canvas file with a clear message", async ({ page, base }) => {
     await page.goto(`${base}/docs`);
     await page.waitForLoadState("networkidle");
-    await page.getByTestId("import-canvas-input").setInputFiles({
+    await importCanvasFile(page, {
       name: "bad.canvas",
       mimeType: "application/json",
       buffer: Buffer.from(JSON.stringify({ nodes: [{ id: "x", type: "sticky" }] })),
     });
     await expect(page.getByText("Not a valid .canvas file")).toContainText("type must be one of");
-    await expect(page).toHaveURL(/\/docs(\/[0-9a-f-]+)?$/);
+    await expect(page).toHaveURL(/\/docs(\/[0-9a-f-]+)?(\?.*)?$/);
   });
 
   test("Compass cards: add via picker -> live data -> persists -> export -> unavailable", async ({ page, base, workspaceSlug }) => {
@@ -177,11 +177,8 @@ test.describe("JSON Canvas doc", () => {
 
     await page.goto(`${base}/docs`);
     await page.waitForLoadState("networkidle");
-    await page.getByTestId("library-create-menu").click();
-    await page.getByRole("menuitem", { name: "New diagram" }).click();
-    await page.waitForURL(/\/docs\/[0-9a-f-]+$/, { timeout: 15_000 });
+    const docId = await createDiagramFromLibrary(page);
     await expect(page.getByTestId("canvas-doc-editor")).toBeVisible({ timeout: 15_000 });
-    const docId = page.url().split("/").pop()!;
 
     // ── Add an opportunity card through the picker ───────────────────────────
     await page.getByRole("button", { name: "Add Compass card" }).click();
@@ -199,7 +196,10 @@ test.describe("JSON Canvas doc", () => {
     await page.getByTestId("canvas-card-results").getByRole("button", { name: new RegExp(`Canvas card sol ${suffix}`) }).click();
     await expect(page.getByTestId("compass-card").filter({ hasText: `Canvas card sol ${suffix}` })).toBeVisible({ timeout: 15_000 });
 
+    // The page tree is the Library rail view; open it for the drag, then close it so later steps get the full editor width.
+    await openLibrary(page);
     await page.locator(`a[href$="/docs/${docId}"]`).first().dragTo(page.getByTestId("canvas-surface"), { targetPosition: { x: 120, y: 120 } });
+    await closeLibrary(page);
     await expect(page.getByTestId("compass-card")).toHaveCount(3, { timeout: 15_000 });
 
     // ── Autosave, reload, still live ─────────────────────────────────────────
@@ -249,9 +249,7 @@ test.describe("JSON Canvas doc", () => {
     try {
       await page.goto(`${base}/docs`);
       await page.waitForLoadState("networkidle");
-      await page.getByTestId("library-create-menu").click();
-      await page.getByRole("menuitem", { name: "New diagram" }).click();
-      await page.waitForURL(/\/docs\/[0-9a-f-]+$/, { timeout: 15_000 });
+      await createDiagramFromLibrary(page);
       await expect(page.getByTestId("canvas-doc-editor")).toBeVisible({ timeout: 15_000 });
 
       // ── Scope the build to one opportunity ───────────────────────────────────
@@ -313,8 +311,9 @@ test.describe("JSON Canvas doc", () => {
     };
     await page.goto(`${base}/docs`);
     await page.waitForLoadState("networkidle");
-    await page.getByTestId("import-canvas-input").setInputFiles({ name: "cards.canvas", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(imported)) });
+    await importCanvasFile(page, { name: "cards.canvas", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(imported)) });
     await page.waitForURL(/\/docs\/[0-9a-f-]+$/, { timeout: 15_000 });
+    await closeLibrary(page);
 
     await expect(page.getByTestId("compass-card-unavailable")).toHaveCount(1, { timeout: 15_000 });
     await expect(page.getByTestId("canvas-surface")).not.toContainText("Secret title");
