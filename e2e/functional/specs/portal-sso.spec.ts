@@ -41,7 +41,9 @@ test.describe("Portal — SSO Identify", () => {
 
       // ── 4. Generate a secret and capture the one-time reveal. ───────────────
       await page.getByRole("button", { name: /generate secret|rotate secret/i }).click();
-      const secretCode = page.locator("code").filter({ hasText: /^[A-Za-z0-9+/]+=*$/ }).first();
+      // Scoped to the reveal box: the Settings page has other <code> elements (the capability pack commit hash, for one) that
+      // also match a base64-looking pattern and come earlier in the DOM.
+      const secretCode = page.getByText("Copy this secret now").locator("xpath=..").locator("code");
       await expect(secretCode).toBeVisible({ timeout: 5_000 });
       const rawSecret = (await secretCode.textContent())?.trim();
       expect(rawSecret).toBeTruthy();
@@ -62,7 +64,7 @@ test.describe("Portal — SSO Identify", () => {
         .setExpirationTime(now + 60)
         .sign(key);
 
-      const anonContext = await browser.newContext({ storageState: undefined });
+      const anonContext = await browser.newContext({ storageState: { cookies: [], origins: [] } });
       const anonPage = await anonContext.newPage();
       await anonPage.goto(
         `${baseURL}/api/portal/${orgSlug}/${workspaceSlug}/sso?token=${encodeURIComponent(goodToken)}`

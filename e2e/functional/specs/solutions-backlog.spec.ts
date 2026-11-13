@@ -143,7 +143,8 @@ test.describe("Solutions backlog", () => {
     // ── Table view: one row per solution, parent link, title opens the panel ─
     await page.getByRole("tab", { name: "Table" }).click();
     await expect(page).toHaveURL(/view=table/);
-    const table = page.getByRole("table", { name: "Solution backlog" });
+    // The table view is a sheet-mode ARIA grid now (#532), not role=table.
+    const table = page.getByRole("grid", { name: "Solution backlog" });
     const row = table.getByRole("row", { name: new RegExp(sol) });
     await expect(row).toBeVisible({ timeout: 15_000 });
     await expect(row.getByRole("link", { name: opp, exact: true })).toHaveAttribute("href", /\/discovery\/[0-9a-f-]+$/);

@@ -8,6 +8,7 @@
  * the writes persist across a reload.
  */
 import { test, expect } from "../fixtures/index";
+import { waitForResponses } from "../fixtures/responses";
 import type { Locator, Page } from "@playwright/test";
 
 async function createTask(page: Page, base: string, title: string) {
@@ -83,9 +84,9 @@ test.describe("Sheet-mode range editing (Tasks list)", () => {
 
     // 3. Paste three dates over the three selected rows.
     await page.keyboard.press("Escape");
-    const pasteSaves: Promise<unknown>[] = [1, 2, 3].map(() => page.waitForResponse(isTaskPatch));
+    const pasteSaves = waitForResponses(page, isTaskPatch, 3);
     await pasteText(dueCell(0), "2031-03-01\n2031-03-02\n2031-03-03");
-    await Promise.all(pasteSaves);
+    await pasteSaves;
     await expect(dueCell(0)).toContainText("Mar 1, 2031");
     await expect(dueCell(1)).toContainText("Mar 2, 2031");
     await expect(dueCell(2)).toContainText("Mar 3, 2031");
@@ -94,9 +95,9 @@ test.describe("Sheet-mode range editing (Tasks list)", () => {
     await dueCell(0).click({ position: { x: 2, y: 2 } });
     await page.keyboard.press("Shift+ArrowDown");
     await page.keyboard.press("Shift+ArrowDown");
-    const fillSaves: Promise<unknown>[] = [1, 2].map(() => page.waitForResponse(isTaskPatch));
+    const fillSaves = waitForResponses(page, isTaskPatch, 2);
     await page.keyboard.press("Control+d");
-    await Promise.all(fillSaves);
+    await fillSaves;
     for (const index of [0, 1, 2]) await expect(dueCell(index)).toContainText("Mar 1, 2031");
 
     // 5. Persisted across a reload.

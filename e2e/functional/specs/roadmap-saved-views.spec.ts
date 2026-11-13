@@ -15,7 +15,7 @@ import { randomUUID } from "node:crypto";
  *      "Shared", but the cross-workspace roadmap still only shows items from
  *      workspaces that member can read (sharing never widens item access), even
  *      when a URL names a workspace they cannot read.
- *   5. A built-in path segment ("roadmap") cannot become a workspace slug.
+ *   5. A built-in path segment ("roadmap") cannot become a workspace slug: it is suffixed instead.
  *
  * Fixtures: the seeded dev user is ADMIN of `e2e-workspace` and `e2e-planning`.
  * The second user is a real dev-credentials login added to `e2e-workspace` only, so
@@ -64,7 +64,7 @@ async function openSaveDialog(page: Page) {
 }
 
 test.describe("Cross-workspace roadmap and saved views", () => {
-  test("All roadmaps lists several workspaces; a saved view persists, shares with the workspace, and never widens item access", async ({ page, base, browser }) => {
+  test("All roadmaps lists several workspaces; a saved view persists, shares with the workspace, and never widens item access", async ({ page, base, browser, playwright }) => {
     test.setTimeout(240_000);
     const pool = requireLocalE2eDatabase();
     const baseURL = test.info().project.use.baseURL as string;
@@ -126,22 +126,24 @@ test.describe("Cross-workspace roadmap and saved views", () => {
       await page.keyboard.press("Escape");
 
       // ── 3. Second user, member of e2e-workspace only ─────────────────────────
-      // Locally the dev-credentials provider reads a plain session cookie (the
-      // next-auth callback route is a 404 shim in this fork), so a users row plus
-      // that cookie is a real login as far as the app can tell.
+      // A real dev-credentials login, as following-notifications does. A hand-made session cookie is not read by the app, and a
+      // context built without an explicit storageState inherits the owner's from the Playwright config, so "user B" was the owner.
+      const login = await playwright.request.newContext({ baseURL });
+      const csrf = await (await login.get("/api/auth/csrf")).json() as { csrfToken: string };
+      const signedIn = await login.post("/api/auth/callback/dev-credentials", {
+        form: { csrfToken: csrf.csrfToken, email: B_EMAIL, callbackUrl: `${baseURL}/dashboard` },
+        maxRedirects: 0,
+      });
+      expect([200, 302]).toContain(signedIn.status());
+      const bState = await login.storageState();
+      await login.dispose();
       const { rows: [bUser] } = await pool.query<{ id: string }>(
-        `INSERT INTO "${S}".users (id, name, email, email_verified, created_at)
-         VALUES (gen_random_uuid(), 'Roadmap Views Member', $1, NOW(), NOW())
-         ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name RETURNING id`,
+        `UPDATE "${S}".users SET name = 'Roadmap Views Member' WHERE email = $1 RETURNING id`,
         [B_EMAIL],
       );
+      expect(bUser?.id, "dev login must have created the second user").toBeTruthy();
       bUserId = bUser.id;
-      bContext = await browser.newContext({ baseURL });
-      await bContext.addCookies([{
-        name: "compass_dev_session",
-        value: encodeURIComponent(JSON.stringify({ user: { id: bUserId, email: B_EMAIL, name: "Roadmap Views Member", image: null } })),
-        url: baseURL,
-      }]);
+      bContext = await browser.newContext({ storageState: bState, baseURL });
       const bPage = await bContext.newPage();
       await pool.query(
         `INSERT INTO "${S}".workspace_members (id, workspace_id, user_id, role, created_at)
@@ -206,7 +208,7 @@ test.describe("Cross-workspace roadmap and saved views", () => {
     }
   });
 
-  test("'roadmap' is reserved: it cannot be used as a workspace slug", async ({ page, orgSlug }) => {
+  test("'roadmap' is reserved: a workspace named Roadmap gets the slug roadmap-workspace instead", async ({ page, orgSlug }) => {
     const pool = requireLocalE2eDatabase();
     try {
       await page.goto(`/${orgSlug}/settings`);
@@ -216,14 +218,26 @@ test.describe("Cross-workspace roadmap and saved views", () => {
       await expect(page.getByLabel("URL slug", { exact: true })).toHaveValue("roadmap");
       await page.getByRole("button", { name: "Create Workspace", exact: true }).click();
 
-      await expect(page.getByText(/"roadmap" is reserved for a built-in page/)).toBeVisible({ timeout: 15_000 });
-      await expect(page, "no navigation happened").toHaveURL(new RegExp(`/${orgSlug}/settings$`));
-      const { rows } = await pool.query(
-        `SELECT 1 FROM "${S}".workspaces w JOIN "${S}".organizations o ON o.id = w.organization_id WHERE o.slug = $1 AND w.slug = 'roadmap'`,
+      // The static /{org}/roadmap page would shadow a workspace with that slug, so the app suffixes it (lib/slug.ts
+      // resolveWorkspaceSlug) rather than rejecting the name, and opens the workspace at its real slug.
+      await page.waitForURL(new RegExp(`/${orgSlug}/roadmap-workspace(/|$)`), { timeout: 30_000 });
+      const { rows } = await pool.query<{ slug: string }>(
+        `SELECT w.slug FROM "${S}".workspaces w JOIN "${S}".organizations o ON o.id = w.organization_id WHERE o.slug = $1 AND w.slug IN ('roadmap', 'roadmap-workspace')`,
         [orgSlug],
       );
-      expect(rows, "no workspace with the reserved slug was created").toHaveLength(0);
+      expect(rows.map((row) => row.slug), "only the suffixed slug exists, never the reserved one").toEqual(["roadmap-workspace"]);
     } finally {
+      // Leave the shared org as found: later specs list its workspaces. Global teardown only sweeps workspaces it can still see.
+      const { rows } = await pool.query<{ id: string }>(
+        `SELECT w.id FROM "${S}".workspaces w JOIN "${S}".organizations o ON o.id = w.organization_id WHERE o.slug = $1 AND w.slug IN ('roadmap', 'roadmap-workspace')`,
+        [orgSlug],
+      );
+      for (const { id } of rows) {
+        for (const table of ["workspace_members", "workspace_modules", "workspace_activation_states", "workspace_sequences", "workspace_updates_state"]) {
+          await pool.query(`DELETE FROM "${S}"."${table}" WHERE workspace_id = $1`, [id]).catch(() => undefined);
+        }
+        await pool.query(`DELETE FROM "${S}".workspaces WHERE id = $1`, [id]);
+      }
       await pool.end();
     }
   });
