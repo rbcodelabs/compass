@@ -444,6 +444,7 @@ const KNOWN_RAW_INSERT_SITES: Record<string, number> = {
   "lib/migrations/work-item-ids-backfill.ts": 1,
   "__tests__/links/task-link-writes.integration.test.ts": 1, // one objective for the task-link writers, listing workspace_id
   "__tests__/entity-links-task-backfill.integration.test.ts": 2, // the objective and solution fixtures for the 097 backfill, each listing workspace_id (a null parameter simulates a row with no workspace)
+  "__tests__/entity-links-legacy-only.integration.test.ts": 2, // objective and solution fixtures for the read-only legacy-only status, each listing workspace_id
   "__tests__/entity-links-opportunity-backfill.integration.test.ts": 1, // legacy objective fixtures (one with no workspace) for the 095 backfill
   "__tests__/entity-links-artifact-backfill.integration.test.ts": 1, // legacy solution fixtures (one with no workspace) for the 096 backfill
   "__tests__/entity-links-solution-key-result-backfill.integration.test.ts": 3, // objective, solution and bulk-solution fixtures for the 098 backfill, each listing workspace_id (a null parameter simulates a row with no workspace)
