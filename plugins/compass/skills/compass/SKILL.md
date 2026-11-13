@@ -314,7 +314,8 @@ Field *definitions* and shared option sets are UI-only (Settings → Custom Fiel
 #### Docs
 | Tool | Description |
 |---|---|
-| `list_docs` | Fetch the doc tree for a workspace; recency-filterable |
+| `list_docs` | `workspaceId`, optional `kind` (`ADR` \| `QA_REPORT` \| `DESIGN` \| `NOTE`) and `limit` (default 50, max 200). Read-only: a workspace's docs, most recently updated first, as `{ id, path, title, kind, docType, updatedAt, url }` (`kind` is `null` when unset). Use it to find every doc of one type, e.g. all ADRs. No `updatedSince`/`sort` window |
+| `write_doc` | `workspaceId, path, content`, optional `operationId`, `expectedRevision`, create-only `docType`, and `kind` (`ADR` \| `QA_REPORT` \| `DESIGN` \| `NOTE`, or `null` to clear). Creates or updates the doc at a path. Omitting `kind` leaves it unset on create and unchanged on update; a missing kind is never an error. The kind is read back as `compass_kind` in the `docs://` frontmatter (read-only, ignored if written there) |
 | `get_doc` | Fetch a single doc's content and metadata (properties) |
 | `prepare_doc_image_upload` | Prepare a short-lived private direct upload for a PNG, JPEG, GIF, or WebP image up to 10 MiB. Upload with `@vercel/blob/client` using `access: "private"`, then embed the returned relative URL or Markdown in a Doc |
 | `create_doc` | Create a new doc page, optionally nested under a parent. Pass `roadmapItemId` + `docType: GTM_POSITIONING_BRIEF` to create a Positioning & Messaging Brief linked 1:1 to a roadmap item (auto-fills a starter template if content is omitted); this docType requires the workspace's Marketing launch setting to be on. Pass `docType: CANVAS` for a JSON Canvas 1.0 doc (`content` = JSON string, validated; blank canvas if omitted; a Compass object card is a `link` node with `url: compass://<kind>/<id>` and `compass: {kind, id, title?}`, kind in opportunity/solution/metric/doc/task/experiment/objective/keyResult); `update_doc` on a CANVAS doc also requires valid JSON Canvas content |
@@ -516,8 +517,8 @@ Every `list_*` tool above marked *recency-filterable* accepts:
 | `sort` | `recentlyUpdated` (newest first) or `leastRecentlyUpdated` (stale-work scans) |
 
 Omit `sort` and each tool keeps its own default ordering — those defaults are
-load-bearing (`list_roadmap_items` groups by horizon, `list_docs` renders a
-parent/child tree, `list_tasks` orders by status then manual `sortOrder`), so
+load-bearing (`list_roadmap_items` groups by horizon, `list_tasks` orders by
+status then manual `sortOrder`), so
 passing `sort` is how you opt out of them, never an accident.
 
 Two uses worth knowing:
