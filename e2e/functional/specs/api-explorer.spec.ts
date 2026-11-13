@@ -42,17 +42,28 @@ test("method columns align operation titles on desktop and mobile", async ({
     await page.goto("/help/api-explorer#operation=getTask");
     if (width === 390)
       await page.getByRole("button", { name: "Browse operations" }).click();
-    const lefts: number[] = [];
+    const titles = [];
     for (const method of methods) {
       const row = page.getByRole("button", {
         name: `${method.toUpperCase()} ${method} a synthetic task with a longer operation title`,
       });
       await expect(row).toBeVisible();
-      const title = await row.locator("span").nth(1).boundingBox();
-      expect(title).not.toBeNull();
-      lefts.push(title!.x);
+      titles.push(await row.locator("span").nth(1).elementHandle());
     }
-    expect(Math.max(...lefts) - Math.min(...lefts)).toBeLessThanOrEqual(1);
+    // Measure every title in one browser task: reading them one await at a time lets a late layout shift (the contract
+    // finishing its render, a scrollbar appearing) land between two reads and look like misalignment.
+    const measure = () =>
+      page.evaluate(
+        (elements) => elements.map((element) => element!.getBoundingClientRect().x),
+        titles,
+      );
+    let lefts: number[] = [];
+    await expect
+      .poll(async () => {
+        lefts = await measure();
+        return Math.max(...lefts) - Math.min(...lefts);
+      })
+      .toBeLessThanOrEqual(1);
     await testInfo.attach(`method-alignment-${width}`, {
       body: JSON.stringify({ viewportWidth: width, methods, titleLefts: lefts }),
       contentType: "application/json",
