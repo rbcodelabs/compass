@@ -15,6 +15,7 @@
  */
 import fs from "node:fs";
 import { test, expect } from "../fixtures/index";
+import { closeLibrary, importCanvasFile } from "../fixtures/docs";
 import type { Locator, Page } from "@playwright/test";
 
 const SCREENSHOT_DIR = "/tmp/qa-canvas";
