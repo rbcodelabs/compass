@@ -305,7 +305,12 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
   const shownMetadata = useRef(JSON.stringify(doc.metadata ?? null));
   // The Library type. Local state so the selector answers at once; a server refresh (our own save settling, or someone else's change) re-seeds it.
   const [docKind, setDocKind] = useState<DocKind | null>(normalizeDocKind(doc.kind));
-  useEffect(() => { setDocKind(normalizeDocKind(doc.kind)); }, [doc.kind]);
+  const [seenDocKind, setSeenDocKind] = useState(doc.kind ?? null);
+  if (seenDocKind !== (doc.kind ?? null)) {
+    // Derived during render rather than in an effect: the server's kind changed under us, so adopt it.
+    setSeenDocKind(doc.kind ?? null);
+    setDocKind(normalizeDocKind(doc.kind));
+  }
 
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingContent = useRef<string | null>(null);
