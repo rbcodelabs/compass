@@ -4,15 +4,23 @@
 
 ## Architecture decisions live in Compass, not the repo
 
-**Compass Docs is the authoritative home for Compass ADRs.** They sit under the
-[**Architecture Decisions**](https://compass.rbcodelabs.com/rbcodelabs/compass/docs/57218788-1db1-4148-b954-b98fb7055c62)
-parent doc in the `rbcodelabs/compass` workspace. This is what
-`Products/Compass/pm-config.md` already routes to — both `review_requests` and
-`decision_records` resolve to the `compass_decisions` provider.
+**Compass Docs is the authoritative home for Compass ADRs.** An ADR is a Doc in
+the `rbcodelabs/compass` workspace with **kind `ADR`**. The kind, not the
+location, is how you find ADRs: `list_docs` with `kind: "ADR"`, or the By Type
+view on the Docs page. The
+[**Architecture Decisions**](https://compass.rbcodelabs.com/rbcodelabs/compass/docs/1a6c874d-3eb0-4603-afc7-6b95a1722a3e)
+parent doc is where they conventionally sit, but placing a new ADR under it is
+optional. Until the kind backfill has run in production, older ADRs may have no
+kind yet; if `list_docs` misses one, look under that parent. `Products/Compass/pm-config.md` routes decisions to Compass already: both
+`review_requests` and `decision_records` resolve to the `compass_decisions`
+provider.
 
-- **To record a new architecture decision:** create a child Doc under that
-  parent, then route it for approval with `request_decision` using
-  `subjectType: "DOC"`.
+- **To record a new architecture decision:** write a Doc with `kind: "ADR"`
+  (`write_doc` accepts it, or set the Type in the doc's properties); putting it as
+  a child of the Architecture Decisions parent is the usual convention but not
+  required. Then route it for approval with `request_decision` using
+  `subjectType: "DOC"`. A Doc with no kind is still valid; it just will not
+  show up under ADR.
 - **Never self-certify.** Do not write `Status: Accepted` on your own record.
   Approval is an event that comes back from the provider; if it did not come
   back, the decision is not approved.

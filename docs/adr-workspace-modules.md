@@ -2,7 +2,7 @@
 
 Status: **Proposed.** Approval is an event from the decision provider, not a line in this file.
 
-Where this lives: Compass keeps its Architecture Decision Records in Compass Docs (child of "Architecture Decisions" in the
+Where this lives: Compass keeps its Architecture Decision Records in Compass Docs (kind `ADR`, conventionally a child of "Architecture Decisions" in the
 `rbcodelabs/compass` workspace) and `docs/decisions/` is pointer stubs only. This file is the in-repo design record that ships with the
 change (like `docs/adr-saved-views.md`); the Compass Doc should be created from it and routed through `request_decision`.
 

@@ -1,7 +1,7 @@
 # ADR-0018 (proposed): Generic saved views with board column layout
 
 **Date:** 2026-10-21
-**Status:** Proposed. Per CLAUDE.md, Compass Docs is the authoritative home for ADRs and `docs/decisions/` takes pointer stubs only. This file is a working draft: on review, create it as a child Doc under "Architecture Decisions" and route it with `request_decision` (`subjectType: "DOC"`). Approval must come back from the provider; do not mark it Accepted here.
+**Status:** Proposed. Per CLAUDE.md, Compass Docs is the authoritative home for ADRs and `docs/decisions/` takes pointer stubs only. This file is a working draft: on review, create it as a Doc with kind `ADR` (conventionally a child of "Architecture Decisions") and route it with `request_decision` (`subjectType: "DOC"`). Approval must come back from the provider; do not mark it Accepted here.
 **Scope:** design only. No implementation code.
 
 Note: `Claude/repo-map.md` does not exist in this worktree and `AGENTS.md` only carries the Next.js warning block. This design is grounded in a direct read of the files cited below. Read `node_modules/next/dist/docs/` before implementing any page or server-action change.
