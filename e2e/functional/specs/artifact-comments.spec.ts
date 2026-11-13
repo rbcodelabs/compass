@@ -42,8 +42,9 @@ test("Artifact comments support the discussion lifecycle across revisions and ar
   await page.getByRole("textbox", { name: "Add comment" }).fill("Draft survives revision refresh")
   await page.locator('input[name="file"]').setInputFiles({ name: "v2.html", mimeType: "text/html", buffer: Buffer.from("<html><body><h1>Revision two</h1></body></html>") })
   await page.getByRole("button", { name: "Replace current revision" }).click()
-  await expect(page.frameLocator("iframe").getByRole("heading", { name: "Revision two" })).toBeVisible()
-  await expect(page.getByRole("textbox", { name: "Add comment" })).toHaveValue("Draft survives revision refresh")
+  // While the new revision loads, the previous frame stays mounted underneath it (holdPrevious); the newest frame is last.
+  await expect(page.frameLocator("iframe").last().getByRole("heading", { name: "Revision two" })).toBeVisible()
+  await expect(page.getByRole("textbox", { name: "Add comment" })).toHaveText("Draft survives revision refresh")
   await expect(pinned(page).getByText("Reviewed delivery note.", { exact: true })).toBeVisible()
   await page.getByRole("button", { name: "Archive", exact: true }).click()
   await expect(page.getByText("This artifact is archived.")).toBeVisible()
@@ -65,6 +66,8 @@ test("Artifact pinning preserves preview and drafts, isolates cookies, and adapt
   await page.getByRole("button", { name: "Comments", exact: true }).click()
   await page.getByRole("textbox", { name: "Add comment" }).fill("The delivery note is easy to find. Could we clarify when it will be shared?")
   await page.getByRole("button", { name: "Post comment", exact: true }).click()
+  // The composer stays disabled, still holding the typed text, until the post lands and it remounts empty.
+  await expect(page.getByRole("textbox", { name: "Add comment" })).toHaveText("")
   await expect(page.getByText("The delivery note is easy to find. Could we clarify when it will be shared?", { exact: true })).toBeVisible()
   await page.getByRole("textbox", { name: "Add comment" }).fill("Keep this draft")
   await page.getByRole("button", { name: "Pin panel", exact: true }).click()
@@ -77,7 +80,7 @@ test("Artifact pinning preserves preview and drafts, isolates cookies, and adapt
   await pinned(page).getByRole("button", { name: "Close panel" }).click()
   await expect(page.getByRole("button", { name: "Comments", exact: true })).toBeFocused()
   await page.getByRole("button", { name: "Comments", exact: true }).click()
-  await expect(page.getByRole("textbox", { name: "Add comment" })).toHaveValue("Keep this draft")
+  await expect(page.getByRole("textbox", { name: "Add comment" })).toHaveText("Keep this draft")
   await expect(page.frameLocator("iframe").getByRole("textbox", { name: "Delivery note" })).toHaveValue("Preview stays mounted")
   for (const theme of ["light", "dark"]) {
     await page.evaluate((value) => document.documentElement.classList.toggle("dark", value === "dark"), theme)
@@ -88,7 +91,7 @@ test("Artifact pinning preserves preview and drafts, isolates cookies, and adapt
       const visibleSurface = await pinned(page).count() ? pinned(page) : surface
       await expect(visibleSurface).toBeVisible()
       await expect(visibleSurface).toHaveCSS("opacity", "1")
-      await expect(page.getByRole("textbox", { name: "Add comment" })).toHaveValue("Keep this draft")
+      await expect(page.getByRole("textbox", { name: "Add comment" })).toHaveText("Keep this draft")
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
       if (await pinned(page).count()) expect((await page.locator('[data-slot="artifact-content-column"]').boundingBox())!.width).toBeGreaterThanOrEqual(479)
       await page.screenshot({ path: testInfo.outputPath(`artifact-comments-${theme}-${width}.png`), animations: "disabled" })
@@ -124,7 +127,7 @@ test("Artifact pinning preserves preview and drafts, isolates cookies, and adapt
   await expect(pinned(page)).toHaveCount(0)
   await page.getByRole("button", { name: "Comments", exact: true }).click()
   await expect(pinned(page).getByRole("separator")).toHaveAttribute("aria-valuenow", "336")
-  await expect(page.getByRole("textbox", { name: "Add comment" })).toHaveValue("")
+  await expect(page.getByRole("textbox", { name: "Add comment" })).toHaveText("")
 })
 
 test("External Artifacts expose the same comments without embedding the external site", async ({ page, base }) => {

@@ -109,7 +109,9 @@ test("deployment cookies load the contract without authorizing cookie-free API r
   ).toBeVisible();
   await page.getByLabel("API key or OAuth bearer token").fill("synthetic");
   await page.getByRole("button", { name: "Send GET request" }).click();
-  await expect(page.getByRole("status")).toContainText("Request failed.");
+  // The failure is announced in the alert; the status line only reports a completed request ("No request sent." otherwise).
+  await expect(page.getByRole("alert").filter({ hasText: "Request failed." })).toBeVisible();
+  await expect(page.getByRole("status")).toContainText("No request sent.");
   expect(calls).toBe(1);
   expect(page.url()).not.toContain("synthetic-protection-login");
 });
