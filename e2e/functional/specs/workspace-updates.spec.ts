@@ -141,10 +141,14 @@ test.describe("Workspace Updates", () => {
         await expect(nav.getByRole("link", { name: "Updates", exact: true })).toBeVisible();
         if (size === "mobile") {
           const decisions = nav.getByRole("link", { name: "Decisions", exact: true });
-          await decisions.scrollIntoViewIfNeeded();
-          const box = await decisions.boundingBox();
-          expect(box!.x).toBeGreaterThanOrEqual(0);
-          expect(box!.x + box!.width).toBeLessThanOrEqual(viewport.width);
+          // BottomNav re-centres the active link (Updates) in an effect that runs on hydration, which
+          // can land after a one-shot scroll and reset scrollLeft to 0. Re-scroll on each poll attempt
+          // so the check converges once hydration has settled.
+          await expect.poll(async () => {
+            await decisions.scrollIntoViewIfNeeded();
+            const box = await decisions.boundingBox();
+            return box && box.x >= 0 ? box.x + box.width : Number.POSITIVE_INFINITY;
+          }).toBeLessThanOrEqual(viewport.width);
           await nav.getByRole("link", { name: "Updates", exact: true }).scrollIntoViewIfNeeded();
         }
         for (const theme of ["light", "dark"]) {
