@@ -8,6 +8,10 @@ import { LIBRARY_LATEST_LIMIT, type KindCounts, type KindGroup, type LibraryDoc 
  *
  * Rows are stacked on a phone (title on its own line, kind and date under it) and sit side by side from `sm` up, so a long title wraps
  * instead of being squeezed beside its date and nothing needs a horizontal scrollbar at 390px.
+ *
+ * Known scale limit (stage 1): the page loads every doc in the workspace and By Type renders every row without pagination, while
+ * Recent is capped at LIBRARY_LATEST_LIMIT with no "showing N of M" hint. That is fine at tens of docs; revisit before a workspace
+ * holds thousands.
  */
 
 // A fixed locale and zone, so the server and the browser never disagree about the day a doc was updated.
