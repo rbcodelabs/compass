@@ -124,6 +124,21 @@ describe("AgentParticipantsPanel", () => {
     await waitFor(() => expect(onAccessLost).toHaveBeenCalledWith("left"))
   })
 
+  it("does not re-read the roster after leaving, so the 404 cannot report the thread as removed", async () => {
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) =>
+      init?.method === "DELETE" ? json({ ok: true }) : json(roster({ viewerRole: "PARTICIPANT", participants: [OWNER, GUEST] })),
+    )
+    vi.stubGlobal("fetch", fetchMock)
+    renderPanel("guest-1")
+    fireEvent.click(await screen.findByRole("button", { name: /shared with 1 person/i }))
+    const readsBefore = fetchMock.mock.calls.filter(([, init]) => init?.method !== "DELETE").length
+    fireEvent.click(await screen.findByRole("button", { name: "Leave" }))
+    await waitFor(() => expect(onAccessLost).toHaveBeenCalledWith("left"))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method !== "DELETE")).toHaveLength(readsBefore)
+    expect(onAccessLost).not.toHaveBeenCalledWith("removed")
+  })
+
   it("reports lost access when the roster 404s", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 404 })))
     renderPanel("guest-1")
