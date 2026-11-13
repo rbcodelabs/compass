@@ -48,13 +48,22 @@ export async function closeLibrary(page: Page): Promise<void> {
   await page.getByTestId("rail-library").waitFor({ state: "hidden", timeout: 3_000 }).catch(() => {});
 }
 
-/** Create a blank diagram from the Library's New menu, wait for its editor, then close the rail. */
-export async function createDiagramFromLibrary(page: Page): Promise<void> {
+/**
+ * Create a blank diagram from the Library's New menu, wait for its page, then close the rail. Returns the diagram's id as it appears
+ * in the first URL: the page later rewrites that URL to the document key (DOC-n), but Library links keep using the id.
+ */
+export async function createDiagramFromLibrary(page: Page): Promise<string> {
   await openLibrary(page);
   await page.getByTestId("library-create-menu").click();
   await page.getByRole("menuitem", { name: "New diagram" }).click();
-  await page.waitForURL(/\/docs\/[0-9a-f-]+$/, { timeout: 15_000 });
+  let id = "";
+  await page.waitForURL((url) => {
+    const match = /\/docs\/([0-9a-f-]+)$/.exec(url.pathname);
+    if (match) id = match[1];
+    return match !== null;
+  }, { timeout: 15_000 });
   await closeLibrary(page);
+  return id;
 }
 
 /**
