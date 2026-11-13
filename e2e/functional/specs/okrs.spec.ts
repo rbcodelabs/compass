@@ -95,30 +95,26 @@ test.describe("OKRs", () => {
     await expect(page.getByText("50%").first()).toBeVisible();
 
     // ── 7. Change objective status to AT_RISK ───────────────────────────────
-    // The objective-row status Select is the FIRST combobox in the objective
-    // card (parent-KR picker is second).  After a page reload with
-    // waitForLoadState("load"), React may still be hydrating which means
-    // SelectValue might not have connected to SelectItems yet — the combobox
-    // accessible name fluctuates between "ON_TRACK" (raw value) and "On track"
-    // (rendered label).  Use nth(0) to get the status combobox regardless of
-    // which text it currently shows, and wait for it to be clickable.
-    const statusCombobox = page.locator('[role="combobox"]').nth(0);
+    // Scope to this run's objective card: the app shell carries other comboboxes
+    // (workspace switcher, filters), so "the first combobox on the page" is not
+    // the status select. The status Select is the first combobox in the card
+    // (the parent-KR picker is second).
+    const objectiveCard = page.locator(".okx-obj").filter({ hasText: objectiveTitle });
+    const statusCombobox = objectiveCard.getByRole("combobox").first();
     await expect(statusCombobox).toBeEnabled({ timeout: 10_000 });
     await statusCombobox.click();
+    // Wait for the updateObjectiveStatus server action itself (its POST carries the Next-Action header), not a fixed delay:
+    // the dev router can show the old value for a while after the action, so the reload below is what reads the persisted state.
+    const statusAction = page.waitForResponse((r) => r.request().method() === "POST" && "next-action" in r.request().headers());
     await page.getByRole("option", { name: "At risk" }).click();
-
-    // The updateObjectiveStatus action is a fast DB update.  Allow 2 s for
-    // the server action to complete before forcing a reload.
-    await page.waitForTimeout(2_000);
+    expect((await statusAction).ok()).toBe(true);
     await page.reload();
     await page.waitForLoadState("load");
 
-    // After reload, the objective status combobox reflects the new status.
-    // ObjectiveRow uses Radix <SelectValue /> which in SSR/pre-hydration
-    // renders the raw enum value ("AT_RISK") rather than the label ("At risk")
-    // because SelectItems haven't connected to context yet.  Match either form.
+    // After reload the status is the persisted one. Pre-hydration the Radix
+    // <SelectValue /> renders the raw enum value, so match either form.
     await expect(
-      page.locator('[role="combobox"]').nth(0)
+      page.locator(".okx-obj").filter({ hasText: objectiveTitle }).getByRole("combobox").first()
     ).toContainText(/AT_RISK|At risk/, { timeout: 10_000 });
   });
 

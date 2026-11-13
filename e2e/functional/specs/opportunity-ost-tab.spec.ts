@@ -2,7 +2,7 @@
  * Opportunity detail "OST" tab follows the workspace thinking model, end to end.
  *
  * One Cycle -> Objective -> two Key Results, an Opportunity whose Key Result pointer (an entity_links
- * row, written through the app's typed-link writer) names the first Key Result, and one Solution. The
+ * row, seeded the way the app's typed-link writer stores it) names the first Key Result, and one Solution. The
  * pointer is the supported fallback parent in every preset, so each model has something to draw.
  *
  * `workspaces.thinking_model` is switched per test on the shared e2e workspace and always restored to NULL
@@ -12,8 +12,6 @@ import pg from "pg";
 import { randomUUID } from "node:crypto";
 import { test, expect } from "../fixtures/index";
 import { E2E_SCHEMA, isolatedE2EConnectionString } from "../fixtures/isolated-database";
-import getPrisma from "../../../lib/db";
-import { runTypedLinkTransaction, setKeyResultPointer } from "../../../lib/typed-links";
 
 const S = `"${E2E_SCHEMA}"`;
 
@@ -73,8 +71,13 @@ test.describe.serial("Opportunity OST tab follows the thinking model", () => {
       [ids.kr, ids.kr2, ids.objective, titles.kr, titles.kr2],
     );
     await pool.query(`INSERT INTO ${S}.opportunities (id, workspace_id, title) VALUES ($1, $2, $3)`, [ids.opp, workspaceId, titles.opp]);
-    await runTypedLinkTransaction(getPrisma(), (tx) =>
-      setKeyResultPointer(tx, { opportunityId: ids.opp, workspaceId, keyResultId: ids.kr, ctx: { source: "UI", createdById: null } }),
+    // The Key Result pointer: what lib/typed-links.ts setKeyResultPointer writes (the LEGACY pointer plus the LEGACY Objective link derived
+    // from it). Seeded by SQL because Playwright's loader cannot resolve the "@/..." imports of the writer's lazy-loaded lib/links/service.ts.
+    await pool.query(
+      `INSERT INTO ${S}.entity_links (workspace_id, link_type, from_type, from_id, to_type, to_id, origin, source, created_at, updated_at)
+       VALUES ($1, 'OPPORTUNITY_TARGETS_KEY_RESULT', 'OPPORTUNITY', $2, 'KEY_RESULT', $3, 'LEGACY', 'UI', NOW(), NOW()),
+              ($1, 'OPPORTUNITY_TARGETS_OBJECTIVE', 'OPPORTUNITY', $2, 'OBJECTIVE', $4, 'LEGACY', 'UI', NOW(), NOW())`,
+      [workspaceId, ids.opp, ids.kr, ids.objective],
     );
     await pool.query(`INSERT INTO ${S}.solutions (id, workspace_id, opportunity_id, title) VALUES ($1, $2, $3, $4)`, [
       ids.solution,
