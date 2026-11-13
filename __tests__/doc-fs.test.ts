@@ -196,7 +196,7 @@ describe("writePath", () => {
     mocks.db.doc.findMany.mockResolvedValue([])
     mocks.createDocument.mockResolvedValue({ id: "new-doc", revision: "rev-new" })
     const result = await writePath(WS, "Vision", "# Hello", { authorName: "Agent" })
-    expect(result).toEqual({ docId: "new-doc", created: true, revision: "rev-new", path: "Vision" })
+    expect(result).toEqual({ docId: "new-doc", created: true, revision: "rev-new", path: "Vision", kind: null })
     expect(mocks.createDocument).toHaveBeenCalledWith(
       expect.objectContaining({ workspaceId: WS, parentId: null, title: "Vision", content: "# Hello", sortOrder: 0 }),
       expect.objectContaining({ authorName: "Agent" })
@@ -207,7 +207,7 @@ describe("writePath", () => {
     mocks.db.doc.findMany.mockResolvedValue([row({ id: "doc-1", title: "Vision" })])
     mocks.updateDocument.mockResolvedValue({ id: "doc-1", revision: "rev-2" })
     const result = await writePath(WS, "Vision", "# Updated", { authorName: "Agent", expectedRevision: "rev-1" })
-    expect(result).toEqual({ docId: "doc-1", created: false, revision: "rev-2", path: "Vision" })
+    expect(result).toEqual({ docId: "doc-1", created: false, revision: "rev-2", path: "Vision", kind: null })
     expect(mocks.updateDocument).toHaveBeenCalledWith(
       "doc-1",
       expect.objectContaining({ content: "# Updated" }),

@@ -90,6 +90,9 @@ import { captureCanvas } from "@/lib/canvas-capture-tool-handlers"
 import { createFeedbackSourceTool, updateFeedbackSourceTool } from "@/lib/feedback-source-tool-handlers"
 import {
   writeDoc,
+  listLibraryDocs,
+  DOC_LIST_DEFAULT_LIMIT,
+  DOC_LIST_MAX_LIMIT,
   deleteDoc,
   moveDoc,
   listDocHistory,
@@ -99,6 +102,7 @@ import {
   resolveDocComment,
 } from "@/lib/doc-fs-tool-handlers"
 import * as docFs from "@/lib/doc-fs"
+import { DOC_KINDS } from "@/lib/doc-kinds"
 import { ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js"
 import {
   createAssumption,
@@ -3559,11 +3563,30 @@ const _handler = createMcpHandler(
           content: z.string().describe("Doc content: optional YAML frontmatter, then the markdown body"),
           operationId: z.string().uuid().optional().describe("Stable retry ID; required for Geode pilot documents"),
           expectedRevision: z.string().optional().describe("Revision from a prior read of this path; when supplied, a concurrent edit since then is refused rather than overwritten"),
+          kind: z.enum(DOC_KINDS).nullable().optional().describe("The doc's Library type: ADR, QA_REPORT, DESIGN or NOTE. Optional and independent of docType: omit it to leave the type unset on create or unchanged on update, pass null to clear it. A doc with no type is always valid. It is read back as compass_kind in the docs:// frontmatter and filterable with list_docs."),
           docType: z.enum(["STANDARD", "CANVAS"]).optional().describe("Create-only; ignored when the path already exists. CANVAS creates a JSON Canvas 1.0 doc: the body (after any frontmatter) must be a JSON Canvas JSON string (blank canvas if empty); Compass object cards are link nodes with url \"compass://<kind>/<id>\" and a compass field {kind, id, title?}. Defaults to STANDARD."),
         },
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       writeDoc
+    )
+
+    register(
+      "list_docs",
+      {
+        title: "List Docs",
+        description:
+          "Lists a workspace's docs, most recently updated first, optionally only those of one Library kind (ADR, QA_REPORT, DESIGN or NOTE) -- " +
+          "the way to find, say, every ADR without walking the docs:// tree. Returns each doc's id, path (as used by write_doc and the docs:// resource), " +
+          "title, kind (null when unset), docType, updatedAt and url. Read-only. Set a doc's kind with write_doc.",
+        inputSchema: {
+          workspaceId: z.string().uuid().describe("UUID of the workspace"),
+          kind: z.enum(DOC_KINDS).optional().describe("Only docs of this Library kind. Omit to list docs of every kind, typed or not."),
+          limit: z.number().int().min(1).max(DOC_LIST_MAX_LIMIT).optional().describe(`Max docs to return (default ${DOC_LIST_DEFAULT_LIMIT}, max ${DOC_LIST_MAX_LIMIT})`),
+        },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      listLibraryDocs
     )
 
     register(

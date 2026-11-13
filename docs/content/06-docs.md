@@ -10,6 +10,22 @@ section: "Core Features"
 
 The Docs section brings Markdown **Docs**, **Diagrams**, and **Artifacts** together in one Library. Use Docs for PRDs and research notes, Diagrams for visual thinking, and Artifacts for prototypes and other solution deliverables.
 
+## Library overview
+
+Opening **Docs** shows the **Library overview** instead of jumping into a page. Use the view switcher in the header to move between three views:
+
+- **Overview** (the default): how many docs the workspace has of each type (ADR, QA report, Design, Note, and **No type**), and the eight most recently updated docs. Click a type count to see that type's docs.
+- **By type**: every doc grouped by type, with **No type** last. Each row shows the title and the day it was last updated; click one to open it.
+- **Recent**: the 50 most recently updated docs, newest first.
+
+These views list docs only; artifacts stay in the Library in the agent sidebar. **New doc** in the header creates a page (members who can only read a workspace see the views without it). A workspace with no pages yet shows **Create your first page**. On a phone the rows stack, with the title on its own line and the type and date beneath, so nothing is squeezed or cut off.
+
+### Setting a doc's type
+
+Open a doc, expand **Properties**, and choose a **Type**: ADR, QA report, Design or Note, or **No type** to clear it. The type is saved with the doc, and the doc moves to its new group in **By type** straight away. A type is optional, and a doc with no type is just as valid. Your workspace's existing docs have no type until someone sets one. Agents set it with the `kind` option of `write_doc` and find docs by type with `list_docs`; see [MCP API](/help/09-mcp-api).
+
+## The Library in the sidebar
+
 The Library mixes root items alphabetically, keeping child pages beneath their parents. Search **Find in library** across titles, or use **All**, **Docs**, **Diagrams**, and **Artifacts** to narrow the list. Matching nested items keep their parent context visible. Search, filters, and **New** stay above a single scrolling list, including on mobile.
 
 Use **New** to create a doc, create a diagram, import a `.canvas` file, or add an artifact.

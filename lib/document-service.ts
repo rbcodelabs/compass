@@ -28,6 +28,8 @@ type DocumentChange = {
   /** Reparent (doc-fs's movePath — ADR 0019). Null moves the doc to the workspace root. */
   parentId?: string | null
   sortOrder?: number
+  /** Library kind (lib/doc-kinds.ts; migration 117). Null clears it; undefined leaves it alone. Validated by the caller. */
+  kind?: string | null
 }
 
 export class DocumentError extends Error {
