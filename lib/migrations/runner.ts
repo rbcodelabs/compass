@@ -27,6 +27,8 @@ import { assertWorkspaceUpdatesMigration } from "@/lib/migrations/workspace-upda
 import { assertFollowsNotificationsMigration } from "@/lib/migrations/follows-notifications";
 import { assertPortalHomeLayoutMigration } from "@/lib/migrations/portal-home-layout";
 import { assertDocPublishingMigration } from "@/lib/migrations/doc-publishing";
+import { assertDocKindMigration } from "@/lib/migrations/doc-kind";
+import { DOC_KIND_BACKFILL_MIGRATION, assertDocKindBackfill, backfillDocKinds } from "@/lib/migrations/doc-kind-backfill";
 import { assertPortalHomeTemplateMigration } from "@/lib/migrations/portal-home-template";
 import { assertRoadmapViewsMigration } from "@/lib/migrations/roadmap-views";
 import { SAVED_VIEWS_SURFACE_MIGRATION, assertSavedViewsSurfaceMigration, backfillSavedViewsSurface } from "@/lib/migrations/saved-views-surface";
@@ -795,6 +797,19 @@ const MIGRATIONS: readonly MigrationEntry[] = [
     // TASK_CREATED_FROM is live; never untargeted. Until it runs the readers fall back to the not-yet-moved task_links rows.
     name: "115_entity_links_task_link_move",
     filePath: path.join(process.cwd(), "prisma/migrations/115_entity_links_task_link_move/migration.sql"),
+  },
+  {
+    // docs.kind (nullable VARCHAR(30), no default/index/FK/enum): what a doc is in the Library. NULL = no type, so code may ship before this applies.
+    // The hook asserts the column exists, is varchar and is nullable before the receipt.
+    name: "117_doc_kind",
+    filePath: path.join(process.cwd(), "prisma/migrations/117_doc_kind/migration.sql"),
+  },
+  {
+    // No DDL, EXPLICIT-ONLY. Sets docs.kind for existing docs from their title and parent page (ADR / QA_REPORT / DESIGN; anything the rules do not place
+    // stays NULL). Only NULL rows are written, so a kind someone already set is never overwritten; updated_at is untouched. The hook proves its postcondition
+    // (no classifiable doc still NULL) before the receipt. POST it by name after 117_doc_kind is applied; never untargeted.
+    name: "118_doc_kind_backfill",
+    filePath: path.join(process.cwd(), "prisma/migrations/118_doc_kind_backfill/migration.sql"),
   },
 ];
 
@@ -2016,10 +2031,10 @@ export async function getMigrationStatus(pool: Pool, schema: string) {
 }
 
 /** Migrations that an untargeted run must NOT pick up on its own: they are only correct at a moment a human chooses. */
-const EXPLICIT_ONLY_MIGRATIONS: readonly string[] = [WORKSPACE_ID_RESIDUAL_MIGRATION, TYPED_LINK_RESIDUAL_MIGRATION, WORK_ITEM_IDS_RESIDUAL_MIGRATION, ENTITY_LINKS_OPPORTUNITY_BACKFILL_MIGRATION, ENTITY_LINKS_OPPORTUNITY_RESIDUAL_MIGRATION, ENTITY_LINKS_ARTIFACT_BACKFILL_MIGRATION, ENTITY_LINKS_TASK_BACKFILL_MIGRATION, ENTITY_LINKS_TASK_LINK_MOVE_MIGRATION, ENTITY_LINKS_CONVERSATION_BACKFILL_MIGRATION, ENTITY_LINKS_SOLUTION_KEY_RESULT_BACKFILL_MIGRATION, SHARED_COMPASS_AGENT_BOOTSTRAP_MIGRATION, WORKSPACE_MODULES_LEGACY_FLAG_BACKFILL_MIGRATION];
+const EXPLICIT_ONLY_MIGRATIONS: readonly string[] = [WORKSPACE_ID_RESIDUAL_MIGRATION, TYPED_LINK_RESIDUAL_MIGRATION, WORK_ITEM_IDS_RESIDUAL_MIGRATION, ENTITY_LINKS_OPPORTUNITY_BACKFILL_MIGRATION, ENTITY_LINKS_OPPORTUNITY_RESIDUAL_MIGRATION, ENTITY_LINKS_ARTIFACT_BACKFILL_MIGRATION, ENTITY_LINKS_TASK_BACKFILL_MIGRATION, ENTITY_LINKS_TASK_LINK_MOVE_MIGRATION, ENTITY_LINKS_CONVERSATION_BACKFILL_MIGRATION, ENTITY_LINKS_SOLUTION_KEY_RESULT_BACKFILL_MIGRATION, SHARED_COMPASS_AGENT_BOOTSTRAP_MIGRATION, WORKSPACE_MODULES_LEGACY_FLAG_BACKFILL_MIGRATION, DOC_KIND_BACKFILL_MIGRATION];
 
 /**
- * Which pending migrations a POST runs: the named one, or everything except the explicit-only one-shots (069, 072, 094, 095, 096, 097, 115_entity_links_task_link_move, 098_entity_links_backfill_solution_key_result, 103, 106_entity_links_residual_opportunity).
+ * Which pending migrations a POST runs: the named one, or everything except the explicit-only one-shots (069, 072, 094, 095, 096, 097, 115_entity_links_task_link_move, 098_entity_links_backfill_solution_key_result, 103, 106_entity_links_residual_opportunity, 118_doc_kind_backfill).
  * `includeExplicitOnly` is for callers that provision a FRESH schema (the scoped preview worker): there is no old
  * deployment to drain, so applying 069 straight after 068 is correct and required for the schema to reach "ready".
  * Production-style callers (the admin route, an untargeted POST) never set it.
@@ -2322,6 +2337,7 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
       if (migration.name === "074_portal_home_layout") await assertPortalHomeLayoutMigration(client, schema)
       if (migration.name === "113_doc_publishing") await assertDocPublishingMigration(client, schema)
       if (migration.name === "114_portal_home_template") await assertPortalHomeTemplateMigration(client, schema)
+      if (migration.name === "117_doc_kind") await assertDocKindMigration(client, schema)
       if (migration.name === "075_roadmap_item_provenance") await assertRoadmapItemProvenanceMigration(client, schema)
       if (migration.name === "079_roadmap_views") await assertRoadmapViewsMigration(client, schema)
       if (migration.name === SAVED_VIEWS_SURFACE_MIGRATION) {
@@ -2414,6 +2430,12 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
         // Before the receipt below, so a failure leaves an unfinished attempt and the next POST resumes.
         await backfillLaunchWorkflowModules(client, schema, log)
         await assertWorkspaceModulesMigration(client, schema)
+      }
+      if (migration.name === DOC_KIND_BACKFILL_MIGRATION) {
+        // Data half only (explicit-only): classify existing docs from their title and parent page, then prove no classifiable doc is still NULL.
+        // Before the receipt below, so a failure leaves an unfinished attempt and the next POST resumes.
+        await backfillDocKinds(client, schema, log)
+        await assertDocKindBackfill(client, schema)
       }
       if (migration.name === WORKSPACE_MODULES_LEGACY_FLAG_BACKFILL_MIGRATION) {
         // Data half only (explicit-only): enable the modules whose legacy env flag is "1" here, then prove every workspace has the row.

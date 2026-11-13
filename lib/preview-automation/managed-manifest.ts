@@ -254,7 +254,7 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   // Postcondition pinned in REVIEWED_MIGRATION_CODE_SHA256. Digest recorded from the shipped SQL after reading it.
   "114_portal_home_template": "009701f53d716a8eb9ae81d0e208631a592c4b2b643ebf8811d75be566698421",
   // Task link move: no executable SQL (comments only). The work is the TypeScript hook pinned in REVIEWED_MIGRATION_CODE_SHA256.
-  "115_entity_links_task_link_move": "48f1b5362241d301cb0cef3065862f778acf89a1f540900e2ba8b2f4198d427b"
+  "115_entity_links_task_link_move": "48f1b5362241d301cb0cef3065862f778acf89a1f540900e2ba8b2f4198d427b",
 };
 
 /**
@@ -421,6 +421,18 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
   // The 115 hook (task link move) and the OCC retry it imports; editing either re-reviews the migration.
   "115_entity_links_task_link_move": {
     "lib/migrations/entity-links-task-link-move.ts": "4888e450cf2313c3a095ca09bc7b5c4fa14af85b20d812a68e12661556a442cd",
+    "lib/migrations/workspace-id-on-solution-objective.ts": "43295c27b84b319d6cfcada757c7dab6c598c930e237aa642c8d05fa94a3f8c7",
+  },
+  // The 117 postcondition (docs.kind exists, varchar, nullable); editing it re-reviews the migration.
+  "117_doc_kind": {
+    "lib/migrations/doc-kind.ts": "479ad7e54f8b9061dc4c4b67065b77286c3f44dde765520441363cef196295bb",
+  },
+  // The 118 hook, the pure classifier it applies, the kind vocabulary it writes, and the OCC retry it imports; editing any re-reviews the migration.
+  "118_doc_kind_backfill": {
+    "lib/migrations/doc-kind-backfill.ts": "2edb5b282ea735694f8e95cdfad5831a26dffaa811c74f086a73c9970ac1cfa2",
+    "lib/doc-kind-backfill.ts": "f90812a5f22450d8ce51a590bcacefda5efaaa9bb8834de3da36dc1bdbb9124b",
+    "lib/doc-kinds.ts": "7bcf6c377962ca7769c941049712015c6401ac8a4835e63c5b57b9b13c97ee71",
+    "lib/migrations/doc-kind.ts": "479ad7e54f8b9061dc4c4b67065b77286c3f44dde765520441363cef196295bb",
     "lib/migrations/workspace-id-on-solution-objective.ts": "43295c27b84b319d6cfcada757c7dab6c598c930e237aa642c8d05fa94a3f8c7",
   },
 };
