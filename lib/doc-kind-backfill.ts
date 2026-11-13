@@ -17,7 +17,8 @@ export type DocKindClassifierInput = { title: string; parentTitle: string | null
 const ADR_TITLE = /^ADR\b/i
 const NUMBERED_TITLE = /^\d{4}[ .:-]/
 const ISO_DATE_PREFIX = /^\d{4}-\d{2}(?:-\d{2})?(?!\d)/
-const QA_REPORT_TITLE = /^QA Report/i
+// \b so the container page "QA Reports" is not a report itself.
+const QA_REPORT_TITLE = /^QA Report\b/i
 const DESIGN_TITLE = /^Design[:_]/i
 
 const normalizeParent = (parentTitle: string | null) => parentTitle?.trim().toLowerCase() ?? null
