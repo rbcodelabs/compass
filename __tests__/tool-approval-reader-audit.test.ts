@@ -86,6 +86,7 @@ const EXEMPT: Exemption[] = [
   { file: "lib/mcp-authz.ts", kind: "reviewRequest.findUnique", count: 1, reason: "Resolves only a referenced row's workspaceId for the authorization gate; returns no content." },
   { file: "lib/mcp-authz.ts", kind: "decisionRecord.findUnique", count: 1, reason: "Resolves only a referenced row's workspaceId for the authorization gate; returns no content." },
   { file: "lib/migrations/entity-links-artifact-backfill.ts", kind: "raw:review_requests", count: 4, reason: "Registered migration SQL run only via the authenticated migrate endpoint; not a request-time reader." },
+  { file: "lib/migrations/entity-links-row-detail.ts", kind: "raw:review_requests", count: 1, reason: "Read-only migrate-status SQL (metadata only, authenticated endpoint); it reads every gate type on purpose to report existence and excludes tool approvals from `resolves` exactly as lib/links/endpoints.ts does." },
   { file: "lib/migrations/entity-links-read-parity.ts", kind: "raw:review_requests", count: 3, reason: "Registered migration SQL run only via the authenticated migrate endpoint; not a request-time reader." },
   { file: "lib/migrations/entity-links-task-backfill.ts", kind: "raw:review_requests", count: 3, reason: "Registered migration SQL run only via the authenticated migrate endpoint; not a request-time reader." },
   { file: "lib/migrations/runner.ts", kind: "raw:review_requests", count: 3, reason: "Schema/table-name lists for migration verification; not a request-time reader." },
