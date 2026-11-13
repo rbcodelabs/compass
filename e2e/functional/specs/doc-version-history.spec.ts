@@ -28,7 +28,7 @@ test.describe("Doc Version History", () => {
       await page.waitForLoadState("networkidle");
 
       await clickNewDoc(page)
-      await page.waitForURL(/\/docs\/[0-9a-f-]+$/, { timeout: 15_000 });
+      await page.waitForURL(/\/docs\/(?:[0-9a-f-]+|DOC-\d+)$/, { timeout: 15_000 });
 
       const editor = page.locator(".ProseMirror");
       await expect(editor).toBeVisible({ timeout: 10_000 });
