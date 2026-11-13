@@ -193,6 +193,9 @@ test.describe("Doc editor interactions (mobile)", () => {
     await page.keyboard.press("Home");
     for (let i = 0; i < 3; i++) await page.keyboard.press("Shift+ArrowRight");
     await expect(page.getByTestId("doc-bubble-menu")).toHaveCount(0);
+    // The comment button enables only once the editor has registered the selection. Clicking Bold before that races ProseMirror's
+    // async selection sync (seen under load: Bold ran on an empty selection and produced no <strong>).
+    await expect(page.getByTitle("Comment on selection")).toBeEnabled();
     await page.getByTitle("Bold", { exact: true }).click();
     await expect(editor.locator("strong")).toHaveText("Tap");
   });
