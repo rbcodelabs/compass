@@ -205,6 +205,8 @@ test.describe("Opportunity composer panel", () => {
 
     await page.goto(`${base}/discovery/${anchorId}`);
     await page.waitForLoadState("networkidle");
+    // The full-page URL is canonicalised to the opportunity's display ID (OPP-n); keep whatever the app settled on.
+    const anchorRef = new URL(page.url()).pathname.split("/").pop()!;
     await page.getByRole("button", { name: "New Opportunity", exact: true }).click();
     const composer = page.locator('[data-slot="opportunity-composer"]');
     await expect(composer).toBeVisible();
@@ -212,7 +214,7 @@ test.describe("Opportunity composer panel", () => {
     await composer.getByLabel("Title").fill(created);
     await composer.getByRole("button", { name: "Submit", exact: true }).click();
 
-    await expect(page).toHaveURL(new RegExp(`/discovery/${anchorId}\\?.*detail=opportunity%3A[0-9a-f-]{36}`), {
+    await expect(page).toHaveURL(new RegExp(`/discovery/${anchorRef}\\?.*detail=opportunity%3A[0-9a-f-]{36}`), {
       timeout: 30_000,
     });
     await expect(page.locator('[data-slot="pinned-panel"]').getByText(created, { exact: true })).toBeVisible();
@@ -251,6 +253,8 @@ test.describe("Opportunity composer panel", () => {
 
       await page.goto(`${base}/discovery/${anchorId}`);
       await page.waitForLoadState("networkidle");
+      // The full-page URL is canonicalised to the opportunity's display ID (OPP-n); keep whatever the app settled on.
+      const anchorRef = new URL(page.url()).pathname.split("/").pop()!;
       await page.getByRole("button", { name: "Browse opportunities" }).click();
       const dialog = page.getByRole("dialog");
       await dialog.getByRole("button", { name: "New Opportunity", exact: true }).click();
@@ -260,7 +264,7 @@ test.describe("Opportunity composer panel", () => {
       await expect(page).toHaveURL(/detail=opportunity-new%3Anew/);
       await composer.getByLabel("Title").fill(created);
       await composer.getByRole("button", { name: "Submit", exact: true }).click();
-      await expect(page).toHaveURL(new RegExp(`/discovery/${anchorId}\\?.*detail=opportunity%3A[0-9a-f-]{36}`), {
+      await expect(page).toHaveURL(new RegExp(`/discovery/${anchorRef}\\?.*detail=opportunity%3A[0-9a-f-]{36}`), {
         timeout: 30_000,
       });
       await expect(page.locator('[data-slot="sheet-content"]').getByText(created, { exact: true })).toBeVisible();

@@ -12,7 +12,6 @@
  *  - no model: with no active Opportunity scoring model the Score column is absent.
  */
 import getPrisma from "../../../lib/db";
-import { runTypedLinkTransaction, setKeyResultPointer } from "../../../lib/typed-links";
 import pg from "pg";
 import type { Page } from "@playwright/test";
 import { test, expect } from "../fixtures/index";
@@ -53,11 +52,20 @@ async function createOpportunity(title: string, raw: number | null, modelId: str
   return opportunity;
 }
 
-/** The Key Result pointer is an entity_links row: write it through the app's typed-link writer. */
-async function pointAt(opportunityId: string, keyResultId: string) {
-  await runTypedLinkTransaction(getPrisma(), (tx) =>
-    setKeyResultPointer(tx, { opportunityId, workspaceId: seed.workspaceId, keyResultId, ctx: { source: "UI", createdById: null } }),
-  );
+/**
+ * The Key Result pointer is two entity_links rows, exactly what lib/typed-links.ts setKeyResultPointer writes: the LEGACY
+ * OPPORTUNITY_TARGETS_KEY_RESULT pointer and the LEGACY OPPORTUNITY_TARGETS_OBJECTIVE link derived from it. They are seeded here
+ * rather than through the app writer because the writer lazy-loads lib/links/service.ts, whose "@/..." imports Playwright's loader
+ * cannot resolve outside the app bundle (Cannot find module '@/lib/entity-types'); same reason as experiments-gallery.spec.ts.
+ */
+async function pointAt(opportunityId: string, keyResultId: string, objectiveId: string) {
+  const row = (linkType: string, toType: string, toId: string) => ({
+    workspaceId: seed.workspaceId, linkType, fromType: "OPPORTUNITY", fromId: opportunityId, toType, toId, origin: "LEGACY", source: "UI",
+  });
+  await getPrisma().entityLink.createMany({
+    data: [row("OPPORTUNITY_TARGETS_KEY_RESULT", "KEY_RESULT", keyResultId), row("OPPORTUNITY_TARGETS_OBJECTIVE", "OBJECTIVE", objectiveId)],
+    skipDuplicates: true,
+  });
 }
 
 async function setScoringConfig(modelId: string | null) {
@@ -127,13 +135,13 @@ test("20 linked rows are bounded, scrollable and sorted by raw score with unscor
   viaKr.push(await createOpportunity(`${TAG} opp u-3 kr`, null, seed.modelId));
   const krTargets = [keyResult.id, keyResult2.id];
   for (const [i, o] of viaKr.entries()) {
-    await pointAt(o.id, krTargets[i % 2]);
+    await pointAt(o.id, krTargets[i % 2], objective.id);
   }
   // 2 linked directly, and 1 linked both ways (must appear once).
   const directScored = await createOpportunity(`${TAG} opp direct 250`, 250, seed.modelId);
   const directUnscored = await createOpportunity(`${TAG} opp u-1 direct`, null, seed.modelId);
   const both = await createOpportunity(`${TAG} opp both`, 100, seed.modelId);
-  await pointAt(both.id, keyResult.id);
+  await pointAt(both.id, keyResult.id, objective.id);
   for (const o of [directScored, directUnscored, both]) await linkViaPicker(page, base, o.id, `${TAG} busy objective`);
 
   await page.setViewportSize({ width: 390, height: 800 });
@@ -211,7 +219,7 @@ test("a Torres workspace still lists a key-result-linked opportunity (the preset
   const objective = await createObjective(`${TAG} torres objective`);
   const keyResult = await prisma.keyResult.create({ data: { objectiveId: objective.id, title: `${TAG} torres KR`, target: 10, current: 0, unit: null } });
   const viaKr = await createOpportunity(`${TAG} opp torres via-kr`, 777, seed.modelId);
-  await pointAt(viaKr.id, keyResult.id);
+  await pointAt(viaKr.id, keyResult.id, objective.id);
   await page.goto(`${base}/okrs?detail=${encodeURIComponent(`objective:${objective.id}`)}`);
   await expect(section(page).getByRole("link", { name: `${TAG} opp torres via-kr` })).toBeVisible({ timeout: 60_000 });
   await expect(section(page).getByTestId("linked-opportunity-score")).toContainText("777");
