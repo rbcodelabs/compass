@@ -1,7 +1,7 @@
 /** Auditable MCP → REST ledger. It documents parity but never drives routing. */
 export const MCP_PARITY_CATALOG = {
-  toolCount: 214,
-  sortedToolNamesSha256: "a33e92c17c2a60ad44143af3d860e8a7cadb6c17ca785eead8b1c3b1fe30ea5b",
+  toolCount: 215,
+  sortedToolNamesSha256: "3215881e4253019914197350d67e1e5bea0d988caddf5b2d7ead9d102db49bf6",
 } as const
 
 export type McpRestParityDisposition =
@@ -133,6 +133,7 @@ export const MCP_REST_PARITY_MANIFEST = {
   list_custom_field_definitions: direct("listCustomFieldDefinitions"),
   list_decisions: direct("listDecisions"),
   list_doc_history: composition(["listDocVersions"], "REST lists versions by document id rather than by path."),
+  list_docs: composition(["listDocs"], "REST lists documents with a cursor; the MCP tool adds the Library kind filter, path and recency ordering in one bounded call."),
   list_doc_comments: direct("listDocComments"),
   list_eligible_parent_key_results: direct("listEligibleParentKeyResults"),
   list_evidence: direct("listEvidence"),

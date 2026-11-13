@@ -26,6 +26,7 @@ import { safeMatter, stringifyFrontMatter } from "@/lib/safe-matter"
 import { normalizeCanvasContent } from "@/lib/json-canvas"
 import { followAfterCreate, mcpFollowActor } from "@/lib/following-hooks"
 import { normalizeDocType, type DocType } from "@/lib/doc-types"
+import { DOC_KINDS, isDocKind, normalizeDocKind, type DocKind } from "@/lib/doc-kinds"
 import { listScopeFrontmatterForDoc } from "@/lib/spec-docs/scopes"
 import { validateSpecEmbeds } from "@/lib/spec-docs/validate"
 import getPrisma from "@/lib/db"
@@ -51,6 +52,8 @@ export type DocFsNode = {
   parentId: string | null
   roadmapItemId: string | null
   docType: DocType
+  /** What the doc is in the Library; null when unset (or a stored value this build does not recognise). */
+  kind: DocKind | null
   hasChildren: boolean
   updatedAt: Date
 }
@@ -58,6 +61,11 @@ export type DocFsNode = {
 export type DocFsMutationOptions = {
   /** Create-only: the type of a newly created doc (ignored when the path already exists). Defaults to STANDARD. */
   docType?: DocType
+  /**
+   * The doc's Library kind (lib/doc-kinds.ts), on create and on update. Omitted (undefined): unset on create, unchanged on update.
+   * `null` clears it. Any other value that is not a DocKind is refused with `invalid-kind`. A missing kind is never an error.
+   */
+  kind?: string | null
   operationId?: string
   expectedRevision?: string
   authorId?: string | null
@@ -112,6 +120,7 @@ type DocRow = {
   parentId: string | null
   roadmapItemId: string | null
   docType: string | null
+  kind?: string | null
   updatedAt: Date
 }
 
@@ -151,6 +160,7 @@ function buildTree(docs: DocRow[]): DocFsNode[] {
         roadmapItemId: d.roadmapItemId,
         // The column is free-form; only a known type survives, so a SPEC doc is not flattened to STANDARD for the filesystem and agents.
         docType: normalizeDocType(d.docType),
+        kind: normalizeDocKind(d.kind),
         hasChildren: (childrenByParent.get(d.id) ?? []).length > 0,
         updatedAt: d.updatedAt,
       })
@@ -172,7 +182,7 @@ export async function listPaths(workspaceId: string): Promise<DocFsNode[]> {
   const docs = await prisma.doc.findMany({
     where: { workspaceId },
     orderBy: [{ parentId: "asc" }, { sortOrder: "asc" }, { createdAt: "asc" }, { id: "asc" }],
-    select: { id: true, title: true, parentId: true, roadmapItemId: true, docType: true, updatedAt: true },
+    select: { id: true, title: true, parentId: true, roadmapItemId: true, docType: true, kind: true, updatedAt: true },
   })
   return buildTree(docs)
 }
@@ -223,6 +233,9 @@ export async function readDocById(workspaceId: string, docId: string): Promise<D
     ...userMetadata,
     compass_doc_id: doc.id,
     compass_doc_type: doc.docType,
+    // Read-only and omitted when the doc has no kind. Like every compass_ key it is stripped on ingest (stripReservedKeys), so it cannot be
+    // set through frontmatter: write_doc's `kind` parameter is the only way to change it.
+    ...(normalizeDocKind(doc.kind) ? { compass_kind: normalizeDocKind(doc.kind) } : {}),
     ...(doc.roadmapItemId ? { compass_roadmap_item_id: doc.roadmapItemId } : {}),
     // Read-only and derived from the doc's DOC_SPECIFIES_SCOPE links on every read. Like the other compass_ keys it is stripped on
     // ingest (stripReservedKeys) and set last here, so it can be neither spoofed through a write nor shadowed by user metadata.
@@ -324,7 +337,17 @@ async function assertSpecEmbeds(workspaceId: string, body: string): Promise<void
   if (problem) throw new DocFsError("invalid-embeds", problem)
 }
 
-export type WritePathResult = { docId: string; created: boolean; revision: string | null; path: string }
+export type WritePathResult = { docId: string; created: boolean; revision: string | null; path: string; kind: DocKind | null }
+
+/**
+ * A caller-supplied kind as what to persist: undefined (leave alone), null (clear) or a known DocKind. Anything else is refused before any
+ * write, so a bad kind never leaves an implicit parent chain behind.
+ */
+function resolveKindOption(kind: string | null | undefined): DocKind | null | undefined {
+  if (kind === undefined || kind === null) return kind
+  if (isDocKind(kind)) return kind
+  throw new DocFsError("invalid-kind", `Unknown kind "${kind}". Use one of: ${DOC_KINDS.join(", ")}, or null to clear it.`)
+}
 
 /**
  * Create-or-update by path. `path` already tells you which one it is — a
@@ -341,6 +364,7 @@ export async function writePath(
 ): Promise<WritePathResult> {
   const segments = splitPath(path)
   if (segments.length === 0) throw new DocFsError("invalid-path", `Invalid doc path: "${path}".`)
+  const kind = resolveKindOption(opts.kind)
   const parsed = safeMatter(content)
   // Trim only the blank line gray-matter leaves behind after stripping an
   // actual frontmatter block. Content with no frontmatter is stored exactly
@@ -365,12 +389,12 @@ export async function writePath(
   if (existing) {
     const updated = await updateDocument(
       existing.docId,
-      { content: body, metadata: metadata ? toJsonInput(metadata) : undefined },
+      { content: body, metadata: metadata ? toJsonInput(metadata) : undefined, ...(kind === undefined ? {} : { kind }) },
       { operationId: opts.operationId, expectedRevision: opts.expectedRevision, ...actorOpts(opts) }
     )
-    return { docId: updated.id, created: false, revision: documentRevision(updated), path: segments.join("/") }
+    return { docId: updated.id, created: false, revision: documentRevision(updated), path: segments.join("/"), kind: normalizeDocKind(updated.kind) }
   }
-  return createAtPath(workspaceId, segments, body, metadata, effectiveDocType, opts)
+  return createAtPath(workspaceId, segments, body, metadata, effectiveDocType, opts, kind)
 }
 
 /**
@@ -387,6 +411,7 @@ export async function createPath(
 ): Promise<WritePathResult> {
   const segments = splitPath(path)
   if (segments.length === 0) throw new DocFsError("invalid-path", `Invalid doc path: "${path}".`)
+  const kind = resolveKindOption(opts.kind)
   if (await resolvePath(workspaceId, segments.join("/"))) {
     // A retried pass (a lost response) finds its own earlier create at the path.
     // The operation receipt tells that apart from someone else's doc, and
@@ -405,7 +430,7 @@ export async function createPath(
     if (!canvas.ok) throw new DocFsError("invalid-canvas", canvas.error)
     body = canvas.content
   }
-  return createAtPath(workspaceId, segments, body, metadata, docType, opts)
+  return createAtPath(workspaceId, segments, body, metadata, docType, opts, kind)
 }
 
 async function createAtPath(
@@ -414,7 +439,8 @@ async function createAtPath(
   body: string,
   metadata: Record<string, unknown> | null,
   effectiveDocType: DocType,
-  opts: DocFsMutationOptions
+  opts: DocFsMutationOptions,
+  kind: DocKind | null | undefined
 ): Promise<WritePathResult> {
   const path = segments.join("/")
 
@@ -422,11 +448,11 @@ async function createAtPath(
   const parentId = await ensureParentChain(workspaceId, segments.slice(0, -1), opts)
   const sortOrder = await nextSortOrder(workspaceId, parentId)
   const created = await createDocument(
-    { workspaceId, parentId, title, content: body, metadata: metadata ? toJsonInput(metadata) : undefined, sortOrder, ...(effectiveDocType !== "STANDARD" ? { docType: effectiveDocType } : {}) },
+    { workspaceId, parentId, title, content: body, metadata: metadata ? toJsonInput(metadata) : undefined, sortOrder, ...(effectiveDocType !== "STANDARD" ? { docType: effectiveDocType } : {}), ...(kind ? { kind } : {}) },
     { operationId: opts.operationId, ...actorOpts(opts) }
   )
   await followAfterCreate({ model: "doc", workspaceId, row: { id: created.id }, actor: async () => mcpFollowActor() ?? { type: "SYSTEM", id: null } })
-  return { docId: created.id, created: true, revision: documentRevision(created), path }
+  return { docId: created.id, created: true, revision: documentRevision(created), path, kind: normalizeDocKind(created.kind) }
 }
 
 export type DeletePathOptions = DocFsMutationOptions & { recursive?: boolean }
