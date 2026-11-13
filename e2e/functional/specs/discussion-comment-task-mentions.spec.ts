@@ -101,7 +101,10 @@ test.describe("Discussion comment @mention -> task", () => {
     // Reload: chip and card come back from the server.
     await page.reload();
     await page.waitForLoadState("networkidle");
-    await page.locator('[data-slot="card"]').filter({ hasText: title }).getByRole("button", { name: title }).click();
+    // The open panel is URL state (?detail=), so the reload re-opens it; the
+    // modal sheet also hides the board behind it from the accessibility tree, so
+    // the card button cannot (and need not) be clicked again.
+    await expect(page.locator('[data-slot="sheet-content"]')).toBeVisible({ timeout: 15_000 });
     const reopened = page.locator('[data-slot="sheet-content"]').getByRole("article").filter({ hasText: "Can you pick this up?" });
     await expect(reopened.getByTestId("comment-mention")).toContainText(`@${bName}`, { timeout: 10_000 });
     await expect(reopened.getByTestId("comment-task-card")).toBeVisible();

@@ -37,7 +37,7 @@ test.describe("Feedback Attachments", () => {
       await page.goto(`${base}/settings`);
       await page.waitForLoadState("networkidle");
 
-      const toggle = page.getByRole("switch").nth(1);
+      const toggle = page.getByTestId("portal-toggle-feedback");
       const isChecked = await toggle.getAttribute("aria-checked");
       if (isChecked !== "true") {
         await toggle.click();

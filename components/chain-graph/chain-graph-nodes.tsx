@@ -61,7 +61,8 @@ const ChainNodeView = memo(function ChainNodeView({ data }: NodeProps<ChainRFNod
 
   return (
     <div
-      className={cn("relative", className)}
+      tabIndex={0}
+      className={cn("relative rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring", className)}
       style={{ width: size, height: size }}
       role="button"
       aria-label={`${ui.typeLabels[node.type]}: ${node.title}. Status ${humanize(node.status)}.`}
@@ -101,7 +102,8 @@ const ClusterNodeView = memo(function ClusterNodeView({ data }: NodeProps<Cluste
 
   return (
     <div
-      className={cn("relative", className)}
+      tabIndex={0}
+      className={cn("relative rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring", className)}
       style={{ width: size, height: size }}
       role="button"
       aria-expanded={false}
