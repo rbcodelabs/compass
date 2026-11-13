@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type ElementHandle, type Page } from "@playwright/test";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 
@@ -42,7 +42,7 @@ test("method columns align operation titles on desktop and mobile", async ({
     await page.goto("/help/api-explorer#operation=getTask");
     if (width === 390)
       await page.getByRole("button", { name: "Browse operations" }).click();
-    const titles = [];
+    const titles: ElementHandle<HTMLElement | SVGElement>[] = [];
     for (const method of methods) {
       const row = page.getByRole("button", {
         name: `${method.toUpperCase()} ${method} a synthetic task with a longer operation title`,
@@ -54,7 +54,7 @@ test("method columns align operation titles on desktop and mobile", async ({
     // finishing its render, a scrollbar appearing) land between two reads and look like misalignment.
     const measure = () =>
       page.evaluate(
-        (elements) => elements.map((element) => element!.getBoundingClientRect().x),
+        (elements) => elements.map((element) => element.getBoundingClientRect().x),
         titles,
       );
     let lefts: number[] = [];
