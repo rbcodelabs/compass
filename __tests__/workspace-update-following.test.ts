@@ -66,20 +66,23 @@ describe("status hook decoupled from the workspace_updates module", () => {
   })
 
   it("uses a Solution's own workspaceId, never its Opportunity's (migration 068)", async () => {
-    findUnique.mockResolvedValueOnce({ id: "s1", workspaceId: WS, opportunityId: "o1", status: "IDEA" })
+    findUnique.mockResolvedValue({ id: "s1", workspaceId: WS, opportunityId: "o1", status: "IDEA" })
     await captureWorkspaceMutation(db, "solution", "update", user, "s1", async () => ({ id: "s1", workspaceId: WS, opportunityId: "o1", status: "VALIDATED" }))
     const [effects] = mocks.apply.mock.calls[0]
     expect(effects[0].event).toMatchObject({ subjectType: "SOLUTION", workspaceId: WS })
-    expect(findUnique).toHaveBeenCalledTimes(1)
+    // Two reads of the Solution itself (one before the transaction for its workspace's modules, one inside it) and never the Opportunity.
+    expect(findUnique).toHaveBeenCalledTimes(2)
+    expect(findUnique.mock.calls.every(([args]) => args.where.id === "s1")).toBe(true)
   })
 
   it("fails closed for a Solution with no workspaceId: no effect is planned and the edit still succeeds", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {})
-    findUnique.mockResolvedValueOnce({ id: "s1", workspaceId: null, opportunityId: "o1", status: "IDEA" })
+    findUnique.mockResolvedValue({ id: "s1", workspaceId: null, opportunityId: "o1", status: "IDEA" })
     const result = await captureWorkspaceMutation(db, "solution", "update", user, "s1", async () => ({ id: "s1", workspaceId: null, opportunityId: "o1", status: "VALIDATED" }))
     expect(result).toMatchObject({ id: "s1" })
     expect(mocks.apply).not.toHaveBeenCalled()
-    expect(findUnique).toHaveBeenCalledTimes(1)
+    expect(findUnique).toHaveBeenCalledTimes(2)
+    expect(findUnique.mock.calls.every(([args]) => args.where.id === "s1")).toBe(true)
   })
 
   it("does no extra read, auth, or effect when nothing changed", async () => {

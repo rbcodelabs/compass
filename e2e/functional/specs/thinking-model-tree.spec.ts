@@ -112,7 +112,9 @@ test.describe.serial("Thinking model tree and picker", () => {
     await setModel("TORRES_OST");
     await page.goto(`${base}/discovery`);
     await page.waitForLoadState("networkidle");
-    await page.getByRole("link", { name: "Outcome tree" }).click();
+    // The tree entry lives in the header's "Discovery tools" overflow menu.
+    await page.getByRole("button", { name: "Discovery tools" }).click();
+    await page.getByRole("menuitem", { name: "Outcome tree" }).click();
     await expect(page).toHaveURL(/\/discovery\/tree$/);
 
     const tree = page.getByTestId("outcome-tree");
@@ -175,7 +177,9 @@ test.describe.serial("Thinking model tree and picker", () => {
     await setModel(null);
     await page.goto(`${base}/discovery`);
     await page.waitForLoadState("networkidle");
-    await expect(page.getByRole("link", { name: /tree$/i })).toHaveCount(0);
+    await page.getByRole("button", { name: "Discovery tools" }).click();
+    await expect(page.getByRole("menuitem", { name: /tree$/i })).toHaveCount(0);
+    await page.keyboard.press("Escape");
 
     const response = await page.goto(`${base}/discovery/tree`);
     expect(response?.status()).toBe(404);

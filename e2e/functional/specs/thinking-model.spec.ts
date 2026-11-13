@@ -56,7 +56,11 @@ test.describe("Thinking model", () => {
     await page.getByRole("button", { name: "Add outcome" }).click();
     await expect(page.getByText(`TM Outcome ${ts}`)).toBeVisible({ timeout: 10_000 });
 
-    await expect(page.getByRole("button", { name: "Add success metric" })).toBeVisible();
+    // Add key result lives in the objective's overflow menu now (6e7dd195), under the preset's own words.
+    await page.getByRole("button", { name: "Card actions" }).first().click();
+    await expect(page.getByRole("menuitem", { name: /Add success metric/i })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("menuitem")).toHaveCount(0);
     // Whole screen: no surviving canonical entity words in the main region or nav.
     const main = await page.getByRole("main").first().innerText();
     expect(main).not.toMatch(/objective|key result/i);

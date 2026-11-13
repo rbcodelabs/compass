@@ -75,8 +75,13 @@ test.describe("Task shared Discussion", () => {
       await page.screenshot({ path: testInfo.outputPath(`task-discussion-${name}.png`), fullPage: true });
       // Scroll the workspace container to include its bottom-nav safe padding.
       await page.getByRole("main").evaluate((element) => { element.scrollTop = element.scrollHeight; });
+      // Post is disabled while the composer is empty, and a trial click needs an enabled target: type a draft so
+      // this still proves the button is reachable (not covered by the bottom nav), then clear it.
+      const composer = discussion.getByLabel("Add comment");
+      await composer.fill("Layout check, not posted");
       await discussion.getByRole("button", { name: "Post comment" }).click({ trial: true });
       await page.screenshot({ path: testInfo.outputPath(`task-discussion-composer-${name}.png`), fullPage: true });
+      await composer.fill("");
     }
 
     await root.getByRole("button", { name: /Resolve thread by/ }).click();

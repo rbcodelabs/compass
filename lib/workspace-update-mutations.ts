@@ -135,6 +135,34 @@ async function followingTablesFor(model: Model): Promise<boolean> {
   return followingTablesExist(getPrisma());
 }
 
+/**
+ * Module answers for an update, read BEFORE its transaction opens. `isModuleEnabled` reads on the shared pool, not on the open
+ * transaction, so asking from inside the callback needs a second connection while the transaction already holds one. The pool is
+ * small by design (3 on a session-mode pooler, see getPlainPoolOptions): as many concurrent writes as there are connections each
+ * hold one and wait for another, none ever frees, and every one dies at the 5 s transaction timeout. An update names its row, so
+ * its workspace is known up front. A create cannot be, and keeps asking lazily. Best-effort: any miss falls back to the lazy read.
+ */
+async function prefetchModules(prisma: AppPrismaClient, model: Model, operation: "create" | "update", id: string | undefined) {
+  const known = new Map<string, boolean>();
+  let workspaceId: string | null = null;
+  if (operation === "update" && id) {
+    try {
+      const row = await readRow(prisma as unknown as AppTransactionClient, model, id);
+      if (row) workspaceId = await scope(prisma as unknown as AppTransactionClient, model, row);
+      if (workspaceId) {
+        known.set(`${workspaceId}:workspace_updates`, await isModuleEnabled(workspaceId, "workspace_updates"));
+        known.set(`${workspaceId}:following`, await isModuleEnabled(workspaceId, "following"));
+      }
+    } catch {
+      known.clear();
+    }
+  }
+  return {
+    enabled: async (workspace: string, key: "workspace_updates" | "following"): Promise<boolean> =>
+      known.get(`${workspace}:${key}`) ?? isModuleEnabled(workspace, key),
+  };
+}
+
 /** Explicit call-site adapter: ordinary edits and ordering emit no events. */
 export async function captureWorkspaceMutation<T extends { id: string }>(
   prisma: AppPrismaClient,
@@ -163,6 +191,7 @@ async function captureUnlocked<T extends { id: string }>(
   options?: WorkspaceUpdatesOptions,
 ): Promise<T> {
   const followingTables = await followingTablesFor(model);
+  const modules = await prefetchModules(prisma, model, operation, id);
   let pending: FollowingEffect[] = [];
   // Status a task held before this write, for the Doc comment thread sync below.
   const taskBefore: { status: string | null } = { status: null };
@@ -207,11 +236,11 @@ async function captureUnlocked<T extends { id: string }>(
       const enabled =
         updatesTables &&
         workspaceId !== null &&
-        (await isModuleEnabled(workspaceId, "workspace_updates"));
+        (await modules.enabled(workspaceId, "workspace_updates"));
       const following =
         followingTables &&
         workspaceId !== null &&
-        (await isModuleEnabled(workspaceId, "following"));
+        (await modules.enabled(workspaceId, "following"));
       if (!enabled && !following) return result;
       const updateActor = enabled ? await workspaceMutationActor(source) : null;
       const followActor = following

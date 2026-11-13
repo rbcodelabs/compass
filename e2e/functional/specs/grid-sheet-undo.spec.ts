@@ -13,6 +13,7 @@
  * Pastes are synthetic `ClipboardEvent("paste")`s: no clipboard permission needed.
  */
 import { test, expect } from "../fixtures/index";
+import { waitForResponses } from "../fixtures/responses";
 import type { Locator, Page } from "@playwright/test";
 
 async function createTask(page: Page, base: string, title: string) {
@@ -60,36 +61,36 @@ test.describe("Sheet-mode undo / redo (Tasks list)", () => {
 
     // Paste three dates: three saves, ONE history step.
     await dueCell(0).click({ position: { x: 2, y: 2 } });
-    let saves = [1, 2, 3].map(() => page.waitForResponse(isTaskPatch));
+    let saves = waitForResponses(page, isTaskPatch, 3);
     await pasteText(dueCell(0), "2031-04-01\n2031-04-02\n2031-04-03");
-    await Promise.all(saves);
+    await saves;
     await expect(dueCell(2)).toContainText("Apr 3, 2031");
     await expect(undo).toBeEnabled();
 
     // Ctrl+Z restores all three through the same save path.
-    saves = [1, 2, 3].map(() => page.waitForResponse(isTaskPatch));
+    saves = waitForResponses(page, isTaskPatch, 3);
     await dueCell(0).click({ position: { x: 2, y: 2 } });
     await page.keyboard.press("Control+z");
-    await Promise.all(saves);
+    await saves;
     for (const index of [0, 1, 2]) await expect(dueCell(index)).not.toContainText("2031");
     await expect(undo).toBeDisabled();
     await expect(redo).toBeEnabled();
 
     // Ctrl+Shift+Z re-applies the paste.
-    saves = [1, 2, 3].map(() => page.waitForResponse(isTaskPatch));
+    saves = waitForResponses(page, isTaskPatch, 3);
     await page.keyboard.press("Control+Shift+z");
-    await Promise.all(saves);
+    await saves;
     await expect(dueCell(1)).toContainText("Apr 2, 2031");
 
     // The toolbar button undoes it again; Ctrl+Y redoes.
-    saves = [1, 2, 3].map(() => page.waitForResponse(isTaskPatch));
+    saves = waitForResponses(page, isTaskPatch, 3);
     await undo.click();
-    await Promise.all(saves);
+    await saves;
     await expect(dueCell(1)).not.toContainText("2031");
-    saves = [1, 2, 3].map(() => page.waitForResponse(isTaskPatch));
+    saves = waitForResponses(page, isTaskPatch, 3);
     await dueCell(0).click({ position: { x: 2, y: 2 } });
     await page.keyboard.press("Control+y");
-    await Promise.all(saves);
+    await saves;
     await expect(dueCell(2)).toContainText("Apr 3, 2031");
 
     // Persisted, and history does not survive a reload (new grid instance).

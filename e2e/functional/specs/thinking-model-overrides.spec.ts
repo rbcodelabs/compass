@@ -155,15 +155,19 @@ test.describe("Thinking model overrides (all five entities)", () => {
     await expect(page.getByRole("button", { name: /Add problem/i }).first()).toBeVisible();
     await expect(page.getByRole("button", { name: /Add opportunity/i })).toHaveCount(0);
     await expect(page.getByLabel("Problem board")).toBeVisible();
+    // Discovery no longer groups by its parent entity (that grouping moved to the Solutions backlog), so neither word is offered.
     await page.getByLabel("Group board by").click();
-    await expect(page.getByRole("option", { name: "Problem", exact: true })).toBeVisible();
+    await expect(page.getByRole("option", { name: "Status", exact: true })).toBeVisible();
+    await expect(page.getByRole("option", { name: "Problem", exact: true })).toHaveCount(0);
     await expect(page.getByRole("option", { name: "Opportunity", exact: true })).toHaveCount(0);
-    await page.getByRole("option", { name: "Problem", exact: true }).click();
-    // The swimlane's own words.
-    await expect(page.getByLabel(`${oppTitle} bets`)).toBeVisible({ timeout: 15_000 });
-    await expect(page.getByText(/\b1 bet\b/).first()).toBeVisible();
-    await page.getByLabel("Group board by").click();
-    await page.getByRole("option", { name: "Status", exact: true }).click();
+    await page.keyboard.press("Escape");
+    // The swimlane's own words, on the Solutions backlog grouped by its parent.
+    await page.goto(`${base}/solutions?groupBy=opportunity`);
+    await page.waitForLoadState("networkidle");
+    await expect(page.getByLabel("Bet backlog grouped by problem")).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator('[data-slot="solution-backlog-column"]', { hasText: oppTitle }).getByText(solutionTitle)).toBeVisible();
+    await page.goto(`${base}/discovery`);
+    await page.waitForLoadState("networkidle");
 
     // A panel: the opportunity.
     await page.getByRole("button", { name: oppTitle, exact: true }).click();

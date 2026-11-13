@@ -228,8 +228,10 @@ test.describe("Spec docs: editing", () => {
     await expect(status).toHaveAttribute("data-state", "idle");
     const before = await editorMarkdown(page);
 
-    // A plain click on the title opens the panel; the page does not navigate away.
-    await solutionCard.getByRole("link", { name: solTitle }).click();
+    // Cards are collapsed by default (#493): expand it to reach the "Open record" link, whose accessible name is "Open <title>".
+    await solutionCard.getByTestId("embed-card-toggle").click();
+    // A plain click on the link opens the panel; the page does not navigate away.
+    await solutionCard.getByRole("link", { name: `Open ${solTitle}` }).click();
     await page.waitForURL(/[?&]detail=solution(%3A|:)[0-9a-f-]{36}/, { timeout: 15_000 });
     expect(new URL(page.url()).pathname).toBe(docPath);
     const panel = page.locator('[data-slot="sheet-content"]');

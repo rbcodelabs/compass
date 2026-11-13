@@ -21,6 +21,15 @@ async function swipe(page: Page, card: Locator, dx: number, dy: number) {
   await touch.detach();
 }
 
+/**
+ * Columns are one viewport wide on a phone and ordered most-advanced first (Active before Exploring, In delivery before Idea), so the
+ * seeded card's column is not necessarily the first one. Bring that column on screen the way a reader would, by scrolling the board
+ * sideways to it, before measuring where the card sits.
+ */
+async function revealColumn(card: Locator) {
+  await card.scrollIntoViewIfNeeded();
+}
+
 const boards = [
   { route: "tasks", table: "tasks", extra: "status", value: "BACKLOG" },
   { route: "discovery", table: "opportunities", extra: "status", value: "EXPLORING" },
@@ -54,12 +63,14 @@ test("solutions backlog card content supports vertical and horizontal touch scro
       await expect.poll(async () => (await column.boundingBox())!.width).toBeGreaterThanOrEqual(279);
     }
     await page.setViewportSize({ width: 390, height: 844 });
+    await revealColumn(first);
     await expect(first).toBeInViewport();
     const firstTop = (await first.boundingBox())!.y;
     await swipe(page, first, 0, -140);
     await expect.poll(async () => (await first.boundingBox())!.y).toBeLessThan(firstTop - 50);
     await page.reload();
     await page.waitForLoadState("networkidle");
+    await revealColumn(first);
     const firstLeft = (await first.boundingBox())!.x;
     await swipe(page, first, -80, 0);
     await expect.poll(async () => (await first.boundingBox())!.x).toBeLessThan(firstLeft - 35);
@@ -104,6 +115,7 @@ for (const board of boards) {
         }
       }
       await page.setViewportSize({ width: 390, height: 844 });
+      await revealColumn(first);
       await expect(first).toBeInViewport();
       await expect(last).not.toBeInViewport();
       await page.mouse.move(170, 550);
@@ -122,12 +134,14 @@ for (const board of boards) {
 
       await page.reload();
       await page.waitForLoadState("networkidle");
+      await revealColumn(first);
       const firstTop = (await first.boundingBox())!.y;
       await swipe(page, first, 0, -140);
       await expect.poll(async () => (await first.boundingBox())!.y).toBeLessThan(firstTop - 50);
 
       await page.reload();
       await page.waitForLoadState("networkidle");
+      await revealColumn(first);
       const firstLeft = (await first.boundingBox())!.x;
       await swipe(page, first, -140, 0);
       await expect.poll(async () => (await first.boundingBox())!.x).toBeLessThan(firstLeft - 50);
