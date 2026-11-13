@@ -435,7 +435,7 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
   // The 118 hook, the pure classifier it applies, the kind vocabulary it writes, and the OCC retry it imports; editing any re-reviews the migration.
   "118_doc_kind_backfill": {
     "lib/migrations/doc-kind-backfill.ts": "2edb5b282ea735694f8e95cdfad5831a26dffaa811c74f086a73c9970ac1cfa2",
-    "lib/doc-kind-backfill.ts": "eaaa3bcd42ab9d085d48bb37f2c7d21b337e5390d511f175d7f552b21aaa0486",
+    "lib/doc-kind-backfill.ts": "c2d4a339c39d3a123bec472d508c940c4ae95c6d3ef710de569dbdc5bdbd0225",
     "lib/doc-kinds.ts": "7bcf6c377962ca7769c941049712015c6401ac8a4835e63c5b57b9b13c97ee71",
     "lib/migrations/doc-kind.ts": "479ad7e54f8b9061dc4c4b67065b77286c3f44dde765520441363cef196295bb",
     "lib/migrations/workspace-id-on-solution-objective.ts": "43295c27b84b319d6cfcada757c7dab6c598c930e237aa642c8d05fa94a3f8c7",

@@ -44,9 +44,13 @@ describe("classifyDocKind rules", () => {
     expect(classify("Notes on ADR 12")).toBeNull()
   })
 
-  it("matches a four digit number prefix followed by a space, dot, colon or dash", () => {
+  it("matches a zero-padded four digit number prefix followed by a space, dot, colon or dash", () => {
     for (const title of ["0018 Title", "0018. Title", "0018: Title", "0018-Title"]) expect(classify(title)).toBe("ADR")
     for (const title of ["018 Title", "00180 Title", "0018Title", "2026/11 Title"]) expect(classify(title)).toBeNull()
+  })
+
+  it("does not read a year or year-like title prefix as an ADR number", () => {
+    for (const title of ["2026 Roadmap", "2026 Planning notes", "2025: Year in review", "2026-Q1 plan", "1999 retrospective", "1018 Something"]) expect(classify(title), title).toBeNull()
   })
 
   it("does not read an ISO-date title prefix as an ADR number (a dated note stays unset)", () => {
