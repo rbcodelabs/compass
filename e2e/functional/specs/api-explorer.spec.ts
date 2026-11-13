@@ -48,7 +48,9 @@ test("method columns align operation titles on desktop and mobile", async ({
         name: `${method.toUpperCase()} ${method} a synthetic task with a longer operation title`,
       });
       await expect(row).toBeVisible();
-      titles.push(await row.locator("span").nth(1).elementHandle());
+      const title = await row.locator("span").nth(1).elementHandle();
+      expect(title).not.toBeNull();
+      titles.push(title!);
     }
     // Measure every title in one browser task: reading them one await at a time lets a late layout shift (the contract
     // finishing its render, a scrollbar appearing) land between two reads and look like misalignment.
