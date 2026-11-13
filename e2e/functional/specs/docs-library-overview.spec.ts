@@ -8,6 +8,8 @@ import getPrisma from "../../../lib/db";
  * Seeded docs carry an updatedAt an hour in the future so they lead the Recent list however many other specs have written docs.
  */
 test.describe("Docs library overview", () => {
+  // The tests share one set of seeded docs and the third changes one of them, so they run in order in one worker.
+  test.describe.configure({ mode: "serial" });
   const stamp = Date.now();
   const names = {
     adr: `Overview ADR ${stamp}`,
