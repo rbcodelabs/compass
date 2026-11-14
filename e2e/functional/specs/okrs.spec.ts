@@ -7,14 +7,60 @@
  * Each test run uses a unique title (via timestamp) so parallel runs or
  * retries don't collide with each other.
  */
+import pg from "pg";
 import { test, expect } from "../fixtures/index";
+import { isolatedE2EConnectionString } from "../fixtures/isolated-database";
+
+const S = "compass_dev";
 
 test.describe("OKRs", () => {
+  // Every row these tests create is named after a per-test timestamp. afterAll deletes exactly those rows: a cycle-less Objective with a
+  // Key Result counts as an eligible parent for every later top-level Objective (lib/okr-hierarchy.ts), so leaving the "Persistent" one
+  // behind made the next repeat's "annual objective offers no Link to parent Key Result" assertion fail.
+  const stamps: number[] = [];
+  const stamp = () => {
+    const ts = Date.now();
+    stamps.push(ts);
+    return ts;
+  };
+
+  test.afterAll(async () => {
+    if (stamps.length === 0) return;
+    const cycles = stamps.flatMap((ts) => [`E2E Cycle ${ts}`, `E2E Annual ${ts}`, `E2E Q1 ${ts}`]);
+    const objectives = stamps.flatMap((ts) => [
+      `E2E Objective ${ts}`,
+      `E2E Annual Objective ${ts}`,
+      `E2E Quarterly Objective ${ts}`,
+      `E2E Persistent Objective ${ts}`,
+    ]);
+    const pool = new pg.Pool({ connectionString: isolatedE2EConnectionString() });
+    try {
+      const { rows: [ws] } = await pool.query<{ id: string }>(
+        `SELECT w.id FROM "${S}".workspaces w JOIN "${S}".organizations o ON o.id = w.organization_id WHERE o.slug = 'e2e-test-org' AND w.slug = 'e2e-workspace'`,
+      );
+      if (!ws) return;
+      const objectiveIds = `SELECT id FROM "${S}".objectives WHERE workspace_id = $1 AND title = ANY($2::text[])`;
+      const keyResultIds = `SELECT id FROM "${S}".key_results WHERE objective_id IN (${objectiveIds})`;
+      // Order matters: parent pointers and links first, then check-ins -> key results -> objectives -> cycles (all FKs are RESTRICT).
+      await pool.query(`UPDATE "${S}".objectives SET parent_key_result_id = NULL WHERE parent_key_result_id IN (${keyResultIds})`, [ws.id, objectives]);
+      await pool.query(
+        `DELETE FROM "${S}".entity_links WHERE workspace_id = $1 AND (from_id IN (${objectiveIds}) OR to_id IN (${objectiveIds}) OR from_id IN (${keyResultIds}) OR to_id IN (${keyResultIds}))`,
+        [ws.id, objectives],
+      );
+      await pool.query(`DELETE FROM "${S}".check_ins WHERE key_result_id IN (${keyResultIds})`, [ws.id, objectives]);
+      await pool.query(`DELETE FROM "${S}".key_results WHERE objective_id IN (${objectiveIds})`, [ws.id, objectives]);
+      await pool.query(`DELETE FROM "${S}".objectives WHERE workspace_id = $1 AND title = ANY($2::text[])`, [ws.id, objectives]);
+      await pool.query(`DELETE FROM "${S}".okr_cycles WHERE workspace_id = $1 AND title = ANY($2::text[])`, [ws.id, cycles]);
+    } finally {
+      await pool.end();
+    }
+  });
+
   test("create cycle → objective → KR → check-in → status change", async ({
     page,
     base,
   }) => {
-    const ts = Date.now();
+    const ts = stamp();
     const cycleTitle = `E2E Cycle ${ts}`;
     const objectiveTitle = `E2E Objective ${ts}`;
     const krTitle = `E2E KR ${ts}`;
@@ -119,7 +165,7 @@ test.describe("OKRs", () => {
   });
 
   test("link a quarterly Objective to an annual Key Result", async ({ page, base }, testInfo) => {
-    const ts = Date.now();
+    const ts = stamp();
     const annualCycle = `E2E Annual ${ts}`;
     const annualObjective = `E2E Annual Objective ${ts}`;
     const annualKR = `E2E Annual KR ${ts}`;
@@ -200,7 +246,7 @@ test.describe("OKRs", () => {
     page,
     base,
   }) => {
-    const ts = Date.now();
+    const ts = stamp();
     const objectiveTitle = `E2E Persistent Objective ${ts}`;
     const krTitle = `E2E Persistent KR ${ts}`;
 
