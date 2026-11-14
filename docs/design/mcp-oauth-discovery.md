@@ -18,7 +18,7 @@ Compass's MCP endpoint authenticates with a **static bearer API key only**.
 
 | Concern | Current state | File |
 |---|---|---|
-| Token validation | `MCP_API_KEY` env var, or a per-user `cmp_<32 hex>` key looked up by `keyPrefix` + SHA-256 `keyHash` | `lib/mcp-auth.ts` |
+| Token validation | `MCP_API_KEY` env var (honored only when `MCP_SERVICE_KEY_ENABLED=1`), or a per-user `cmp_<32 hex>` key looked up by `keyPrefix` + SHA-256 `keyHash` | `lib/mcp-auth.ts` |
 | Acting identity | `McpActor { userId, purpose, scopeWorkspaceId }` carried via `AsyncLocalStorage` | `lib/mcp-authz.ts` |
 | Per-tool policy | Fail-closed gate map; every registered tool (145 at time of writing) must have an entry | `lib/mcp-tool-gates.ts` |
 | Key issuance | `createApiKey` server action, Settings UI, shown once | `app/[orgSlug]/[workspaceSlug]/settings/actions.ts` (`createApiKey`) |
@@ -597,8 +597,8 @@ DCR's removal date firms up), workspace-scoped consent (decision 1 — the
 `assertActorWorkspaceScope` primitive is already there if we want it), a static
 or verified-client allowlist (decision 4), and an authorization audit log.
 
-Static `cmp_…` API keys stay supported indefinitely for server-to-server use;
-`MCP_API_KEY` service-account behavior is unchanged.
+Static `cmp_…` API keys stay supported for server-to-server use. The
+`MCP_API_KEY` service account additionally requires `MCP_SERVICE_KEY_ENABLED=1`.
 
 ## Verification plan
 

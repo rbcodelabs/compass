@@ -53,9 +53,9 @@ const SOLUTION_ID = "55555555-5555-5555-5555-555555555555"
 const ASSUMPTION_ID = "66666666-6666-6666-6666-666666666666"
 const WS_ID = "33333333-3333-3333-3333-333333333333"
 
-const sampleOpportunity = { id: OPP_ID, title: "Improve visual accessibility" }
-const sampleSolution = { id: SOLUTION_ID, title: "Add dark mode toggle" }
-const sampleAssumption = { id: ASSUMPTION_ID, title: "Users want dark mode" }
+const sampleOpportunity = { id: OPP_ID, title: "Improve visual accessibility", workspaceId: WS_ID }
+const sampleSolution = { id: SOLUTION_ID, title: "Add dark mode toggle", workspaceId: WS_ID }
+const sampleAssumption = { id: ASSUMPTION_ID, title: "Users want dark mode", solution: { workspaceId: WS_ID } }
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -177,6 +177,16 @@ describe("linkEvidence", () => {
         updatedAt: expect.any(Date),
       },
     })
+  })
+
+  it("refuses a target in a different workspace than the evidence, without writing", async () => {
+    mockEvidence.findUnique.mockResolvedValueOnce({ id: EVIDENCE_ID, excerpt: "x", workspaceId: WS_ID })
+    mockOpportunity.findUnique.mockResolvedValueOnce({ ...sampleOpportunity, workspaceId: "99999999-9999-9999-9999-999999999999" })
+
+    const result = await linkEvidence({ evidenceId: EVIDENCE_ID, opportunityId: OPP_ID })
+
+    expect(result.content[0].text).toContain("not found")
+    expect(mockEvidence.update).not.toHaveBeenCalled()
   })
 
   it("rejects when zero target IDs are provided", async () => {

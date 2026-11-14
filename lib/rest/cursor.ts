@@ -5,10 +5,12 @@ const ORDERED_CURSOR_OBJECT_TYPES = new Set(["OPPORTUNITY", "SOLUTION", "EXPERIM
 export type OrderedCursorPayload = { id: string; objectType: "OPPORTUNITY" | "SOLUTION" | "EXPERIMENT" | "OBJECTIVE" | "KEY_RESULT" | "ROADMAP_ITEM" | "TASK"; order: number; context: string }
 
 function secret(): string {
-  const value = process.env.REST_CURSOR_SECRET || process.env.MCP_API_KEY
+  const value = process.env.REST_CURSOR_SECRET
   if (value) return value
+  // Development/test only. Production must configure its own key; it is never
+  // derived from MCP_API_KEY (a bearer credential).
   if (process.env.NODE_ENV !== "production") return "compass-local-rest-cursor"
-  throw new Error("REST_CURSOR_SECRET or MCP_API_KEY must be configured.")
+  throw new Error("REST_CURSOR_SECRET must be configured.")
 }
 
 export function encodeCursor(payload: CursorPayload): string {

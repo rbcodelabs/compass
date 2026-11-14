@@ -7,7 +7,8 @@ import { Prisma } from "@prisma/client";
 import { randomBytes, createHash } from "crypto";
 import { githubConnectorUid, isAppInstalledOn, parseAgentRepos } from "@/lib/github-app-token";
 import { isPermissionError, resolveOrgAdmin, resolveWorkspaceAdmin } from "@/lib/permissions";
-import { countWorkspaceAdmins, normalizeWorkspaceRole } from "@/lib/roles";
+import { countWorkspaceAdmins, isOrgAdminRole, normalizeWorkspaceRole } from "@/lib/roles";
+import { isOwnBrandingLogoUrl } from "@/lib/branding-logo";
 import { PRESET_PALETTES, PRESET_FONTS } from "@/lib/branding-presets";
 import { encrypt } from "@/lib/crypto-secrets";
 import { encryptAnthropicApiKey, validateAnthropicApiKey } from "@/lib/workspace-anthropic-key";
@@ -132,6 +133,11 @@ async function assertSquadInWorkspace(prisma: ReturnType<typeof getPrisma>, squa
 }
 
 // ─── Helper: resolve workspace and assert membership ─────────────────────────
+//
+// MEMBER-LEVEL BY DESIGN: this helper (membership only) gates the squad, shared
+// option set and custom field actions in this file. Anything that publishes,
+// authenticates, brands or limits the workspace, or touches membership,
+// credentials or deletion, must use resolveWorkspaceAdmin instead.
 
 async function resolveWorkspace(orgSlug: string, workspaceSlug: string) {
   const session = await auth();
@@ -659,7 +665,9 @@ export async function revokeApiKey(
  *
  * Aurora DSQL does not enforce FK cascades, so we must delete child records
  * before parents, in dependency order. Returns the path to redirect to after
- * deletion (another workspace in the org, or "/" if the org is also deleted).
+ * deletion (another workspace in the org, or "/" if none remain). When the last
+ * workspace goes, the organization is deleted only if the caller is an org
+ * OWNER/ADMIN; otherwise the empty organization is left for an org admin.
  */
 export async function deleteWorkspace(
   orgSlug: string,
@@ -679,9 +687,22 @@ export async function deleteWorkspace(
   });
 
   if (remainingWorkspaces.length === 0) {
-    // Delete org members then the org itself
-    await prisma.organizationMember.deleteMany({ where: { organizationId } });
-    await prisma.organization.delete({ where: { id: organizationId } });
+    // Deleting the organization is an org-level operation. resolveWorkspaceAdmin
+    // also admits a workspace-only admin, so only an org OWNER/ADMIN may take the
+    // organization down with its last workspace. For anyone else the (now empty)
+    // organization and its memberships are deliberately left in place; an org
+    // admin can remove it from Organization settings.
+    const session = await auth();
+    const callerOrgMembership = session?.user?.id
+      ? await prisma.organizationMember.findFirst({
+          where: { organizationId, userId: session.user.id },
+          select: { role: true },
+        })
+      : null;
+    if (isOrgAdminRole(callerOrgMembership?.role)) {
+      await prisma.organizationMember.deleteMany({ where: { organizationId } });
+      await prisma.organization.delete({ where: { id: organizationId } });
+    }
     return { redirectTo: "/" };
   }
 
@@ -767,7 +788,7 @@ export async function updatePortalSettings(
     ssoEnabled?: boolean;
   }
 ) {
-  const { prisma, workspaceId } = await resolveWorkspace(orgSlug, workspaceSlug);
+  const { prisma, workspaceId } = await resolveWorkspaceAdmin(orgSlug, workspaceSlug);
 
   await prisma.workspace.update({
     where: { id: workspaceId },
@@ -793,7 +814,7 @@ export async function regenerateSsoSecret(
   orgSlug: string,
   workspaceSlug: string
 ): Promise<{ rawSecret: string }> {
-  const { prisma, workspaceId } = await resolveWorkspace(orgSlug, workspaceSlug);
+  const { prisma, workspaceId } = await resolveWorkspaceAdmin(orgSlug, workspaceSlug);
 
   const encryptionKey = process.env.SSO_SECRET_ENCRYPTION_KEY;
   if (!encryptionKey) {
@@ -843,7 +864,7 @@ export async function updateWorkspaceBranding(
     logoUrl?: string | null;
   }
 ) {
-  const { prisma, workspaceId } = await resolveWorkspace(orgSlug, workspaceSlug);
+  const { prisma, workspaceId } = await resolveWorkspaceAdmin(orgSlug, workspaceSlug);
 
   if (
     input.primaryHex !== undefined &&
@@ -877,6 +898,13 @@ export async function updateWorkspaceBranding(
     !PRESET_FONTS.some((f) => f.id === input.fontPresetId)
   ) {
     throw new Error(`Unknown fontPresetId: ${input.fontPresetId}`);
+  }
+
+  // The portal renders this as <img src>, so accept only a file this deployment's
+  // own public store issued under branding/ (what /api/branding/logo returns),
+  // never an arbitrary URL or scheme.
+  if (input.logoUrl !== undefined && input.logoUrl !== null && !isOwnBrandingLogoUrl(input.logoUrl)) {
+    throw new Error("Invalid logoUrl: upload the logo through Compass");
   }
 
   await prisma.workspace.update({
@@ -914,7 +942,7 @@ export async function updateWorkspaceLimits(
     nextLimit?: number | null;
   }
 ) {
-  const { prisma, workspaceId } = await resolveWorkspace(orgSlug, workspaceSlug);
+  const { prisma, workspaceId } = await resolveWorkspaceAdmin(orgSlug, workspaceSlug);
 
   for (const [field, value] of Object.entries(input) as [keyof typeof input, number | null | undefined][]) {
     if (value !== undefined && value !== null && (!Number.isInteger(value) || value < 0)) {

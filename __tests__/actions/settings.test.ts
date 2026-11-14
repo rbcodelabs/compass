@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const mockSquad = {
   findFirst: vi.fn(),
@@ -240,6 +240,7 @@ import {
   createApiKey,
   revokeApiKey,
   updatePortalSettings,
+  regenerateSsoSecret,
   updateWorkspaceBranding,
   updateWorkspaceLimits,
   deleteWorkspace,
@@ -725,6 +726,44 @@ describe("revokeApiKey", () => {
   });
 });
 
+// ─── Admin-only settings actions reject a plain workspace member ─────────────
+
+describe("admin-only settings actions", () => {
+  beforeEach(() => {
+    mockWorkspace.findFirst.mockResolvedValue({
+      id: "ws-1",
+      organizationId: "org-1",
+      members: [{ role: "MEMBER" }],
+      organization: { members: [{ role: "MEMBER" }] },
+    });
+    vi.stubEnv("SSO_SECRET_ENCRYPTION_KEY", "0".repeat(64));
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it.each([
+    ["updatePortalSettings", () => updatePortalSettings("org", "ws", { roadmapPublic: true })],
+    ["regenerateSsoSecret", () => regenerateSsoSecret("org", "ws")],
+    ["updateWorkspaceBranding", () => updateWorkspaceBranding("org", "ws", { primaryHex: "#4f3df2" })],
+    ["updateWorkspaceLimits", () => updateWorkspaceLimits("org", "ws", { nowLimit: 3 })],
+  ])("%s rejects a plain member without writing", async (_name, call) => {
+    await expect(call()).rejects.toThrow("Forbidden: workspace admin required");
+    expect(mockWorkspace.update).not.toHaveBeenCalled();
+  });
+
+  it("still allows an org admin who is only a workspace member", async () => {
+    mockWorkspace.findFirst.mockResolvedValue({
+      id: "ws-1",
+      organizationId: "org-1",
+      members: [{ role: "MEMBER" }],
+      organization: { members: [{ role: "ADMIN" }] },
+    });
+    await updatePortalSettings("org", "ws", { roadmapPublic: true });
+    expect(mockWorkspace.update).toHaveBeenCalledTimes(1);
+  });
+});
+
 // ─── updatePortalSettings ─────────────────────────────────────────────────────
 
 describe("updatePortalSettings", () => {
@@ -799,10 +838,32 @@ describe("updateWorkspaceBranding", () => {
     expect(data.brandingFontFamily).toBe("Roboto Slab");
   });
 
-  it("persists a logo URL", async () => {
-    await updateWorkspaceBranding("org", "ws", { logoUrl: "https://blob.example.com/logo.png" });
-    const data = mockWorkspace.update.mock.calls[0][0].data;
-    expect(data.brandingLogoUrl).toBe("https://blob.example.com/logo.png");
+  it("persists a logo URL issued by this deployment's public store", async () => {
+    vi.stubEnv("BLOB_READ_WRITE_TOKEN", "vercel_blob_rw_abc123_secretpart");
+    try {
+      const url = "https://abc123.public.blob.vercel-storage.com/branding/3f2c-logo.png";
+      await updateWorkspaceBranding("org", "ws", { logoUrl: url });
+      const data = mockWorkspace.update.mock.calls[0][0].data;
+      expect(data.brandingLogoUrl).toBe(url);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it.each([
+    "https://blob.example.com/logo.png",
+    "javascript:alert(1)",
+    "data:image/svg+xml;base64,AAAA",
+    "https://abc123.public.blob.vercel-storage.com/other/logo.png",
+    "https://zzz999.public.blob.vercel-storage.com/branding/logo.png",
+  ])("rejects a logo URL this deployment did not issue: %s", async (url) => {
+    vi.stubEnv("BLOB_READ_WRITE_TOKEN", "vercel_blob_rw_abc123_secretpart");
+    try {
+      await expect(updateWorkspaceBranding("org", "ws", { logoUrl: url })).rejects.toThrow("Invalid logoUrl");
+      expect(mockWorkspace.update).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("clears a logo when logoUrl is explicitly null", async () => {
@@ -999,18 +1060,42 @@ describe("deleteWorkspace", () => {
     expect(result.redirectTo).toBe("/my-org/other-ws");
   });
 
-  it("deletes the org when no workspaces remain after deletion", async () => {
+  it("deletes the org when no workspaces remain and the caller is an org admin", async () => {
     vi.mocked(deleteWorkspaceCascade).mockResolvedValueOnce(undefined);
     mockWorkspace.findFirst.mockResolvedValue({ id: "ws-1", organizationId: "org-1", members: [{ role: "ADMIN" }] });
+    mockOrganizationMember.findFirst.mockResolvedValue({ role: "OWNER" });
     // No remaining workspaces after deletion
     mockWorkspace.findMany.mockResolvedValue([]);
 
     const result = await deleteWorkspace("org", "ws");
 
+    expect(mockOrganizationMember.findFirst).toHaveBeenCalledWith({
+      where: { organizationId: "org-1", userId: "user-1" },
+      select: { role: true },
+    });
     expect(mockOrganizationMember.deleteMany).toHaveBeenCalledWith({
       where: { organizationId: "org-1" },
     });
     expect(mockOrganization.delete).toHaveBeenCalledWith({ where: { id: "org-1" } });
+    expect(result.redirectTo).toBe("/");
+  });
+
+  it("leaves the empty org in place when the last workspace is deleted by a workspace-only admin", async () => {
+    vi.mocked(deleteWorkspaceCascade).mockResolvedValueOnce(undefined);
+    mockWorkspace.findFirst.mockResolvedValue({
+      id: "ws-1",
+      organizationId: "org-1",
+      members: [{ role: "ADMIN" }],
+      organization: { members: [{ role: "MEMBER" }] },
+    });
+    mockOrganizationMember.findFirst.mockResolvedValue({ role: "MEMBER" });
+    mockWorkspace.findMany.mockResolvedValue([]);
+
+    const result = await deleteWorkspace("org", "ws");
+
+    expect(deleteWorkspaceCascade).toHaveBeenCalledWith(mockPrisma, "ws-1");
+    expect(mockOrganizationMember.deleteMany).not.toHaveBeenCalled();
+    expect(mockOrganization.delete).not.toHaveBeenCalled();
     expect(result.redirectTo).toBe("/");
   });
 

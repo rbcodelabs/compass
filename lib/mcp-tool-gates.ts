@@ -108,9 +108,14 @@ async function assertCommentTarget(actor: McpActor, args: Args) {
 
 /** The provided evidence target (exactly one of opp/sol/assumption); returns its workspaceId. */
 async function assertEvidenceTarget(actor: McpActor, args: Args): Promise<string> {
-  if (args.opportunityId) return (await assertEntityAccess(actor, "opportunity", args.opportunityId)).workspaceId
-  if (args.solutionId) return (await assertEntityAccess(actor, "solution", args.solutionId)).workspaceId
-  if (args.assumptionId) return (await assertEntityAccess(actor, "assumption", args.assumptionId)).workspaceId
+  const [entityType, entityId] = evidenceTargetEntity(args)
+  return (await assertEntityAccess(actor, entityType, entityId)).workspaceId
+}
+
+function evidenceTargetEntity(args: Args): readonly [WorkspaceEntityType, string] {
+  if (args.opportunityId) return ["opportunity", args.opportunityId]
+  if (args.solutionId) return ["solution", args.solutionId]
+  if (args.assumptionId) return ["assumption", args.assumptionId]
   throw new McpAuthzError("An evidence target (opportunityId, solutionId, or assumptionId) is required.")
 }
 
@@ -271,8 +276,9 @@ export const TOOL_GATES: Record<string, Gate> = {
   delete_key_result: async (a, x) => void (await assertEntityAccess(a, "keyResult", x.keyResultId)),
   log_checkin: async (a, x) => void (await assertEntityAccess(a, "keyResult", x.keyResultId)),
   set_objective_parent_kr: async (a, x) => {
-    await assertEntityAccess(a, "objective", x.objectiveId)
-    if (x.keyResultId) await assertEntityAccess(a, "keyResult", x.keyResultId)
+    // Both ends must share one workspace (a member of two workspaces must not cross-link them).
+    if (x.keyResultId) await assertSameWorkspaceEntities(a, [["objective", x.objectiveId], ["keyResult", x.keyResultId]])
+    else await assertEntityAccess(a, "objective", x.objectiveId)
   },
   // Without a cycle there is no child to tie to the declared workspace; membership of the declared workspace is the whole check.
   list_eligible_parent_key_results: (a, x) =>
@@ -353,6 +359,7 @@ export const TOOL_GATES: Record<string, Gate> = {
   create_experiment: async (a, x) => {
     await assertWorkspaceMember(a, x.workspaceId)
     if (x.assumptionId) await assertChildInDeclaredWorkspace(a, "assumption", x.assumptionId, x.workspaceId)
+    if (x.squadId) await assertChildInDeclaredWorkspace(a, "squad", x.squadId, x.workspaceId)
   },
   log_experiment_result: async (a, x) => void (await assertEntityAccess(a, "experiment", x.experimentId)),
   conclude_experiment: async (a, x) => void (await assertEntityAccess(a, "experiment", x.experimentId)),
@@ -370,7 +377,10 @@ export const TOOL_GATES: Record<string, Gate> = {
     await assertWorkspaceMember(a, x.workspaceId)
     if (x.solutionId) await assertChildInDeclaredWorkspace(a, "solution", x.solutionId, x.workspaceId)
     if (x.opportunityId) await assertChildInDeclaredWorkspace(a, "opportunity", x.opportunityId, x.workspaceId)
-    if (x.keyResultId) await assertEntityAccess(a, "keyResult", x.keyResultId)
+    // Same workspace as the declared one, as update_roadmap_item does: access alone would let a member of two
+    // workspaces attach another workspace's key result, and the squad was not checked at all.
+    if (x.keyResultId) await assertChildInDeclaredWorkspace(a, "keyResult", x.keyResultId, x.workspaceId)
+    if (x.squadId) await assertChildInDeclaredWorkspace(a, "squad", x.squadId, x.workspaceId)
   },
   request_decision: async (a, x) => {
     await assertWorkspaceMember(a, x.workspaceId)
@@ -521,8 +531,8 @@ export const TOOL_GATES: Record<string, Gate> = {
     }
   },
   link_evidence: async (a, x) => {
-    await assertEntityAccess(a, "evidence", x.evidenceId)
-    await assertEvidenceTarget(a, x)
+    // Re-pointing evidence at an entity in another workspace would surface it there.
+    await assertSameWorkspaceEntities(a, [["evidence", x.evidenceId], evidenceTargetEntity(x)])
   },
   list_evidence: async (a, x) => void (await assertEntityAccess(a, x.nodeType as WorkspaceEntityType, x.nodeId)),
 

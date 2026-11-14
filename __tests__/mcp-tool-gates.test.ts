@@ -38,6 +38,8 @@ const mockPrisma = {
   task: { findUnique: vi.fn() },
   keyResult: { findUnique: vi.fn(), findFirst: vi.fn() },
   squad: { findUnique: vi.fn(), findFirst: vi.fn() },
+  evidence: { findUnique: vi.fn() },
+  assumption: { findUnique: vi.fn() },
   customFieldDefinition: { findMany: vi.fn(), findUnique: vi.fn() },
 }
 vi.mock("@/lib/db", () => ({ default: () => mockPrisma }))
@@ -1340,6 +1342,68 @@ describe("workspace module tools", () => {
     mockPrisma.agentToolCall.create.mockResolvedValue({ id: "activity-1" })
     await expect(applyToolGate("update_workspace_module", { userId: "user-1", purpose: "AGENT" as const, agentId: "agent-1" }, { workspaceId: "ws-1", moduleKey: "following", enabled: true }))
       .rejects.toThrow(/human identity/)
+  })
+})
+
+describe("add_to_roadmap rejects a squad or key result from another workspace", () => {
+  beforeEach(() => { mockPrisma.workspace.findFirst.mockResolvedValue({ id: "member-of-both" }) })
+  const base = { workspaceId: "ws-1", title: "t", horizon: "NOW" }
+
+  it("rejects a foreign squadId and never reaches a write", async () => {
+    mockPrisma.squad.findUnique.mockResolvedValue({ workspaceId: "ws-2" })
+    await expect(callTool("add_to_roadmap", MEMBER, { ...base, squadId: "s" })).rejects.toThrow(/does not belong to workspace/)
+    expect(mockPrisma.roadmapItem.update).not.toHaveBeenCalled()
+  })
+
+  it("rejects a foreign keyResultId", async () => {
+    mockPrisma.keyResult.findUnique.mockResolvedValue({ objective: { workspaceId: "ws-2" } })
+    await expect(applyToolGate("add_to_roadmap", MEMBER, { ...base, keyResultId: "k" })).rejects.toThrow(/does not belong to workspace/)
+  })
+
+  it("admits same-workspace squad and key result, and omitted ones need no lookup", async () => {
+    mockPrisma.squad.findUnique.mockResolvedValue({ workspaceId: "ws-1" })
+    mockPrisma.keyResult.findUnique.mockResolvedValue({ objective: { workspaceId: "ws-1" } })
+    await expect(applyToolGate("add_to_roadmap", MEMBER, { ...base, squadId: "s", keyResultId: "k" })).resolves.toBeUndefined()
+    mockPrisma.squad.findUnique.mockClear()
+    await expect(applyToolGate("add_to_roadmap", MEMBER, base)).resolves.toBeUndefined()
+    expect(mockPrisma.squad.findUnique).not.toHaveBeenCalled()
+  })
+})
+
+describe("link_evidence and set_objective_parent_kr require both ends in one workspace", () => {
+  beforeEach(() => { mockPrisma.workspace.findFirst.mockResolvedValue({ id: "member-of-both" }) })
+
+  it("link_evidence rejects a target in another workspace for a member of both", async () => {
+    mockPrisma.evidence.findUnique.mockResolvedValue({ workspaceId: "ws-1" })
+    mockPrisma.opportunity.findUnique.mockResolvedValue({ workspaceId: "ws-2" })
+    await expect(applyToolGate("link_evidence", MEMBER, { evidenceId: "e", opportunityId: "o" })).rejects.toThrow(/same workspace/)
+    mockPrisma.solution.findUnique.mockResolvedValue({ workspaceId: "ws-2" })
+    await expect(applyToolGate("link_evidence", MEMBER, { evidenceId: "e", solutionId: "s" })).rejects.toThrow(/same workspace/)
+  })
+
+  it("link_evidence admits a same-workspace target and still requires a target", async () => {
+    mockPrisma.evidence.findUnique.mockResolvedValue({ workspaceId: "ws-1" })
+    mockPrisma.opportunity.findUnique.mockResolvedValue({ workspaceId: "ws-1" })
+    await expect(applyToolGate("link_evidence", MEMBER, { evidenceId: "e", opportunityId: "o" })).resolves.toBeUndefined()
+    await expect(applyToolGate("link_evidence", MEMBER, { evidenceId: "e" })).rejects.toThrow(/evidence target/i)
+  })
+
+  it("set_objective_parent_kr rejects a key result from another workspace", async () => {
+    mockPrisma.objective.findUnique.mockResolvedValue({ workspaceId: "ws-1" })
+    mockPrisma.keyResult.findUnique.mockResolvedValue({ objective: { workspaceId: "ws-2" } })
+    await expect(applyToolGate("set_objective_parent_kr", MEMBER, { objectiveId: "o", keyResultId: "k" })).rejects.toThrow(/same workspace/)
+    mockPrisma.keyResult.findUnique.mockResolvedValue({ objective: { workspaceId: "ws-1" } })
+    await expect(applyToolGate("set_objective_parent_kr", MEMBER, { objectiveId: "o", keyResultId: "k" })).resolves.toBeUndefined()
+  })
+})
+
+describe("create_experiment rejects a squad from another workspace", () => {
+  it("refuses a foreign squadId and admits a same-workspace one", async () => {
+    mockPrisma.workspace.findFirst.mockResolvedValue({ id: "member-of-both" })
+    mockPrisma.squad.findUnique.mockResolvedValue({ workspaceId: "ws-2" })
+    await expect(applyToolGate("create_experiment", MEMBER, { workspaceId: "ws-1", squadId: "s" })).rejects.toThrow(/does not belong to workspace/)
+    mockPrisma.squad.findUnique.mockResolvedValue({ workspaceId: "ws-1" })
+    await expect(applyToolGate("create_experiment", MEMBER, { workspaceId: "ws-1", squadId: "s" })).resolves.toBeUndefined()
   })
 })
 

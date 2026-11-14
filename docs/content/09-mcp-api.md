@@ -101,9 +101,19 @@ who is connecting, not by which is newer:
 | Best for | A person connecting their own AI client | Server-to-server automation, scheduled jobs, anything unattended |
 | Expiry | Access tokens last an hour and refresh automatically | Until you revoke it (or its explicit expiry) |
 
-Nothing here is deprecated. Static `compass_…` API keys and `MCP_API_KEY`
-service-account behavior remain supported indefinitely, and their access is
+Per-user static `cmp_…` API keys are not deprecated, and their access is
 unchanged — an OAuth connection is an additional door, not a replacement one.
+The shared `MCP_API_KEY` service key is only honored when
+`MCP_SERVICE_KEY_ENABLED=1` is also set, because it bypasses every workspace
+check.
+
+On Vercel, set `MCP_SERVICE_KEY_ENABLED=1` in each environment that relies on
+the shared key; without it requests with that key get the normal invalid-token
+response and the server logs a one-time warning. REST list endpoints sign their
+pagination cursors with `REST_CURSOR_SECRET`, which is required whenever
+`NODE_ENV=production` — that includes Vercel **preview** deployments, so set it
+in Production and Preview. It no longer falls back to `MCP_API_KEY`; changing it
+restarts pagination for clients.
 
 ### Connect by URL (OAuth)
 

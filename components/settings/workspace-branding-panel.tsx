@@ -126,8 +126,8 @@ export function WorkspaceBrandingPanel({
     if (!file) return;
     setLogoError(null);
 
-    if (!file.type.startsWith("image/")) {
-      setLogoError("Please choose an image file");
+    if (!["image/png", "image/jpeg", "image/webp", "image/gif"].includes(file.type)) {
+      setLogoError("Please choose a PNG, JPEG, WebP or GIF image");
       return;
     }
     if (file.size > 10 * 1024 * 1024) {
@@ -139,6 +139,8 @@ export function WorkspaceBrandingPanel({
     try {
       const form = new FormData();
       form.append("file", file);
+      form.append("orgSlug", orgSlug);
+      form.append("workspaceSlug", workspaceSlug);
       const res = await fetch("/api/branding/logo", { method: "POST", body: form });
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { error?: string };
@@ -342,7 +344,7 @@ export function WorkspaceBrandingPanel({
           <input
             ref={fileInputRef}
             type="file"
-            accept="image/*"
+            accept="image/png,image/jpeg,image/webp,image/gif"
             className="hidden"
             onChange={handleFileSelected}
           />

@@ -111,9 +111,9 @@ Organization
 Compass exposes a Streamable HTTP MCP endpoint for agentic access.
 
 **Endpoint:** `POST https://compass.rbcodelabs.com/api/mcp`
-**Auth:** `Authorization: Bearer <MCP_API_KEY>`
+**Auth:** `Authorization: Bearer <MCP_API_KEY>` (the shared service key needs `MCP_SERVICE_KEY_ENABLED=1`; a per-user `cmp_` key does not)
 
-The API key is stored in the Vercel project settings and in `.env.local` as `MCP_API_KEY`.
+The API key is stored in the Vercel project settings and in `.env.local` as `MCP_API_KEY`. The shared service key is only accepted when `MCP_SERVICE_KEY_ENABLED=1` is also set; per-user `cmp_` keys need no flag.
 
 ### Tool Catalog
 

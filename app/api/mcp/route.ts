@@ -1,5 +1,5 @@
-// MCP_API_KEY — set in Vercel project settings and .env.local.
-// All MCP requests require:  Authorization: Bearer <MCP_API_KEY>
+// MCP_API_KEY — optional shared service key; only honored when MCP_SERVICE_KEY_ENABLED=1.
+// All MCP requests require:  Authorization: Bearer <MCP_API_KEY or a per-user cmp_ key>
 //
 // Endpoint: POST /api/mcp  (Streamable HTTP transport)
 

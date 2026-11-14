@@ -5,6 +5,7 @@ import {
   type FeedbackAttachmentMetadata,
   validateFeedbackAttachmentMetadata,
 } from "@/lib/feedback-attachments";
+import { PORTAL_FEEDBACK_SOURCE, PUBLIC_FEEDBACK_SELECT, publicFeedbackItemWhere, serializePublicFeedbackItem } from "@/lib/public-feedback";
 import { allocateOneSeq, withSequenceTransaction } from "@/lib/work-item-sequence"
 
 type Params = { orgSlug: string; workspaceSlug: string };
@@ -52,35 +53,13 @@ export async function GET(
   }
 
   const items = await prisma.feedbackItem.findMany({
-    where: { workspaceId: workspace.id },
-    select: {
-      id: true,
-      title: true,
-      description: true,
-      submitterName: true,
-      status: true,
-      voteCount: true,
-      createdAt: true,
-      attachments: {
-        select: { id: true, url: true, filename: true, fileType: true },
-      },
-    },
+    where: publicFeedbackItemWhere(workspace.id),
+    select: PUBLIC_FEEDBACK_SELECT,
     orderBy: { createdAt: "desc" },
     take: limit,
   });
 
-  return NextResponse.json({
-    items: items.map((item) => ({
-      id: item.id,
-      title: item.title,
-      description: item.description,
-      submitterName: item.submitterName,
-      status: item.status,
-      voteCount: item.voteCount,
-      createdAt: item.createdAt.toISOString(),
-      attachments: item.attachments,
-    })),
-  });
+  return NextResponse.json({ items: items.map(serializePublicFeedbackItem) });
 }
 
 export async function POST(
@@ -170,6 +149,7 @@ export async function POST(
       title: title.trim(),
       description: typeof description === "string" && description.trim() ? description.trim() : null,
       type: feedbackType,
+      source: PORTAL_FEEDBACK_SOURCE,
       submitterName: typeof submitterName === "string" && submitterName.trim() ? submitterName.trim() : null,
       submitterEmail: effectiveSubmitterEmail,
       portalAccountId,
