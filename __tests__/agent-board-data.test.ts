@@ -218,9 +218,6 @@ describe("listAgentBoardCards", () => {
           ]
         }),
       },
-      taskLink: {
-        findMany: vi.fn().mockResolvedValue([]),
-      },
       task: {
         findMany: vi.fn().mockResolvedValue(tasks),
       },
