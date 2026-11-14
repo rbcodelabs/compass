@@ -271,6 +271,9 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   // Interactive agent run controls: two additive CREATE TABLE IF NOT EXISTS (agent_inbox_items, agent_scheduled_wakeups) plus six ASYNC indexes; no existing table altered, no backfill, no FK.
   // Postcondition pinned in REVIEWED_MIGRATION_CODE_SHA256. Digest recorded from the shipped SQL after reading it.
   "121_agent_interactive_controls": "535b29c20a5c1ea489b8d6757fbe0beae1bdc06751a31940bc9d60cc65b43d52",
+  // Personal Workspace/Squad orchestrator configuration & conversation supervision: two additive CREATE TABLE IF NOT EXISTS (agent_orchestrators, agent_conversation_supervision) plus five ASYNC indexes; no existing table altered, no backfill, no FK.
+  // Postcondition pinned in REVIEWED_MIGRATION_CODE_SHA256. Digest recorded from the shipped SQL after reading it.
+  "122_agent_orchestrator_supervision": "363fc87c38ba6222071967aa801e0e8a18992f5f5f9d1ac25f02988848d406be",
 };
 
 /**
@@ -469,6 +472,10 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
   // The 121 postcondition (all columns + types + nullability on agent_inbox_items and agent_scheduled_wakeups, plus all six indexes valid, ready, and unpredicated); editing it re-reviews the migration.
   "121_agent_interactive_controls": {
     "lib/migrations/agent-interactive-controls.ts": "cf3e136b495f2e203d7969181fe3cdf39f0217611253df0477c198366e3dccb0",
+  },
+  // The 122 postcondition (all columns + types + nullability on agent_orchestrators and agent_conversation_supervision, plus all five indexes valid, ready, and unpredicated); editing it re-reviews the migration.
+  "122_agent_orchestrator_supervision": {
+    "lib/migrations/agent-orchestrator-supervision.ts": "0cc90fcb63e8eddaa357db82c9dc23741eae379d20261320c9f2ae4b38065ea5",
   },
 };
 

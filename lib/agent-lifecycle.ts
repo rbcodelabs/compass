@@ -3,6 +3,10 @@ import { agentRunsAvailable } from "@/lib/agent-runs";
 import { deleteWorkspaceAgentChildRuns } from "@/lib/agent-child-runs";
 import { deleteWorkspaceAgentInboxItems } from "@/lib/agent-inbox-questions";
 import { deleteWorkspaceAgentScheduledWakeups } from "@/lib/agent-scheduled-wakeups";
+import {
+  deleteWorkspaceAgentOrchestrators,
+  deleteWorkspaceConversationSupervision,
+} from "@/lib/orchestrator/scope";
 import { deleteWorkspaceAgentSessions } from "@/lib/agent-session";
 import { deleteWorkspaceConversationReviews } from "@/lib/agent-board-data";
 
@@ -29,6 +33,8 @@ export async function deleteWorkspaceAgentData(prisma: AppPrismaClient, workspac
   await deleteWorkspaceAgentChildRuns(prisma, workspaceId);
   await deleteWorkspaceAgentInboxItems(prisma, workspaceId);
   await deleteWorkspaceAgentScheduledWakeups(prisma, workspaceId);
+  await deleteWorkspaceConversationSupervision(prisma, workspaceId);
+  await deleteWorkspaceAgentOrchestrators(prisma, workspaceId);
   if (await agentRunsAvailable(prisma)) {
     const runs = await prisma.agentRun.findMany({ where: { workspaceId }, select: { id: true } });
     if (runs.length) await prisma.agentRunEvent.deleteMany({ where: { runId: { in: runs.map((run) => run.id) } } });

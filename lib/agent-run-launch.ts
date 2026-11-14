@@ -37,6 +37,7 @@ import { selectMaterializable } from "@/lib/agent-doc-materialize"
 import { DOC_MANIFEST_FILE, signDocManifest } from "@/lib/agent-doc-manifest"
 import type { AgentRecord } from "@/lib/agent-ownership"
 import type { ResolvedAgentModel } from "@/lib/agent-model"
+import { getOrchestratorSkillAppendixForConversation } from "@/lib/orchestrator/skill"
 
 export type LaunchContext = {
   prisma: AppPrismaClient
@@ -46,6 +47,10 @@ export type LaunchContext = {
   /** The human who started the run: the key's user, and the one run-attributed usage is charged to. */
   userId: string
   workspace: { id: string }
+  /** Optional conversationId used to resolve orchestrator skill injection when `reuseConversationSandbox` is omitted. */
+  conversationId?: string
+  /** Optional extra system prompt appendices merged after capability pack skills and before orchestrator skills. */
+  systemPromptAppendices?: string[]
   /** Null/omitted for the built-in Compass Agent; populated when running as a named Cloud Agent. */
   agent?: Pick<AgentRecord, "id" | "name" | "instructions" | "model"> | null
   /** Complete text prompt (or resume delta prompt when `session` is provided). */
@@ -115,6 +120,19 @@ export async function launchQueuedAgentRun(ctx: LaunchContext): Promise<{ starte
     const preparedPacks = await prepareCapabilityPacksForTurn(await activePacksFor(prisma, ctx.workspace.id), {
       get: (pathname) => getCapabilityPackArtifactStorage().get(pathname),
     })
+    const targetConversationId = ctx.conversationId ?? ctx.reuseConversationSandbox?.conversationId
+    const orchestratorAppendix = targetConversationId
+      ? await getOrchestratorSkillAppendixForConversation(prisma, {
+          workspaceId: ctx.workspace.id,
+          userId: ctx.userId,
+          conversationId: targetConversationId,
+        }).catch(() => null)
+      : null
+    const systemPromptAppendices = [
+      ...preparedPacks.systemPromptAppendices,
+      ...(ctx.systemPromptAppendices ?? []),
+      ...(orchestratorAppendix ? [orchestratorAppendix] : []),
+    ]
     // Stamped before the sandbox exists, so no audit row derived from this run's events can read an empty provenance.
     await prisma.agentRun.update({
       where: { id: run.id },
@@ -219,7 +237,7 @@ export async function launchQueuedAgentRun(ctx: LaunchContext): Promise<{ starte
         prompt: ctx.prompt,
         session: ctx.session,
         workspaceId: ctx.workspace.id,
-        systemPromptAppendices: preparedPacks.systemPromptAppendices,
+        systemPromptAppendices,
         pluginPaths: preparedPacks.pluginPaths,
         skillIds: preparedPacks.skillIds,
         bypassSecret: ctx.bypassSecret,

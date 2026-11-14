@@ -44,6 +44,7 @@ import { resolveAgentPageContext } from "@/lib/agent-page-context"
 import { resolveConversationAccess } from "@/lib/agent-conversation-access"
 import { clearConversationPendingQuestions } from "@/lib/agent-inbox-questions"
 import { cancelAllPendingConversationWakeups } from "@/lib/agent-scheduled-wakeups"
+import { getOrchestratorSkillAppendixForConversation } from "@/lib/orchestrator/skill"
 import { deriveConversationSummary, extractLatestPrUrl } from "@/lib/agent-card-derive"
 import { getGoldenSnapshotId } from "@/lib/agent-runtime-config"
 import { resolveRunSnapshot } from "@/lib/agent-sandbox-class"
@@ -538,6 +539,15 @@ export async function POST(request: NextRequest) {
     const preparedPacks = await prepareCapabilityPacksForTurn(activePacks, {
       get: (pathname) => getCapabilityPackArtifactStorage().get(pathname),
     })
+    const orchestratorAppendix = await getOrchestratorSkillAppendixForConversation(prisma, {
+      workspaceId,
+      userId,
+      conversationId: conversationIdResolved,
+    }).catch(() => null)
+    const systemPromptAppendices = [
+      ...preparedPacks.systemPromptAppendices,
+      ...(orchestratorAppendix ? [orchestratorAppendix] : []),
+    ]
     const kind: AgentRunKind = interviewClaim?.claimed ? handoffKind(interviewClaim.state) : "CHAT"
 
     // Pack provenance is an argument to run creation, not something stamped on
@@ -660,7 +670,7 @@ export async function POST(request: NextRequest) {
           prompt: turnPrompt,
           session: sessionEnv,
           workspaceId: workspace.id,
-          systemPromptAppendices: preparedPacks.systemPromptAppendices,
+          systemPromptAppendices,
           pluginPaths: preparedPacks.pluginPaths,
           skillIds: preparedPacks.skillIds,
           bypassSecret,

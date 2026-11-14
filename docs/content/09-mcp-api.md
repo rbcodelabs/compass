@@ -1320,3 +1320,28 @@ In-app cloud agent turns can schedule a durable follow-up run on their own conve
 | Tool | Description |
 |---|---|
 | `ScheduleWakeup` | Schedule a continuation turn on the current conversation (`delaySeconds` clamped to `60..3600`, `reason`, `prompt`), replacing any earlier pending wake-up, or pass `stop: true` to cancel the pending wake-up. Short delays (`<= 240s`) arm an inline timer alongside `/api/cron/agent-wakeups`. Sending a manual user message or clicking **Cancel** in the UI cancels any pending wake-up automatically. |
+
+### Thread coordination & supervision (`AGENT_TURN` only)
+
+In-app cloud agent turns can coordinate, delegate, and supervise sibling conversations within the same user's `(userId, workspaceId)` boundary and Squad coordination scope (`lib/orchestrator/scope.ts`). Squad threads coordinate within their Squad; unassigned threads coordinate with unassigned threads (and may self-assign to a Squad via `threads_set_squad`); a Workspace Orchestrator sees unassigned threads plus Squad rollups by default and passes explicit `elevatedSquadId` per call for cross-Squad reads or proposed replies without overwriting Squad manager notes.
+
+| Tool | Description |
+|---|---|
+| `threads_get_current` | Return the calling conversation's ID, title, `squadId`, and orchestrator role (`"NONE"`, `"SQUAD"`, or `"WORKSPACE"`). |
+| `threads_list` | List conversations in the caller's coordination scope (`status`, `limit`, `includeArchived`, `elevatedSquadId`), plus Squad rollups (`squadSummaries`) for the Workspace Orchestrator. |
+| `threads_get_messages` | Read recent turns from a conversation (`threadId`, `lastN`, `maxCharsPerMessage`, `elevatedSquadId`) without switching context. |
+| `threads_get_log` | Read tool calls, bash commands, and errors from a conversation's latest run (`threadId`, `lastN`, `types`, `elevatedSquadId`). |
+| `threads_list_squads` | List workspace Squads (`id`, `name`, `color`). |
+| `threads_set_squad` | Assign a conversation to a Squad (`threadId`, `squadId` or `null`). Unassigned threads may self-assign their own conversation to a Squad. |
+| `threads_create` | Create a new agent conversation (`title`, optional `prompt`, `squadId`, `agentId`) and optionally start its first background run. |
+| `threads_send_message` | Send a follow-up message to another conversation (`threadId`, `message`, `elevatedSquadId`) and start a continuation run. Refuses self-sends and refuses sending when the caller has a pending `PROPOSED_REPLY` on that thread. |
+| `threads_wait` | Wait up to `timeoutSeconds` (`5..300`, default `90`) for a conversation's active run to settle (`DONE`, `FAILED`, `AWAITING_USER`, or `TIMEOUT`). |
+| `threads_archive` | Archive a conversation (`threadId`, `confirm`, `elevatedSquadId`). Orchestrator callers must pass `confirm: true`. |
+| `threads_set_notes` | Set or clear supervisor `managerNotes` (`<= 2000` chars) on a conversation in scope (`threadId`, `notes`). Refuses cross-Squad `elevatedSquadId` writes so Squad Orchestrators retain note ownership. |
+| `threads_set_proposed_reply` | Draft a human-gated `PROPOSED_REPLY` (`<= 4000` chars) on a conversation (`threadId`, `reply`, `elevatedSquadId`) for user approval in the UI. |
+| `threads_clear_proposed_reply` | Clear a pending `PROPOSED_REPLY` on a conversation (`threadId`, `elevatedSquadId`). |
+| `threads_post_decision` | Post a structured `DECISION` inbox item (`header` `<= 32` chars, `question`, `2..4` `options`, `multiSelect`, `contextThreadId`, `elevatedSquadId`) for the user to resolve. |
+| `threads_clear_decision` | Dismiss a pending `DECISION` inbox item (`decisionId`, `contextThreadId`, `elevatedSquadId`). |
+| `notify_workspace_orchestrator` | Escalate a concise (`<= 400` chars) cross-Squad dependency, blocker, or handoff from a Squad Orchestrator to the user's Workspace Orchestrator (`kind`, `subject`, `summary`, `relatedThreadIds`; rate-limited to 1 message per 5 minutes with burst 3 and 30-minute `(kind, subject)` dedup). |
+| `threads_list_orchestrators` | Workspace Orchestrator only: list the user's personal Workspace Orchestrator and per-Squad Orchestrators (`id`, `kind`, `title`, `enabled`, `threadId`, `squadId`). |
+| `threads_set_orchestrator_enabled` | Workspace Orchestrator only: enable or disable a Squad Orchestrator (`squadId`, `enabled`), provisioning its backing conversation on first enable. |

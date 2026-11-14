@@ -1,7 +1,7 @@
 /** Auditable MCP → REST ledger. It documents parity but never drives routing. */
 export const MCP_PARITY_CATALOG = {
-  toolCount: 216,
-  sortedToolNamesSha256: "5855354ca5adb280ae0c27a003bb4a63cfce107e8bc72cfee44c4b6e1377b798",
+  toolCount: 234,
+  sortedToolNamesSha256: "5283a26cd04db9e117cf35cebded77734f80d93dfc45633a5779982909f58642",
 } as const
 
 export type McpRestParityDisposition =
@@ -17,6 +17,7 @@ const excluded = (category: "human-governance" | "execution-boundary" | "model-o
 const slackExcluded = excluded("execution-boundary", "None; read Slack directly, or ask an agent that has the MCP slack_* tools.", "These tools act through the deployment's single Slack bot credential (Vercel Connect), scoped by Slack channel invitation rather than Compass resources; REST exposes only Compass resources and has no per-caller Slack authorization to offer.")
 const agentTaskExcluded = excluded("execution-boundary", "create_task, update_task, list_tasks and get_task operate on the team task board over REST.", "The agent's own conversation-scoped plan list, registered only for agent turns and resolved from the turn key's live agent run; a stateless REST client has no agent conversation.")
 const agentWakeupExcluded = excluded("execution-boundary", "None; scheduled wake-ups belong to an in-app agent conversation's runtime lifecycle.", "Schedules or cancels a future self-wakeup on the calling agent turn's own conversation; a stateless REST client has no live agent run.")
+const agentOrchestratorExcluded = excluded("execution-boundary", "None; thread coordination and supervision belong to an in-app agent conversation's runtime lifecycle.", "Coordinates, supervises, or escalates across in-app agent threads within the caller's coordination scope; resolved from the turn key's live agent run.")
 
 export const MCP_REST_PARITY_MANIFEST = {
   ScheduleWakeup: agentWakeupExcluded,
@@ -170,6 +171,7 @@ export const MCP_REST_PARITY_MANIFEST = {
   mark_read: direct("markNotificationsRead"),
   move_doc: composition(["updateDoc"], "REST renames a document by PATCHing its title on its id; reparenting has no REST operation, MCP expresses both as a path change."),
   move_task_status: direct("updateTask"),
+  notify_workspace_orchestrator: agentOrchestratorExcluded,
   prepare_artifact_upload: excluded("transport-convenience", "Send the HTML in the createArtifact or updateArtifact request body.", "Direct upload exists only to keep a large document out of a model's context window when an MCP tool call would otherwise embed it twice; a REST client posts the file bytes itself, so the staged-upload step adds nothing."),
   prepare_doc_image_upload: direct("prepareDocImageUpload"),
   prepare_feedback_attachment_upload: direct("prepareFeedbackAttachmentUpload"),
@@ -201,6 +203,23 @@ export const MCP_REST_PARITY_MANIFEST = {
   set_launch_tier: direct("setLaunchTier"),
   set_objective_parent_kr: direct("updateObjective"),
   set_workspace_scoring_model: direct("updateWorkspaceScoringModel"),
+  threads_archive: agentOrchestratorExcluded,
+  threads_clear_decision: agentOrchestratorExcluded,
+  threads_clear_proposed_reply: agentOrchestratorExcluded,
+  threads_create: agentOrchestratorExcluded,
+  threads_get_current: agentOrchestratorExcluded,
+  threads_get_log: agentOrchestratorExcluded,
+  threads_get_messages: agentOrchestratorExcluded,
+  threads_list: agentOrchestratorExcluded,
+  threads_list_orchestrators: agentOrchestratorExcluded,
+  threads_list_squads: agentOrchestratorExcluded,
+  threads_post_decision: agentOrchestratorExcluded,
+  threads_send_message: agentOrchestratorExcluded,
+  threads_set_notes: agentOrchestratorExcluded,
+  threads_set_orchestrator_enabled: agentOrchestratorExcluded,
+  threads_set_proposed_reply: agentOrchestratorExcluded,
+  threads_set_squad: agentOrchestratorExcluded,
+  threads_wait: agentOrchestratorExcluded,
   unfollow: direct("unfollowResource"),
   unlink_artifact_from_decision: direct("unlinkArtifactDecision"),
   unlink_artifact_from_experiment: direct("unlinkArtifactExperiment"),

@@ -3196,6 +3196,61 @@ model AgentScheduledWakeup {
   @@map("agent_scheduled_wakeups")
 }
 
+/// Personal Workspace or Squad orchestrator configuration and bound conversation (migration 122).
+/// Scoped per `(userId, workspaceId, scopeType, scopeKey)` where `scopeType` is `"WORKSPACE"`
+/// (`scopeKey = "workspace"`) or `"SQUAD"` (`scopeKey = squadId`). Bare UUID references (no FKs or
+/// emulated Restrict relations) keep workspace/conversation teardown safe before or after migration.
+/// DSQL: no FKs, no @updatedAt trigger (set explicitly), escalation rate-limit/dedup state serialized as TEXT.
+model AgentOrchestrator {
+  id                      String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId             String    @map("workspace_id") @db.Uuid
+  userId                  String    @map("user_id") @db.Uuid
+  /// WORKSPACE | SQUAD
+  scopeType               String    @default("WORKSPACE") @map("scope_type") @db.VarChar(20)
+  /// "workspace" for WORKSPACE orchestrators, or the Squad UUID string for SQUAD orchestrators
+  scopeKey                String    @default("workspace") @map("scope_key") @db.VarChar(64)
+  conversationId          String?   @map("conversation_id") @db.Uuid
+  agentId                 String?   @map("agent_id") @db.Uuid
+  enabled                 Boolean   @default(true)
+  wakeOnActivity          Boolean   @default(true) @map("wake_on_activity")
+  heartbeatEnabled        Boolean   @default(false) @map("heartbeat_enabled")
+  heartbeatMinutes        Int       @default(60) @map("heartbeat_minutes")
+  escalationsEnabled      Boolean   @default(true) @map("escalations_enabled")
+  lastHeartbeatAt         DateTime? @map("last_heartbeat_at")
+  lastEscalationStateJson String    @default("{}") @map("last_escalation_state_json") @db.Text
+  createdAt               DateTime  @default(now()) @map("created_at")
+  updatedAt               DateTime  @default(now()) @map("updated_at")
+
+  @@unique([userId, workspaceId, scopeType, scopeKey], map: "agent_orchestrators_user_ws_scope_key")
+  @@index([workspaceId, userId], map: "idx_agent_orchestrators_workspace_user")
+  @@index([conversationId], map: "idx_agent_orchestrators_conversation")
+  @@map("agent_orchestrators")
+}
+
+/// Owner/supervisor-scoped orchestrator tracking state for an `AgentConversation` (migration 122):
+/// Manager Notes v2 (`managerNotes`, `managerNotesUpdatedAt`, `managerSourceOrchestratorId`) and
+/// pending human-gated `ProposedReply` (`proposedReplyText`, `proposedReplyGeneratedAt`,
+/// `proposedReplyAuthorOrchestratorId`). Never injected into the target thread's context.
+/// DSQL: no FKs, no @updatedAt trigger (set explicitly).
+model AgentConversationSupervision {
+  id                                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId                       String    @map("workspace_id") @db.Uuid
+  conversationId                    String    @map("conversation_id") @db.Uuid
+  supervisorUserId                  String    @map("supervisor_user_id") @db.Uuid
+  managerNotes                      String    @default("") @map("manager_notes") @db.Text
+  managerNotesUpdatedAt             DateTime? @map("manager_notes_updated_at")
+  managerSourceOrchestratorId       String?   @map("manager_source_orchestrator_id") @db.Uuid
+  proposedReplyText                 String?   @map("proposed_reply_text") @db.Text
+  proposedReplyGeneratedAt          DateTime? @map("proposed_reply_generated_at")
+  proposedReplyAuthorOrchestratorId String?   @map("proposed_reply_author_orchestrator_id") @db.Uuid
+  createdAt                         DateTime  @default(now()) @map("created_at")
+  updatedAt                         DateTime  @default(now()) @map("updated_at")
+
+  @@unique([conversationId, supervisorUserId], map: "agent_conversation_supervision_conv_user_key")
+  @@index([workspaceId, supervisorUserId], map: "idx_agent_conversation_supervision_ws_user")
+  @@map("agent_conversation_supervision")
+}
+
 /// Append-only trace of one run: status phases, agent stream messages, the
 /// result, and heartbeats. The unique (runId, seq) is what makes a retried
 /// callback batch idempotent — a duplicate delivery collides and is discarded

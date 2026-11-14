@@ -234,6 +234,7 @@ import {
 } from "@/lib/card-sort-tool-handlers"
 import { allocateOneSeq, withSequenceTransaction } from "@/lib/work-item-sequence"
 import { scheduleAgentWakeup } from "@/lib/agent-scheduled-wakeups"
+import { registerOrchestratorMcpTools } from "@/lib/orchestrator/mcp-tools"
 
 // Roadmap item start/end dates come from a plain "YYYY-MM-DD" string (an
 // <input type="date"> value, or an MCP caller's ISO date string), which
@@ -3106,6 +3107,7 @@ const _handler = createMcpHandler(
         },
         scheduleAgentWakeup,
       )
+      registerOrchestratorMcpTools(register, TOOL_OUTPUT_SCHEMA)
     }
 
     register(
