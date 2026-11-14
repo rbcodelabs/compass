@@ -49,8 +49,11 @@ test.describe("Docs pending decision toolbar", () => {
     await expect(page.getByRole("link", { name: "Request decision", exact: true })).toBeHidden()
     await outcome.click()
     const outcomeMenu = page.getByRole("menu")
-    // `reviewUrl` is absolute (page.url()); the href is workspace-relative.
-    await expect(outcomeMenu.getByRole("menuitem", { name: question })).toHaveAttribute("href", new URL(reviewUrl).pathname)
+    // The menu links by the request's uuid (like the single-request toolbar link and the
+    // second test below); /reviews/<uuid> 308s to the canonical DEC-n URL, which is the
+    // `reviewUrl` the click below must land on.
+    const request = await prisma.reviewRequest.findFirstOrThrow({ where: { workspaceId: workspace.id, currentRevision: { title: question } }, select: { id: true } })
+    await expect(outcomeMenu.getByRole("menuitem", { name: question })).toHaveAttribute("href", `${new URL(reviewUrl).pathname.replace(/\/reviews\/.*$/, "")}/reviews/${request.id}`)
     await expect(outcomeMenu.getByRole("menuitem", { name: "Request another decision" })).toHaveAttribute("href", new RegExp(`subjectId=${doc.id}`))
     await outcomeMenu.getByRole("menuitem", { name: question }).click()
     await expect(page).toHaveURL(reviewUrl)
