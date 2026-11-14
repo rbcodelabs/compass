@@ -2885,6 +2885,12 @@ model AgentConversation {
   /// Set when the OWNER archives the chat; null = active. Archived chats are hidden from the
   /// conversation list (everyone it is shared with) but stay readable by id and restorable.
   archivedAt  DateTime? @map("archived_at")
+  /// Optional owning Squad (bare UUID, no FK: DSQL) for Squad grouping and Squad orchestrator scoping (migration 119).
+  squadId     String?   @map("squad_id") @db.Uuid
+  /// Latest 1-line markdown-stripped outcome excerpt for idle board cards and chat rows (migration 119).
+  summary     String?   @db.VarChar(500)
+  /// Latest GitHub pull request URL surfaced in the conversation, rendered as a PR chip on the board (migration 119).
+  prUrl       String?   @map("pr_url") @db.VarChar(500)
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @default(now()) @map("updated_at")
 
@@ -3032,6 +3038,10 @@ model AgentRun {
   userId          String    @map("user_id") @db.Uuid
   /// QUEUED | RUNNING | SUCCEEDED | FAILED | INTERRUPTED | CANCELED
   status          String    @default("QUEUED") @db.VarChar(20)
+  /// Interactive sub-state while RUNNING (e.g. WAITING_INPUT | WAITING_THREADS); null during active execution (migration 119).
+  substatus       String?   @db.VarChar(20)
+  /// Latest humanized live tool/subagent activity line for O(1) board reads while RUNNING (migration 119).
+  currentActivity String?   @map("current_activity") @db.VarChar(240)
   /// "CHAT", or the HandoffKind when this run drives a handoff claim.
   kind            String    @default("CHAT") @db.VarChar(30)
   /// SHA-256 of the run's callback bearer token (never the token itself).

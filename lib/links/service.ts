@@ -475,6 +475,25 @@ export async function listLinkRows(
   })) as EntityLinkRow[]
 }
 
+/**
+ * Batch-reads stored link rows originating from any of `fromIds` across `linkTypes` in `workspaceId`,
+ * ordered oldest-first up to `take`. The caller resolves the target endpoints through `resolveEndpoints`
+ * (`workspaceId`-filtered) and drops any link whose target endpoint is missing or foreign.
+ */
+export async function listLinkRowsFromEntities(
+  db: Partial<Tx>,
+  input: { workspaceId: string; linkTypes: readonly string[]; fromIds: readonly string[]; take: number },
+): Promise<Pick<EntityLinkRow, "linkType" | "fromId" | "toType" | "toId" | "createdAt">[]> {
+  if (!db.entityLink || input.linkTypes.length === 0 || input.fromIds.length === 0) return []
+  const keys = input.linkTypes.map((lt) => requireLinkType(lt).key)
+  return (await db.entityLink.findMany({
+    where: { workspaceId: input.workspaceId, linkType: { in: keys }, fromId: { in: [...input.fromIds] } },
+    select: { linkType: true, fromId: true, toType: true, toId: true, createdAt: true },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    take: input.take,
+  })) as Pick<EntityLinkRow, "linkType" | "fromId" | "toType" | "toId" | "createdAt">[]
+}
+
 /** A stored link by its own id, or null (ids are uuids; a malformed one is simply not found). The caller authorizes through the link's endpoints. */
 export async function findLinkById(db: Tx, id: string): Promise<EntityLinkRow | null> {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) return null

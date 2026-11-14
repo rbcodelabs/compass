@@ -67,6 +67,7 @@ import { assertArtifactScreenshotsMigration } from "@/lib/migrations/artifact-sc
 import { AGENT_RETENTION_INDEXES_MIGRATION, assertAgentRetentionIndexesMigration } from "@/lib/migrations/agent-retention-indexes";
 import { AGENT_CONVERSATION_REVIEWS_MIGRATION, assertAgentConversationReviewsMigration } from "@/lib/migrations/agent-conversation-reviews";
 import { AGENT_SANDBOX_CLASS_MIGRATION, assertAgentSandboxClassMigration } from "@/lib/migrations/agent-sandbox-class";
+import { AGENT_BOARD_RICH_CARDS_MIGRATION, assertAgentBoardRichCardsMigration } from "@/lib/migrations/agent-board-rich-cards";
 
 
 
@@ -820,6 +821,12 @@ const MIGRATIONS: readonly MigrationEntry[] = [
     // (no classifiable doc still NULL) before the receipt. POST it by name after 117_doc_kind is applied; never untargeted.
     name: "118_doc_kind_backfill",
     filePath: path.join(process.cwd(), "prisma/migrations/118_doc_kind_backfill/migration.sql"),
+  },
+  {
+    // Rich agent board cards: five nullable columns across agent_conversations (squad_id, summary, pr_url) and agent_runs (substatus, current_activity).
+    // No default, backfill, index, or FK (DSQL). The hook asserts all five columns exist, are typed and are nullable before the receipt.
+    name: "119_agent_board_rich_cards",
+    filePath: path.join(process.cwd(), "prisma/migrations/119_agent_board_rich_cards/migration.sql"),
   },
 ];
 
@@ -2385,6 +2392,7 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
       if (migration.name === "102_agent_run_caps") await assertAgentRunCapsMigration(client, schema)
       if (migration.name === AGENT_RETENTION_INDEXES_MIGRATION) await assertAgentRetentionIndexesMigration(client, schema)
       if (migration.name === AGENT_CONVERSATION_REVIEWS_MIGRATION) await assertAgentConversationReviewsMigration(client, schema)
+      if (migration.name === AGENT_BOARD_RICH_CARDS_MIGRATION) await assertAgentBoardRichCardsMigration(client, schema)
       if (migration.name === "110_artifact_external_share") await assertArtifactExternalShareMigration(client, schema)
       if (migration.name === AGENT_SANDBOX_CLASS_MIGRATION) await assertAgentSandboxClassMigration(client, schema)
       if (migration.name === WORKSPACE_ID_MIGRATION || migration.name === WORKSPACE_ID_RESIDUAL_MIGRATION) {

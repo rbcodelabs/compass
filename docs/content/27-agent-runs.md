@@ -59,7 +59,7 @@ ordinary link.
 The **Agent** page has a **Chat | Board** switch in its title bar. **Board** replaces the
 chat with your conversations laid out by status, newest activity first in each column:
 
-- **Working**: a run is queued or going. The card shows a spinner.
+- **Working**: a run is queued or going. The card shows a live spinner and the current tool or activity step (pausing with an amber dot if no heartbeat has arrived for 45 seconds).
 - **New**: finished, and you have not looked at it since it last changed.
 - **Done**: finished, and you have looked at it since.
 - **Failed**: the latest run failed or was interrupted. It stays here until the conversation runs again.
@@ -67,8 +67,14 @@ chat with your conversations laid out by status, newest activity first in each c
 
 **Working** and **New** are always shown; the other columns appear only when they have a card.
 Columns keep a minimum width and the board scrolls sideways, so on a phone you swipe between
-them. The board refreshes itself every few seconds, so a run finishing moves its card without
-a reload.
+them. The board streams live updates over `/api/agent/board/stream` (falling back to polling if needed), so a run updating or finishing patches its card in place without losing scroll position or input focus.
+
+Each card (and each conversation row in the **Chat** left sidebar) surfaces rich context at a glance:
+
+- **Summary & live activity**: idle conversations show a short summary of the latest assistant reply; active runs show the current step.
+- **Subtask checklist**: tasks linked to the conversation appear inline with a `completed / total` progress bar and up to five checklist items.
+- **Footer chips**: linked Compass items (`OPP`, `SOL`, `DOC`, `DEC`), a **Squad** badge when assigned, and a clickable `PR #N` chip when a GitHub pull request URL appears in the thread.
+- **Search & Group by**: filter across titles, summaries, live activity, subtasks, PR numbers and linked items, and switch **Group** between **Status** and **Squad** on both the Board and the Chat sidebar.
 
 Click a card to open that conversation in the chat; it counts as looked at. Whether you have
 looked at a conversation is yours alone: when a conversation is shared, your opening it does not
@@ -236,6 +242,7 @@ changes nothing for users.
 
 The board's per-person "looked at" state needs migration `109_agent_conversation_reviews`.
 Until it is applied the board still works, but every finished conversation shows as **New**.
+Rich card metadata (conversation squad, persisted summary/PR URL, and live run substatus/activity) uses migration `119_agent_board_rich_cards`, falling back gracefully if unapplied.
 
 Two settings matter for a deployed environment:
 

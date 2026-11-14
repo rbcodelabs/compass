@@ -22,7 +22,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { Archive, ArchiveRestore, FileText, Loader2, Sparkles, X as XIcon } from "lucide-react"
+import { Archive, ArchiveRestore, FileText, GitPullRequest, Loader2, Search, Sparkles, X as XIcon } from "lucide-react"
 import { fetchArchivedConversations, setConversationArchived, type ArchivedConversation } from "@/lib/agent-archive-client"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -45,7 +45,18 @@ import { AttachMenu, uploadAgentFiles, type AttachedItem, type AttachedUpload } 
 import { SeedContextChip } from "@/components/agent/seed-context-chip"
 import { AgentParticipantsPanel, type Roster } from "@/components/agent/agent-participants"
 import { initialsOf } from "@/lib/user-initials"
-import { formatRelativeTime, groupConversationsByStatus, type AgentListConversation, type BoardColumnId } from "@/lib/agent-board"
+import {
+  classifyBoardCard,
+  filterListConversations,
+  formatRelativeTime,
+  groupConversationsBySquad,
+  groupConversationsByStatus,
+  type AgentBoardCardSquad,
+  type AgentListConversation,
+  type BoardColumnId,
+  type BoardGroupBy,
+} from "@/lib/agent-board"
+import { formatPrBadge } from "@/lib/agent-card-derive"
 import { cn } from "@/lib/utils"
 
 type Role = "user" | "assistant"
@@ -109,6 +120,8 @@ type Props = {
   listOpen?: boolean
   /** Conversations the shell has marked read this session (after its dwell), overriding the server-rendered status. */
   reviewedIds?: ReadonlySet<string>
+  /** Optional workspace squads for Squad grouping in the sidebar. */
+  squads?: AgentBoardCardSquad[]
   /**
    * Called when turn 1 of a brand-new chat comes back with the id the server
    * assigned to it.
@@ -163,11 +176,14 @@ export function AgentChat({
   variant = "page",
   listOpen = true,
   reviewedIds,
+  squads = [],
   onConversationCreated,
   onStreamingChange,
 }: Props) {
   const isRail = variant === "rail"
   const router = useRouter()
+  const [listQuery, setListQuery] = useState("")
+  const [listGroupBy, setListGroupBy] = useState<BoardGroupBy>("status")
   // Archive: the page list shows active chats; "Archived" swaps it for the archived ones.
   const [showArchived, setShowArchived] = useState(false)
   const [archivedChats, setArchivedChats] = useState<ArchivedConversation[]>([])
@@ -649,12 +665,25 @@ export function AgentChat({
   }, [queued, isStreaming, composerBlocked, accessLost, sending])
   // Who is answering and on what, shown in the composer card while a detached run is live.
   // A chat counts as read only after the shell dwell, so the list follows reviewedIds rather than merely being open.
-  const groups = useMemo(
+  const effectiveConversations = useMemo(
     () =>
-      groupConversationsByStatus(
-        conversations.map((c) => (reviewedIds?.has(c.id) && c.lastActivityAt ? { ...c, reviewedAt: c.lastActivityAt } : c))
+      filterListConversations(
+        conversations.map((c) => (reviewedIds?.has(c.id) && c.lastActivityAt ? { ...c, reviewedAt: c.lastActivityAt } : c)),
+        listQuery,
       ),
-    [conversations, reviewedIds]
+    [conversations, reviewedIds, listQuery],
+  )
+  const hasAnySquads = useMemo(
+    () => squads.length > 0 || conversations.some((c) => Boolean(c.squad)),
+    [squads.length, conversations],
+  )
+  const groups = useMemo(
+    () => (listGroupBy === "status" ? groupConversationsByStatus(effectiveConversations) : null),
+    [effectiveConversations, listGroupBy],
+  )
+  const squadGroups = useMemo(
+    () => (listGroupBy === "squad" ? groupConversationsBySquad(effectiveConversations, squads) : null),
+    [effectiveConversations, listGroupBy, squads],
   )
   const runStatusLine =
     activeRun && !activeRun.done
@@ -701,12 +730,63 @@ export function AgentChat({
           shell's title-bar toggle (no residual strip). Below md it is hidden
           outright, as before. */}
       {!isRail && listOpen && (
-      <aside className="hidden w-64 shrink-0 flex-col border-r border-default bg-surface-inset md:flex">
+      <aside aria-label="Chat history" className="hidden w-64 shrink-0 flex-col border-r border-default bg-surface-inset md:flex">
+        {!showArchived && (
+          <div className="flex flex-col gap-1.5 border-b border-default p-2">
+            <div className="relative flex items-center">
+              <Search aria-hidden="true" className="pointer-events-none absolute left-2 size-3.5 text-text-subtle" />
+              <input
+                type="search"
+                value={listQuery}
+                onChange={(e) => setListQuery(e.target.value)}
+                aria-label="Filter chats"
+                placeholder="Filter chats…"
+                className="h-7 w-full rounded-md border border-default bg-surface-card pl-7 pr-6 text-xs text-text-primary placeholder:text-text-subtle focus-visible:border-border-focus focus-visible:outline-none [&::-webkit-search-cancel-button]:hidden"
+              />
+              {listQuery && (
+                <button
+                  type="button"
+                  onClick={() => setListQuery("")}
+                  aria-label="Clear chat filter"
+                  className="absolute right-1.5 text-text-subtle hover:text-text-primary"
+                >
+                  <XIcon aria-hidden="true" className="size-3" />
+                </button>
+              )}
+            </div>
+            {hasAnySquads && (
+              <div className="grid grid-cols-2 rounded-md border border-border-default bg-surface-navigation-active p-0.5 text-[11px]" role="group" aria-label="Group chats by">
+                <button
+                  type="button"
+                  aria-pressed={listGroupBy === "status"}
+                  onClick={() => setListGroupBy("status")}
+                  className={cn(
+                    "rounded py-0.5 font-medium",
+                    listGroupBy === "status" ? "bg-surface-card text-text-primary shadow-xs" : "text-text-subtle hover:text-text-primary",
+                  )}
+                >
+                  Status
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={listGroupBy === "squad"}
+                  onClick={() => setListGroupBy("squad")}
+                  className={cn(
+                    "rounded py-0.5 font-medium",
+                    listGroupBy === "squad" ? "bg-surface-card text-text-primary shadow-xs" : "text-text-subtle hover:text-text-primary",
+                  )}
+                >
+                  Squad
+                </button>
+              </div>
+            )}
+          </div>
+        )}
         <ScrollArea className="min-h-0 flex-1 p-2">
           <ul className="flex flex-col gap-1">
-            {(showArchived ? archivedChats : conversations).length === 0 && (
+            {(showArchived ? archivedChats : effectiveConversations).length === 0 && (
               <li className="px-2 py-6 text-center text-sm text-text-subtle">
-                {showArchived ? "No archived chats" : "No conversations yet"}
+                {showArchived ? "No archived chats" : listQuery.trim() ? "No matching chats" : "No conversations yet"}
               </li>
             )}
             {groups && !showArchived
@@ -731,17 +811,44 @@ export function AgentChat({
                     </ul>
                   </li>
                 ))
-              : (showArchived ? archivedChats : conversations).map((c) => (
-                  <ConversationRow
-                    key={c.id}
-                    c={c}
-                    status={null}
-                    active={c.id === activeConversationId}
-                    basePath={basePath}
-                    archived={showArchived}
-                    onToggleArchived={() => void changeArchived(c.id, !showArchived)}
-                  />
-                ))}
+              : squadGroups && !showArchived
+                ? squadGroups.map((group) => (
+                    <li key={group.id} className="flex flex-col gap-1">
+                      <p className="flex items-center justify-between px-3 pt-3 text-[11px] font-semibold uppercase tracking-wide text-text-subtle">
+                        <span className="flex min-w-0 items-center gap-1.5">
+                          {group.color && (
+                            <span aria-hidden="true" className="size-2 shrink-0 rounded-full" style={{ backgroundColor: group.color }} />
+                          )}
+                          <span className="truncate">{group.label}</span>
+                        </span>
+                        <span>{group.items.length}</span>
+                      </p>
+                      <ul className="flex flex-col gap-1">
+                        {group.items.map((c) => (
+                          <ConversationRow
+                            key={c.id}
+                            c={c}
+                            status={c.lastActivityAt ? classifyBoardCard({ runStatus: c.runStatus ?? null, messageCount: c.messageCount ?? 1, lastActivityAt: c.lastActivityAt, reviewedAt: c.reviewedAt ?? null }) : null}
+                            active={c.id === activeConversationId}
+                            basePath={basePath}
+                            archived={false}
+                            onToggleArchived={() => void changeArchived(c.id, true)}
+                          />
+                        ))}
+                      </ul>
+                    </li>
+                  ))
+                : (showArchived ? archivedChats : effectiveConversations).map((c) => (
+                    <ConversationRow
+                      key={c.id}
+                      c={c}
+                      status={null}
+                      active={c.id === activeConversationId}
+                      basePath={basePath}
+                      archived={showArchived}
+                      onToggleArchived={() => void changeArchived(c.id, !showArchived)}
+                    />
+                  ))}
           </ul>
         </ScrollArea>
         <div className="border-t border-default p-2">
@@ -1063,7 +1170,7 @@ const STATUS_STYLE: Record<BoardColumnId, { label: string; dot: string; badge: s
   ready: { label: "Ready", dot: "bg-status-neutral", badge: "bg-status-neutral-surface text-status-neutral" },
 }
 
-/** One chat-list row. With a status it shows a dot, a labelled badge and the time of last activity. */
+/** One chat-list row. With rich fields it renders a 2-line preview, subtask fraction, PR badge, and relative age. */
 function ConversationRow({
   c,
   status,
@@ -1081,6 +1188,9 @@ function ConversationRow({
 }) {
   const archiveLabel = archived ? "Restore chat" : "Archive chat"
   const style = status ? STATUS_STYLE[status] : null
+  const preview = status === "working" ? c.currentActivity : c.summary
+  const prBadge = formatPrBadge(c.prUrl)
+  const subtasks = c.subtasks && c.subtasks.total > 0 ? c.subtasks : null
   return (
     <li className="group relative">
       <Link
@@ -1095,10 +1205,26 @@ function ConversationRow({
           {style && <span aria-hidden="true" className={cn("size-2 shrink-0 rounded-full", style.dot)} />}
           <span className={cn("min-w-0 flex-1 truncate", status === "new" && "font-semibold")}>{c.title || "Untitled chat"}</span>
         </span>
+        {preview && (
+          <span className="mt-0.5 block truncate pl-4 text-xs text-text-subtle">
+            {preview}
+          </span>
+        )}
         {style && c.lastActivityAt && (
-          <span className="mt-1 flex items-center gap-2 pl-4 text-xs">
+          <span className="mt-1 flex flex-wrap items-center gap-1.5 pl-4 text-xs">
             <span className={cn("rounded px-1.5 py-0.5 font-medium", style.badge)}>{style.label}</span>
-            <span className="text-text-subtle">{formatRelativeTime(c.lastActivityAt)}</span>
+            {subtasks && (
+              <span className="rounded bg-surface-card px-1.5 py-0.5 text-[11px] tabular-nums text-text-subtle">
+                {subtasks.completed}/{subtasks.total}
+              </span>
+            )}
+            {prBadge && (
+              <span className="inline-flex items-center gap-0.5 rounded bg-surface-card px-1.5 py-0.5 text-[11px] text-text-subtle">
+                <GitPullRequest aria-hidden="true" className="size-2.5" />
+                #{prBadge.number}
+              </span>
+            )}
+            <span className="text-text-subtle" suppressHydrationWarning>{formatRelativeTime(c.lastActivityAt)}</span>
           </span>
         )}
       </Link>
