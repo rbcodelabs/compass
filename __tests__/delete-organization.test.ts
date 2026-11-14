@@ -10,7 +10,6 @@ const mockWorkspace = { findMany: vi.fn(), delete: vi.fn() };
 const mockObjective = { updateMany: vi.fn(), findMany: vi.fn(), deleteMany: vi.fn() };
 const mockExperiment = { updateMany: vi.fn(), findMany: vi.fn(), deleteMany: vi.fn() };
 const mockTask = { findMany: vi.fn().mockResolvedValue([]), updateMany: vi.fn().mockResolvedValue({ count: 0 }), deleteMany: vi.fn() };
-const mockTaskLink = { deleteMany: vi.fn() };
 const mockRoadmapItem = { findMany: vi.fn(), deleteMany: vi.fn() };
 const mockLaunchChecklist = { findMany: vi.fn(), deleteMany: vi.fn() };
 const mockLaunchChecklistItem = { deleteMany: vi.fn() };
@@ -55,7 +54,6 @@ const mockDocComment = { deleteMany: vi.fn() };
 const mockDoc = { updateMany: vi.fn(), deleteMany: vi.fn(), findFirst: vi.fn().mockResolvedValue(null), findMany: vi.fn().mockResolvedValue([]) };
 const mockArtifact = { findMany: vi.fn(), updateMany: vi.fn(), deleteMany: vi.fn() };
 const mockArtifactRevision = { findMany: vi.fn(), findFirst: vi.fn(), deleteMany: vi.fn() };
-const mockArtifactLink = { deleteMany: vi.fn() };
 const mockArtifactBlobCleanup = { upsert: vi.fn(), findMany: vi.fn(), update: vi.fn(), delete: vi.fn() };
 const mockScoringModel = { findMany: vi.fn(), deleteMany: vi.fn() };
 const mockScoringModelMetric = { deleteMany: vi.fn() };
@@ -107,7 +105,6 @@ const mockPrisma = {
   objective: mockObjective,
   experiment: mockExperiment,
   task: mockTask,
-  taskLink: mockTaskLink,
   roadmapItem: mockRoadmapItem,
   launchChecklist: mockLaunchChecklist,
   launchChecklistItem: mockLaunchChecklistItem,
@@ -157,7 +154,6 @@ const mockPrisma = {
   workspaceDefaultAgent: { deleteMany: vi.fn() },
   artifact: mockArtifact,
   artifactRevision: mockArtifactRevision,
-  artifactLink: mockArtifactLink,
   artifactBlobCleanup: mockArtifactBlobCleanup,
   scoringModel: mockScoringModel,
   scoringModelMetric: mockScoringModelMetric,
@@ -282,7 +278,6 @@ beforeEach(() => {
     mockExperiment.updateMany,
     mockExperiment.deleteMany,
     mockTask.deleteMany,
-    mockTaskLink.deleteMany,
     mockRoadmapItem.deleteMany,
     mockLaunchChecklist.deleteMany,
     mockLaunchChecklistItem.deleteMany,
@@ -327,7 +322,6 @@ beforeEach(() => {
     mockArtifact.updateMany,
     mockArtifact.deleteMany,
     mockArtifactRevision.deleteMany,
-    mockArtifactLink.deleteMany,
     mockArtifactBlobCleanup.upsert,
     mockArtifactBlobCleanup.update,
     mockArtifactBlobCleanup.delete,
@@ -440,8 +434,7 @@ describe("deleteOrganization", () => {
       where: { workspaceId: "ws-1" },
       data: { assumptionId: null },
     });
-    // The frozen artifact_links rows would Restrict the Artifact delete, so they are removed here (entity_links go with the workspace sweep).
-    expect(mockArtifactLink.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" } });
+    // Artifact links are entity_links rows; they go with the workspace sweep.
     expect(mockArtifact.updateMany).toHaveBeenCalledWith({
       where: { workspaceId: "ws-1" },
       data: { currentRevisionId: null, updatedAt: expect.any(Date) },
@@ -491,8 +484,7 @@ describe("deleteOrganization", () => {
     expect(orderOf(sweptFor("ARTIFACT"))).toBeLessThan(mockArtifact.deleteMany.mock.invocationCallOrder[0]);
     expect(orderOf((call) => JSON.stringify(call[0]).includes('"fromType":"REVIEW_REQUEST"'))).toBeLessThan(mockReviewRequest.deleteMany.mock.invocationCallOrder[0]);
 
-    // ── Tasks / TaskLinks ──
-    expect(mockTaskLink.deleteMany).toHaveBeenCalledWith({ where: { taskId: { in: ["task-1"] } } });
+    // ── Tasks (their links are entity_links rows, swept by endpoint above) ──
     expect(mockTask.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" } });
 
     // ── Launch checklists / templates ──

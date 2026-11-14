@@ -46,7 +46,7 @@ describe("095 registration", () => {
   });
 
   it("is reported by GET /api/admin/migrate before it is POSTed", () => {
-    expect(read("lib/migrations/runner.ts")).toContain("entityLinksOpportunityBackfill: await getEntityLinksOpportunityStatus(client, schema)");
+    expect(read("lib/migrations/runner.ts")).toContain("entityLinksOpportunityBackfill: await statusUnlessLegacyDropped(client, schema, LEGACY_STATUS_SOURCES.opportunity, () => getEntityLinksOpportunityStatus(client, schema))");
   });
 
   it("is pinned in the managed manifest (SQL and hook)", () => {

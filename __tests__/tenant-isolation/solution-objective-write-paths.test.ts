@@ -443,6 +443,9 @@ const KNOWN_RAW_INSERT_SITES: Record<string, number> = {
   // INSERT INTO ${schema}.${WORKSPACE_SEQUENCES_TABLE}: the work item counter (see DYNAMIC_INSERT_ALLOWED); counted so a second one is noticed.
   "lib/migrations/work-item-ids-backfill.ts": 1,
   "__tests__/links/task-link-writes.integration.test.ts": 1, // one objective for the task-link writers, listing workspace_id
+  "__tests__/entity-links-legacy-drop.integration.test.ts": 2, // one objective and one solution for the 116 drop fixtures, each listing workspace_id
+  // INSERT INTO ${ident(schema)}.${ident(source.table)}: the pre-drop backup loader (see DYNAMIC_INSERT_ALLOWED); counted so a second one is noticed.
+  "lib/migrations/legacy-link-backup.ts": 1,
   "__tests__/entity-links-task-backfill.integration.test.ts": 2, // the objective and solution fixtures for the 097 backfill, each listing workspace_id (a null parameter simulates a row with no workspace)
   "__tests__/entity-links-legacy-only.integration.test.ts": 2, // objective and solution fixtures for the read-only legacy-only status, each listing workspace_id
   "__tests__/entity-links-opportunity-backfill.integration.test.ts": 1, // legacy objective fixtures (one with no workspace) for the 095 backfill
@@ -484,6 +487,7 @@ const DYNAMIC_INSERT_ALLOWED: Record<string, Array<{ name: string; reason: strin
   "e2e/functional/specs/kanban-mobile-scroll.spec.ts": [{ name: "${board.table}", reason: "board.table comes from a fixed list: tasks, opportunities, experiments, roadmap_items" }],
   "e2e/functional/specs/markdown-description.spec.ts": [{ name: "compass_dev.${kind}", reason: "kind is typed to 'opportunities' | 'tasks' | 'roadmap_items'" }],
   "scripts/verify-managed-pilot-migrations.ts": [{ name: "${table}", reason: "table comes from a fixed list of synthetic OAuth sentinel tables" }],
+  "lib/migrations/legacy-link-backup.ts": [{ name: "${ident(source.table)}", reason: "source.table comes from the fixed list of the four legacy link tables restored from a backup; never solutions or objectives" }],
 };
 const INTENTIONAL_MARKER = "INTENTIONAL NULL workspaceId";
 

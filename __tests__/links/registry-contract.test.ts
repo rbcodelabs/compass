@@ -155,7 +155,7 @@ describe("delete paths and the workspace cascade cover every type", () => {
     research: read("lib/research-workspace-cleanup.ts"),
     // The Solution and Key Result sweeps live in the typed-link drains the UI, MCP and cascade deletes call.
     typedLinks: read("lib/typed-links.ts"),
-    // A task delete sweeps entity_links (both task link types) and the frozen task_links rows from the one task-link writer.
+    // A task delete sweeps entity_links (both task link types) from the one task-link writer.
     taskLinks: read("lib/task-link-writes.ts"),
     // Artifact links (phase 6): a single Artifact delete, and the workspace Decision teardown for the Review request end.
     artifacts: read("lib/artifacts.ts"),

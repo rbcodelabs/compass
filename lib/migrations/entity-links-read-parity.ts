@@ -3,10 +3,11 @@
  * of each legacy table against the LIVE entity_links rows of the matching link types. "Live" is what the workspace-filtered readers show:
  * both endpoints exist in the link's workspace (a dangling, foreign or NULL-workspace endpoint is absent).
  *
- * AFTER THE CODE CLEANUP (entity_links is the only store; the legacy tables are frozen and no code writes them) this is a historical
- * check, not a gate: links created after the cleanup exist only in entity_links, so `onlyEntityLinks` grows by design, and a link
- * removed after the cleanup leaves its frozen legacy row behind, so `onlyLegacy` can too. It is still the way to prove the backfills
- * landed before the legacy tables are dropped.
+ * AFTER THE CODE CLEANUP (entity_links is the only store; the legacy tables are frozen and no code writes them) links created after the
+ * cleanup exist only in entity_links, so `onlyEntityLinks` grows by design, and a link removed after the cleanup leaves its frozen
+ * legacy row behind, so `onlyLegacy` can too. `onlyLegacy` is the GATE of migration 116 (lib/migrations/entity-links-legacy-drop.ts): it
+ * must be 0 before the legacy tables are dropped. A family whose legacy source no longer exists (116 ran) reports `legacyDropped` and
+ * zeros instead of querying a missing table.
  *
  * Counts and capped ids only (no titles or content). Nothing here writes. Cost: each family reads its legacy table plus the rows of its
  * link types once (entity_links has no index that leads with link_type, so that part is a scan filtered by the workspace index), so
@@ -14,6 +15,7 @@
  */
 import type { PoolClient } from "pg"
 import { usesPlainPostgres } from "@/lib/db-url"
+import { presentLegacyRelations, type LegacyRelation } from "@/lib/migrations/legacy-link-relations"
 
 const ID_CAP = 20
 /** Per-family cap on the parity query; a timeout surfaces as the status's {error} field, never a hung request. */
@@ -62,7 +64,8 @@ type LinkFamily = "SOLUTION_KR" | "OPPORTUNITY" | "ARTIFACT" | "TASK"
 /** The task_links kinds migration 115 moves into TASK_CREATED_FROM (the stored to_type is the same word). */
 const TASK_ORIGIN_TYPES: readonly string[] = ["COMMENT", "AGENT_CONVERSATION"]
 
-type Spec = { name: string; family: LinkFamily; sets: (s: string) => SetSql }
+/** `needs` is the legacy source the spec compares against; once migration 116 dropped it the family has no legacy side and reports zeros. */
+type Spec = { name: string; family: LinkFamily; needs: readonly LegacyRelation[]; sets: (s: string) => SetSql }
 
 const mirror = (s: string, linkType: string, fromType: string, toType: string, origin: string, extra = "") =>
   `SELECT e.from_id AS f, e.to_type AS tt, e.to_id AS t, ${origin} AS o, e.id::text AS id FROM "${s}"."entity_links" AS e
@@ -72,6 +75,7 @@ const SPECS: readonly Spec[] = [
   {
     name: "solutionKeyResult",
     family: "SOLUTION_KR",
+    needs: ["solution_key_result_links"],
     sets: (s) => ({
       legacy: `SELECT l.solution_id AS f, 'KEY_RESULT' AS tt, l.key_result_id AS t, NULL::text AS o, l.id::text AS id FROM "${s}"."solution_key_result_links" AS l
         WHERE ${live(s, "SOLUTION", "l.solution_id", "l.workspace_id")} AND ${live(s, "KEY_RESULT", "l.key_result_id", "l.workspace_id")}`,
@@ -81,6 +85,7 @@ const SPECS: readonly Spec[] = [
   {
     name: "opportunityObjective",
     family: "OPPORTUNITY",
+    needs: ["opportunity_objective_links"],
     sets: (s) => ({
       legacy: `SELECT l.opportunity_id AS f, 'OBJECTIVE' AS tt, l.objective_id AS t, l.origin::text AS o, l.id::text AS id FROM "${s}"."opportunity_objective_links" AS l
         WHERE ${live(s, "OPPORTUNITY", "l.opportunity_id", "l.workspace_id")} AND ${live(s, "OBJECTIVE", "l.objective_id", "l.workspace_id")}`,
@@ -90,6 +95,7 @@ const SPECS: readonly Spec[] = [
   {
     name: "opportunityKeyResultPointer",
     family: "OPPORTUNITY",
+    needs: ["opportunities.linked_key_result_id"],
     sets: (s) => ({
       legacy: `SELECT o.id AS f, 'KEY_RESULT' AS tt, o.linked_key_result_id AS t, NULL::text AS o, o.id::text AS id FROM "${s}"."opportunities" AS o
         WHERE o.linked_key_result_id IS NOT NULL AND ${live(s, "KEY_RESULT", "o.linked_key_result_id", "o.workspace_id")}`,
@@ -99,6 +105,7 @@ const SPECS: readonly Spec[] = [
   {
     name: "artifactSolution",
     family: "ARTIFACT",
+    needs: ["artifact_links"],
     sets: (s) => ({
       legacy: `SELECT l.artifact_id AS f, 'SOLUTION' AS tt, l.linked_id AS t, NULL::text AS o, l.id::text AS id FROM "${s}"."artifact_links" AS l
         WHERE l.linked_type = 'SOLUTION' AND ${live(s, "ARTIFACT", "l.artifact_id", "l.workspace_id")} AND ${live(s, "SOLUTION", "l.linked_id", "l.workspace_id")}`,
@@ -108,6 +115,7 @@ const SPECS: readonly Spec[] = [
   {
     name: "artifactDecision",
     family: "ARTIFACT",
+    needs: ["artifact_links"],
     sets: (s) => ({
       legacy: `SELECT l.artifact_id AS f, 'REVIEW_REQUEST' AS tt, l.linked_id AS t, NULL::text AS o, l.id::text AS id FROM "${s}"."artifact_links" AS l
         WHERE l.linked_type = 'REVIEW_REQUEST' AND ${live(s, "ARTIFACT", "l.artifact_id", "l.workspace_id")} AND ${live(s, "REVIEW_REQUEST", "l.linked_id", "l.workspace_id")}
@@ -119,6 +127,7 @@ const SPECS: readonly Spec[] = [
   {
     name: "taskReferences",
     family: "TASK",
+    needs: ["task_links"],
     // A task link has no workspace of its own: it is live when the task and the target are in the SAME workspace.
     sets: (s) => ({
       legacy: TASK_TARGETS.map((target) => `SELECT l.task_id AS f, '${target.stored}' AS tt, l.linked_id AS t, NULL::text AS o, l.id::text AS id FROM "${s}"."task_links" AS l
@@ -133,6 +142,7 @@ const SPECS: readonly Spec[] = [
     // before task_links is dropped. `onlyEntityLinks` grows by design (links made after the code deploy have no legacy row).
     name: "taskCreatedFrom",
     family: "TASK",
+    needs: ["task_links"],
     sets: (s) => ({
       legacy: TASK_ORIGIN_TYPES.map((type) => `SELECT l.task_id AS f, '${type}' AS tt, l.linked_id AS t, NULL::text AS o, l.id::text AS id FROM "${s}"."task_links" AS l
         WHERE l.linked_type = '${type}' AND EXISTS (SELECT 1 FROM "${s}"."tasks" AS tk WHERE tk.id = l.task_id AND ${live(s, type, "l.linked_id", "tk.workspace_id")})`).join("\n      UNION ALL\n      "),
@@ -154,6 +164,8 @@ export type ReadParityEntry = {
   originDrift: number
   /** Capped ids: legacy row ids for onlyLegacy and originDrift, entity_links ids for onlyEntityLinks. */
   ids: { onlyLegacy: string[]; onlyEntityLinks: string[]; originDrift: string[] }
+  /** True when the legacy source of this family no longer exists (migration 116 ran): there is nothing left to be missing from entity_links. */
+  legacyDropped?: boolean
 }
 
 export type EntityLinksReadParityStatus = {
@@ -162,6 +174,11 @@ export type EntityLinksReadParityStatus = {
   /** Zero across the board means every legacy row has its entity_links twin and nothing was written since (see the header). */
   totalMismatches: number
   families: Record<string, ReadParityEntry & { family: LinkFamily }>
+}
+
+const DROPPED_ENTRY: ReadParityEntry = {
+  legacyLive: 0, mirrorLive: 0, onlyLegacy: 0, onlyEntityLinks: 0, originDrift: 0,
+  ids: { onlyLegacy: [], onlyEntityLinks: [], originDrift: [] }, legacyDropped: true,
 }
 
 async function parityFor(client: PoolClient, schema: string, spec: Spec): Promise<ReadParityEntry> {
@@ -209,8 +226,9 @@ async function parityFor(client: PoolClient, schema: string, spec: Spec): Promis
 export async function getEntityLinksReadParityStatus(client: PoolClient, schema: string): Promise<EntityLinksReadParityStatus> {
   const families: EntityLinksReadParityStatus["families"] = {}
   let totalMismatches = 0
+  const present = await presentLegacyRelations(client, schema)
   for (const spec of SPECS) {
-    const entry = await parityFor(client, schema, spec)
+    const entry = spec.needs.every((relation) => present.has(relation)) ? await parityFor(client, schema, spec) : DROPPED_ENTRY
     totalMismatches += entry.onlyLegacy + entry.onlyEntityLinks + entry.originDrift
     families[spec.name] = { family: spec.family, ...entry }
   }

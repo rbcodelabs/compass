@@ -1,8 +1,7 @@
 /**
  * lib/task-links-read.ts over seeded fake data: the nine association kinds are entity_links TASK_REFERENCES rows (stored spelling
  * REVIEW_REQUEST for DECISION), the two origins (COMMENT, AGENT_CONVERSATION) are entity_links TASK_CREATED_FROM rows. Pins workspace
- * scoping on both endpoints, (createdAt, id) ordering, dangling targets, the legacy DECISION spelling, and the deploy-before-migration
- * fallback: origin links not moved out of task_links yet are still read (and merged by pair with their entity_links twin).
+ * scoping on both endpoints, (createdAt, id) ordering, dangling targets and the legacy DECISION spelling.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { WS_A, WS_B, createTenantFakePrisma } from "../helpers/tenant-fake-prisma";
@@ -20,11 +19,6 @@ let clock = 0;
 const at = () => new Date(10_000 + ++clock);
 
 const ORIGINS = ["COMMENT", "AGENT_CONVERSATION"];
-
-/** A not-yet-moved origin link: a frozen task_links row (what every link made before migration 115 still is). */
-function legacy(taskId: string, linkedType: string, linkedId: string, opts: { createdAt?: Date; id?: string } = {}) {
-  state().taskLinks.push({ id: opts.id ?? `tl-${++clock}`, taskId, linkedType, linkedId, source: "UI", createdById: null, createdAt: opts.createdAt ?? at() });
-}
 
 /** One link as it is stored now: a reference in entity_links TASK_REFERENCES, an origin (COMMENT, AGENT_CONVERSATION) in TASK_CREATED_FROM. */
 function link(taskId: string, linkedType: string, linkedId: string, opts: { createdAt?: Date; id?: string } = {}) {
@@ -172,39 +166,29 @@ describe("getTaskIdsLinkedTo", () => {
   });
 });
 
-describe("deploy before migration 115: origin links still only in task_links", () => {
-  it("getTaskLinks shows an unmoved COMMENT and AGENT_CONVERSATION link next to the moved ones, in creation order", async () => {
-    legacy("task-a", "COMMENT", "cmt-a", { id: "tl-old", createdAt: new Date(1_000) });
-    legacy("task-a", "AGENT_CONVERSATION", "conv-a", { id: "tl-conv", createdAt: new Date(2_000) });
+describe("origin links (TASK_CREATED_FROM)", () => {
+  it("getTaskLinks shows COMMENT and AGENT_CONVERSATION links in creation order", async () => {
+    link("task-a", "COMMENT", "cmt-a", { id: "el-old", createdAt: new Date(1_000) });
+    link("task-a", "AGENT_CONVERSATION", "conv-a", { id: "el-conv", createdAt: new Date(2_000) });
     link("task-a", "COMMENT", "cmt-a2", { id: "el-new", createdAt: new Date(3_000) });
     const map = await getTaskLinks(db(), [{ id: "task-a", workspaceId: WS_A.id }]);
-    expect(map.get("task-a")!.map((l) => [l.id, l.linkedType, l.linkedId])).toEqual([["tl-old", "COMMENT", "cmt-a"], ["tl-conv", "AGENT_CONVERSATION", "conv-a"], ["el-new", "COMMENT", "cmt-a2"]]);
+    expect(map.get("task-a")!.map((l) => [l.id, l.linkedType, l.linkedId])).toEqual([["el-old", "COMMENT", "cmt-a"], ["el-conv", "AGENT_CONVERSATION", "conv-a"], ["el-new", "COMMENT", "cmt-a2"]]);
   });
 
-  it("a pair present in BOTH stores (after the migration copied it) shows once, from entity_links", async () => {
-    legacy("task-a", "COMMENT", "cmt-a", { id: "tl-1", createdAt: new Date(1_000) });
-    link("task-a", "COMMENT", "cmt-a", { id: "tl-1", createdAt: new Date(1_000) });
-    legacy("task-a", "AGENT_CONVERSATION", "conv-a", { id: "tl-2", createdAt: new Date(2_000) });
-    link("task-a", "AGENT_CONVERSATION", "conv-a", { id: "el-2", createdAt: new Date(2_000) });
-    const links = (await getTaskLinks(db(), [{ id: "task-a", workspaceId: WS_A.id }])).get("task-a")!;
-    expect(links.map((l) => [l.id, l.linkedType])).toEqual([["tl-1", "COMMENT"], ["el-2", "AGENT_CONVERSATION"]]);
-  });
-
-  it("does not show an unmoved link of a task read under another workspace", async () => {
-    legacy("task-a", "COMMENT", "cmt-a");
+  it("does not show an origin link of a task read under another workspace", async () => {
+    link("task-a", "COMMENT", "cmt-a");
     expect((await getTaskLinks(db(), [{ id: "task-a", workspaceId: WS_B.id }])).get("task-a")).toEqual([]);
   });
 
-  it("getTaskIdsLinkedTo finds the tasks of an unmoved link and of a moved one, once each", async () => {
-    legacy("task-a", "COMMENT", "cmt-a");
-    legacy("task-a2", "COMMENT", "cmt-a");
+  it("getTaskIdsLinkedTo finds each linked task once", async () => {
+    link("task-a", "COMMENT", "cmt-a");
     link("task-a2", "COMMENT", "cmt-a");
-    legacy("task-b", "COMMENT", "cmt-a");
+    link("task-b", "COMMENT", "cmt-a");
     expect((await getTaskIdsLinkedTo(db(), { workspaceId: WS_A.id, linkedType: "COMMENT", linkedId: "cmt-a" })).sort()).toEqual(["task-a", "task-a2"]);
   });
 
-  it("getOriginTargetIds and getTasksLinkedToOrigin read both stores", async () => {
-    legacy("task-a", "COMMENT", "cmt-a", { createdAt: new Date(1_000) });
+  it("getOriginTargetIds and getTasksLinkedToOrigin read the origin links", async () => {
+    link("task-a", "COMMENT", "cmt-a", { createdAt: new Date(1_000) });
     link("task-a", "COMMENT", "cmt-a2", { createdAt: new Date(2_000) });
     link("task-a", "AGENT_CONVERSATION", "conv-a", { createdAt: new Date(3_000) });
     expect(await getOriginTargetIds(db(), { taskId: "task-a", linkedType: "COMMENT" })).toEqual(["cmt-a", "cmt-a2"]);

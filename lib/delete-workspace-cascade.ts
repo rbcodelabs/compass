@@ -101,14 +101,13 @@ export async function deleteWorkspaceCascade(prisma: AppPrismaClient, workspaceI
   // DSQL has no FK cascades, so clear the full child graph first.
   await deleteWorkspaceDecisionData(prisma, workspaceId);
 
-  // 3. Tasks + TaskLinks (TaskLink.task is Restrict). A parent and its subtasks cannot go in one statement either: the emulated
+  // 3. Tasks + their links. A parent and its subtasks cannot go in one statement either: the emulated
   //    Restrict on Task.parentTaskId refuses it (P2014) even though every row is being deleted, so the tree is detached first.
   const taskIds = await ids(
     prisma.task.findMany({ where: { workspaceId }, select: { id: true } })
   );
   if (taskIds.length > 0) {
-    // Every task link (references and origins) lives in entity_links and goes first, by endpoint. The frozen task_links rows are
-    // removed too: TaskLink.task is Restrict, so they must go before the tasks.
+    // Every task link (references and origins) lives in entity_links and goes first, by endpoint.
     await deleteLinksOfTasks(prisma, taskIds);
   }
   await updateInBatches(prisma.task, { workspaceId, parentTaskId: { not: null } }, { parentTaskId: null });

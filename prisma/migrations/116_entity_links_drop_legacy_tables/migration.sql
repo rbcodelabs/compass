@@ -1,0 +1,16 @@
+-- Migration 116: drop the legacy link tables and the Opportunity -> Key Result pointer column, now that entity_links is the only link store.
+--
+--   DROP TABLE  task_links, artifact_links, opportunity_objective_links, solution_key_result_links
+--   DROP COLUMN opportunities.linked_key_result_id
+--
+-- IRREVERSIBLE and EXPLICIT-ONLY: an untargeted POST never runs it. POST it by name
+-- ({"script":"116_entity_links_drop_legacy_tables"}) only after the owner's go, after the code that no longer names these tables is
+-- deployed, and after the backup in docs/maintenance/entity-links-legacy-drop.md has been taken. A dropped table cannot be restored by
+-- this application.
+--
+-- This file intentionally contains no executable statement. The DDL is issued by the hook
+-- (lib/migrations/entity-links-legacy-drop.ts) AFTER its read-only preflight has passed, so nothing can run before the checks do. The
+-- preflight throws, and drops nothing, unless: migrations 091 and 115 have finished receipts; every live legacy pair is present in
+-- entity_links; entityLinksTaskLinkMove.unmoved is 0; and every consistent AGENT_CONVERSATION task link has its CONVERSATION_CREATED row.
+-- The hook then drops each table and the column with one IF EXISTS statement per transaction (Aurora DSQL allows one DDL per transaction;
+-- plain Postgres is happy with the same), so a half-finished run resumes. Before the receipt it proves all five relations are gone.

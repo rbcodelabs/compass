@@ -8,17 +8,11 @@
  * This module is the only writer of both, so a caller never has to know which type a kind lives in. A link keeps the spelling callers
  * already use (`DECISION`, not the stored `REVIEW_REQUEST`).
  *
- * Link ids: a link's id is its entity_links row id. Migration 115 keeps the task_links id on the row it copies, so the id an open page
- * holds for an origin link survives the move. `getTaskLinkById` also resolves a legacy task_links id (see lib/legacy-link-tables.ts).
- *
- * DEPLOY BEFORE MIGRATION. This code ships before migration 115 runs. Until then every origin link made BEFORE the deploy exists only in
- * task_links, so lookups fall back to the frozen rows (lib/legacy-link-tables.ts) and a delete removes the pair from both stores. New
- * links go to entity_links only. Nothing is ever written to task_links.
+ * Link ids: a link's id is its entity_links row id (migration 115 kept the old task_links id on the rows it copied).
  */
 import type { AppPrismaClient, AppTransactionClient } from "@/lib/db"
 import { TASK_CREATED_FROM_LINK_TYPE, TASK_ORIGIN_TARGET_TYPES, TASK_REFERENCE_TARGET_TYPES } from "@/lib/links/registry"
 import { deleteLinksForEntity, drainLinksToEntities, findLink, findLinkById, linkEntities, unlinkEntities } from "@/lib/links/service"
-import { deleteFrozenTaskLinks, deleteLegacyTaskLinkPair, deleteLegacyTaskLinksTo, findLegacyTaskLinkById, readUnmovedTaskLinks } from "@/lib/legacy-link-tables"
 import { runTypedLinkTransaction, TypedLinkError, type LinkContext } from "@/lib/typed-links"
 
 const TASK_REFERENCES = "TASK_REFERENCES"
@@ -113,10 +107,7 @@ async function findTaskLinkIn(db: Tx, input: { taskId: string; linkedType: strin
   if (!store) return null
   const row = await findLink(db, { linkType: store.linkType, fromId: input.taskId, toId: input.linkedId, workspaceId: input.workspaceId })
   if (row && row.toType === store.toType) return { id: row.id, taskId: input.taskId, linkedType: input.linkedType, linkedId: row.toId, source: row.source, createdById: row.createdById, createdAt: row.createdAt }
-  if (store.linkType !== TASK_CREATED_FROM_LINK_TYPE) return null
-  // Not moved yet (migration 115 has not run, or this link is newer than its copy): the frozen row still stands for the pair.
-  const [legacy] = await readUnmovedTaskLinks(db, { taskIds: [input.taskId], linkedType: input.linkedType, linkedIds: [input.linkedId], workspaceId: input.workspaceId })
-  return legacy ?? null
+  return null
 }
 
 /** What deleting a link needs to know about it. */
@@ -124,12 +115,11 @@ export type ResolvedTaskLink = { id: string; taskId: string; linkedType: string;
 
 /** Resolves a link id from the UI to the link; null when it is gone. */
 export async function getTaskLinkById(db: AppPrismaClient | Tx, linkId: string): Promise<ResolvedTaskLink | null> {
-  const client = db as Tx
-  const link = await findLinkById(client, linkId)
+  const link = await findLinkById(db as Tx, linkId)
   if (link && (link.linkType === TASK_REFERENCES || link.linkType === TASK_CREATED_FROM_LINK_TYPE)) {
     return { id: link.id, taskId: link.fromId, linkedType: taskLinkedTypeOf(link.toType), linkedId: link.toId }
   }
-  return findLegacyTaskLinkById(client, linkId)
+  return null
 }
 
 /** Deletes a link in `tx`. Only the task is verified, so a link whose target has since vanished stays removable. */
@@ -141,8 +131,6 @@ async function deleteInTx(tx: Tx, link: ResolvedTaskLink, workspaceId: string): 
       viaDedicatedWriter: true, viaInternalWriter: store.linkType === TASK_CREATED_FROM_LINK_TYPE,
     })
   }
-  // The frozen row of the same pair goes with it, or the pre-migration fallback would bring the link back.
-  await deleteLegacyTaskLinkPair(tx, { taskId: link.taskId, linkedType: link.linkedType, linkedId: link.linkedId })
 }
 
 /** Deletes a link in its own retried transaction. */
@@ -178,15 +166,13 @@ export async function deleteOriginLinksTo(tx: Tx, input: { linkedType: string; l
   if (!taskOriginTargetType(input.linkedType) || input.linkedIds.length === 0) return 0
   // A deleted comment or conversation keeps no link of any type, so the sweep is by endpoint (only TASK_CREATED_FROM ends at either today).
   const moved = input.linkedType === "COMMENT" ? await deleteLinksForEntity(tx, "COMMENT", input.linkedIds) : await deleteLinksForEntity(tx, "AGENT_CONVERSATION", input.linkedIds)
-  return moved + (await deleteLegacyTaskLinksTo(tx, input))
+  return moved
 }
 
 /**
- * Workspace teardown: every link of the given tasks (entity_links by endpoint, so a drifted workspace_id is covered too, and the frozen
- * task_links rows, which block the task delete through their emulated Restrict). The caller chunks.
+ * Workspace teardown: every link of the given tasks (entity_links by endpoint, so a drifted workspace_id is covered too). The caller chunks.
  */
 export async function deleteLinksOfTasks(db: Tx, taskIds: readonly string[]): Promise<void> {
   if (taskIds.length === 0) return
   await deleteLinksForEntity(db, "TASK", taskIds)
-  await deleteFrozenTaskLinks(db, { taskIds })
 }

@@ -13,7 +13,6 @@ const mocks = vi.hoisted(() => ({
     docCommentAnchor: { create: vi.fn(), deleteMany: vi.fn() }, solutionPlanProposal: { create: vi.fn(), deleteMany: vi.fn() },
     commentElementAnchor: { create: vi.fn(), deleteMany: vi.fn() }, commentExternalAuthor: { create: vi.fn(), deleteMany: vi.fn() },
     entityLink: { findMany: vi.fn(), deleteMany: vi.fn() },
-    taskLink: { deleteMany: vi.fn() },
   },
   db: { $transaction: vi.fn() },
 }))
@@ -29,7 +28,6 @@ describe("legacy/shared Doc comment atomic compatibility", () => {
     mocks.missingSharedUpdate.value = false
     mocks.failSharedCreate.value = false
     mocks.failLegacyDelete.value = false
-    mocks.tx.taskLink.deleteMany.mockResolvedValue({ count: 0 })
     mocks.tx.entityLink.findMany.mockResolvedValue([])
     mocks.tx.entityLink.deleteMany.mockResolvedValue({ count: 0 })
     mocks.tx.doc.findUnique.mockResolvedValue({ id: "doc-1", workspaceId: "workspace-1" })

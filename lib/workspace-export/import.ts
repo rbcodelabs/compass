@@ -35,12 +35,6 @@ const DROP_ON_UNRESOLVED = new Set([
   // Link and polymorphic endpoints: a row whose target is not part of the import would point into another workspace.
   "EntityLink.fromId",
   "EntityLink.toId",
-  "TaskLink.linkedId",
-  "ArtifactLink.linkedId",
-  "OpportunityObjectiveLink.opportunityId",
-  "OpportunityObjectiveLink.objectiveId",
-  "SolutionKeyResultLink.solutionId",
-  "SolutionKeyResultLink.keyResultId",
   "Comment.targetId",
   "CanvasNodePosition.entityId",
   "CustomFieldValue.objectId",
@@ -110,6 +104,14 @@ function chunks<T>(list: T[], size: number): T[][] {
 
 const BUNDLE_DATA_ENTRY = /^data\/([A-Za-z]+)\.\d{4}\.ndjson$/
 
+/**
+ * Models and columns that older bundles carry but no longer exist: the legacy link tables were dropped (their links live in EntityLink,
+ * which every bundle carries) and so was opportunities.linked_key_result_id. Such an entry is skipped with a warning instead of making an
+ * old bundle unimportable; it never reaches the database.
+ */
+export const RETIRED_BUNDLE_MODELS: ReadonlySet<string> = new Set(["TaskLink", "ArtifactLink", "OpportunityObjectiveLink", "SolutionKeyResultLink"])
+export const RETIRED_BUNDLE_COLUMNS: Readonly<Record<string, readonly string[]>> = { Opportunity: ["linkedKeyResultId"] }
+
 /** Models a bundle may contain. Anything else (User, ApiKey, ...) is rejected: a crafted bundle must not write outside the content set. */
 function allowedModels(): Set<string> {
   return new Set(["Workspace", ...exportOrder()])
@@ -130,8 +132,13 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
   }
 
   const allowed = allowedModels()
+  const retiredSeen = new Set<string>()
   for (const name of reader.list("data/")) {
     const m = BUNDLE_DATA_ENTRY.exec(name)
+    if (m && RETIRED_BUNDLE_MODELS.has(m[1])) {
+      retiredSeen.add(m[1])
+      continue
+    }
     if (!m || !allowed.has(m[1]) || !dmmfModels.has(m[1])) {
       throw new WorkspaceImportError(`Bundle contains an unexpected data entry: ${name}`)
     }
@@ -218,12 +225,14 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
   // ---- row transform -----------------------------------------------------------------------------------------------------
   let referencesCleared = 0
   const warnings = [...manifest.warnings, ...slugWarnings]
+  if (retiredSeen.size > 0) warnings.push(`Ignored retired legacy link data in the bundle (${[...retiredSeen].sort().join(", ")}); links are restored from the bundle's EntityLink rows.`)
   const uploaded: { store: "artifact" | "research" | "feedback"; key: string }[] = []
 
   const dropped: Record<string, number> = {}
   /** Returns null when a required reference cannot be resolved (it would point outside the workspace or into another org). */
   const transform = (model: string, raw: Row): Row | null => {
     const row = decodeRow(model, raw)
+    for (const column of RETIRED_BUNDLE_COLUMNS[model] ?? []) delete row[column]
     let unresolvable = false
     for (const [name, value] of Object.entries(row)) {
       const info = fieldInfo(model, name)

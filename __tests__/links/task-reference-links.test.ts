@@ -1,8 +1,7 @@
 /**
  * TaskLink (9 association targets; DECISION is stored as REVIEW_REQUEST, plus the two origins). entity_links is the only store:
  * TASK_REFERENCES for the nine associations and TASK_CREATED_FROM for COMMENT and AGENT_CONVERSATION (moved by migration 115);
- * lib/task-link-writes.ts is the single writer of both and never writes task_links. Until 115 has run it still honours a frozen
- * task_links row of an origin link (find, resolve, delete) so a deploy before the migration loses nothing.
+ * lib/task-link-writes.ts is the single writer of both. The legacy task_links table is gone from the schema.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { WS_A, WS_B, createTenantFakePrisma } from "../helpers/tenant-fake-prisma";
@@ -30,22 +29,14 @@ const tx = () => fake.current!.client as unknown as AppTransactionClient;
 const referenceRows = () => fake.current!.state.entityLinks.filter((row) => row.linkType === KEY);
 const ORIGIN_KEY = "TASK_CREATED_FROM";
 const originRows = () => fake.current!.state.entityLinks.filter((row) => row.linkType === ORIGIN_KEY);
-/** The frozen task_links rows: nothing writes them any more, a test seeds them to stand for a link made before the deploy. */
-const frozenRows = () => fake.current!.state.taskLinks;
 
 /** The tenant fake has no tasks, task links or the other task targets: a tiny in-memory delegate for each, enough for resolveEndpoints and the writers. */
 function addTaskTables(base: ReturnType<typeof createTenantFakePrisma>) {
   const match = (row: Row, where: Row = {}): boolean =>
     Object.entries(where).every(([key, cond]) => {
-      // The `task` relation of a task_links row resolves through its taskId.
-      if (key === "task") {
-        const task = state.tasks.find((candidate) => candidate.id === row.taskId);
-        return Boolean(task) && match(task!, cond as Row);
-      }
       if (cond !== null && typeof cond === "object" && "in" in (cond as Row)) return ((cond as { in: unknown[] }).in).includes(row[key]);
       return row[key] === cond;
     });
-  let n = 0;
   const table = (rows: Row[]) => ({
     findMany: async ({ where, select }: { where?: Row; select?: Row } = {}) => rows.filter((row) => match(row, where)).map((row) => (select ? Object.fromEntries(Object.keys(select).map((key) => [key, row[key]])) : { ...row })),
     findFirst: async ({ where }: { where?: Row } = {}) => rows.find((row) => match(row, where)) ?? null,
@@ -67,26 +58,8 @@ function addTaskTables(base: ReturnType<typeof createTenantFakePrisma>) {
     feedbackItem: [{ id: "fb-a", workspaceId: WS_A.id, title: "A feedback" }],
     reviewRequest: [{ id: "rr-a", workspaceId: WS_A.id, currentRevision: { title: "A decision" } }],
   };
-  // task_links is frozen: it starts empty and only the tests that stand for a pre-deploy link seed it.
-  state.taskLinks = [];
-  const taskLink = {
-    ...table(state.taskLinks),
-    findUnique: async ({ where }: { where: { id: string } }) => state.taskLinks.find((row) => row.id === where.id) ?? null,
-    create: async ({ data }: { data: Row }) => {
-      if (state.taskLinks.some((row) => row.taskId === data.taskId && row.linkedType === data.linkedType && row.linkedId === data.linkedId)) throw Object.assign(new Error("Unique constraint failed"), { code: "P2002" });
-      const row = { id: `tl-${++n}`, source: "UI", createdById: null, createdAt: new Date(), ...data };
-      state.taskLinks.push(row);
-      return { ...row };
-    },
-    deleteMany: async ({ where }: { where?: Row }) => {
-      const doomed = state.taskLinks.filter((row) => match(row, where));
-      for (const row of doomed) state.taskLinks.splice(state.taskLinks.indexOf(row), 1);
-      return { count: doomed.length };
-    },
-  };
   Object.assign(base.client, {
     task: table(state.tasks),
-    taskLink,
     roadmapItem: table(targets.roadmapItem),
     // The fake's own doc delegate only has findUnique; endpoint resolution needs findMany.
     doc: { ...(base.client as unknown as { doc: object }).doc, ...table(targets.doc) },
@@ -176,10 +149,9 @@ describe("TASK_CREATED_FROM registry entry (COMMENT and AGENT_CONVERSATION)", ()
 });
 
 describe("createTaskLink", () => {
-  it.each(Object.keys(TARGET_OF))("%s: one entity_links row with the stored type, none in task_links, the caller's spelling returned", async (linkedType) => {
+  it.each(Object.keys(TARGET_OF))("%s: one entity_links row with the stored type, the caller's spelling returned", async (linkedType) => {
     const linkedId = TARGET_OF[linkedType];
     const link = await createTaskLink(prisma(), { taskId: "task-a", linkedType, linkedId, workspaceId: WS_A.id });
-    expect(frozenRows()).toHaveLength(0);
     expect(referenceRows()).toHaveLength(1);
     expect(referenceRows()[0]).toMatchObject({ workspaceId: WS_A.id, fromType: "TASK", fromId: "task-a", toType: STORED_TYPE[linkedType] ?? linkedType, toId: linkedId, origin: "DIRECT", source: "UI" });
     expect(link).toMatchObject({ id: referenceRows()[0].id, taskId: "task-a", linkedType, linkedId });
@@ -209,10 +181,9 @@ describe("createTaskLink", () => {
     expect(referenceRows()).toHaveLength(0);
   });
 
-  it.each([["COMMENT", "cmt-a"], ["AGENT_CONVERSATION", "conv-a"]])("a %s link is one TASK_CREATED_FROM row in entity_links and nothing in task_links", async (linkedType, linkedId) => {
+  it.each([["COMMENT", "cmt-a"], ["AGENT_CONVERSATION", "conv-a"]])("a %s link is one TASK_CREATED_FROM row in entity_links", async (linkedType, linkedId) => {
     const link = await createTaskLink(prisma(), { taskId: "task-a", linkedType, linkedId, workspaceId: WS_A.id, source: "AGENT", createdById: null });
     expect(referenceRows()).toHaveLength(0);
-    expect(frozenRows()).toHaveLength(0);
     expect(originRows()).toHaveLength(1);
     expect(originRows()[0]).toMatchObject({ workspaceId: WS_A.id, fromType: "TASK", fromId: "task-a", toType: linkedType, toId: linkedId, origin: "DIRECT", source: "AGENT" });
     expect(link).toMatchObject({ id: originRows()[0].id, taskId: "task-a", linkedType, linkedId });
@@ -230,15 +201,8 @@ describe("createTaskLink", () => {
 
   it("an unknown link kind is refused instead of being stored somewhere", async () => {
     await expect(createTaskLink(prisma(), { taskId: "task-a", linkedType: "SQUAD", linkedId: "x", workspaceId: WS_A.id })).rejects.toThrow(/Unsupported task link type/);
-    expect(frozenRows()).toHaveLength(0);
   });
 
-  it("before migration 115, a repeat of a link that only exists in task_links returns that link and writes nothing", async () => {
-    frozenRows().push({ id: "tl-old", taskId: "task-a", linkedType: "COMMENT", linkedId: "cmt-a", source: "UI", createdById: null, createdAt: new Date(1) });
-    const again = await createTaskLink(prisma(), { taskId: "task-a", linkedType: "COMMENT", linkedId: "cmt-a", workspaceId: WS_A.id });
-    expect(again).toMatchObject({ id: "tl-old", linkedType: "COMMENT", linkedId: "cmt-a" });
-    expect(originRows()).toHaveLength(0);
-  });
 });
 
 describe("createTaskLinks (inside the caller's transaction, e.g. a task create)", () => {
@@ -251,7 +215,6 @@ describe("createTaskLinks (inside the caller's transaction, e.g. a task create)"
     expect(links.map((link) => link.linkedType)).toEqual(["COMMENT", "DECISION", "DOC"]);
     expect(referenceRows().map((row) => row.toType).sort()).toEqual(["DOC", "REVIEW_REQUEST"]);
     expect(originRows().map((row) => row.toId)).toEqual(["cmt-a"]);
-    expect(frozenRows()).toHaveLength(0);
   });
 
   it("a refused target throws so the caller's transaction rolls the task back", async () => {
@@ -267,25 +230,22 @@ describe("findTaskLink and getTaskLinkById", () => {
     expect(await findTaskLink(prisma(), { taskId: "task-a", linkedType: "DECISION", linkedId: "rr-a", workspaceId: WS_B.id })).toBeNull();
   });
 
-  it("finds an origin link by pair, and an unmoved one from task_links", async () => {
+  it("finds an origin link by pair", async () => {
     const link = await createTaskLink(prisma(), { taskId: "task-a", linkedType: "AGENT_CONVERSATION", linkedId: "conv-a", workspaceId: WS_A.id });
     expect(await findTaskLink(prisma(), { taskId: "task-a", linkedType: "AGENT_CONVERSATION", linkedId: "conv-a", workspaceId: WS_A.id })).toMatchObject({ id: link.id });
-    frozenRows().push({ id: "tl-old", taskId: "task-a", linkedType: "COMMENT", linkedId: "cmt-a", source: "UI", createdById: null, createdAt: new Date(1) });
-    expect(await findTaskLink(prisma(), { taskId: "task-a", linkedType: "COMMENT", linkedId: "cmt-a", workspaceId: WS_A.id })).toMatchObject({ id: "tl-old" });
-    // The task's workspace still scopes the unmoved row.
-    expect(await findTaskLink(prisma(), { taskId: "task-a", linkedType: "COMMENT", linkedId: "cmt-a", workspaceId: WS_B.id })).toBeNull();
+    // The task's workspace scopes the lookup.
+    expect(await findTaskLink(prisma(), { taskId: "task-a", linkedType: "AGENT_CONVERSATION", linkedId: "conv-a", workspaceId: WS_B.id })).toBeNull();
   });
 
-  it("resolves a link id of either store, and null for a gone one", async () => {
+  it("resolves a link id of either link type, and null for a gone one", async () => {
     const uuid = "6f9619ff-8b86-4011-b42d-00c04fc964ff";
     fake.current!.state.entityLinks.push({ id: uuid, workspaceId: WS_A.id, linkType: KEY, fromType: "TASK", fromId: "task-a", toType: "REVIEW_REQUEST", toId: "rr-a", origin: "DIRECT", source: "UI", createdById: null, createdAt: new Date(1) });
     expect(await getTaskLinkById(prisma(), uuid)).toEqual({ id: uuid, taskId: "task-a", linkedType: "DECISION", linkedId: "rr-a" });
     const originId = "7f9619ff-8b86-4011-b42d-00c04fc964ff";
     fake.current!.state.entityLinks.push({ id: originId, workspaceId: WS_A.id, linkType: ORIGIN_KEY, fromType: "TASK", fromId: "task-a", toType: "COMMENT", toId: "cmt-a", origin: "MIGRATION", source: "UI", createdById: null, createdAt: new Date(1), updatedAt: new Date(1) });
     expect(await getTaskLinkById(prisma(), originId)).toEqual({ id: originId, taskId: "task-a", linkedType: "COMMENT", linkedId: "cmt-a" });
-    // Before 115 the id an open page holds is the task_links id; after it the copy keeps that id.
-    frozenRows().push({ id: "tl-old", taskId: "task-a", linkedType: "AGENT_CONVERSATION", linkedId: "conv-a" });
-    expect(await getTaskLinkById(prisma(), "tl-old")).toMatchObject({ id: "tl-old", taskId: "task-a", linkedType: "AGENT_CONVERSATION", linkedId: "conv-a" });
+    // An id that is not an entity_links link of either type (a stale legacy task_links id) resolves to nothing.
+    expect(await getTaskLinkById(prisma(), "tl-old")).toBeNull();
     expect(await getTaskLinkById(prisma(), "6f9619ff-8b86-4011-b42d-00c04fc964aa")).toBeNull();
   });
 });
@@ -295,16 +255,6 @@ describe("deleteTaskLink", () => {
     const link = await createTaskLink(prisma(), { taskId: "task-a", linkedType: "DECISION", linkedId: "rr-a", workspaceId: WS_A.id });
     await deleteTaskLink(prisma(), { link, workspaceId: WS_A.id });
     expect(referenceRows()).toHaveLength(0);
-  });
-
-  it("a stale pre-cleanup task_links row of a reference kind (the id an open page still holds) goes with its pair", async () => {
-    const link = await createTaskLink(prisma(), { taskId: "task-a", linkedType: "DOC", linkedId: "doc-a", workspaceId: WS_A.id });
-    fake.current!.state.taskLinks.push({ id: "stale-legacy-id", taskId: "task-a", linkedType: "DOC", linkedId: "doc-a" });
-    // The stale id is not an entity_links id; the pair it names is what gets removed.
-    await deleteTaskLink(prisma(), { link: { id: "stale-legacy-id", taskId: "task-a", linkedType: "DOC", linkedId: "doc-a" }, workspaceId: WS_A.id });
-    expect(referenceRows()).toHaveLength(0);
-    expect(frozenRows()).toHaveLength(0);
-    expect(link.id).not.toBe("stale-legacy-id");
   });
 
   it("a target deleted since still unlinks (only the task is verified)", async () => {
@@ -320,20 +270,6 @@ describe("deleteTaskLink", () => {
     await deleteTaskLink(prisma(), { link: comment, workspaceId: WS_A.id });
     expect(originRows()).toHaveLength(0);
     expect(referenceRows()).toHaveLength(1);
-  });
-
-  it("removing an origin link also removes its frozen task_links twin, or the pre-migration fallback would bring it back", async () => {
-    frozenRows().push({ id: "tl-old", taskId: "task-a", linkedType: "COMMENT", linkedId: "cmt-a", source: "UI", createdById: null, createdAt: new Date(1) });
-    const resolved = await getTaskLinkById(prisma(), "tl-old");
-    await deleteTaskLink(prisma(), { link: resolved!, workspaceId: WS_A.id });
-    expect(frozenRows()).toHaveLength(0);
-    expect(await findTaskLink(prisma(), { taskId: "task-a", linkedType: "COMMENT", linkedId: "cmt-a", workspaceId: WS_A.id })).toBeNull();
-    // A moved link (the copy kept the id) removes both rows too.
-    const moved = await createTaskLink(prisma(), { taskId: "task-a", linkedType: "AGENT_CONVERSATION", linkedId: "conv-a", workspaceId: WS_A.id });
-    frozenRows().push({ id: "tl-twin", taskId: "task-a", linkedType: "AGENT_CONVERSATION", linkedId: "conv-a" });
-    await deleteTaskLink(prisma(), { link: moved, workspaceId: WS_A.id });
-    expect(frozenRows()).toHaveLength(0);
-    expect(originRows()).toHaveLength(0);
   });
 
   it("only removes the pair it was asked about and leaves other links of the task", async () => {
@@ -375,15 +311,13 @@ describe("drainTaskLinksTo (objective and key result deletes)", () => {
 });
 
 describe("deleteOriginLinksTo (a deleted comment)", () => {
-  it("removes the TASK_CREATED_FROM rows that end at the deleted comments, and the frozen twins, and nothing else", async () => {
+  it("removes the TASK_CREATED_FROM rows that end at the deleted comments, and nothing else", async () => {
     await createTaskLink(prisma(), { taskId: "task-a", linkedType: "COMMENT", linkedId: "cmt-a", workspaceId: WS_A.id });
     await createTaskLink(prisma(), { taskId: "task-a2", linkedType: "COMMENT", linkedId: "cmt-a2", workspaceId: WS_A.id });
     await createTaskLink(prisma(), { taskId: "task-a", linkedType: "AGENT_CONVERSATION", linkedId: "conv-a", workspaceId: WS_A.id });
     await createTaskLink(prisma(), { taskId: "task-a", linkedType: "DOC", linkedId: "doc-a", workspaceId: WS_A.id });
-    frozenRows().push({ id: "tl-old", taskId: "task-a2", linkedType: "COMMENT", linkedId: "cmt-a" });
-    expect(await deleteOriginLinksTo(tx(), { linkedType: "COMMENT", linkedIds: ["cmt-a"] })).toBe(2);
+    expect(await deleteOriginLinksTo(tx(), { linkedType: "COMMENT", linkedIds: ["cmt-a"] })).toBe(1);
     expect(originRows().map((row) => row.toId).sort()).toEqual(["cmt-a2", "conv-a"]);
-    expect(frozenRows()).toHaveLength(0);
     expect(referenceRows()).toHaveLength(1);
     // Association kinds and an empty list are not its business.
     expect(await deleteOriginLinksTo(tx(), { linkedType: "DOC", linkedIds: ["doc-a"] })).toBe(0);
@@ -393,14 +327,12 @@ describe("deleteOriginLinksTo (a deleted comment)", () => {
 });
 
 describe("deleteLinksOfTasks (workspace teardown)", () => {
-  it("removes every link of the tasks in both link types, plus their frozen task_links rows", async () => {
+  it("removes every link of the tasks in both link types", async () => {
     await createTaskLink(prisma(), { taskId: "task-a", linkedType: "DOC", linkedId: "doc-a", workspaceId: WS_A.id });
     await createTaskLink(prisma(), { taskId: "task-a", linkedType: "COMMENT", linkedId: "cmt-a", workspaceId: WS_A.id });
     await createTaskLink(prisma(), { taskId: "task-a2", linkedType: "COMMENT", linkedId: "cmt-a", workspaceId: WS_A.id });
-    frozenRows().push({ id: "tl-old", taskId: "task-a", linkedType: "AGENT_CONVERSATION", linkedId: "conv-a" }, { id: "tl-other", taskId: "task-b", linkedType: "COMMENT", linkedId: "cmt-b" });
     await deleteLinksOfTasks(tx(), ["task-a"]);
     expect(referenceRows()).toHaveLength(0);
     expect(originRows().map((row) => row.fromId)).toEqual(["task-a2"]);
-    expect(frozenRows().map((row) => row.id)).toEqual(["tl-other"]);
   });
 });
