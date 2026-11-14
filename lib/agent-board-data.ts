@@ -42,7 +42,6 @@ type BoardDb = Pick<AppPrismaClient, "agentConversation" | "agentConversationRev
     Pick<
       AppPrismaClient,
       | "task"
-      | "entityLink"
       | "squad"
       | "agentMessage"
       | "agentChildRun"
@@ -141,7 +140,7 @@ async function loadSubtasksByConversation(
 ): Promise<{ subtasksByConv: Map<string, AgentBoardCardSubtasks>; planTaskIdsByConv: Map<string, Set<string>> }> {
   const subtasksByConv = new Map<string, AgentBoardCardSubtasks>()
   const planTaskIdsByConv = new Map<string, Set<string>>()
-  if (!prisma.task || !prisma.entityLink || conversationIds.length === 0) {
+  if (!prisma.task || conversationIds.length === 0) {
     return { subtasksByConv, planTaskIdsByConv }
   }
 
