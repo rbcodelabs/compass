@@ -73,8 +73,9 @@ Each card (and each conversation row in the **Chat** left sidebar) surfaces rich
 
 - **Summary & live activity**: idle conversations show a short summary of the latest assistant reply; active runs show the current step.
 - **Subtask checklist**: tasks linked to the conversation appear inline with a `completed / total` progress bar and up to five checklist items.
-- **Footer chips**: linked Compass items (`OPP`, `SOL`, `DOC`, `DEC`), a **Squad** badge when assigned, and a clickable `PR #N` chip when a GitHub pull request URL appears in the thread.
-- **Search & Group by**: filter across titles, summaries, live activity, subtasks, PR numbers and linked items, and switch **Group** between **Status** and **Squad** on both the Board and the Chat sidebar.
+- **Footer chips**: linked Compass items (`OPP`, `SOL`, `DOC`, `DEC`), a **Squad** badge when assigned, a clickable `PR #N` chip when a GitHub pull request URL appears in the thread, and a **`◉ N` sub-agent badge** whenever the run delegated work to child sub-agents (clicking it opens the conversation's sub-agent tree popover).
+- **Sub-agent tree & breadcrumb timeline**: inside **Chat**, a sub-agent team pill sits above the composer whenever child agents ran; opening any child agent drills into its tool steps, nested delegations and result summary under sticky `Main conversation › Parent › Child` breadcrumbs while preserving your main chat scroll position.
+- **Search & Group by**: filter across titles, summaries, live activity, subtasks, sub-agent roles, PR numbers and linked items, and switch **Group** between **Status** and **Squad** on both the Board and the Chat sidebar.
 
 Click a card to open that conversation in the chat; it counts as looked at. Whether you have
 looked at a conversation is yours alone: when a conversation is shared, your opening it does not
@@ -242,7 +243,7 @@ changes nothing for users.
 
 The board's per-person "looked at" state needs migration `109_agent_conversation_reviews`.
 Until it is applied the board still works, but every finished conversation shows as **New**.
-Rich card metadata (conversation squad, persisted summary/PR URL, and live run substatus/activity) uses migration `119_agent_board_rich_cards`, falling back gracefully if unapplied.
+Rich card metadata (conversation squad, persisted summary/PR URL, and live run substatus/activity) uses migration `119_agent_board_rich_cards`, and durable child sub-agent hierarchies use migration `120_agent_child_runs`, both falling back gracefully if unapplied.
 
 Two settings matter for a deployed environment:
 

@@ -71,6 +71,13 @@ export type AgentBoardCardLinkedObject = {
   kind: "CREATED" | "MENTIONS"
 }
 
+export type AgentBoardCardChildAgents = {
+  total: number
+  active: number
+  failed: number
+  roles: string[]
+}
+
 /** One conversation as the board sees it. Timestamps are ISO strings so it serializes to the client. */
 export type AgentBoardCard = {
   id: string
@@ -100,6 +107,8 @@ export type AgentBoardCard = {
   linkedObjects?: AgentBoardCardLinkedObject[]
   /** Total linked object count (may exceed `linkedObjects.length`). */
   linkedObjectCount?: number
+  /** Summary of harness-native child sub-agents spawned across this conversation's runs. */
+  childAgents?: AgentBoardCardChildAgents
 }
 
 export type AgentBoardColumn = { id: BoardColumnId; label: string; cards: AgentBoardCard[] }
@@ -210,7 +219,7 @@ function matchesPrUrl(prUrl: string | null | undefined, needle: string): boolean
   return matchesSearchText(badge.label, needle) || matchesSearchText(badge.repo, needle)
 }
 
-/** Case-insensitive client search across card title, summary, live activity, squad, PR URL/badge, subtasks, and linked objects. */
+/** Case-insensitive client search across card title, summary, live activity, squad, PR URL/badge, subtasks, linked objects, and child-agent roles. */
 export function filterBoardCards(cards: readonly AgentBoardCard[], query: string): AgentBoardCard[] {
   const needle = query.trim().toLowerCase()
   if (!needle) return [...cards]
@@ -222,6 +231,7 @@ export function filterBoardCards(cards: readonly AgentBoardCard[], query: string
     if (matchesPrUrl(card.prUrl, needle)) return true
     if (card.subtasks?.items.some((item) => matchesSearchText(item.title, needle))) return true
     if (card.linkedObjects?.some((obj) => matchesSearchText(obj.title, needle) || matchesSearchText(obj.entityType, needle))) return true
+    if (card.childAgents?.roles.some((role) => matchesSearchText(role, needle))) return true
     return false
   })
 }
@@ -250,6 +260,7 @@ export type AgentListConversation = {
   currentActivity?: string | null
   lastHeartbeatAt?: string | null
   subtasks?: AgentBoardCardSubtasks
+  childAgents?: AgentBoardCardChildAgents
 }
 
 export type AgentListGroup = { id: BoardColumnId; label: string; items: (AgentListConversation & { lastActivityAt: string })[] }
@@ -266,6 +277,7 @@ export function filterListConversations<T extends AgentListConversation>(convers
     if (matchesSearchText(c.squad?.name, needle)) return true
     if (matchesPrUrl(c.prUrl, needle)) return true
     if (c.subtasks?.items.some((item) => matchesSearchText(item.title, needle))) return true
+    if (c.childAgents?.roles.some((role) => matchesSearchText(role, needle))) return true
     return false
   })
 }

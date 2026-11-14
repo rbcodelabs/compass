@@ -12,7 +12,7 @@ import { AgentChat } from "@/components/agent/agent-chat"
 import { AgentBoard } from "@/components/agent/agent-board"
 import { cn } from "@/lib/utils"
 
-type ChatProps = Omit<Parameters<typeof AgentChat>[0], "listOpen" | "variant" | "reviewedIds" | "squads">
+type ChatProps = Omit<Parameters<typeof AgentChat>[0], "listOpen" | "variant" | "reviewedIds" | "squads" | "teamOpenRequest">
 
 const ONE_YEAR = 60 * 60 * 24 * 365
 
@@ -57,6 +57,7 @@ export function AgentPageShell({
   const [reviewedIds, setReviewedIds] = useState<ReadonlySet<string>>(() => new Set())
   const [boardSeed, setBoardSeed] = useState(initialBoardCards)
   const [liveCards, setLiveCards] = useState<AgentBoardCard[] | null>(initialBoardCards)
+  const [teamOpenRequest, setTeamOpenRequest] = useState<{ conversationId: string; nonce: number } | null>(null)
   const mergedConversations = useMemo(() => {
     if (!liveCards) return chat.conversations
     return liveCards.map((card) => ({
@@ -73,6 +74,7 @@ export function AgentPageShell({
       currentActivity: card.currentActivity ?? null,
       lastHeartbeatAt: card.lastHeartbeatAt ?? null,
       subtasks: card.subtasks,
+      childAgents: card.childAgents,
     }))
   }, [chat.conversations, liveCards])
   const toggleList = useCallback(() => {
@@ -117,11 +119,14 @@ export function AgentPageShell({
   )
 
   const openFromBoard = useCallback(
-    (conversationId: string) => {
+    (conversationId: string, options?: { openTeam?: boolean }) => {
       // The card is a link (?c=<id>), so navigation is the link's own; this switches the shell to the chat
       // and records the review.
       document.cookie = `${AGENT_VIEW_COOKIE}=chat; path=/; max-age=${ONE_YEAR}`
       setView("chat")
+      if (options?.openTeam) {
+        setTeamOpenRequest((prev) => ({ conversationId, nonce: (prev?.nonce ?? 0) + 1 }))
+      }
       void markReviewed(workspaceId, conversationId)
     },
     [workspaceId]
@@ -185,6 +190,7 @@ export function AgentPageShell({
           listOpen={listOpen}
           reviewedIds={reviewedIds}
           squads={initialSquads}
+          teamOpenRequest={teamOpenRequest}
         />
       </div>
       {view === "board" && (

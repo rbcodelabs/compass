@@ -109,7 +109,7 @@ export function PlanCard({ plan, running, taskHref }: { plan: PlanItem[]; runnin
   )
 }
 
-function SubagentCard({ agent }: { agent: Subagent }) {
+function SubagentCard({ agent, onInspectSubagent }: { agent: Subagent; onInspectSubagent?: (subagentId: string) => void }) {
   // Open while it works so you can watch; the user's own toggle wins afterwards.
   const [override, setOverride] = useState<boolean | null>(null)
   const open = override ?? agent.status === "running"
@@ -145,13 +145,26 @@ function SubagentCard({ agent }: { agent: Subagent }) {
               {agent.summary}
             </p>
           )}
+          {onInspectSubagent && (
+            <div className="mt-2 flex justify-end border-t border-default pt-1.5">
+              <button
+                type="button"
+                data-testid="subagent-card-open-timeline"
+                onClick={() => onInspectSubagent(agent.id)}
+                className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium text-text-secondary hover:bg-surface-inset hover:text-text-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring"
+              >
+                <span>Open timeline</span>
+                <ChevronRight className="size-3" aria-hidden="true" />
+              </button>
+            </div>
+          )}
         </div>
       )}
     </li>
   )
 }
 
-export function AgentActivity({ toolCalls = [], plan = [], subagents = [], running, workspaceId, conversationId = null, basePath }: TurnActivity & { running: boolean; /** Where approval cards look their request up; without it no card is drawn. */ workspaceId?: string; conversationId?: string | null; /** `/org/workspace`, for the card's fallback link. */ basePath?: string }) {
+export function AgentActivity({ toolCalls = [], plan = [], subagents = [], running, workspaceId, conversationId = null, basePath, onInspectSubagent }: TurnActivity & { running: boolean; /** Where approval cards look their request up; without it no card is drawn. */ workspaceId?: string; conversationId?: string | null; /** `/org/workspace`, for the card's fallback link. */ basePath?: string; onInspectSubagent?: (subagentId: string) => void }) {
   if (!hasActivity({ toolCalls, plan, subagents })) return null
   const approvalIds = workspaceId ? approvalRequestIds([...toolCalls, ...subagents.flatMap((agent) => agent.steps)]) : []
   return (
@@ -167,7 +180,7 @@ export function AgentActivity({ toolCalls = [], plan = [], subagents = [], runni
           </h3>
           <ul className="flex flex-col gap-1.5">
             {subagents.map((agent) => (
-              <SubagentCard key={agent.id} agent={agent} />
+              <SubagentCard key={agent.id} agent={agent} onInspectSubagent={onInspectSubagent} />
             ))}
           </ul>
         </section>

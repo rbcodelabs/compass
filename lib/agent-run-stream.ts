@@ -33,6 +33,8 @@ export type PlanItem = { content: string; activeForm: string; status: PlanItemSt
 export type Subagent = {
   /** The id of the Task/Agent tool_use that spawned it; children point back here via parent_tool_use_id. */
   id: string
+  /** When spawned by another subagent, the parent subagent's tool_use id. */
+  parentToolUseId?: string
   description: string
   agentType: string
   status: StepStatus
@@ -145,7 +147,24 @@ export function applyAgentSdkEvent(payload: unknown, state: AgentTurnState): Age
       if (!parentId) text += raw.text
     } else if (raw?.type === "tool_use" && typeof raw.name === "string") {
       const id = String(raw.id ?? steps.length)
-      if (parentId) {
+      if (SUBAGENT_TOOLS.has(raw.name)) {
+        if (!subagents.some((agent) => agent.id === id)) {
+          const input = (raw.input ?? {}) as Record<string, unknown>
+          const description = typeof input.description === "string" && input.description ? input.description : "Subagent"
+          const agentType = typeof input.subagent_type === "string" && input.subagent_type ? input.subagent_type : "general-purpose"
+          subagents = [
+            ...subagents,
+            {
+              id,
+              ...(parentId ? { parentToolUseId: parentId } : {}),
+              description,
+              agentType,
+              status: "running",
+              steps: [],
+            },
+          ]
+        }
+      } else if (parentId) {
         const owner = subagents.find((agent) => agent.id === parentId)
         if (owner && !owner.steps.some((step) => step.id === id)) {
           const step: ToolStep = { id, label: humanizeToolName(raw.name), status: "running", detail: summarizeInput(raw.input) }
@@ -156,13 +175,6 @@ export function applyAgentSdkEvent(payload: unknown, state: AgentTurnState): Age
       } else if (raw.name === PLAN_TOOL) {
         const next = parsePlan(raw.input)
         if (next) plan = next
-      } else if (SUBAGENT_TOOLS.has(raw.name)) {
-        if (!subagents.some((agent) => agent.id === id)) {
-          const input = (raw.input ?? {}) as Record<string, unknown>
-          const description = typeof input.description === "string" && input.description ? input.description : "Subagent"
-          const agentType = typeof input.subagent_type === "string" && input.subagent_type ? input.subagent_type : "general-purpose"
-          subagents = [...subagents, { id, description, agentType, status: "running", steps: [] }]
-        }
       } else if (!steps.some((step) => step.id === id)) {
         // Replay-safe: the same tool_use arriving twice (a re-read of the event log)
         // must not produce two rows in the tool strip.

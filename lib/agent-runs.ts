@@ -41,6 +41,7 @@ import { finishInterviewProcessing, reportPmAgentFailure } from "@/lib/pm-agent-
 import { stopSandboxByName } from "@/lib/agent-sandbox"
 import { AGENT_SANDBOX_IDLE_MS, agentSandboxReuseEnabled, type PreviousRunState } from "@/lib/agent-sandbox-reuse"
 import { deriveConversationSummary, deriveLatestRunActivity, extractLatestPrUrl } from "@/lib/agent-card-derive"
+import { settleStrandedAgentChildRuns, syncAgentChildRunsForBatch } from "@/lib/agent-child-runs"
 
 // ── Budgets and caps ────────────────────────────────────────────────────────
 //
@@ -556,7 +557,7 @@ export async function appendAgentRunEvents({
 }) {
   const { serialized } = validateAgentRunBatch(events)
 
-  return prisma.$transaction(async (tx) => {
+  const txOutcome = await prisma.$transaction(async (tx) => {
     const run = await tx.agentRun.findUnique({ where: { id: runId }, select: AGENT_RUN_AUTH_SELECT })
     if (!run || !agentRunWorkerTokenIsBound({
       rawToken,
@@ -580,7 +581,13 @@ export async function appendAgentRunEvents({
     const fresh = serialized.filter((event) => !seen.has(event.seq))
     const replayedSeqs = serialized.filter((event) => seen.has(event.seq)).map((event) => event.seq)
     if (fresh.length === 0) {
-      return { acceptedSeqs: [] as number[], replayedSeqs, lastSeq: run.lastSeq, status: run.status as AgentRunStatus }
+      return {
+        result: { acceptedSeqs: [] as number[], replayedSeqs, lastSeq: run.lastSeq, status: run.status as AgentRunStatus },
+        fresh,
+        conversationId: run.conversationId,
+        workspaceId: run.workspaceId,
+        redactArgs: false,
+      }
     }
 
     const freshBytes = fresh.reduce((total, event) => total + Buffer.byteLength(event.payloadJson, "utf8"), 0)
@@ -641,12 +648,35 @@ export async function appendAgentRunEvents({
     }
 
     return {
-      acceptedSeqs: fresh.map((event) => event.seq),
-      replayedSeqs,
-      lastSeq: nextLastSeq,
-      status: run.status as AgentRunStatus,
+      result: {
+        acceptedSeqs: fresh.map((event) => event.seq),
+        replayedSeqs,
+        lastSeq: nextLastSeq,
+        status: run.status as AgentRunStatus,
+      },
+      fresh,
+      conversationId: run.conversationId,
+      workspaceId: run.workspaceId,
+      redactArgs: Boolean(run.claimId),
     }
   })
+
+  if (txOutcome.fresh.length > 0) {
+    try {
+      await syncAgentChildRunsForBatch(prisma, {
+        runId,
+        conversationId: txOutcome.conversationId,
+        workspaceId: txOutcome.workspaceId,
+        events: txOutcome.fresh,
+        redactArgs: txOutcome.redactArgs,
+        now,
+      })
+    } catch {
+      /* Child-run projection is derived state; never fail an already-accepted worker batch. */
+    }
+  }
+
+  return txOutcome.result
 }
 
 export async function recordAgentRunHeartbeat({
@@ -789,6 +819,12 @@ export async function finalizeAgentRun({
   if (claimed.count !== 1) {
     const current = await prisma.agentRun.findUnique({ where: { id: runId }, select: { status: true } })
     return { finalized: false as const, status: (current?.status ?? run.status) as AgentRunStatus }
+  }
+
+  try {
+    await settleStrandedAgentChildRuns(prisma, { runId, terminalRunStatus: status, now })
+  } catch {
+    /* Best-effort derived projection cleanup; terminal run status is already claimed. */
   }
 
   // ── Side effects. Each is best-effort and independently guarded: a failure to

@@ -265,6 +265,9 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   // Rich agent board cards: five nullable ADD COLUMN IF NOT EXISTS statements across agent_conversations and agent_runs; no default, backfill, index or FK.
   // Postcondition pinned in REVIEWED_MIGRATION_CODE_SHA256. Digest recorded from the shipped SQL after reading it.
   "119_agent_board_rich_cards": "19cfe2458c83ee662c87834c6a64d31e22a5e7172f73ddaef4f7339fabb53285",
+  // Durable child-agent runs: one additive CREATE TABLE IF NOT EXISTS (agent_child_runs) plus three ASYNC indexes; no existing table altered, no backfill, no FK.
+  // Postcondition pinned in REVIEWED_MIGRATION_CODE_SHA256. Digest recorded from the shipped SQL after reading it.
+  "120_agent_child_runs": "48b46872dca4695083f6eb7ea3c0c17886ac78a8da4a0484ec0bbbf6c55eaf27",
 };
 
 /**
@@ -455,6 +458,10 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
   // The 119 postcondition (five nullable columns across agent_conversations and agent_runs exist and carry expected types); editing it re-reviews the migration.
   "119_agent_board_rich_cards": {
     "lib/migrations/agent-board-rich-cards.ts": "e75d5fb573400513a13cdc1df8269da1060dc5646be60bd76bb894eec098db93",
+  },
+  // The 120 postcondition (all agent_child_runs columns + types + nullability, plus all three indexes valid, ready, and unpredicated); editing it re-reviews the migration.
+  "120_agent_child_runs": {
+    "lib/migrations/agent-child-runs.ts": "811cb7bb53b604cc3183b7bc0dfebd9f6ff800dc06a793909dddaaa2f190f581",
   },
 };
 

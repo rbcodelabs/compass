@@ -66,7 +66,7 @@ export const MODEL_BUCKETS: Readonly<Record<string, ExportBucket>> = Object.from
     `WorkspaceUpdateEvent WorkspaceUpdatesState WorkspaceUpdatesReadState UiSession UiCommand
      Notification PreviewAutomationRun ResearchRequest ResearchBlobCleanup ArtifactBlobCleanup
      DocOperation DocStorageObject ResearchParticipantVoiceEvent ResearchVoiceEvent
-     ResearchVoiceCommand AgentRuntimeConfig AgentRuntimeSnapshot AgentRun AgentRunEvent AgentSession
+     ResearchVoiceCommand AgentRuntimeConfig AgentRuntimeSnapshot AgentRun AgentRunEvent AgentChildRun AgentSession
      AgentWebSearch AgentToolCall AgentAuditLog AgentConversationReview NowGateEvaluation
      NowPolicyApplicationEvidence PortfolioCapacityOperation ReleaseDispatch WorkspaceActivationState
      ArtifactShareEvent`

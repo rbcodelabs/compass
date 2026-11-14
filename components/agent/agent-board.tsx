@@ -108,7 +108,7 @@ type AgentBoardProps = {
   /** Workspace squads for the Group by: Squad mode. */
   squads?: AgentBoardCardSquad[]
   /** Called as a card is clicked, before navigation, so the shell can switch to the chat. */
-  onOpenConversation: (conversationId: string) => void
+  onOpenConversation: (conversationId: string, options?: { openTeam?: boolean }) => void
   /** Optional live-card callback so the sibling Chat sidebar stays in sync when switching views. */
   onCardsChange?: (cards: AgentBoardCard[]) => void
 }
@@ -296,7 +296,9 @@ export function AgentBoard({ workspaceId, basePath, initialCards, squads = [], o
               showSquadBadge
               now={now}
               href={`${basePath}/agent?c=${card.id}`}
+              teamHref={`${basePath}/agent?c=${card.id}&team=1`}
               onOpen={() => onOpenConversation(card.id)}
+              onOpenTeam={() => onOpenConversation(card.id, { openTeam: true })}
             />
           ))
         )}
@@ -326,7 +328,9 @@ export function AgentBoard({ workspaceId, basePath, initialCards, squads = [], o
               showSquadBadge={false}
               now={now}
               href={`${basePath}/agent?c=${card.id}`}
+              teamHref={`${basePath}/agent?c=${card.id}&team=1`}
               onOpen={() => onOpenConversation(card.id)}
+              onOpenTeam={() => onOpenConversation(card.id, { openTeam: true })}
             />
           ))
         )}
@@ -458,14 +462,18 @@ function BoardCard({
   showSquadBadge,
   now,
   href,
+  teamHref,
   onOpen,
+  onOpenTeam,
 }: {
   card: AgentBoardCard
   column: BoardColumnId
   showSquadBadge: boolean
   now: number
   href: string
+  teamHref: string
   onOpen: () => void
+  onOpenTeam: () => void
 }) {
   const label = BOARD_COLUMN_LABELS[column]
   const staleHeartbeat = isRunHeartbeatStale(card, now)
@@ -473,6 +481,7 @@ function BoardCard({
   const subtasks = card.subtasks && card.subtasks.total > 0 ? card.subtasks : null
   const linkedObjects = card.linkedObjects && card.linkedObjects.length > 0 ? card.linkedObjects : null
   const extraLinkedCount = Math.max(0, (card.linkedObjectCount ?? 0) - (linkedObjects?.length ?? 0))
+  const childAgents = card.childAgents && card.childAgents.total > 0 ? card.childAgents : null
 
   const liveLine =
     column === "working"
@@ -480,15 +489,23 @@ function BoardCard({
       : null
   const idleSummary = column !== "working" ? (card.summary ?? null) : null
 
+  const childBadgeLabel = childAgents
+    ? `${childAgents.total} ${childAgents.total === 1 ? "sub-agent" : "sub-agents"}${
+        childAgents.active > 0
+          ? ` (${childAgents.active} working)`
+          : childAgents.failed > 0
+            ? ` (${childAgents.failed} failed)`
+            : ""
+      }`
+    : null
+
   return (
-    <Link
-      href={href}
-      onClick={onOpen}
+    <article
       data-board-card={card.id}
       data-column={column}
       className={cn(
-        "flex items-start gap-2.5 rounded-xl border border-border-default bg-surface-card p-3 shadow-[var(--shadow-card)] transition",
-        "hover:border-border-strong hover:shadow-[var(--shadow-panel)] focus-visible:border-border-focus focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30",
+        "group/card relative flex items-start gap-2.5 rounded-xl border border-border-default bg-surface-card p-3 shadow-[var(--shadow-card)] transition",
+        "hover:border-border-strong hover:shadow-[var(--shadow-panel)] has-[a:focus-visible]:border-border-focus has-[a:focus-visible]:ring-2 has-[a:focus-visible]:ring-ring/30",
         column === "new" && "border-l-[3px] border-l-status-warning",
       )}
     >
@@ -496,9 +513,13 @@ function BoardCard({
       <span className="min-w-0 flex-1">
         {/* Title + optional Squad pill */}
         <span className="flex items-start justify-between gap-2">
-          <span className="line-clamp-2 text-sm font-medium leading-5 text-text-primary">
+          <Link
+            href={href}
+            onClick={onOpen}
+            className="line-clamp-2 text-sm font-medium leading-5 text-text-primary focus-visible:outline-none after:absolute after:inset-0 after:rounded-xl"
+          >
             {card.title || "Untitled chat"}
-          </span>
+          </Link>
           {showSquadBadge && card.squad && (
             <span
               data-testid="board-card-squad-badge"
@@ -635,8 +656,28 @@ function BoardCard({
               </span>
             </>
           )}
+          {childAgents && childBadgeLabel && (
+            <Link
+              href={teamHref}
+              onClick={onOpenTeam}
+              data-testid="board-card-child-agents"
+              aria-label={childBadgeLabel}
+              title={childBadgeLabel}
+              className={cn(
+                "relative z-10 ml-auto inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px] font-medium tabular-nums transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
+                childAgents.active > 0
+                  ? "border-status-info/30 bg-status-info-surface text-status-info hover:border-status-info/60"
+                  : childAgents.failed > 0
+                    ? "border-status-danger/30 bg-status-danger-surface text-status-danger hover:border-status-danger/60"
+                    : "border-border-default bg-surface-inset text-text-secondary hover:border-border-strong hover:text-text-primary",
+              )}
+            >
+              <span aria-hidden="true">◉</span>
+              <span>{childAgents.total}</span>
+            </Link>
+          )}
         </span>
       </span>
-    </Link>
+    </article>
   )
 }
