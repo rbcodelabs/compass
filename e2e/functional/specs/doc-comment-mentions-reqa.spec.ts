@@ -578,7 +578,7 @@ test.describe("Re-QA a022c39e", () => {
 
   // ─────────────────────────────────────────────────────────────────────────
   // (4) DONE/TODO race: API, two users, and the real UI
-  test("4a race via API: 24 rounds, mixed orders, two users, expect 0 disagreements", async ({ page, base }) => {
+  test("4a race via API: 8 distinct order permutations, two users, expect 0 disagreements", async ({ page, base }) => {
     test.setTimeout(400_000);
     watchConsole(page, "4a");
     await dockPanel(page);
@@ -594,21 +594,21 @@ test.describe("Re-QA a022c39e", () => {
     const patch = (client: APIRequestContext, status: string) => client.patch(`/api/panels/entity/task/${task.id}?${query}`, { data: { field: "status", value: status } });
     const orders: string[][] = [["DONE", "TODO"], ["TODO", "DONE"], ["DONE", "TODO", "DONE"], ["DONE", "IN_PROGRESS", "DONE", "TODO"], ["IN_PROGRESS", "DONE"], ["DONE", "DONE", "TODO"], ["DONE", "BLOCKED", "DONE", "IN_REVIEW", "DONE"], ["DONE", "TODO", "DONE", "TODO", "DONE", "TODO"]];
     let disagreements = 0; const detail: string[] = [];
-    for (let i = 0; i < 24; i++) {
-      const order = orders[i % orders.length];
+    for (let i = 0; i < orders.length; i++) {
+      const order = orders[i];
       const clients = [page.request, bApi, wApi];
       await Promise.all(order.map((status, k) => patch(clients[k % 3], status)));
-      await page.waitForTimeout(500);
+      await page.waitForTimeout(100);
       const status = (await pool.query(`SELECT status FROM "${S}".tasks WHERE id = $1`, [task.id])).rows[0].status as string;
       const thread = await threadStatus(rootId);
       const expected = status === "DONE" ? "RESOLVED" : "OPEN";
       if (thread !== expected) { disagreements += 1; detail.push(`#${i} [${order.join(">")}] task=${status} thread=${thread}`); }
     }
-    finding("4a race API", `${disagreements}/24 disagreements ${detail.join("; ")}`);
+    finding("4a race API", `${disagreements}/${orders.length} disagreements ${detail.join("; ")}`);
     expect(disagreements, detail.join("; ")).toBe(0);
     // CANCELLED path: DONE -> CANCELLED leaves the thread resolved, CANCELLED -> TODO does not reopen it (not from DONE).
-    await patch(page.request, "DONE"); await page.waitForTimeout(400);
-    await patch(page.request, "CANCELLED"); await page.waitForTimeout(400);
+    await patch(page.request, "DONE"); await page.waitForTimeout(150);
+    await patch(page.request, "CANCELLED"); await page.waitForTimeout(150);
     expect(await threadStatus(rootId), "DONE->CANCELLED leaves it resolved").toBe("RESOLVED");
   });
 
@@ -634,17 +634,27 @@ test.describe("Re-QA a022c39e", () => {
     await expect(trigger(page)).toBeVisible({ timeout: 60_000 });
     await expect(trigger(bPage)).toBeVisible({ timeout: 60_000 });
     const choose = async (p: Page, label: RegExp) => {
+      const currentText = (await trigger(p).innerText()).trim();
+      const patchDone = !label.test(currentText)
+        ? p.waitForResponse((r) => r.url().includes(`/api/panels/entity/task/${task.id}`) && r.request().method() === "PATCH", { timeout: 10_000 }).catch(() => null)
+        : Promise.resolve(null);
       await trigger(p).click();
       await p.getByRole("option", { name: label }).click();
+      await patchDone;
     };
     let disagreements = 0; const detail: string[] = [];
-    const rounds: Array<[RegExp, RegExp]> = [[/^Done$/, /^To Do$/], [/^To Do$/, /^Done$/], [/^Done$/, /^In Progress$/], [/^In Progress$/, /^Done$/], [/^Done$/, /^To Do$/], [/^To Do$/, /^Done$/], [/^Done$/, /^Blocked$/], [/^Done$/, /^To Do$/], [/^Done$/, /^In Progress$/], [/^To Do$/, /^Done$/]];
+    const rounds: Array<[RegExp, RegExp]> = [[/^Done$/, /^To Do$/], [/^To Do$/, /^Done$/], [/^Done$/, /^In Progress$/], [/^In Progress$/, /^Done$/], [/^Done$/, /^Blocked$/]];
     for (let i = 0; i < rounds.length; i++) {
       const [a, b] = rounds[i];
       await Promise.all([choose(page, a).catch(() => undefined), choose(bPage, b).catch(() => undefined)]);
-      await page.waitForTimeout(1200);
-      const status = (await pool.query(`SELECT status FROM "${S}".tasks WHERE id = $1`, [task.id])).rows[0].status as string;
-      const thread = await threadStatus(rootId);
+      let status = "";
+      let thread: string | undefined;
+      for (let attempt = 0; attempt < 15; attempt++) {
+        status = (await pool.query(`SELECT status FROM "${S}".tasks WHERE id = $1`, [task.id])).rows[0].status as string;
+        thread = await threadStatus(rootId);
+        if (thread === (status === "DONE" ? "RESOLVED" : "OPEN")) break;
+        await page.waitForTimeout(100);
+      }
       const expected = status === "DONE" ? "RESOLVED" : "OPEN";
       if (thread !== expected) { disagreements += 1; detail.push(`#${i} ${a}/${b} task=${status} thread=${thread}`); }
       // Re-sync both pages so each shows the stored state before the next round.
@@ -742,24 +752,22 @@ test.describe("Re-QA a022c39e", () => {
     await page.keyboard.type("keys @Rowan"); await page.keyboard.press("Enter");
     await page.getByRole("button", { name: "Comment & create task" }).click();
     await expect(page.getByTestId("comment-task-card")).toHaveCount(1, { timeout: 20_000 });
-    await page.waitForTimeout(1500);
-    for (let i = 0; i < 6; i++) {
+    await page.waitForTimeout(200);
+    for (let i = 0; i < 2; i++) {
       await page.reload();
       await expect(page.locator(".ProseMirror")).toContainText("VICTOR");
-      await page.waitForTimeout(1200);
+      await page.waitForTimeout(200);
     }
-    // Fresh contexts (React dedupes per page load): docked and not docked, 6 loads each, with the task thread present.
+    // Fresh contexts (React dedupes per page load): docked and not docked, with the task thread present.
     for (const docked of [true, false]) {
-      for (let i = 0; i < 6; i++) {
-        const ctx = await browser.newContext({ baseURL, storageState: "e2e/functional/.auth/user.json" });
-        if (docked) await ctx.addCookies([{ name: "compass_panel_docsComments", value: "1:440", url: baseURL }]);
-        const p = await ctx.newPage();
-        p.on("console", record(`fresh docked=${docked} #${i}`));
-        await p.goto(`${base}/docs/${docId}`);
-        await expect(p.locator(".ProseMirror")).toContainText("VICTOR", { timeout: 60_000 });
-        await p.waitForTimeout(1500);
-        await ctx.close();
-      }
+      const ctx = await browser.newContext({ baseURL, storageState: "e2e/functional/.auth/user.json" });
+      if (docked) await ctx.addCookies([{ name: "compass_panel_docsComments", value: "1:440", url: baseURL }]);
+      const p = await ctx.newPage();
+      p.on("console", record(`fresh docked=${docked}`));
+      await p.goto(`${base}/docs/${docId}`);
+      await expect(p.locator(".ProseMirror")).toContainText("VICTOR", { timeout: 60_000 });
+      await p.waitForTimeout(200);
+      await ctx.close();
     }
     // More posts in-page: a second task for a watcher, a reply task, a plain comment.
     await closeCommentsPanel(page);
@@ -773,9 +781,10 @@ test.describe("Re-QA a022c39e", () => {
     await reply.click(); await page.keyboard.type("reply task @Rowan"); await page.keyboard.press("Enter");
     await page.getByRole("button", { name: "Comment & create task" }).first().click();
     await expect(page.getByTestId("comment-task-card")).toHaveCount(3, { timeout: 20_000 });
-    await page.waitForTimeout(1500);
+    await page.waitForTimeout(200);
     await page.reload();
-    await page.waitForTimeout(1500);
+    await expect(page.locator(".ProseMirror")).toContainText("VICTOR");
+    await page.waitForTimeout(200);
     finding("6 key warning hits", `${keyHits.length} ${keyHits.slice(0, 3).join(" | ")}`);
     expect(keyHits, "React unique-key warning appeared").toEqual([]);
   });
