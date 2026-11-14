@@ -92,6 +92,19 @@ ${e2eEnv ? `export ${e2eEnv}\n` : ""}${e2eServer}corepack pnpm run test:e2e:func
   return { reserve_mb: 8192, timeout_s: 2700, database: true, node: "22", env: ENV, steps, artifacts: ["test-results", "playwright-report"] }
 }
 
+/**
+ * @param {string[]} args
+ * @param {number} index
+ */
+function readFlagValue(args, index) {
+  const flag = args[index]
+  const value = args[index + 1]
+  if (value === undefined || value === "" || value.startsWith("--")) {
+    throw new Error(`Flag ${flag} requires a value`)
+  }
+  return value
+}
+
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
   const args = process.argv.slice(2)
   const specs = []
@@ -101,12 +114,16 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
   let shards
   let e2eEnv = ""
   for (let index = 0; index < args.length; index += 1) {
-    if (args[index] === "--spec") specs.push(args[++index])
-    else if (args[index] === "--out") out = args[++index]
-    else if (args[index] === "--out-prefix") outPrefix = args[++index]
-    else if (args[index] === "--shard") shard = args[++index]
-    else if (args[index] === "--shards") shards = args[++index]
-    else if (args[index] === "--e2e-env") e2eEnv = args[++index]
+    const arg = args[index]
+    if (arg === "--spec") specs.push(readFlagValue(args, index++))
+    else if (arg === "--out") out = readFlagValue(args, index++)
+    else if (arg === "--out-prefix") outPrefix = readFlagValue(args, index++)
+    else if (arg === "--shard") shard = readFlagValue(args, index++)
+    else if (arg === "--shards") shards = readFlagValue(args, index++)
+    else if (arg === "--e2e-env") e2eEnv = readFlagValue(args, index++)
+    else if (arg !== "--unflagged-assert" && arg !== "--control") {
+      throw new Error(`Unknown flag "${arg}"`)
+    }
   }
   const unflaggedAssert = args.includes("--unflagged-assert")
   const control = args.includes("--control")

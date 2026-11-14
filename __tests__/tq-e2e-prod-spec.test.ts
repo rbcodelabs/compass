@@ -117,6 +117,14 @@ describe("buildTqSpec", () => {
       ["--shards", "2", "--out-prefix", prefix, "--shard", "1/2"],
       ["--shards", "2", "--out-prefix", prefix, "--out", path.join(dir, "single.json")],
       ["--shards", "0", "--out-prefix", prefix],
+      ["--spec"],
+      ["--out"],
+      ["--e2e-env"],
+      ["--shard"],
+      ["--shards"],
+      ["--out-prefix"],
+      ["--out", "--control"],
+      ["--spec", "--unflagged-assert"],
     ]) {
       const res = spawnSync(process.execPath, [SCRIPT, ...badArgs], { encoding: "utf8" })
       expect(res.status, `expected failure for ${badArgs.join(" ")}`).not.toBe(0)

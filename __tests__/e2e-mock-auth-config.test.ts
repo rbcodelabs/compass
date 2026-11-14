@@ -67,6 +67,8 @@ describe("e2e mock login is never enabled by deploy configuration", () => {
   test("next.config.ts skips built-in TypeScript checking ONLY for non-Vercel COMPASS_E2E_MOCK_AUTH_BUILD=1 builds", async () => {
     expect((await loadNextConfig({})).typescript?.ignoreBuildErrors).toBe(false)
     expect((await loadNextConfig({ COMPASS_E2E_MOCK_AUTH_BUILD: "" })).typescript?.ignoreBuildErrors).toBe(false)
+    expect((await loadNextConfig({ COMPASS_E2E_MOCK_AUTH_BUILD: "0" })).typescript?.ignoreBuildErrors).toBe(false)
+    expect((await loadNextConfig({ COMPASS_E2E_MOCK_AUTH_BUILD: "true" })).typescript?.ignoreBuildErrors).toBe(false)
     expect((await loadNextConfig({ COMPASS_E2E_MOCK_AUTH_BUILD: "1" })).typescript?.ignoreBuildErrors).toBe(true)
     expect((await loadNextConfig({ COMPASS_E2E_MOCK_AUTH_BUILD: "1", VERCEL: "1" })).typescript?.ignoreBuildErrors).toBe(false)
   })
