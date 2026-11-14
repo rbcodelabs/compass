@@ -130,6 +130,121 @@ describe("listAgentBoardCards", () => {
     expect(cards).toHaveLength(1)
     expect(cards[0].reviewedAt).toBeNull()
   })
+
+  it("falls back cleanly on P2022 when migration 119 columns are not yet applied", async () => {
+    const prisma = fakePrisma()
+    prisma.agentConversation.findMany
+      .mockRejectedValueOnce(Object.assign(new Error("column squad_id does not exist"), { code: "P2022" }))
+      .mockResolvedValueOnce([conversation("pre-119")])
+    const cards = await listAgentBoardCards(prisma, { workspaceId: WS, userId: "me" })
+    expect(cards).toHaveLength(1)
+    expect(cards[0].id).toBe("pre-119")
+    expect(prisma.agentConversation.findMany).toHaveBeenCalledTimes(2)
+    expect(prisma.agentConversation.findMany.mock.calls[1][0].select).not.toHaveProperty("squadId")
+  })
+
+  it("batches squad, fallback summary + PR URL, capped plan subtasks, and non-plan linked objects", async () => {
+    const convId = "11111111-1111-4111-8111-111111111111"
+    const oppId = "22222222-2222-4222-8222-222222222222"
+    const tasks = Array.from({ length: 6 }, (_, i) => ({
+      id: `00000000-0000-4000-8000-00000000000${i + 1}`,
+      title: `Plan step ${i + 1}`,
+      status: i < 2 ? "DONE" : i === 2 ? "IN_PROGRESS" : "TODO",
+    }))
+    const prisma: Any = {
+      ...fakePrisma({
+        conversations: [
+          conversation(convId, {
+            squadId: "sq-1",
+            summary: null,
+            prUrl: null,
+            runs: [
+              {
+                status: "RUNNING",
+                substatus: null,
+                currentActivity: "Updating Tasks",
+                lastHeartbeatAt: new Date("2026-10-05T12:08:50.000Z"),
+                statusChangedAt: new Date("2026-10-05T12:09:00.000Z"),
+              },
+            ],
+          }),
+        ],
+      }),
+      squad: {
+        findMany: vi.fn().mockResolvedValue([{ id: "sq-1", name: "Core", color: "#6366f1" }]),
+      },
+      agentMessage: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            conversationId: convId,
+            content: "## Done\nOpened https://github.com/rbcodelabs/compass/pull/570 for review.",
+          },
+        ]),
+      },
+      entityLink: {
+        findMany: vi.fn().mockImplementation(async (args: Any) => {
+          const lt = args?.where?.linkType
+          if (lt === "TASK_CREATED_FROM") {
+            return tasks.map((t, idx) => ({
+              id: `el-t-${idx}`,
+              linkType: "TASK_CREATED_FROM",
+              fromType: "TASK",
+              fromId: t.id,
+              toType: "AGENT_CONVERSATION",
+              toId: convId,
+              source: "AGENT",
+              createdById: null,
+              createdAt: new Date(1_000 + idx),
+            }))
+          }
+          // Conversation -> Object links: includes plan tasks (which must NOT duplicate as footer chips) + 1 Opportunity
+          return [
+            ...tasks.map((t, idx) => ({
+              id: `el-c-${idx}`,
+              linkType: "CONVERSATION_CREATED",
+              fromId: convId,
+              toType: "TASK",
+              toId: t.id,
+              createdAt: new Date(1_000 + idx),
+            })),
+            {
+              id: "el-opp",
+              linkType: "CONVERSATION_CREATED",
+              fromId: convId,
+              toType: "OPPORTUNITY",
+              toId: oppId,
+              createdAt: new Date(2_000),
+            },
+          ]
+        }),
+      },
+      taskLink: {
+        findMany: vi.fn().mockResolvedValue([]),
+      },
+      task: {
+        findMany: vi.fn().mockResolvedValue(tasks),
+      },
+      opportunity: {
+        findMany: vi.fn().mockResolvedValue([{ id: oppId, title: "Rich Agent Management", seqPrefix: "OPP", seqNumber: 42 }]),
+      },
+    }
+
+    const [rich] = await listAgentBoardCards(prisma, { workspaceId: WS, userId: "me" })
+    expect(rich.squad).toEqual({ id: "sq-1", name: "Core", color: "#6366f1" })
+    expect(rich.currentActivity).toBe("Updating Tasks")
+    expect(rich.lastHeartbeatAt).toBe("2026-10-05T12:08:50.000Z")
+    expect(rich.summary).toBe("Done Opened https://github.com/rbcodelabs/compass/pull/570 for review.")
+    expect(rich.prUrl).toBe("https://github.com/rbcodelabs/compass/pull/570")
+    expect(rich.subtasks?.completed).toBe(2)
+    expect(rich.subtasks?.total).toBe(6)
+    expect(rich.subtasks?.items).toHaveLength(5)
+    expect(rich.subtasks?.items[2].status).toBe("in_progress")
+    // Plan subtasks are filtered out of footer linkedObjects so only the real Opportunity chip remains
+    expect(rich.linkedObjectCount).toBe(1)
+    expect(rich.linkedObjects).toEqual([
+      { entityType: "OPPORTUNITY", entityId: oppId, title: "Rich Agent Management", kind: "CREATED" },
+    ])
+  })
 })
 
 describe("deleteWorkspaceConversationReviews", () => {

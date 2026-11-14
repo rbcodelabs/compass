@@ -42,6 +42,7 @@ import { agentRunCredentialSource, logAgentRunCredentialSource } from "@/lib/age
 import { resolveAgentHandoffContext } from "@/lib/agent-context"
 import { resolveAgentPageContext } from "@/lib/agent-page-context"
 import { resolveConversationAccess } from "@/lib/agent-conversation-access"
+import { deriveConversationSummary, extractLatestPrUrl } from "@/lib/agent-card-derive"
 import { getGoldenSnapshotId } from "@/lib/agent-runtime-config"
 import { resolveRunSnapshot } from "@/lib/agent-sandbox-class"
 import { agentCapReachedBody, checkAgentRunCaps, checkAgentUsageLimit } from "@/lib/agent-limits"
@@ -891,10 +892,29 @@ export async function POST(request: NextRequest) {
           },
           select: { id: true },
         })
-        await prisma.agentConversation.update({
-          where: { id: conversationIdResolved },
-          data: { updatedAt: new Date() },
-        })
+        const nowDone = new Date()
+        const derivedSummary = deriveConversationSummary(assistantText)
+        const derivedPrUrl = extractLatestPrUrl(assistantText)
+        try {
+          await prisma.agentConversation.update({
+            where: { id: conversationIdResolved },
+            data: {
+              updatedAt: nowDone,
+              ...(derivedSummary ? { summary: derivedSummary } : {}),
+              ...(derivedPrUrl ? { prUrl: derivedPrUrl } : {}),
+            },
+            select: { id: true },
+          })
+        } catch (updateErr) {
+          if (typeof updateErr !== "object" || updateErr === null || !("code" in updateErr) || (updateErr as { code?: unknown }).code !== "P2022") {
+            throw updateErr
+          }
+          await prisma.agentConversation.update({
+            where: { id: conversationIdResolved },
+            data: { updatedAt: nowDone },
+            select: { id: true },
+          })
+        }
 
         // Hand the finished transcript to the store BEFORE telling the browser the
         // turn is over, so an immediate follow-up resumes it. Never fatal: the next

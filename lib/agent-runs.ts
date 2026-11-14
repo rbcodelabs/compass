@@ -40,6 +40,7 @@ import { revokeAgentMcpKey } from "@/lib/agent-mcp-key"
 import { finishInterviewProcessing, reportPmAgentFailure } from "@/lib/pm-agent-service"
 import { stopSandboxByName } from "@/lib/agent-sandbox"
 import { AGENT_SANDBOX_IDLE_MS, agentSandboxReuseEnabled, type PreviousRunState } from "@/lib/agent-sandbox-reuse"
+import { deriveConversationSummary, deriveLatestRunActivity, extractLatestPrUrl } from "@/lib/agent-card-derive"
 
 // ── Budgets and caps ────────────────────────────────────────────────────────
 //
@@ -267,6 +268,10 @@ export async function agentRunAttributionAvailable(prisma: Pick<AppPrismaClient,
 /** Test seam: forget the probe result so a suite can exercise both branches. */
 export function resetAgentRunAttributionAvailabilityCache() {
   attributionCache = null
+}
+
+function isMissingColumn(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "code" in error && (error as { code?: unknown }).code === "P2022"
 }
 
 /**
@@ -589,22 +594,32 @@ export async function appendAgentRunEvents({
     })
 
     const nextLastSeq = Math.max(run.lastSeq, ...fresh.map((event) => event.seq))
-    const advanced = await tx.agentRun.updateMany({
-      where: {
-        id: runId,
-        status: run.status,
-        lastSeq: run.lastSeq,
-        eventCount: run.eventCount,
-        payloadBytes: run.payloadBytes,
-      },
-      data: {
-        lastSeq: nextLastSeq,
-        eventCount: run.eventCount + fresh.length,
-        payloadBytes: run.payloadBytes + freshBytes,
-        lastHeartbeatAt: now,
-        updatedAt: now,
-      },
-    })
+    const nextActivity = deriveLatestRunActivity(fresh, { redactArgs: Boolean(run.claimId) })
+    const advanceWhere = {
+      id: runId,
+      status: run.status,
+      lastSeq: run.lastSeq,
+      eventCount: run.eventCount,
+      payloadBytes: run.payloadBytes,
+    }
+    const baseAdvanceData = {
+      lastSeq: nextLastSeq,
+      eventCount: run.eventCount + fresh.length,
+      payloadBytes: run.payloadBytes + freshBytes,
+      lastHeartbeatAt: now,
+      updatedAt: now,
+    }
+    let advanced: { count: number }
+    if (nextActivity) {
+      try {
+        advanced = await tx.agentRun.updateMany({ where: advanceWhere, data: { ...baseAdvanceData, currentActivity: nextActivity } })
+      } catch (error) {
+        if (!isMissingColumn(error)) throw error
+        advanced = await tx.agentRun.updateMany({ where: advanceWhere, data: baseAdvanceData })
+      }
+    } else {
+      advanced = await tx.agentRun.updateMany({ where: advanceWhere, data: baseAdvanceData })
+    }
     if (advanced.count !== 1) {
       throw new AgentRunError("Agent run callback changed concurrently", 409, "CALLBACK_RACE")
     }
@@ -745,24 +760,32 @@ export async function finalizeAgentRun({
     return { finalized: false as const, status: run.status as AgentRunStatus }
   }
 
-  const claimed = await prisma.agentRun.updateMany({
-    where: { id: runId, status: { in: [...NON_TERMINAL_AGENT_RUN_STATUSES] } },
-    data: {
-      status,
-      error: error ?? null,
-      errorCode: errorCode ?? null,
-      // The model recorded when the run started is the one it really used; the constant only covers a run that never recorded one.
-      ...(status === "SUCCEEDED" && !run.model ? { model: AGENT_RUN_MODEL_ID } : {}),
-      inputTokens: usage?.usage?.input_tokens ?? null,
-      outputTokens: usage?.usage?.output_tokens ?? null,
-      numTurns: usage?.numTurns ?? null,
-      costUsd: usage?.totalCostUsd ?? null,
-      durationMs: usage?.durationMs ?? null,
-      finishedAt: now,
-      statusChangedAt: now,
-      updatedAt: now,
-    },
-  })
+  const terminalWhere = { id: runId, status: { in: [...NON_TERMINAL_AGENT_RUN_STATUSES] } }
+  const baseTerminalData = {
+    status,
+    error: error ?? null,
+    errorCode: errorCode ?? null,
+    // The model recorded when the run started is the one it really used; the constant only covers a run that never recorded one.
+    ...(status === "SUCCEEDED" && !run.model ? { model: AGENT_RUN_MODEL_ID } : {}),
+    inputTokens: usage?.usage?.input_tokens ?? null,
+    outputTokens: usage?.usage?.output_tokens ?? null,
+    numTurns: usage?.numTurns ?? null,
+    costUsd: usage?.totalCostUsd ?? null,
+    durationMs: usage?.durationMs ?? null,
+    finishedAt: now,
+    statusChangedAt: now,
+    updatedAt: now,
+  }
+  let claimed: { count: number }
+  try {
+    claimed = await prisma.agentRun.updateMany({
+      where: terminalWhere,
+      data: { ...baseTerminalData, substatus: null, currentActivity: null },
+    })
+  } catch (err) {
+    if (!isMissingColumn(err)) throw err
+    claimed = await prisma.agentRun.updateMany({ where: terminalWhere, data: baseTerminalData })
+  }
   if (claimed.count !== 1) {
     const current = await prisma.agentRun.findUnique({ where: { id: runId }, select: { status: true } })
     return { finalized: false as const, status: (current?.status ?? run.status) as AgentRunStatus }
@@ -795,7 +818,19 @@ export async function finalizeAgentRun({
         packProvenance: run.packProvenance ?? "[]",
       },
     })
-    await prisma.agentConversation.update({ where: { id: run.conversationId }, data: { updatedAt: now } })
+    const derivedSummary = deriveConversationSummary(content)
+    const derivedPrUrl = status === "SUCCEEDED" ? extractLatestPrUrl(content) : null
+    const richConvoData = {
+      updatedAt: now,
+      ...(derivedSummary ? { summary: derivedSummary } : {}),
+      ...(derivedPrUrl ? { prUrl: derivedPrUrl } : {}),
+    }
+    try {
+      await prisma.agentConversation.update({ where: { id: run.conversationId }, data: richConvoData, select: { id: true } })
+    } catch (err) {
+      if (!isMissingColumn(err)) throw err
+      await prisma.agentConversation.update({ where: { id: run.conversationId }, data: { updatedAt: now }, select: { id: true } })
+    }
   } catch {
     /* transcript history is best-effort; cleanup below still has to run */
   }
@@ -818,7 +853,7 @@ export async function finalizeAgentRun({
   if (keepWarm) return { finalized: true as const, status }
   try {
     await effects.stopSandbox(sandboxName)
-    await prisma.agentRun.update({ where: { id: runId }, data: { sandboxStoppedAt: now, updatedAt: now } })
+    await prisma.agentRun.update({ where: { id: runId }, data: { sandboxStoppedAt: now, updatedAt: now }, select: { id: true } })
   } catch {
     /* A sandbox that is already gone, or unreachable, still hits its own
        platform-side `timeoutMs`; leaving sandboxStoppedAt null records that we

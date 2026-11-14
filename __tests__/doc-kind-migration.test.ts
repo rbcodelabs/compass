@@ -30,7 +30,6 @@ describe("runner registration", () => {
     for (const name of ["117_doc_kind", "118_doc_kind_backfill"]) expect([...runner.matchAll(new RegExp(`name:\\s*"${name}"`, "g"))], name).toHaveLength(1)
     expect(names.indexOf("117_doc_kind")).toBeGreaterThan(names.indexOf("115_entity_links_task_link_move"))
     expect(names[names.indexOf("117_doc_kind") + 1]).toBe("118_doc_kind_backfill")
-    expect(names[names.length - 1]).toBe("118_doc_kind_backfill")
   })
 
   it("points each entry at its prisma/migrations folder", () => {

@@ -1,18 +1,18 @@
 "use client"
 
 import Link from "next/link"
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { Columns3, MessageSquare, PanelLeftClose, PanelLeftOpen, Plus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { WorkspacePage, WorkspaceViewSwitcher } from "@/components/patterns"
 import { AGENT_LIST_COOKIE } from "@/lib/agent-list-pref"
 import { AGENT_VIEW_COOKIE, parseAgentView, type AgentView } from "@/lib/agent-view-pref"
-import type { AgentBoardCard } from "@/lib/agent-board"
+import type { AgentBoardCard, AgentBoardCardSquad } from "@/lib/agent-board"
 import { AgentChat } from "@/components/agent/agent-chat"
 import { AgentBoard } from "@/components/agent/agent-board"
 import { cn } from "@/lib/utils"
 
-type ChatProps = Omit<Parameters<typeof AgentChat>[0], "listOpen" | "variant" | "reviewedIds">
+type ChatProps = Omit<Parameters<typeof AgentChat>[0], "listOpen" | "variant" | "reviewedIds" | "squads">
 
 const ONE_YEAR = 60 * 60 * 24 * 365
 
@@ -41,15 +41,40 @@ export function AgentPageShell({
   initialListOpen,
   initialView,
   initialBoardCards,
+  initialSquads,
   basePath,
   ...chat
-}: ChatProps & { initialListOpen: boolean; initialView: AgentView; initialBoardCards: AgentBoardCard[] | null }) {
+}: ChatProps & {
+  initialListOpen: boolean
+  initialView: AgentView
+  initialBoardCards: AgentBoardCard[] | null
+  initialSquads?: AgentBoardCardSquad[]
+}) {
   const [listOpen, setListOpen] = useState(initialListOpen)
   const [view, setView] = useState<AgentView>(initialView)
   // The server-painted cards are only right for the first frame; any later mount of the board starts from a fetch.
   // Chats that passed the dwell this session. The server-rendered list is stale until a reload, so the list reads this.
   const [reviewedIds, setReviewedIds] = useState<ReadonlySet<string>>(() => new Set())
   const [boardSeed, setBoardSeed] = useState(initialBoardCards)
+  const [liveCards, setLiveCards] = useState<AgentBoardCard[] | null>(initialBoardCards)
+  const mergedConversations = useMemo(() => {
+    if (!liveCards) return chat.conversations
+    return liveCards.map((card) => ({
+      id: card.id,
+      title: card.title,
+      messageCount: card.messageCount,
+      runStatus: card.runStatus,
+      lastActivityAt: card.lastActivityAt,
+      reviewedAt: card.reviewedAt,
+      squad: card.squad ?? null,
+      summary: card.summary ?? null,
+      prUrl: card.prUrl ?? null,
+      substatus: card.substatus ?? null,
+      currentActivity: card.currentActivity ?? null,
+      lastHeartbeatAt: card.lastHeartbeatAt ?? null,
+      subtasks: card.subtasks,
+    }))
+  }, [chat.conversations, liveCards])
   const toggleList = useCallback(() => {
     const next = !listOpen
     setListOpen(next)
@@ -137,6 +162,7 @@ export function AgentPageShell({
             variant="outline"
             size="sm"
             className="gap-2"
+            nativeButton={false}
             // Starting a chat from the board means going to the chat; the saved view follows.
             onClick={() => {
               document.cookie = `${AGENT_VIEW_COOKIE}=chat; path=/; max-age=${ONE_YEAR}`
@@ -152,14 +178,23 @@ export function AgentPageShell({
       contentClassName="p-0 sm:p-0 md:p-0"
     >
       <div className={cn("flex min-h-0 flex-1 flex-col", view !== "chat" && "hidden")}>
-        <AgentChat {...chat} basePath={basePath} listOpen={listOpen} reviewedIds={reviewedIds} />
+        <AgentChat
+          {...chat}
+          conversations={mergedConversations}
+          basePath={basePath}
+          listOpen={listOpen}
+          reviewedIds={reviewedIds}
+          squads={initialSquads}
+        />
       </div>
       {view === "board" && (
         <AgentBoard
           workspaceId={workspaceId}
           basePath={basePath}
           initialCards={boardSeed}
+          squads={initialSquads}
           onOpenConversation={openFromBoard}
+          onCardsChange={setLiveCards}
         />
       )}
     </WorkspacePage>

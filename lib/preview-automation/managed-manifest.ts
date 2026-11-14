@@ -261,7 +261,10 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   // Digest recorded from the shipped SQL after reading it.
   "117_doc_kind": "b38d87998e1e318942d22e15ca6a67b24b0a42a90da6da23528ef02737624f4d",
   // Docs library kind backfill: no executable SQL (comments only), EXPLICIT-ONLY. The work is the TypeScript hook and classifier pinned in REVIEWED_MIGRATION_CODE_SHA256.
-  "118_doc_kind_backfill": "cf98889cac84ca6e077b36ae237146dc4b1e77f3b85d00a96e6599b90d15926b"
+  "118_doc_kind_backfill": "cf98889cac84ca6e077b36ae237146dc4b1e77f3b85d00a96e6599b90d15926b",
+  // Rich agent board cards: five nullable ADD COLUMN IF NOT EXISTS statements across agent_conversations and agent_runs; no default, backfill, index or FK.
+  // Postcondition pinned in REVIEWED_MIGRATION_CODE_SHA256. Digest recorded from the shipped SQL after reading it.
+  "119_agent_board_rich_cards": "19cfe2458c83ee662c87834c6a64d31e22a5e7172f73ddaef4f7339fabb53285",
 };
 
 /**
@@ -448,6 +451,10 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
     "lib/doc-kinds.ts": "7bcf6c377962ca7769c941049712015c6401ac8a4835e63c5b57b9b13c97ee71",
     "lib/migrations/doc-kind.ts": "479ad7e54f8b9061dc4c4b67065b77286c3f44dde765520441363cef196295bb",
     "lib/migrations/workspace-id-on-solution-objective.ts": "43295c27b84b319d6cfcada757c7dab6c598c930e237aa642c8d05fa94a3f8c7",
+  },
+  // The 119 postcondition (five nullable columns across agent_conversations and agent_runs exist and carry expected types); editing it re-reviews the migration.
+  "119_agent_board_rich_cards": {
+    "lib/migrations/agent-board-rich-cards.ts": "e75d5fb573400513a13cdc1df8269da1060dc5646be60bd76bb894eec098db93",
   },
 };
 

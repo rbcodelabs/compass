@@ -5,10 +5,16 @@
 import { describe, expect, it } from "vitest"
 
 import {
+  applyAgentBoardPatch,
   BOARD_COLUMN_LABELS,
   bucketizeBoard,
+  bucketizeBoardBySquad,
   classifyBoardCard,
+  diffAgentBoardCards,
+  filterBoardCards,
   formatRelativeTime,
+  isRunHeartbeatStale,
+  STALE_HEARTBEAT_MS,
   type AgentBoardCard,
 } from "@/lib/agent-board"
 
@@ -125,5 +131,84 @@ describe("formatRelativeTime", () => {
 
   it("never shows a negative age for a timestamp slightly in the future (clock skew)", () => {
     expect(formatRelativeTime("2026-10-05T12:10:30.000Z", now)).toBe("just now")
+  })
+})
+
+describe("isRunHeartbeatStale", () => {
+  const now = Date.parse(T2)
+
+  it("flags only RUNNING cards whose heartbeat exceeds STALE_HEARTBEAT_MS", () => {
+    const freshIso = new Date(now - STALE_HEARTBEAT_MS + 1_000).toISOString()
+    const staleIso = new Date(now - STALE_HEARTBEAT_MS - 1_000).toISOString()
+
+    expect(isRunHeartbeatStale(card({ runStatus: "RUNNING", lastHeartbeatAt: freshIso }), now)).toBe(false)
+    expect(isRunHeartbeatStale(card({ runStatus: "RUNNING", lastHeartbeatAt: staleIso }), now)).toBe(true)
+    expect(isRunHeartbeatStale(card({ runStatus: "SUCCEEDED", lastHeartbeatAt: staleIso }), now)).toBe(false)
+    expect(isRunHeartbeatStale(card({ runStatus: "RUNNING", lastHeartbeatAt: null }), now)).toBe(false)
+  })
+})
+
+describe("filterBoardCards and bucketizeBoardBySquad", () => {
+  const squadA = { id: "sq-1", name: "Platform", color: "#3b82f6" }
+  const squadB = { id: "sq-2", name: "Growth", color: "#10b981" }
+
+  const sample: AgentBoardCard[] = [
+    card({
+      id: "c-platform",
+      title: "Migrate links",
+      squad: squadA,
+      currentActivity: "Running vitest suite",
+      subtasks: { completed: 1, total: 2, items: [{ id: "t-1", title: "Audit entity_links", status: "completed" }] },
+    }),
+    card({
+      id: "c-unassigned",
+      title: "Triage portal feedback",
+      summary: "Clustered 14 enterprise SSO requests",
+      prUrl: "https://github.com/rbcodelabs/compass/pull/571",
+      linkedObjects: [{ entityType: "OPPORTUNITY", entityId: "o-1", title: "Enterprise SSO", kind: "CREATED" }],
+    }),
+  ]
+
+  it("matches across title, summary, live activity, squad, PR URL/badge, subtasks, and linked objects", () => {
+    expect(filterBoardCards(sample, "vitest").map((c) => c.id)).toEqual(["c-platform"])
+    expect(filterBoardCards(sample, "entity_links").map((c) => c.id)).toEqual(["c-platform"])
+    expect(filterBoardCards(sample, "platform").map((c) => c.id)).toEqual(["c-platform"])
+    expect(filterBoardCards(sample, "enterprise sso").map((c) => c.id)).toEqual(["c-unassigned"])
+    expect(filterBoardCards(sample, "pull/571").map((c) => c.id)).toEqual(["c-unassigned"])
+    expect(filterBoardCards(sample, "#571").map((c) => c.id)).toEqual(["c-unassigned"])
+    expect(filterBoardCards(sample, "PR #571").map((c) => c.id)).toEqual(["c-unassigned"])
+    expect(filterBoardCards(sample, "   ").map((c) => c.id)).toEqual(["c-platform", "c-unassigned"])
+  })
+
+  it("buckets cards by workspace squads plus No squad sorted newest-activity-first", () => {
+    const cols = bucketizeBoardBySquad(sample, [squadA, squadB])
+    expect(cols.map((c) => [c.id, c.label, c.cards.length])).toEqual([
+      ["sq-1", "Platform", 1],
+      ["sq-2", "Growth", 0],
+      ["unassigned", "No squad", 1],
+    ])
+  })
+})
+
+describe("diffAgentBoardCards and applyAgentBoardPatch", () => {
+  it("emits only changed/removed cards and preserves object identity for untouched cards", () => {
+    const a = card({ id: "a", title: "Alpha" })
+    const b = card({ id: "b", title: "Beta", runStatus: "RUNNING", currentActivity: "Step 1" })
+    const initial = diffAgentBoardCards(new Map(), [a, b])
+    expect(initial.upserts).toHaveLength(2)
+    expect(initial.removedIds).toEqual([])
+
+    const bUpdated = { ...b, currentActivity: "Step 2" }
+    const step2 = diffAgentBoardCards(initial.nextFingerprints, [a, bUpdated])
+    expect(step2.upserts).toEqual([bUpdated])
+    expect(step2.removedIds).toEqual([])
+
+    const reduced = applyAgentBoardPatch([a, b], { upserts: step2.upserts, removedIds: step2.removedIds })
+    expect(reduced[0]).toBe(a) // untouched card keeps exact reference
+    expect(reduced[1]).toBe(bUpdated)
+
+    const removed = diffAgentBoardCards(step2.nextFingerprints, [a])
+    expect(removed.removedIds).toEqual(["b"])
+    expect(applyAgentBoardPatch(reduced, { upserts: [], removedIds: ["b"] })).toEqual([a])
   })
 })

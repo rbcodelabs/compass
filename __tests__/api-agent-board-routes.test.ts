@@ -19,6 +19,7 @@ const mockPrisma = {
 vi.mock("@/lib/db", () => ({ default: () => mockPrisma }))
 
 import { GET as getBoard } from "@/app/api/agent/board/route"
+import { GET as getBoardStream } from "@/app/api/agent/board/stream/route"
 import { POST as postReview } from "@/app/api/agent/conversations/[conversationId]/review/route"
 
 const SESSION = { user: { id: "user-1" } }
@@ -117,5 +118,44 @@ describe("POST /api/agent/conversations/:id/review", () => {
   it("503s while the reviews migration is unapplied", async () => {
     mockPrisma.agentConversationReview.upsert.mockRejectedValue(Object.assign(new Error("no table"), { code: "P2021" }))
     expect((await postReview(...reviewReq(CONVERSATION_ID, { workspaceId: WORKSPACE_ID }))).status).toBe(503)
+  })
+})
+
+describe("GET /api/agent/board/stream", () => {
+  it("401s without a session and 400s without a valid workspaceId", async () => {
+    mockAuth.mockResolvedValueOnce(null)
+    expect((await getBoardStream(new Request(`https://compass.rbcodelabs.com/api/agent/board/stream?workspaceId=${WORKSPACE_ID}`))).status).toBe(401)
+    expect((await getBoardStream(new Request("https://compass.rbcodelabs.com/api/agent/board/stream?workspaceId=bad"))).status).toBe(400)
+  })
+
+  it("emits an initial SSE snapshot frame and terminates cleanly on client abort", async () => {
+    mockPrisma.agentConversation.findMany.mockResolvedValue([
+      {
+        id: CONVERSATION_ID,
+        title: "Streaming thread",
+        updatedAt: new Date("2026-10-05T12:00:00.000Z"),
+        _count: { messages: 1 },
+        runs: [{ status: "RUNNING", currentActivity: "Searching docs", statusChangedAt: new Date("2026-10-05T12:01:00.000Z") }],
+      },
+    ])
+
+    const controller = new AbortController()
+    const response = await getBoardStream(
+      new Request(`https://compass.rbcodelabs.com/api/agent/board/stream?workspaceId=${WORKSPACE_ID}`, {
+        signal: controller.signal,
+      }),
+    )
+    expect(response.status).toBe(200)
+    expect(response.headers.get("Content-Type")).toContain("text/event-stream")
+
+    const reader = response.body!.getReader()
+    const first = await reader.read()
+    const text = new TextDecoder().decode(first.value)
+    expect(text).toContain("event: snapshot")
+    expect(text).toContain("Streaming thread")
+    expect(text).toContain("Searching docs")
+
+    controller.abort()
+    await reader.cancel()
   })
 })

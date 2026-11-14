@@ -4,7 +4,7 @@ import { auth } from "@/auth"
 import getPrisma from "@/lib/db"
 import { AGENT_LIST_COOKIE, parseAgentListOpen } from "@/lib/agent-list-pref"
 import { AGENT_VIEW_COOKIE, resolveInitialAgentView } from "@/lib/agent-view-pref"
-import { listAgentBoardCards } from "@/lib/agent-board-data"
+import { listAgentBoardCards, listWorkspaceBoardSquads } from "@/lib/agent-board-data"
 import { AgentPageShell } from "@/components/agent/agent-page-shell"
 import { listAgentConversations, getAgentConversationMessages } from "@/lib/agent-conversations"
 import { resolveAgentHandoffContext } from "@/lib/agent-context"
@@ -81,7 +81,10 @@ export default async function AgentPage({ params, searchParams }: AgentPageProps
   const initialView = resolveInitialAgentView(cookieStore.get(AGENT_VIEW_COOKIE)?.value, conversationId)
   // A failed board query must not take the whole page (chat included) down: null makes the board fetch for itself.
   // The same query feeds the chat list status groups, so it runs for both views; a failure just means a flat list.
-  const boardCards = await listAgentBoardCards(prisma, { workspaceId: workspace.id, userId }).catch(() => null)
+  const [boardCards, workspaceSquads] = await Promise.all([
+    listAgentBoardCards(prisma, { workspaceId: workspace.id, userId }).catch(() => null),
+    listWorkspaceBoardSquads(prisma, { workspaceId: workspace.id, userId }).catch(() => []),
+  ])
   const initialBoardCards = initialView === "board" ? boardCards : null
   const statusById = new Map((boardCards ?? []).map((card) => [card.id, card]))
 
@@ -95,7 +98,19 @@ export default async function AgentPage({ params, searchParams }: AgentPageProps
           id: c.id,
           title: c.title,
           ...(card
-            ? { messageCount: card.messageCount, runStatus: card.runStatus, lastActivityAt: card.lastActivityAt, reviewedAt: card.reviewedAt }
+            ? {
+                messageCount: card.messageCount,
+                runStatus: card.runStatus,
+                lastActivityAt: card.lastActivityAt,
+                reviewedAt: card.reviewedAt,
+                squad: card.squad,
+                summary: card.summary,
+                prUrl: card.prUrl,
+                substatus: card.substatus,
+                currentActivity: card.currentActivity,
+                lastHeartbeatAt: card.lastHeartbeatAt,
+                subtasks: card.subtasks,
+              }
             : {}),
         }
       })}
@@ -109,6 +124,7 @@ export default async function AgentPage({ params, searchParams }: AgentPageProps
       initialListOpen={listOpen}
       initialView={initialView}
       initialBoardCards={initialBoardCards}
+      initialSquads={workspaceSquads}
     />
   )
 }
