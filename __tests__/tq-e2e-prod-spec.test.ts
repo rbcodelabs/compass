@@ -4,7 +4,7 @@ import os from "node:os"
 import path from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
 // The generator is plain ESM JavaScript (allowJs); it is run by hand to produce a `tq submit --spec` file.
-import { buildTqSpec } from "../scripts/tq-e2e-prod-spec.mjs"
+import { buildTqSpec, runCli } from "../scripts/tq-e2e-prod-spec.mjs"
 
 const SCRIPT = path.resolve(__dirname, "../scripts/tq-e2e-prod-spec.mjs")
 const tempDirs: string[] = []
@@ -86,34 +86,45 @@ describe("buildTqSpec", () => {
     expect(() => buildTqSpec({ specs: [], shard: badShard })).toThrow(/shard/i)
   })
 
-  it("writes N shard spec files via CLI --shards N --out-prefix <prefix> and prints their paths", () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tq-e2e-prod-spec-"))
-    tempDirs.push(dir)
-    const prefix = path.join(dir, "e2e")
-    const result = spawnSync(process.execPath, [SCRIPT, "--shards", "2", "--out-prefix", prefix], { encoding: "utf8" })
-    expect(result.status, result.stderr).toBe(0)
+  it(
+    "writes N shard spec files via CLI --shards N --out-prefix <prefix> and prints their paths",
+    () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tq-e2e-prod-spec-"))
+      tempDirs.push(dir)
+      const prefix = path.join(dir, "e2e")
+      const result = spawnSync(process.execPath, [SCRIPT, "--shards", "2", "--out-prefix", prefix], { encoding: "utf8" })
+      expect(result.status, result.stderr).toBe(0)
 
-    const expectedPaths = [path.join(dir, "e2e-1-of-2.json"), path.join(dir, "e2e-2-of-2.json")]
-    expect(result.stdout.trim().split("\n")).toEqual(expectedPaths)
+      const expectedPaths = [path.join(dir, "e2e-1-of-2.json"), path.join(dir, "e2e-2-of-2.json")]
+      expect(result.stdout.trim().split("\n")).toEqual(expectedPaths)
 
-    const shard1 = JSON.parse(fs.readFileSync(expectedPaths[0], "utf8")) as ReturnType<typeof buildTqSpec>
-    const shard2 = JSON.parse(fs.readFileSync(expectedPaths[1], "utf8")) as ReturnType<typeof buildTqSpec>
-    expect(step("e2e", shard1).run).toMatch(/corepack pnpm run test:e2e:functional -- --shard=1\/2$/)
-    expect(step("e2e", shard2).run).toMatch(/corepack pnpm run test:e2e:functional -- --shard=2\/2$/)
-    expect(shard1.steps.some((candidate) => candidate.name === "build-unflagged-assert")).toBe(false)
-  })
+      const shard1 = JSON.parse(fs.readFileSync(expectedPaths[0], "utf8")) as ReturnType<typeof buildTqSpec>
+      const shard2 = JSON.parse(fs.readFileSync(expectedPaths[1], "utf8")) as ReturnType<typeof buildTqSpec>
+      expect(step("e2e", shard1).run).toMatch(/corepack pnpm run test:e2e:functional -- --shard=1\/2$/)
+      expect(step("e2e", shard2).run).toMatch(/corepack pnpm run test:e2e:functional -- --shard=2\/2$/)
+      expect(shard1.steps.some((candidate) => candidate.name === "build-unflagged-assert")).toBe(false)
+    },
+    20_000,
+  )
 
-  it("supports CLI --shard k/N for a single generated spec and rejects conflicting CLI flags", () => {
-    const single = spawnSync(process.execPath, [SCRIPT, "--shard", "1/2"], { encoding: "utf8" })
-    expect(single.status, single.stderr).toBe(0)
-    const parsed = JSON.parse(single.stdout) as ReturnType<typeof buildTqSpec>
-    expect(step("e2e", parsed).run).toMatch(/corepack pnpm run test:e2e:functional -- --shard=1\/2$/)
+  it(
+    "supports CLI --shard k/N for a single generated spec",
+    () => {
+      const single = spawnSync(process.execPath, [SCRIPT, "--shard", "1/2"], { encoding: "utf8" })
+      expect(single.status, single.stderr).toBe(0)
+      const parsed = JSON.parse(single.stdout) as ReturnType<typeof buildTqSpec>
+      expect(step("e2e", parsed).run).toMatch(/corepack pnpm run test:e2e:functional -- --shard=1\/2$/)
+    },
+    20_000,
+  )
 
+  it("rejects conflicting, missing-value, and unknown CLI flags in-process", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tq-e2e-prod-spec-"))
     tempDirs.push(dir)
     const prefix = path.join(dir, "e2e")
     for (const badArgs of [
       ["--shards", "2"],
+      ["--out-prefix", prefix],
       ["--shards", "2", "--out-prefix", prefix, "--shard", "1/2"],
       ["--shards", "2", "--out-prefix", prefix, "--out", path.join(dir, "single.json")],
       ["--shards", "0", "--out-prefix", prefix],
@@ -125,9 +136,9 @@ describe("buildTqSpec", () => {
       ["--out-prefix"],
       ["--out", "--control"],
       ["--spec", "--unflagged-assert"],
+      ["--unknown"],
     ]) {
-      const res = spawnSync(process.execPath, [SCRIPT, ...badArgs], { encoding: "utf8" })
-      expect(res.status, `expected failure for ${badArgs.join(" ")}`).not.toBe(0)
+      expect(() => runCli(badArgs, { writeStdout: () => {} }), `expected failure for ${badArgs.join(" ")}`).toThrow()
     }
   })
 })

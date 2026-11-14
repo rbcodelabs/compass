@@ -105,8 +105,11 @@ function readFlagValue(args, index) {
   return value
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
-  const args = process.argv.slice(2)
+/**
+ * @param {string[]} args
+ * @param {{ writeStdout?: (chunk: string) => unknown }} [options]
+ */
+export function runCli(args, { writeStdout = (chunk) => process.stdout.write(chunk) } = {}) {
   const specs = []
   let out
   let outPrefix
@@ -139,13 +142,17 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
       const file = `${outPrefix}-${index}-of-${total}.json`
       const spec = buildTqSpec({ specs, unflaggedAssert, control, e2eEnv, shard: `${index}/${total}` })
       fs.writeFileSync(file, JSON.stringify(spec, null, 1))
-      process.stdout.write(`${file}\n`)
+      writeStdout(`${file}\n`)
     }
   } else {
     if (outPrefix !== undefined) throw new Error("--out-prefix requires --shards <N>")
     const spec = buildTqSpec({ specs, unflaggedAssert, control, e2eEnv, shard })
     const json = JSON.stringify(spec, null, 1)
     if (out) fs.writeFileSync(out, json)
-    else process.stdout.write(json + "\n")
+    else writeStdout(json + "\n")
   }
+}
+
+if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
+  runCli(process.argv.slice(2))
 }
