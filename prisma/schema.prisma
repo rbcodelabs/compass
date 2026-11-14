@@ -2898,6 +2898,7 @@ model AgentConversation {
   user      User           @relation(fields: [userId], references: [id])
   messages  AgentMessage[]
   runs      AgentRun[]
+  childRuns AgentChildRun[]
   participants AgentConversationParticipant[]
   reviews      AgentConversationReview[]
 
@@ -3087,6 +3088,7 @@ model AgentRun {
 
   conversation AgentConversation @relation(fields: [conversationId], references: [id])
   events       AgentRunEvent[]
+  childRuns    AgentChildRun[]
 
   @@index([agentId, createdAt], map: "agent_runs_agent_id_created_at_idx")
   @@index([invokedByUserId], map: "agent_runs_invoked_by_user_id_idx")
@@ -3094,6 +3096,41 @@ model AgentRun {
   @@index([status, lastHeartbeatAt], map: "idx_agent_runs_status_heartbeat")
   @@index([workspaceId, userId], map: "idx_agent_runs_workspace_user")
   @@map("agent_runs")
+}
+
+/// Durable projection of harness-native child subagents (`Task` / `Agent` SDK calls) spawned inside
+/// an `AgentRun` (migration 120). Supports nested subagent hierarchies via `parentChildRunId` and
+/// `parentNativeAgentId`, powering the Board `◉ N` badge, Composer sub-agent team popover, and
+/// sticky breadcrumb drill-down timeline across reloads and shared participants.
+/// DSQL: no FKs, no @updatedAt trigger (set explicitly), JSON step timelines serialized as TEXT.
+model AgentChildRun {
+  id                  String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  conversationId      String    @map("conversation_id") @db.Uuid
+  runId               String    @map("run_id") @db.Uuid
+  workspaceId         String    @map("workspace_id") @db.Uuid
+  nativeAgentId       String    @map("native_agent_id") @db.VarChar(191)
+  parentChildRunId    String?   @map("parent_child_run_id") @db.Uuid
+  parentNativeAgentId String?   @map("parent_native_agent_id") @db.VarChar(191)
+  role                String    @db.VarChar(191)
+  description         String    @db.VarChar(500)
+  /// RUNNING | SUCCEEDED | FAILED | INTERRUPTED
+  status              String    @db.VarChar(20)
+  currentActivity     String?   @map("current_activity") @db.VarChar(240)
+  stepCount           Int       @default(0) @map("step_count")
+  stepsJson           String?   @map("steps_json") @db.Text
+  resultSummary       String?   @map("result_summary") @db.Text
+  startedAt           DateTime  @default(now()) @map("started_at")
+  finishedAt          DateTime? @map("finished_at")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @default(now()) @map("updated_at")
+
+  conversation AgentConversation @relation(fields: [conversationId], references: [id])
+  run          AgentRun          @relation(fields: [runId], references: [id])
+
+  @@unique([runId, nativeAgentId], map: "idx_agent_child_runs_run_native")
+  @@index([conversationId, startedAt], map: "idx_agent_child_runs_conversation_started")
+  @@index([workspaceId, conversationId], map: "idx_agent_child_runs_workspace_conversation")
+  @@map("agent_child_runs")
 }
 
 /// Append-only trace of one run: status phases, agent stream messages, the

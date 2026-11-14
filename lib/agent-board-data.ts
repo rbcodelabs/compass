@@ -33,9 +33,10 @@ import {
   type AgentBoardCardSquad,
   type AgentBoardCardSubtasks,
 } from "@/lib/agent-board"
+import { loadChildAgentSummariesByConversation } from "@/lib/agent-child-runs"
 
 type BoardDb = Pick<AppPrismaClient, "agentConversation" | "agentConversationReview"> &
-  Partial<Pick<AppPrismaClient, "task" | "taskLink" | "squad" | "agentMessage">>
+  Partial<Pick<AppPrismaClient, "task" | "taskLink" | "squad" | "agentMessage" | "agentChildRun">>
 
 /** Enough for any realistic workspace; the board is a triage surface, not an archive. */
 const BOARD_LIMIT = 100
@@ -323,7 +324,7 @@ export async function listAgentBoardCards(
     .filter((c) => c._count.messages > 0 && !c.summary)
     .map((c) => c.id)
 
-  const [reviewedAt, subtaskData, squadsById, fallbackExcerpts] = await Promise.all([
+  const [reviewedAt, subtaskData, squadsById, fallbackExcerpts, childAgentsByConv] = await Promise.all([
     (async () => {
       try {
         const reviews = await prisma.agentConversationReview.findMany({
@@ -340,6 +341,7 @@ export async function listAgentBoardCards(
     loadSubtasksByConversation(prisma, workspaceId, conversationIds),
     loadSquadsById(prisma, workspaceId, referencedSquadIds),
     loadFallbackAssistantExcerpts(prisma, missingSummaryIds),
+    loadChildAgentSummariesByConversation(prisma, workspaceId, conversationIds),
   ])
 
   const linkedByConv = await loadLinkedObjectsByConversation(
@@ -361,6 +363,7 @@ export async function listAgentBoardCards(
     const lastHeartbeatAt = run && run.status === "RUNNING" && run.lastHeartbeatAt ? run.lastHeartbeatAt.toISOString() : null
     const subtasks = subtaskData.subtasksByConv.get(c.id)
     const linked = linkedByConv.get(c.id)
+    const childAgents = childAgentsByConv.get(c.id)
 
     return {
       id: c.id,
@@ -377,6 +380,7 @@ export async function listAgentBoardCards(
       ...(lastHeartbeatAt ? { lastHeartbeatAt } : {}),
       ...(subtasks && subtasks.total > 0 ? { subtasks } : {}),
       ...(linked && linked.total > 0 ? { linkedObjects: linked.items, linkedObjectCount: linked.total } : {}),
+      ...(childAgents && childAgents.total > 0 ? { childAgents } : {}),
     }
   })
 }

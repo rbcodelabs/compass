@@ -244,4 +244,27 @@ describe("plan and subagents", () => {
   it("ignores a child of an unknown parent rather than throwing", () => {
     expect(fold([child("ghost", { type: "tool_use", id: "c", name: "x" })]).subagents).toEqual([])
   })
+
+  it("tracks nested Task/Agent spawns inside a subagent with parentToolUseId", () => {
+    const state = fold([
+      sdk({ type: "tool_use", id: "s-parent", name: "Task", input: { description: "Coordinate audit", subagent_type: "Lead" } }),
+      child("s-parent", { type: "tool_use", id: "s-nested", name: "Agent", input: { description: "Check auth routes", subagent_type: "Security" } }),
+      child("s-nested", { type: "tool_use", id: "st-1", name: "mcp__compass__list_docs", input: { query: "oauth" } }),
+      child("s-nested", { type: "tool_result", tool_use_id: "st-1", content: "1 doc" }),
+      child("s-parent", { type: "tool_result", tool_use_id: "s-nested", content: "Auth routes verified" }),
+    ])
+    expect(state.subagents).toHaveLength(2)
+    expect(state.subagents[0]).toMatchObject({ id: "s-parent", agentType: "Lead", status: "running", steps: [] })
+    expect(state.subagents[1]).toMatchObject({
+      id: "s-nested",
+      parentToolUseId: "s-parent",
+      agentType: "Security",
+      description: "Check auth routes",
+      status: "done",
+      summary: "Auth routes verified",
+    })
+    expect(state.subagents[1].steps).toEqual([
+      { id: "st-1", label: "List docs", status: "done", detail: "query: oauth", result: "1 doc" },
+    ])
+  })
 })

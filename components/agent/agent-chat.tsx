@@ -38,6 +38,9 @@ import { ToolsMenu, connectorsEnabledFor } from "@/components/agent/tools-menu"
 import { ModelPicker, modelLabelFor, useModelPick } from "@/components/agent/model-picker"
 import { AgentChip } from "@/components/agent/composer/agent-chip"
 import { ComposerCard } from "@/components/agent/composer/composer-card"
+import { SubagentTeamPill } from "@/components/agent/composer/subagent-team-pill"
+import { ChildAgentTimeline } from "@/components/agent/child-agent-timeline"
+import { mergeChildAgentRuns, type SerializedChildAgentRun } from "@/lib/agent/child-agent-tree"
 import { AGENT_MAX_GOOGLE_RESOURCES_PER_TURN, GOOGLE_DRIVE_CONNECTOR_SLUG, googleResourcesFromPaste, type GoogleResourceRef } from "@/lib/agent-google-resources"
 import { Markdown } from "@/components/agent/markdown"
 import { RecentMentions } from "@/components/agent/recent-mentions"
@@ -122,6 +125,12 @@ type Props = {
   reviewedIds?: ReadonlySet<string>
   /** Optional workspace squads for Squad grouping in the sidebar. */
   squads?: AgentBoardCardSquad[]
+  /** Opens the composer sub-agent team popover on initial deep-link (`?team=1`). */
+  initialTeamOpen?: boolean
+  /** Drills into a specific child sub-agent timeline on initial deep-link (`?child=<id>`). */
+  initialChildRunId?: string
+  /** Shell-dispatched request to open the sub-agent team popover for a conversation (e.g. clicking `◉ N` on a Board card). */
+  teamOpenRequest?: { conversationId: string; nonce: number } | null
   /**
    * Called when turn 1 of a brand-new chat comes back with the id the server
    * assigned to it.
@@ -177,6 +186,9 @@ export function AgentChat({
   listOpen = true,
   reviewedIds,
   squads = [],
+  initialTeamOpen = false,
+  initialChildRunId,
+  teamOpenRequest = null,
   onConversationCreated,
   onStreamingChange,
 }: Props) {
@@ -337,6 +349,7 @@ export function AgentChat({
 
   // Set by a thread switch, read once by the scroll effect below. Declared before both effects so the compiler sees it before the first mutation.
   const jumpToBottom = useRef(false)
+  const transcriptHostRef = useRef<HTMLDivElement>(null)
 
   // Re-seed the transcript whenever the selected conversation changes — with one
   // exception, consumed exactly once.
@@ -375,6 +388,7 @@ export function AgentChat({
   useEffect(() => {
     const instant = jumpToBottom.current
     jumpToBottom.current = false
+    if (transcriptHostRef.current?.classList.contains("hidden")) return
     bottomRef.current?.scrollIntoView({ behavior: instant ? "auto" : "smooth", block: "end" })
   }, [messages, streamingText, liveToolSteps, livePlan, liveSubagents, phase])
 
@@ -467,6 +481,141 @@ export function AgentChat({
     return () => lookup.abort()
   }, [activeConversationId, workspaceId, liveToolSteps.length, isStreaming])
   const linkedObjects = linkedState && linkedState.conversationId === activeConversationId ? linkedState.items : []
+
+  // Durable child sub-agent runs (`Task` / `Agent` SDK spawns) for this conversation, merged with the active turn's
+  // live `Subagent` stream so the composer team pill and drill-down timeline stay live mid-turn and survive reloads.
+  const [durableChildState, setDurableChildState] = useState<{ conversationId: string; runs: SerializedChildAgentRun[] } | null>(null)
+  useEffect(() => {
+    if (!activeConversationId) return
+    const lookup = new AbortController()
+    void (async () => {
+      try {
+        const res = await fetch(
+          `/api/agent/conversations/${activeConversationId}/child-runs?workspaceId=${encodeURIComponent(workspaceId)}`,
+          { signal: lookup.signal },
+        )
+        if (!res.ok) return
+        const body = (await res.json()) as { childRuns?: SerializedChildAgentRun[] }
+        setDurableChildState({
+          conversationId: activeConversationId,
+          runs: Array.isArray(body.childRuns) ? body.childRuns : [],
+        })
+      } catch {
+        // Best-effort: live subagents still populate the current turn.
+      }
+    })()
+    return () => lookup.abort()
+  }, [activeConversationId, workspaceId, liveSubagents.length, liveToolSteps.length, isStreaming])
+
+  const durableChildRuns = useMemo(
+    () => (durableChildState && durableChildState.conversationId === activeConversationId ? durableChildState.runs : []),
+    [durableChildState, activeConversationId],
+  )
+  const childAgentRuns = useMemo(
+    () =>
+      mergeChildAgentRuns({
+        durableRuns: durableChildRuns,
+        conversationId: activeConversationId,
+        activeRunId: activeRun?.id ?? null,
+        liveSubagents,
+      }),
+    [durableChildRuns, activeConversationId, activeRun?.id, liveSubagents],
+  )
+
+  const savedMainScrollRef = useRef<{ conversationId: string | null; scrollTop: number; atBottom: boolean } | null>(null)
+  const [selectedChildState, setSelectedChildState] = useState<{ conversationId: string | null; childRunId: string | null }>(
+    () => ({ conversationId: activeConversationId, childRunId: initialChildRunId ?? null }),
+  )
+  const rawSelectedChildId =
+    selectedChildState.conversationId === activeConversationId ? selectedChildState.childRunId : null
+  const selectedChildRun = useMemo(
+    () =>
+      rawSelectedChildId
+        ? childAgentRuns.find((run) => run.id === rawSelectedChildId || run.nativeAgentId === rawSelectedChildId) ?? null
+        : null,
+    [childAgentRuns, rawSelectedChildId],
+  )
+
+  const selectChildRun = useCallback(
+    (nextId: string | null) => {
+      const resolvedId = nextId
+        ? childAgentRuns.find((run) => run.id === nextId || run.nativeAgentId === nextId)?.id ?? nextId
+        : null
+      if (!rawSelectedChildId && resolvedId) {
+        const viewport = transcriptHostRef.current?.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]')
+        if (viewport) {
+          savedMainScrollRef.current = {
+            conversationId: activeConversationId,
+            scrollTop: viewport.scrollTop,
+            atBottom: viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight <= 24,
+          }
+        }
+      }
+      setSelectedChildState({ conversationId: activeConversationId, childRunId: resolvedId })
+      if (resolvedId === null) {
+        const saved = savedMainScrollRef.current
+        if (saved && saved.conversationId === activeConversationId) {
+          requestAnimationFrame(() => {
+            const viewport = transcriptHostRef.current?.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]')
+            if (!viewport) return
+            viewport.scrollTop = saved.atBottom ? viewport.scrollHeight : saved.scrollTop
+          })
+        }
+      }
+    },
+    [activeConversationId, childAgentRuns, rawSelectedChildId],
+  )
+
+  const [sidebarTeamRequest, setSidebarTeamRequest] = useState<{ conversationId: string; nonce: number } | null>(null)
+  const effectiveTeamRequest = useMemo(() => {
+    if (sidebarTeamRequest && (!teamOpenRequest || sidebarTeamRequest.nonce >= teamOpenRequest.nonce)) {
+      return sidebarTeamRequest
+    }
+    return teamOpenRequest
+  }, [sidebarTeamRequest, teamOpenRequest])
+
+  const [teamPopoverState, setTeamPopoverState] = useState<{
+    conversationId: string | null
+    open: boolean
+    consumedNonce: number
+  }>(() => ({
+    conversationId: activeConversationId,
+    open: Boolean(initialTeamOpen),
+    consumedNonce: 0,
+  }))
+
+  const hasPendingTeamRequest = Boolean(
+    effectiveTeamRequest &&
+      effectiveTeamRequest.conversationId === activeConversationId &&
+      effectiveTeamRequest.nonce > teamPopoverState.consumedNonce,
+  )
+  const teamPopoverOpen =
+    hasPendingTeamRequest || (teamPopoverState.conversationId === activeConversationId && teamPopoverState.open)
+
+  const handleTeamOpenChange = useCallback(
+    (nextOpen: boolean) => {
+      setTeamPopoverState((prev) => ({
+        conversationId: activeConversationId,
+        open: nextOpen,
+        consumedNonce: Math.max(prev.consumedNonce, effectiveTeamRequest?.nonce ?? 0),
+      }))
+    },
+    [activeConversationId, effectiveTeamRequest?.nonce],
+  )
+
+  const openConversationTeam = useCallback(
+    (conversationId: string) => {
+      if (conversationId === activeConversationId) {
+        handleTeamOpenChange(true)
+        return
+      }
+      setSidebarTeamRequest((prev) => ({
+        conversationId,
+        nonce: Math.max(prev?.nonce ?? 0, teamOpenRequest?.nonce ?? 0) + 1,
+      }))
+    },
+    [activeConversationId, handleTeamOpenChange, teamOpenRequest?.nonce],
+  )
 
   // Reattach to a run already in flight for this conversation.
   //
@@ -806,6 +955,7 @@ export function AgentChat({
                           basePath={basePath}
                           archived={false}
                           onToggleArchived={() => void changeArchived(c.id, true)}
+                          onOpenTeam={() => openConversationTeam(c.id)}
                         />
                       ))}
                     </ul>
@@ -833,6 +983,7 @@ export function AgentChat({
                             basePath={basePath}
                             archived={false}
                             onToggleArchived={() => void changeArchived(c.id, true)}
+                            onOpenTeam={() => openConversationTeam(c.id)}
                           />
                         ))}
                       </ul>
@@ -847,6 +998,7 @@ export function AgentChat({
                       basePath={basePath}
                       archived={showArchived}
                       onToggleArchived={() => void changeArchived(c.id, !showArchived)}
+                      onOpenTeam={showArchived ? undefined : () => openConversationTeam(c.id)}
                     />
                   ))}
           </ul>
@@ -879,6 +1031,11 @@ export function AgentChat({
             onAccessLost={handleAccessLost}
           />
         )}
+        <div
+          ref={transcriptHostRef}
+          data-testid="main-conversation-pane"
+          className={cn("flex min-h-0 flex-1 flex-col", selectedChildRun && "hidden")}
+        >
         <ScrollArea className="min-h-0 flex-1">
           {/* `sm:p-6` is dropped in the rail: the breakpoint tracks the
               viewport, not this column, so a 360px rail on a wide screen would
@@ -919,7 +1076,7 @@ export function AgentChat({
             )}
 
             {messages.map((m) => (
-              <MessageRow key={m.id} message={m} userInitials={userInitials} userId={userId} shared={shared} workspaceId={workspaceId} conversationId={activeConversationId} basePath={basePath} />
+              <MessageRow key={m.id} message={m} userInitials={userInitials} userId={userId} shared={shared} workspaceId={workspaceId} conversationId={activeConversationId} basePath={basePath} onInspectSubagent={selectChildRun} />
             ))}
 
             {isStreaming && (
@@ -932,6 +1089,7 @@ export function AgentChat({
                 workspaceId={workspaceId}
                 conversationId={activeConversationId}
                 basePath={basePath}
+                onInspectSubagent={selectChildRun}
               />
             )}
 
@@ -972,6 +1130,16 @@ export function AgentChat({
             <div ref={bottomRef} />
           </div>
         </ScrollArea>
+        </div>
+
+        {selectedChildRun && (
+          <ChildAgentTimeline
+            run={selectedChildRun}
+            allRuns={childAgentRuns}
+            onSelectChildRun={selectChildRun}
+            compact={isRail}
+          />
+        )}
 
         <div className={`border-t border-default bg-surface-panel ${isRail ? "p-3" : "p-3 sm:p-4"}`}>
           {suggestion && !input.trim() && !composerDisabled && !isStreaming && (
@@ -1076,6 +1244,13 @@ export function AgentChat({
                 {modelPick.visible && (
                   <ModelPicker choices={agentChoices} value={modelPick.model} defaultLabel={modelPick.defaultLabel} disabled={composerDisabled} onChange={modelPick.select} />
                 )}
+                <SubagentTeamPill
+                  runs={childAgentRuns}
+                  selectedChildRunId={selectedChildRun?.id ?? null}
+                  onSelectChildRun={selectChildRun}
+                  open={teamPopoverOpen}
+                  onOpenChange={handleTeamOpenChange}
+                />
               </>
             }
           />
@@ -1106,6 +1281,7 @@ function MessageRow({
   workspaceId,
   conversationId,
   basePath,
+  onInspectSubagent,
 }: {
   message: Message
   userInitials: string
@@ -1115,6 +1291,7 @@ function MessageRow({
   workspaceId: string
   conversationId: string | null
   basePath: string
+  onInspectSubagent?: (subagentId: string) => void
 }) {
   const isUser = message.role === "user"
   // A message with no recorded author is this tab's own, not yet reported back.
@@ -1138,7 +1315,7 @@ function MessageRow({
               : "border border-default bg-surface-card text-text-primary"
           }`}
         >
-          {!isUser && <AgentActivity toolCalls={message.toolCalls} plan={message.plan} subagents={message.subagents} running={message.id === "streaming"} workspaceId={workspaceId} conversationId={conversationId} basePath={basePath} />}
+          {!isUser && <AgentActivity toolCalls={message.toolCalls} plan={message.plan} subagents={message.subagents} running={message.id === "streaming"} workspaceId={workspaceId} conversationId={conversationId} basePath={basePath} onInspectSubagent={onInspectSubagent} />}
           {isUser && isApprovalUpdateMessage(message.content) ? (
             <div data-testid="approval-update-message">
               <p className="mb-1 text-xs font-medium text-text-subtle">Approval update (system-generated)</p>
@@ -1170,7 +1347,7 @@ const STATUS_STYLE: Record<BoardColumnId, { label: string; dot: string; badge: s
   ready: { label: "Ready", dot: "bg-status-neutral", badge: "bg-status-neutral-surface text-status-neutral" },
 }
 
-/** One chat-list row. With rich fields it renders a 2-line preview, subtask fraction, PR badge, and relative age. */
+/** One chat-list row. With rich fields it renders a 2-line preview, subtask fraction, PR badge, child-agent count, and relative age. */
 function ConversationRow({
   c,
   status,
@@ -1178,6 +1355,7 @@ function ConversationRow({
   basePath,
   archived,
   onToggleArchived,
+  onOpenTeam,
 }: {
   c: AgentListConversation
   status: BoardColumnId | null
@@ -1185,25 +1363,46 @@ function ConversationRow({
   basePath: string
   archived: boolean
   onToggleArchived: () => void
+  onOpenTeam?: () => void
 }) {
   const archiveLabel = archived ? "Restore chat" : "Archive chat"
   const style = status ? STATUS_STYLE[status] : null
   const preview = status === "working" ? c.currentActivity : c.summary
   const prBadge = formatPrBadge(c.prUrl)
   const subtasks = c.subtasks && c.subtasks.total > 0 ? c.subtasks : null
+  const childAgents = c.childAgents && c.childAgents.total > 0 ? c.childAgents : null
+  const childBadgeLabel = childAgents
+    ? `${childAgents.total} ${childAgents.total === 1 ? "sub-agent" : "sub-agents"}${
+        childAgents.active > 0
+          ? ` (${childAgents.active} working)`
+          : childAgents.failed > 0
+            ? ` (${childAgents.failed} failed)`
+            : ""
+      }`
+    : null
+
   return (
     <li className="group relative">
-      <Link
-        href={basePath + "/agent?c=" + c.id}
-        aria-current={active ? "page" : undefined}
+      <div
         className={cn(
-          "block rounded-lg py-2 pl-3 pr-9 text-sm transition-colors",
-          active ? "bg-surface-interactive text-text-primary" : "text-text-secondary hover:bg-surface-interactive-hover hover:text-text-primary"
+          "rounded-lg py-2 pl-3 pr-9 text-sm transition-colors has-[a:focus-visible]:ring-2 has-[a:focus-visible]:ring-ring/40",
+          active
+            ? "bg-surface-interactive text-text-primary"
+            : "text-text-secondary hover:bg-surface-interactive-hover hover:text-text-primary",
         )}
       >
         <span className="flex items-center gap-2">
           {style && <span aria-hidden="true" className={cn("size-2 shrink-0 rounded-full", style.dot)} />}
-          <span className={cn("min-w-0 flex-1 truncate", status === "new" && "font-semibold")}>{c.title || "Untitled chat"}</span>
+          <Link
+            href={basePath + "/agent?c=" + c.id}
+            aria-current={active ? "page" : undefined}
+            className={cn(
+              "min-w-0 flex-1 truncate focus-visible:outline-none after:absolute after:inset-0 after:rounded-lg",
+              status === "new" && "font-semibold",
+            )}
+          >
+            {c.title || "Untitled chat"}
+          </Link>
         </span>
         {preview && (
           <span className="mt-0.5 block truncate pl-4 text-xs text-text-subtle">
@@ -1224,14 +1423,48 @@ function ConversationRow({
                 #{prBadge.number}
               </span>
             )}
+            {childAgents && childBadgeLabel && (
+              onOpenTeam ? (
+                <Link
+                  href={`${basePath}/agent?c=${c.id}&team=1`}
+                  onClick={(e) => {
+                    if (active) e.preventDefault()
+                    onOpenTeam()
+                  }}
+                  data-testid="chat-row-child-agents"
+                  aria-label={childBadgeLabel}
+                  title={childBadgeLabel}
+                  className={cn(
+                    "relative z-10 inline-flex items-center gap-0.5 rounded border px-1.5 py-0.5 text-[11px] font-medium tabular-nums transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
+                    childAgents.active > 0
+                      ? "border-status-info/30 bg-status-info-surface text-status-info"
+                      : childAgents.failed > 0
+                        ? "border-status-danger/30 bg-status-danger-surface text-status-danger"
+                        : "border-border-default bg-surface-card text-text-subtle hover:text-text-primary",
+                  )}
+                >
+                  <span aria-hidden="true">◉</span>
+                  <span>{childAgents.total}</span>
+                </Link>
+              ) : (
+                <span
+                  data-testid="chat-row-child-agents"
+                  aria-label={childBadgeLabel}
+                  className="inline-flex items-center gap-0.5 rounded bg-surface-card px-1.5 py-0.5 text-[11px] tabular-nums text-text-subtle"
+                >
+                  <span aria-hidden="true">◉</span>
+                  <span>{childAgents.total}</span>
+                </span>
+              )
+            )}
             <span className="text-text-subtle" suppressHydrationWarning>{formatRelativeTime(c.lastActivityAt)}</span>
           </span>
         )}
-      </Link>
+      </div>
       <Button
         variant="ghost"
         size="icon-sm"
-        className="absolute right-1 top-1.5 opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
+        className="absolute right-1 top-1.5 z-10 opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
         onClick={onToggleArchived}
         aria-label={archiveLabel}
         title={archiveLabel}
