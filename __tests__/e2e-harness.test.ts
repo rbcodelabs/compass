@@ -6,9 +6,11 @@ const GOOD: Record<string, string> = {
   DATABASE_URL: "postgres://postgres:postgres@localhost:5432/compass_e2e",
 }
 
-async function enabled(env: Record<string, string | undefined>, build: string | undefined = "1") {
+const UNSET = Symbol("unset")
+
+async function enabled(env: Record<string, string | undefined>, build: string | typeof UNSET = "1") {
   vi.resetModules()
-  if (build === undefined) delete process.env.COMPASS_E2E_MOCK_AUTH_BUILD
+  if (build === UNSET) delete process.env.COMPASS_E2E_MOCK_AUTH_BUILD
   else process.env.COMPASS_E2E_MOCK_AUTH_BUILD = build
   const { e2eMockAuthEnabled } = await import("@/lib/e2e-harness")
   return e2eMockAuthEnabled(env as NodeJS.ProcessEnv)
@@ -30,7 +32,7 @@ describe("e2eMockAuthEnabled", () => {
   })
   it("is off for the empty environment and when the build flag is unset or not exactly 1", async () => {
     expect(await enabled({})).toBe(false)
-    expect(await enabled(GOOD, undefined)).toBe(false)
+    expect(await enabled(GOOD, UNSET)).toBe(false)
     expect(await enabled(GOOD, "")).toBe(false)
     expect(await enabled(GOOD, "true")).toBe(false)
   })
