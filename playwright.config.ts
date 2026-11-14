@@ -44,6 +44,8 @@ const FUNCTIONAL_PORT = process.env.E2E_PORT
     ? functionalPort()
     : 3002;
 const FUNCTIONAL_BASE_URL = `http://localhost:${FUNCTIONAL_PORT}`;
+/** E2E_SERVER=prod serves a prebuilt artifact (COMPASS_E2E_MOCK_AUTH_BUILD=1 next build) with `next start`; default is `pnpm dev`. */
+const PROD_SERVER = process.env.E2E_SERVER === "prod";
 const VERCEL_AUTOMATION_BYPASS_SECRET =
   process.env.VERCEL_AUTOMATION_BYPASS_SECRET;
 
@@ -83,13 +85,22 @@ export default defineConfig({
     globalSetup: "./e2e/functional/global-setup.ts",
     globalTeardown: "./e2e/functional/global-teardown.ts",
     webServer: {
-      command: "pnpm dev",
+      command: PROD_SERVER ? `pnpm exec next start -H 127.0.0.1 -p ${FUNCTIONAL_PORT}` : "pnpm dev",
       // TCP can listen before Next has made the login route available.
       // Probe the actual auth entry point; a 404 must not admit the tests.
       url: `${FUNCTIONAL_BASE_URL}/login`,
       reuseExistingServer: !process.env.CI,
       env: {
         PORT: String(FUNCTIONAL_PORT),
+        ...(PROD_SERVER
+          ? {
+              E2E_MOCK_AUTH: "1",
+              AUTH_TRUST_HOST: "true",
+              AUTH_URL: FUNCTIONAL_BASE_URL,
+              REST_CURSOR_SECRET: "e2e-rest-cursor-secret-not-a-secret",
+              COMPASS_CHAIN_GRAPH: "1",
+            }
+          : {}),
         // Product features (research capture, voice, PM interviews, workspace updates, following) are workspace modules, not
         // environment flags: e2e/functional/fixtures/seed-e2e.ts enables them for the fixture workspace.
         // cloud-agents.spec.ts: assigning a task to a cloud agent starts a run only when the model credential exists. A placeholder

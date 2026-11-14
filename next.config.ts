@@ -6,6 +6,11 @@ const nextConfig: NextConfig = {
     root: path.resolve(__dirname),
   },
   devIndicators: false,
+  // Build-time literal for the e2e-only mock login (lib/e2e-harness.ts). Empty in every build that does not opt in,
+  // so the gated branch is removed from the artifact. Never set this in vercel.json, .env.example or Vercel env.
+  env: {
+    COMPASS_E2E_MOCK_AUTH_BUILD: process.env.COMPASS_E2E_MOCK_AUTH_BUILD === "1" ? "1" : "",
+  },
   // Load these server-only SDKs via Node require at runtime instead of bundling
   // them. In `next dev` this keeps their sources out of Turbopack's module
   // graph, cutting next-server RssAnon by ~25% (cold) / ~12% (warm) on a

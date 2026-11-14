@@ -7,6 +7,7 @@ import getPrisma from "@/lib/db";
 import { authConfig } from "@/auth.config";
 import { createLazyPrismaAuthAdapter } from "@/lib/lazy-prisma-auth-adapter";
 import { googleConnectorUid, requireVerifiedGoogleEmail } from "@/lib/google-signin";
+import { e2eMockAuthEnabled } from "@/lib/e2e-harness";
 import { PREVIEW_SESSION_COOKIE, PREVIEW_SESSION_OPTIONS } from "@/lib/preview-automation/cookies";
 
 /**
@@ -33,7 +34,7 @@ import { PREVIEW_SESSION_COOKIE, PREVIEW_SESSION_OPTIONS } from "@/lib/preview-a
  * different code path end to end. See ADR: Claude/compass-portal-auth-adr-2026-07-03.md.
  */
 
-const isDev = process.env.NODE_ENV === "development";
+const isDev = process.env.NODE_ENV === "development" || e2eMockAuthEnabled();
 
 /**
  * Google sign-in through the Vercel Connect connector in COMPASS_GOOGLE_CONNECTOR.

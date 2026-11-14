@@ -8,6 +8,7 @@ import { safeCallbackUrl } from "@/lib/safe-callback-url"
 import { PasskeyLoginButton } from "@/components/auth/passkey-login-button"
 import { passkeysEnabled } from "@/lib/passkeys"
 import { googleSignInEnabled } from "@/lib/google-signin"
+import { e2eMockAuthEnabled } from "@/lib/e2e-harness"
 
 export const metadata = {
   title: "Sign in",
@@ -58,7 +59,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
   }
 
   const checkEmail = params["check-email"] === "1"
-  const isDev = process.env.NODE_ENV === "development"
+  const isDev = process.env.NODE_ENV === "development" || e2eMockAuthEnabled()
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-surface-app px-4">
