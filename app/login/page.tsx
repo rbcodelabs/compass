@@ -59,7 +59,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
   }
 
   const checkEmail = params["check-email"] === "1"
-  const isDev = process.env.NODE_ENV === "development" || e2eMockAuthEnabled()
+  const isDev = process.env.NODE_ENV === "development" || (process.env.COMPASS_E2E_MOCK_AUTH_BUILD === "1" && e2eMockAuthEnabled())
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-surface-app px-4">

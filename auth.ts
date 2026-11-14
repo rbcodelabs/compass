@@ -34,7 +34,7 @@ import { PREVIEW_SESSION_COOKIE, PREVIEW_SESSION_OPTIONS } from "@/lib/preview-a
  * different code path end to end. See ADR: Claude/compass-portal-auth-adr-2026-07-03.md.
  */
 
-const isDev = process.env.NODE_ENV === "development" || e2eMockAuthEnabled();
+const isDev = process.env.NODE_ENV === "development" || (process.env.COMPASS_E2E_MOCK_AUTH_BUILD === "1" && e2eMockAuthEnabled());
 
 /**
  * Google sign-in through the Vercel Connect connector in COMPASS_GOOGLE_CONNECTOR.
