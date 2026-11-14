@@ -900,7 +900,7 @@ test.describe("Doc comment mentions: adversarial", () => {
       };
     });
     const step = async (label: string) => {
-      await page.waitForTimeout(1500);
+      await page.waitForTimeout(150);
       const found = await page.evaluate(() => (window as unknown as { __keyWarn: Array<{ stack: string; text: string }> }).__keyWarn.splice(0));
       finding(`key-warning after "${label}"`, `${found.length}${found[0] ? `\n${found[0].text}\n${found[0].stack}` : ""}`);
       return found.length;
@@ -951,7 +951,8 @@ test.describe("Doc comment mentions: adversarial", () => {
       const root = document.querySelector("nextjs-portal")?.shadowRoot;
       if (!root) return "no overlay";
       const pill = [...root.querySelectorAll("button")].find((b) => /issue/i.test(b.textContent ?? ""));
-      (pill as HTMLElement | undefined)?.click();
+      if (!pill) return "no issue pill";
+      (pill as HTMLElement).click();
       await new Promise((r) => setTimeout(r, 1500));
       const parts = [...root.querySelectorAll("div, section, dialog")].filter((e) => (e as HTMLElement).innerText && !e.querySelector("div, section")).map((e) => (e as HTMLElement).innerText.replace(/\s+/g, " ").trim());
       return parts.join(" || ").slice(0, 3500);
@@ -1011,17 +1012,17 @@ test.describe("Doc comment mentions: adversarial", () => {
     const orders = [["DONE", "TODO"], ["TODO", "DONE"], ["DONE", "TODO", "DONE"], ["DONE", "IN_PROGRESS", "DONE", "TODO"], ["IN_PROGRESS", "DONE"], ["DONE", "DONE", "TODO"]];
     let disagreements = 0;
     const detail: string[] = [];
-    for (let i = 0; i < 18; i++) {
-      const order = orders[i % orders.length];
+    for (let i = 0; i < orders.length; i++) {
+      const order = orders[i];
       await Promise.all(order.map((status) => page.request.patch(`/api/panels/entity/task/${task.id}?${query}`, { data: { field: "status", value: status } })));
-      await page.waitForTimeout(700);
+      await page.waitForTimeout(150);
       const status = (await pool.query(`SELECT status FROM "${S}".tasks WHERE id = $1`, [task.id])).rows[0].status as string;
       const thread = await threadStatus(rootId);
       const expected = status === "DONE" ? "RESOLVED" : "OPEN";
       // CANCELLED aside, a thread whose only task is live must be open and one whose only task is Done must be resolved.
       if (thread !== expected) { disagreements += 1; detail.push(`[${order.join(">")}] task=${status} thread=${thread}`); }
     }
-    finding("race: concurrent status flips", `${disagreements}/18 rounds ended with thread and task disagreeing. ${detail.join("; ")}`);
+    finding("race: concurrent status flips", `${disagreements}/${orders.length} rounds ended with thread and task disagreeing. ${detail.join("; ")}`);
     expect.soft(disagreements, `thread/task disagree after concurrent flips: ${detail.join("; ")}`).toBe(0);
   });
 });

@@ -3,18 +3,28 @@ import { expect, test } from "../fixtures/index"
 import { execFileSync } from "node:child_process"
 import getPrisma from "../../../lib/db"
 
-// lib/artifacts.ts (and the entity_links reads behind it) load only under tsx, which resolves the repo's "@/" aliases.
-const cli = (command: "read" | "delete" | "leftover", workspaceId: string, id: string): unknown =>
-  JSON.parse(execFileSync("pnpm", ["exec", "tsx", "e2e/functional/fixtures/artifact-experiment-cli.ts", command, workspaceId, id], { encoding: "utf8", env: process.env }).trim().split("\n").at(-1)!)
-/** Full-page screenshot into the test output; also into ARTEXP_QA_DIR when set (the QA run keeps them). */
+// lib/artifacts.ts (and the entity_links helpers behind it) load under tsx, which resolves the repo's "@/" aliases.
+const cli = <T = unknown>(command: "read" | "delete" | "leftover" | "delete-and-verify", ...args: string[]): T =>
+  JSON.parse(
+    execFileSync(process.execPath, ["--import", "tsx", "e2e/functional/fixtures/artifact-experiment-cli.ts", command, ...args], {
+      encoding: "utf8",
+      env: process.env,
+    })
+      .trim()
+      .split("\n")
+      .at(-1)!,
+  ) as T
+/** Full-page screenshot into ARTEXP_QA_DIR (and test output) only when ARTEXP_QA_DIR is set. */
 async function shoot(page: Page, testInfo: TestInfo, name: string) {
+  const dir = process.env.ARTEXP_QA_DIR
+  if (!dir) return
   const capture = { fullPage: true, animations: "disabled" as const, style: "nextjs-portal { display: none }" }
   await page.screenshot({ path: testInfo.outputPath(`${name}.png`), ...capture })
-  if (process.env.ARTEXP_QA_DIR) await page.screenshot({ path: `${process.env.ARTEXP_QA_DIR}/${name}.png`, ...capture })
+  await page.screenshot({ path: `${dir}/${name}.png`, ...capture })
 }
 /**
  * Holds every server action (the section's link reads) until released, so the LOADING state can be seen and captured.
- * `visit` navigates; the screenshot is taken while the section still says "Loading links…".
+ * `visit` navigates; the loading status assertion runs while the section still says "Loading links…".
  */
 async function captureLoading(page: Page, testInfo: TestInfo, name: string, section: string, visit: () => Promise<void>) {
   let release!: () => void
@@ -35,7 +45,14 @@ async function captureLoading(page: Page, testInfo: TestInfo, name: string, sect
     await page.unrouteAll({ behavior: "wait" })
   }
 }
-const attachedArtifacts = (workspaceId: string, experimentId: string) => cli("read", workspaceId, experimentId)
+const attachedArtifacts = async (prisma: ReturnType<typeof getPrisma>, workspaceId: string, experimentId: string): Promise<string[]> => {
+  const rows = await prisma.entityLink.findMany({
+    where: { workspaceId, linkType: "ARTIFACT_ATTACHED_TO_EXPERIMENT", toId: experimentId },
+    select: { fromId: true },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+  })
+  return rows.map((row) => row.fromId)
+}
 
 /**
  * Artifacts <-> Experiments (native ARTIFACT_ATTACHED_TO_EXPERIMENT link). The whole flow goes through the real UI: link from the artifact
@@ -99,7 +116,7 @@ test("an artifact links to an experiment, shows on both pages, unlinks, and its 
   await expect(experimentsSection.getByText("No experiments linked yet.")).toBeVisible()
   await chooseExisting(page, "experiment", experimentTitle)
   await expect(experimentsSection.getByRole("link", { name: experimentTitle, exact: true })).toBeVisible()
-  expect(attachedArtifacts(workspace.id, experiment.id)).toEqual([artifactId])
+  expect(await attachedArtifacts(prisma, workspace.id, experiment.id)).toEqual([artifactId])
 
   for (const viewport of [{ width: 1280, height: 800, label: "desktop" }, { width: 390, height: 844, label: "mobile" }]) {
     await page.setViewportSize(viewport)
@@ -126,7 +143,7 @@ test("an artifact links to an experiment, shows on both pages, unlinks, and its 
   // Unlink from the experiment side; both records survive.
   await artifactsSection.getByRole("button", { name: `Unlink ${artifactTitle}`, exact: true }).click()
   await expect(artifactsSection.getByText("No artifacts linked yet.")).toBeVisible()
-  expect(attachedArtifacts(workspace.id, experiment.id)).toEqual([])
+  expect(await attachedArtifacts(prisma, workspace.id, experiment.id)).toEqual([])
   expect(await prisma.artifact.count({ where: { id: artifactId } })).toBe(1)
   expect(await prisma.experiment.count({ where: { id: experiment.id } })).toBe(1)
 
@@ -158,10 +175,10 @@ test("an artifact links to an experiment, shows on both pages, unlinks, and its 
   await page.setViewportSize({ width: 1280, height: 800 })
 
   // Deleting the artifact removes the link and leaves the experiment.
-  cli("delete", workspace.id, artifactId)
+  const deleted = cli<{ leftover: number; attached: string[] }>("delete-and-verify", workspace.id, artifactId, experiment.id)
   // Nothing may still name the deleted artifact: deleteArtifact swept its link, so a second sweep finds zero rows.
-  expect(cli("leftover", workspace.id, artifactId)).toBe(0)
-  expect(attachedArtifacts(workspace.id, experiment.id)).toEqual([])
+  expect(deleted.leftover).toBe(0)
+  expect(deleted.attached).toEqual([])
   await page.goto(`${base}/experiments/${experiment.id}`)
   await expect(page.getByRole("region", { name: "Linked artifacts" }).getByText("No artifacts linked yet.")).toBeVisible({ timeout: 30_000 }) // the section loads through a server action; the dev server can be slow
   await expect(page.getByRole("link", { name: artifactTitle, exact: true })).toHaveCount(0)
