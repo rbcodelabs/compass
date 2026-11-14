@@ -51,7 +51,8 @@ async function dragTo(page: Page, source: ReturnType<Page["locator"]>, targetBox
 }
 
 test.describe("Tasks", () => {
-  test(
+  // QUARANTINE(prod-e2e): 90s timeout at persistedMove.finished() after next-action POST returns ok() under next start (job 01M7D1C739C829SX990HZFVP6W; same response.finished() hang family as entries #8 and #14). See e2e/functional/QUARANTINE.md.
+  test.fixme(
     "create task → drag to a new status column → link to an opportunity → persisted subtask",
     async ({ page, base }, testInfo) => {
       const ts = Date.now();

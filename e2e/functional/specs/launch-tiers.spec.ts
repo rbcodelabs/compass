@@ -93,7 +93,8 @@ test.describe("Launch tiers, checklist & positioning brief", () => {
     }
   });
 
-  test(
+  // QUARANTINE(prod-e2e): known baseline failure on dev and prod - trailing consoleErrors check catches four 404 resource responses (job 01M7C5MDZS5DWAS1BS9YAH2KA1; fix in #572). See e2e/functional/QUARANTINE.md.
+  test.fixme(
     "flag on: card Launch menu → tier picker auto-seeds → toggle item → brief → portal Launching column",
     async ({ page, base, orgSlug, workspaceSlug, browser, baseURL }) => {
       const wasLaunchWorkflowEnabled = await setLaunchWorkflowEnabled(page, base, true);

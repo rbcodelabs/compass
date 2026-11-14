@@ -5,6 +5,7 @@ import { readBoundedResearchJson, ResearchRequestBodyError } from "@/lib/researc
 import { createResearchVoiceLease, releaseResearchVoiceLease, ResearchVoiceError } from "@/lib/research-voice"
 import { isResearchBrowserVoiceEnabled, isResearchParticipantVoiceEnabled } from "@/lib/research-feature"
 import { verifyParticipantVoiceLease } from "@/lib/research-participant-voice"
+import { e2eHarnessEnabled } from "@/lib/e2e-harness"
 
 export const runtime = "nodejs"
 
@@ -35,7 +36,7 @@ export async function POST(request: Request) {
       resumeToken: body.resumeToken,
     })
     claimedLeaseId = lease.leaseId
-    if (process.env.NODE_ENV !== "production" && process.env.E2E_FUNCTIONAL === "1") {
+    if ((process.env.NODE_ENV !== "production" || process.env.COMPASS_E2E_MOCK_AUTH_BUILD === "1") && e2eHarnessEnabled()) {
       return NextResponse.json({
         ephemeralToken: "e2e-no-provider",
         leaseId: lease.leaseId,

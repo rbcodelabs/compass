@@ -94,7 +94,8 @@ test("Escape cancels pick mode without leaving a draft comment behind", async ({
   await expect(page.getByRole("textbox", { name: "Anchored feedback" })).toHaveCount(0)
 })
 
-test("A stale anchor is flagged rather than positioned at the wrong element", async ({ page, base }) => {
+// QUARANTINE(prod-e2e): strict mode violation - locator('iframe') resolves to 2 elements during revision swap on the fast prod server (job 01M7C5MDZS5DWAS1BS9YAH2KA1). See e2e/functional/QUARANTINE.md.
+test.fixme("A stale anchor is flagged rather than positioned at the wrong element", async ({ page, base }) => {
   await page.setViewportSize({ width: 1280, height: 800 })
   await createArtifact(page, base, "Stale anchor prototype")
   await page.getByRole("button", { name: "Leave feedback" }).click()

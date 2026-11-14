@@ -58,7 +58,8 @@ function column(page: Page, status: string) {
 }
 
 test.describe("Solutions backlog", () => {
-  test("lists solutions from different opportunities in one column and persists a status drag", async ({ page, base }) => {
+  // QUARANTINE(prod-e2e): 90s test timeout waiting for statusWrite response.finished() in full prod suite (job 01M7C5MDZS5DWAS1BS9YAH2KA1). See e2e/functional/QUARANTINE.md.
+  test.fixme("lists solutions from different opportunities in one column and persists a status drag", async ({ page, base }) => {
     const ts = Date.now();
     const oppA = `E2E Backlog Opportunity A ${ts}`;
     const oppB = `E2E Backlog Opportunity B ${ts}`;

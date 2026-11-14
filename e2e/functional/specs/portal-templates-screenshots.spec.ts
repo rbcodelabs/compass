@@ -1,6 +1,6 @@
 /**
  * Design-review screenshots for the four Portal Home templates, regenerated only on request:
- *   PORTAL_TEMPLATE_SCREENSHOTS=<output dir> pnpm test:e2e:functional -- e2e/functional/specs/portal-templates-screenshots.spec.ts
+ *   pnpm build:e2e && PORTAL_TEMPLATE_SCREENSHOTS=<output dir> pnpm test:e2e:functional -- e2e/functional/specs/portal-templates-screenshots.spec.ts
  * Seeds public roadmap items and four published docs, publishes a representative home in each template and
  * captures the customer's full page at 1440 and 390 wide, light and dark. Restores everything it touches.
  * Skipped in normal runs.

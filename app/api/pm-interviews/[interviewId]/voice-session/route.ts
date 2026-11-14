@@ -6,6 +6,7 @@ import { readBoundedResearchJson, ResearchRequestBodyError } from "@/lib/researc
 import { createResearchVoiceLease, releaseResearchVoiceLease, ResearchVoiceError } from "@/lib/research-voice"
 import { isResearchBrowserVoiceEnabled, isResearchParticipantVoiceEnabled } from "@/lib/research-feature"
 import { verifyParticipantVoiceLease } from "@/lib/research-participant-voice"
+import { e2eHarnessEnabled } from "@/lib/e2e-harness"
 
 export async function POST(request: Request, { params }: { params: Promise<{ interviewId: string }> }) {
   let claimedLeaseId: string | null = null
@@ -21,7 +22,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ int
     sessionInput = { sessionId: body.sessionId, resumeToken: body.resumeToken }
     const lease = await createResearchVoiceLease({ context, sessionId: body.sessionId, resumeToken: body.resumeToken })
     claimedLeaseId = lease.leaseId
-    if (process.env.NODE_ENV !== "production" && process.env.E2E_FUNCTIONAL === "1") return NextResponse.json({ ephemeralToken: "e2e-no-provider", leaseId: lease.leaseId, leaseExpiresAt: lease.expiresAt.toISOString(), providerExpiresAt: null, evidenceMode: "PARTICIPANT_SUBMITTED", targetMinutes: context.study.targetMinutes })
+    if ((process.env.NODE_ENV !== "production" || process.env.COMPASS_E2E_MOCK_AUTH_BUILD === "1") && e2eHarnessEnabled()) return NextResponse.json({ ephemeralToken: "e2e-no-provider", leaseId: lease.leaseId, leaseExpiresAt: lease.expiresAt.toISOString(), providerExpiresAt: null, evidenceMode: "PARTICIPANT_SUBMITTED", targetMinutes: context.study.targetMinutes })
     const apiKey = process.env.OPENAI_API_KEY
     if (!apiKey) throw new ResearchVoiceError("Voice interviewer is not configured", 503)
     const provider = await fetch("https://api.openai.com/v1/realtime/client_secrets", { method: "POST", headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json", "OpenAI-Safety-Identifier": createHash("sha256").update(interviewId).digest("hex") }, body: JSON.stringify({ expires_after: { anchor: "created_at", seconds: 60 }, session: { type: "realtime", model: process.env.OPENAI_REALTIME_MODEL || "gpt-realtime", instructions: lease.instructions, tools: [], audio: { input: { turn_detection: { type: "semantic_vad", eagerness: "low", create_response: true, interrupt_response: true }, transcription: { model: process.env.OPENAI_TRANSCRIPTION_MODEL || "gpt-4o-mini-transcribe" } }, output: { voice: process.env.OPENAI_REALTIME_VOICE || "alloy" } } } }), cache: "no-store", signal: AbortSignal.timeout(15_000) })

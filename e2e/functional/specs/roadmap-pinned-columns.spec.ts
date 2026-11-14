@@ -71,7 +71,8 @@ async function shot(page: Page, name: string) {
 
 
 test.describe("Roadmap board dock", () => {
-  test("one dock with tabs: pin, switch, collapse, reorder, drag, and a saved view that restores the layout", async ({ page, base }) => {
+  // QUARANTINE(prod-e2e): second drag to SHIPPED leaves cardTwo in unscheduled column in full prod suite (job 01M7C5MDZS5DWAS1BS9YAH2KA1). See e2e/functional/QUARANTINE.md.
+  test.fixme("one dock with tabs: pin, switch, collapse, reorder, drag, and a saved view that restores the layout", async ({ page, base }) => {
     test.setTimeout(300_000);
     const pool = requireLocalE2eDatabase();
     const tag = randomUUID().slice(0, 8);

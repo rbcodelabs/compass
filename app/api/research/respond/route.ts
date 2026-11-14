@@ -5,6 +5,7 @@ import { ResearchSessionError, respondToResearchSession } from "@/lib/research-s
 import { readBoundedResearchJson, ResearchRequestBodyError } from "@/lib/research-request"
 import { getResearchArtifactStorage } from "@/lib/artifact-storage"
 import { researchFailureDiagnostic } from "@/lib/research-failure-diagnostics"
+import { e2eHarnessEnabled } from "@/lib/e2e-harness"
 
 export const runtime = "nodejs"
 export const maxDuration = 300
@@ -32,7 +33,7 @@ export async function POST(request: Request) {
   try {
     // Functional browser tests exercise the real persistence path without making
     // a paid model call. Production can never enter this branch.
-    const functionalAgent = process.env.NODE_ENV !== "production" && process.env.E2E_FUNCTIONAL === "1"
+    const functionalAgent = (process.env.NODE_ENV !== "production" || process.env.COMPASS_E2E_MOCK_AUTH_BUILD === "1") && e2eHarnessEnabled()
       ? async (input: Parameters<typeof runResearchInterviewAgent>[0]) => {
           // Guarantee overlap for the real-Postgres single-flight probe.
           input.onDelta?.("What made ")

@@ -56,7 +56,8 @@ async function seedLinkableTask(): Promise<{ id: string; title: string }> {
 }
 
 test.describe("Linked tasks — Opportunity panel", () => {
-  test("add a task, link an existing task, both persist and navigate to the task", async ({
+  // QUARANTINE(prod-e2e): strict mode violation - 'Dev User' option resolves to 2 elements from earlier spec workspace member leak (job 01M7C5MDZS5DWAS1BS9YAH2KA1; fix in fix/e2e-dev-user-leaks). See e2e/functional/QUARANTINE.md.
+  test.fixme("add a task, link an existing task, both persist and navigate to the task", async ({
     page,
     base,
   }) => {

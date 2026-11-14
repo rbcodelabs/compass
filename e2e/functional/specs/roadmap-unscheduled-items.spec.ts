@@ -173,14 +173,25 @@ test.describe("Roadmap — not yet on the roadmap", () => {
       const feedbackToggle = page.getByTestId("portal-toggle-feedback");
       const authToggle = page.getByTestId("portal-toggle-auth-required");
       if ((await feedbackToggle.getAttribute("aria-checked")) !== "true") {
-        await feedbackToggle.click();
+        // The switch flips optimistically and the write is a server action: wait for that POST to finish before leaving settings,
+        // or a fast production server renders "Feedback is not enabled" on the portal.
+        await Promise.all([
+          page.waitForResponse((response) => response.request().method() === "POST" && "next-action" in response.request().headers()),
+          feedbackToggle.click(),
+        ]);
         await expect(feedbackToggle).toHaveAttribute("aria-checked", "true", { timeout: 10_000 });
       }
       await expect(authToggle).toBeVisible();
       if ((await authToggle.getAttribute("aria-checked")) === "true") {
-        await authToggle.click();
+        await Promise.all([
+          page.waitForResponse((response) => response.request().method() === "POST" && "next-action" in response.request().headers()),
+          authToggle.click(),
+        ]);
         await expect(authToggle).toHaveAttribute("aria-checked", "false", { timeout: 10_000 });
       }
+      await expect
+        .poll(async () => (await page.request.get(`/api/portal/${orgSlug}/${workspaceSlug}/feedback`)).status(), { timeout: 15_000 })
+        .toBe(200);
 
       // Functional specs share one seeded workspace, so make the portal state
       // required by this journey explicit before submitting anonymously.

@@ -6,6 +6,7 @@ import Passkey from "next-auth/providers/passkey";
 import getPrisma from "@/lib/db";
 import { authConfig } from "@/auth.config";
 import { createLazyPrismaAuthAdapter } from "@/lib/lazy-prisma-auth-adapter";
+import { e2eMockAuthEnabled } from "@/lib/e2e-harness";
 import { googleConnectorUid, requireVerifiedGoogleEmail } from "@/lib/google-signin";
 import { PREVIEW_SESSION_COOKIE, PREVIEW_SESSION_OPTIONS } from "@/lib/preview-automation/cookies";
 
@@ -33,7 +34,9 @@ import { PREVIEW_SESSION_COOKIE, PREVIEW_SESSION_OPTIONS } from "@/lib/preview-a
  * different code path end to end. See ADR: Claude/compass-portal-auth-adr-2026-07-03.md.
  */
 
-const isDev = process.env.NODE_ENV === "development";
+// The dev config (Credentials, JWT sessions) runs in `next dev` and in the e2e production build (lib/e2e-harness.ts). The build
+// literal is written inline so a build without COMPASS_E2E_MOCK_AUTH_BUILD=1 removes the second operand and the mock provider.
+const isDev = process.env.NODE_ENV === "development" || (process.env.COMPASS_E2E_MOCK_AUTH_BUILD === "1" && e2eMockAuthEnabled());
 
 /**
  * Google sign-in through the Vercel Connect connector in COMPASS_GOOGLE_CONNECTOR.
@@ -79,20 +82,9 @@ export const { handlers, auth, signIn, signOut } = isDev
             email: { label: "Email", type: "text" },
           },
           async authorize(credentials) {
-            const prisma = getPrisma();
-            const email =
-              (credentials?.email as string | undefined) ?? "dev@localhost.dev";
-            // Upsert the dev user so the id is stable across restarts.
-            const user = await prisma.user.upsert({
-              where: { email },
-              update: {},
-              create: {
-                email,
-                name: "Dev User",
-                emailVerified: new Date(),
-              },
-            });
-            return { id: user.id, email: user.email, name: user.name };
+            // Loaded on demand so the mock login's code lives in its own chunk, only in builds that kept this branch.
+            const { authorizeMockUser } = await import("@/lib/e2e-mock-auth");
+            return authorizeMockUser(credentials);
           },
         }),
       ],

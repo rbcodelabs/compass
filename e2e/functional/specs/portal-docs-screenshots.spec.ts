@@ -1,6 +1,6 @@
 /**
  * Design-review screenshots for Publish Docs, regenerated only on request:
- *   PORTAL_DOCS_SCREENSHOTS=<output dir> pnpm test:e2e:functional -- e2e/functional/specs/portal-docs-screenshots.spec.ts
+ *   pnpm build:e2e && PORTAL_DOCS_SCREENSHOTS=<output dir> pnpm test:e2e:functional -- e2e/functional/specs/portal-docs-screenshots.spec.ts
  * Captures the editor publish control (published / not), the Docs widget (populated / empty-state surfaces) and the public
  * doc page at 1440 and 390 wide, light and dark. Skipped in normal runs.
  */
