@@ -4,10 +4,14 @@ import { buildTqSpec } from "../scripts/tq-e2e-prod-spec.mjs"
 
 describe("buildTqSpec", () => {
   const spec = buildTqSpec({ specs: ["e2e/functional/specs/analytics.spec.ts"] })
-  const step = (name: string) => spec.steps.find((candidate: { name: string }) => candidate.name === name)
+  const step = (name: string, from = spec) => {
+    const found = from.steps.find((candidate) => candidate.name === name)
+    if (!found) throw new Error(`no step ${name}`)
+    return found
+  }
 
   it("orders install, browsers, database, build, assert, e2e", () => {
-    expect(spec.steps.map((candidate: { name: string }) => candidate.name)).toEqual(["install", "playwright-browsers", "create-e2e-db", "build", "assert", "e2e"])
+    expect(spec.steps.map((candidate) => candidate.name)).toEqual(["install", "playwright-browsers", "create-e2e-db", "build", "assert", "e2e"])
   })
 
   it("builds with CI=1 and the mock-auth flag through pnpm build:e2e, only in the build step", () => {
@@ -21,7 +25,7 @@ describe("buildTqSpec", () => {
   })
 
   it("runs the suite against the compass_e2e database on the prod server with the requested specs", () => {
-    const run = step("e2e").run as string
+    const run = step("e2e").run
     expect(run).toContain("compass_e2e")
     expect(run).toContain("E2E_SERVER=prod")
     expect(run).toContain("e2e/functional/specs/analytics.spec.ts")
@@ -31,14 +35,14 @@ describe("buildTqSpec", () => {
 
   it("can build an unflagged artifact first and prove it contains no marker", () => {
     const withUnflagged = buildTqSpec({ specs: [], unflaggedAssert: true })
-    const build = withUnflagged.steps.find((candidate: { name: string }) => candidate.name === "build-unflagged-assert")
+    const build = step("build-unflagged-assert", withUnflagged)
     expect(build.run).toContain("pnpm build")
-    expect(withUnflagged.steps.map((candidate: { name: string }) => candidate.name).indexOf("build-unflagged-assert")).toBeLessThan(
-      withUnflagged.steps.map((candidate: { name: string }) => candidate.name).indexOf("build"),
+    expect(withUnflagged.steps.map((candidate) => candidate.name).indexOf("build-unflagged-assert")).toBeLessThan(
+      withUnflagged.steps.map((candidate) => candidate.name).indexOf("build"),
     )
   })
 
   it("runs the full suite when no specs are given", () => {
-    expect(buildTqSpec({ specs: [] }).steps.find((candidate: { name: string }) => candidate.name === "e2e").run).not.toContain("e2e/functional/specs/")
+    expect(step("e2e", buildTqSpec({ specs: [] })).run).not.toContain("e2e/functional/specs/")
   })
 })

@@ -15,7 +15,7 @@ afterEach(() => fs.rmSync(dir, { recursive: true, force: true }))
 
 describe("prodBuildProblem", () => {
   it("refuses a missing build and names the command that makes one", () => {
-    expect(prodBuildProblem({ buildIdPath: buildId, headCommitMs: Date.now() })).toMatch(/missing.*pnpm build:e2e/s)
+    expect(prodBuildProblem({ buildIdPath: buildId, headCommitMs: Date.now() })).toMatch(/missing[\s\S]*pnpm build:e2e/)
   })
 
   it("refuses a build older than the HEAD commit", () => {

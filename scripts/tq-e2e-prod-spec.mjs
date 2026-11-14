@@ -22,6 +22,10 @@ const ENV = {
   AUTH_SECRET: "testq-throwaway-e2e-auth-secret-not-a-secret",
 }
 
+/**
+ * @param {{ specs?: string[], unflaggedAssert?: boolean, control?: boolean }} [options]
+ * @returns {{ reserve_mb: number, timeout_s: number, database: boolean, node: string, env: Record<string, string>, steps: { name: string, run: string }[], artifacts: string[] }}
+ */
 export function buildTqSpec({ specs = [], unflaggedAssert = false, control = false } = {}) {
   const specArgs = specs.length > 0 ? ` -- ${specs.join(" ")}` : ""
   const e2eServer = control ? "" : "E2E_SERVER=prod "
