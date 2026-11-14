@@ -36,7 +36,7 @@ export async function POST(request: Request) {
       resumeToken: body.resumeToken,
     })
     claimedLeaseId = lease.leaseId
-    if (e2eHarnessEnabled()) {
+    if ((process.env.NODE_ENV !== "production" || process.env.COMPASS_E2E_MOCK_AUTH_BUILD === "1") && e2eHarnessEnabled()) {
       return NextResponse.json({
         ephemeralToken: "e2e-no-provider",
         leaseId: lease.leaseId,

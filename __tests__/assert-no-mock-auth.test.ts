@@ -40,6 +40,23 @@ describe("scripts/assert-no-mock-auth.mjs", () => {
     expect(result.stderr + result.stdout).toContain(rel)
   })
 
+  it.each(["e2e-no-provider", "Test analysis: participant described", "x-e2e-pm-fail-receipt-finalization"])(
+    "fails when the functional-suite fake %j is in a deployable file",
+    (fake) => {
+      write("server/chunks/fake.js", `var f="${fake}"`)
+      const result = run("--dir", dir)
+      expect(result.status).toBe(1)
+      expect(result.stderr).toContain(fake)
+    },
+  )
+
+  it("refuses --skip-when-mock-build on Vercel, where a flagged build must never happen", () => {
+    write("server/a.js", "ok")
+    const result = spawnSync(process.execPath, [SCRIPT, "--dir", dir, "--skip-when-mock-build"], { encoding: "utf8", env: { ...process.env, VERCEL: "1", COMPASS_E2E_MOCK_AUTH_BUILD: "1" } })
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain("VERCEL")
+  })
+
   it("never looks in the build cache", () => {
     write("cache/webpack/x.pack", `var m="${MARKER}"`)
     write("server/a.js", "ok")

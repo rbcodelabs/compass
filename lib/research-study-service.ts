@@ -131,7 +131,7 @@ export async function generateResearchGuide(
       targetLine = `Target: an interactive prototype (title: ${rawArtifactTitle})`
     } else {
       const target = await resolveUsabilityTestTarget(prisma, workspace.id, { appUrl: input.appUrl, artifactId: input.artifactId }, {
-        production: !e2eHarnessEnabled(),
+        production: !((process.env.NODE_ENV !== "production" || process.env.COMPASS_E2E_MOCK_AUTH_BUILD === "1") && e2eHarnessEnabled()),
       })
       targetLine = target.artifactId
         ? `Target: an interactive prototype (title: ${target.artifactTitle})`
@@ -179,7 +179,7 @@ export async function createResearchStudy(scope: ResearchWorkspaceScope, actor: 
   assertDuration(targetMinutes)
   const target = studyType === "USABILITY_TEST"
     ? await resolveUsabilityTestTarget(prisma, workspace.id, { appUrl: input.appUrl, artifactId: input.artifactId }, {
-        production: !e2eHarnessEnabled(),
+        production: !((process.env.NODE_ENV !== "production" || process.env.COMPASS_E2E_MOCK_AUTH_BUILD === "1") && e2eHarnessEnabled()),
       })
     : { appUrl: null, artifactId: null, artifactTitle: null }
   const guide = validateGuide(input)
@@ -257,7 +257,7 @@ export async function updateResearchStudy(scope: ResearchWorkspaceScope, actor: 
           appUrl: input.appUrl !== undefined ? input.appUrl : (input.artifactId !== undefined ? undefined : appUrlFallback),
           artifactId: input.artifactId !== undefined ? input.artifactId : (input.appUrl !== undefined ? undefined : artifactIdFallback),
         }, {
-          production: !e2eHarnessEnabled(),
+          production: !((process.env.NODE_ENV !== "production" || process.env.COMPASS_E2E_MOCK_AUTH_BUILD === "1") && e2eHarnessEnabled()),
         })
       : { appUrl: null, artifactId: null, artifactTitle: null }
     protocol = {

@@ -61,6 +61,17 @@ describe("e2eMockAuthEnabled", () => {
     },
   )
 
+  it.each(["?host=db.prod.example.com", "?hostaddr=10.0.0.5", "?sslmode=disable&host=other"])(
+    "is off when DATABASE_URL carries a connection-host override query parameter (%s)",
+    async (query) => {
+      expect(await mockEnabled({ ...GOOD, DATABASE_URL: `postgres://postgres:postgres@localhost:5432/compass_e2e${query}` })).toBe(false)
+    },
+  )
+
+  it("still accepts harmless query parameters", async () => {
+    expect(await mockEnabled({ ...GOOD, DATABASE_URL: "postgres://postgres:postgres@localhost:5432/compass_e2e?sslmode=disable" })).toBe(true)
+  })
+
   it("is off for a remote host, a database not named compass_e2e, or an unparseable URL", async () => {
     expect(await mockEnabled({ ...GOOD, DATABASE_URL: "postgres://u:p@db.example.com:5432/compass_e2e" })).toBe(false)
     expect(await mockEnabled({ ...GOOD, DATABASE_URL: "postgres://u:p@localhost:5432/compass" })).toBe(false)

@@ -275,7 +275,7 @@ export async function respondToPmInterview(scope: PmInterviewScope, actor: PmInt
       idempotencyKey: input.idempotencyKey,
       baseUrl: "https://compass.local",
       buildPrompt: ({ defaultPrompt }) => buildPmInterviewChatPrompt(defaultPrompt, snapshot),
-      runAgent: e2eHarnessEnabled()
+      runAgent: (process.env.NODE_ENV !== "production" || process.env.COMPASS_E2E_MOCK_AUTH_BUILD === "1") && e2eHarnessEnabled()
         ? async () => "What concrete observation would most challenge that belief?"
         : runResearchInterviewAgent,
     })

@@ -33,7 +33,7 @@ export async function POST(request: Request) {
   try {
     // Functional browser tests exercise the real persistence path without making
     // a paid model call. Production can never enter this branch.
-    const functionalAgent = e2eHarnessEnabled()
+    const functionalAgent = (process.env.NODE_ENV !== "production" || process.env.COMPASS_E2E_MOCK_AUTH_BUILD === "1") && e2eHarnessEnabled()
       ? async (input: Parameters<typeof runResearchInterviewAgent>[0]) => {
           // Guarantee overlap for the real-Postgres single-flight probe.
           input.onDelta?.("What made ")

@@ -26,7 +26,7 @@ export async function isResearchAuthoritativeVoiceEnabled(workspaceId: string): 
 }
 
 export async function isResearchLegacyVoiceHarnessEnabled(workspaceId: string): Promise<boolean> {
-  return e2eHarnessEnabled() &&
+  return (process.env.NODE_ENV !== "production" || process.env.COMPASS_E2E_MOCK_AUTH_BUILD === "1") && e2eHarnessEnabled() &&
     await isResearchAuthoritativeVoiceEnabled(workspaceId)
 }
 

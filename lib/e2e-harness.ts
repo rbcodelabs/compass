@@ -31,6 +31,8 @@ export function e2eMockAuthEnabled(env: NodeJS.ProcessEnv = process.env): boolea
   try {
     const url = new URL(env.DATABASE_URL ?? "")
     if (!LOCAL_HOSTS.has(url.hostname)) return false
+    // pg lets `?host=` and `?hostaddr=` override the connection host, so a "localhost" URL can still reach another machine.
+    if (url.searchParams.has("host") || url.searchParams.has("hostaddr")) return false
     if (decodeURIComponent(url.pathname.replace(/^\//, "")) !== "compass_e2e") return false
   } catch {
     return false
@@ -42,6 +44,11 @@ export function e2eMockAuthEnabled(env: NodeJS.ProcessEnv = process.env): boolea
  * The functional-suite fakes (research, PM interview, voice, receipt-failure injection): on under the old dev condition
  * (not production and E2E_FUNCTIONAL=1), or under mock mode on the e2e production build (which still needs E2E_FUNCTIONAL=1,
  * so the fakes stay off in any process the functional runner did not start).
+ *
+ * Call sites MUST NOT call this bare. Write
+ * `(process.env.NODE_ENV !== "production" || process.env.COMPASS_E2E_MOCK_AUTH_BUILD === "1") && e2eHarnessEnabled()`
+ * so an artifact without the build flag drops the fakes at compile time, as the old inline NODE_ENV check did
+ * (__tests__/e2e-harness-call-sites.test.ts enforces it; scripts/assert-no-mock-auth.mjs checks the artifact).
  */
 export function e2eHarnessEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   if (env.NODE_ENV !== "production") return env.E2E_FUNCTIONAL === "1"

@@ -26,6 +26,10 @@ const ENV = {
  * @param {{ specs?: string[], unflaggedAssert?: boolean, control?: boolean, e2eEnv?: string }} [options]
  * @returns {{ reserve_mb: number, timeout_s: number, database: boolean, node: string, env: Record<string, string>, steps: { name: string, run: string }[], artifacts: string[] }}
  */
+const COUNT_FAKES = `for s in 'compass-e2e-mock-auth-v1' 'e2e-no-provider' 'Test analysis: participant described' 'x-e2e-pm-fail-receipt-finalization'; do
+  echo "$s: non-map files=$(find .next/server .next/static -type f ! -name '*.map' -print0 | xargs -0 grep -l -- "$s" | wc -l)"
+done`
+
 export function buildTqSpec({ specs = [], unflaggedAssert = false, control = false, e2eEnv = "" } = {}) {
   const specArgs = specs.length > 0 ? ` -- ${specs.join(" ")}` : ""
   const e2eServer = control ? "" : "E2E_SERVER=prod "
@@ -39,7 +43,7 @@ export function buildTqSpec({ specs = [], unflaggedAssert = false, control = fal
       steps.push({
         name: "build-unflagged-assert",
         // The default build command, exactly as Vercel runs it: it ends with scripts/assert-no-mock-auth.mjs and fails on a leak.
-        run: "export CI=1\ncorepack pnpm build\nrm -rf .next",
+        run: `export CI=1\ncorepack pnpm build\necho UNFLAGGED artifact:\n${COUNT_FAKES}\nrm -rf .next`,
       })
     }
     steps.push(
@@ -50,6 +54,7 @@ export function buildTqSpec({ specs = [], unflaggedAssert = false, control = fal
         run: `test -f .next/BUILD_ID
 n=$(find .next/server .next/static -type f ! -name '*.map' -print0 | xargs -0 grep -l 'compass-e2e-mock-auth-v1' | wc -l)
 echo "flagged artifact: marker in $n deployable files"
+${COUNT_FAKES}
 test "$n" -gt 0`,
       },
     )
