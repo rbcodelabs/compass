@@ -116,10 +116,12 @@ export default defineConfig({
         // agent-retention.spec.ts calls the cron route with this bearer; test-only value.
         CRON_SECRET: "e2e-cron-secret",
         // Memory tuning for the Turbopack dev server. Over a full suite its native heap otherwise climbs to 7-10 GB. These two knobs
-        // make Turbopack snapshot its task cache and evict sooner. They are undocumented (found in next's native source). Measured on
-        // the homelab runner (tq job 01M7BH818K9T4ND608NS8FTD6X): peak next-server RSS 7.74 -> 5.21 GB for the agent group and
-        // 7.07 -> 4.65 GB for the experiments group, with identical pass counts and similar wall time. Scoped to this webServer env
-        // on purpose: a human's `pnpm dev` does not read this block and is unchanged.
+        // make Turbopack snapshot its task cache and evict sooner. They are undocumented Turbopack internals (found in next's native
+        // source), so a Next upgrade may silently stop honouring them. Measured on the homelab runner with this exact config (tq jobs
+        // 01M7BP71JE14EMVF96PVRYQNZ1 and 01M7BPJE8MBAVM6QQQNFF428Q9): peak next-server RSS 4.90 GB for the agent group (7.74 GB
+        // without) and 3.9-5.2 GB for the experiments group (5.7-8.8 GB without, job 01M7BQNHAT82JN78E2Q9YQBFWM and 01M7BH818K9T4ND608NS8FTD6X),
+        // with the same pass counts. Only two groups were measured; the full suite with these knobs has not been. Scoped to this
+        // webServer env on purpose: a human's `pnpm dev` does not read this block and is unchanged.
         TURBO_ENGINE_SNAPSHOT_IDLE_TIMEOUT_MILLIS: "250",
         TURBO_ENGINE_SNAPSHOT_MIN_ACTIVE_TIME_MILLIS: "100",
       },
