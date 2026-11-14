@@ -22,14 +22,14 @@ const ENV = {
   AUTH_SECRET: "testq-throwaway-e2e-auth-secret-not-a-secret",
 }
 
-/**
- * @param {{ specs?: string[], unflaggedAssert?: boolean, control?: boolean, e2eEnv?: string }} [options]
- * @returns {{ reserve_mb: number, timeout_s: number, database: boolean, node: string, env: Record<string, string>, steps: { name: string, run: string }[], artifacts: string[] }}
- */
 const COUNT_FAKES = `for s in 'compass-e2e-mock-auth-v1' 'e2e-no-provider' 'Test analysis: participant described' 'x-e2e-pm-fail-receipt-finalization'; do
   echo "$s: non-map files=$(find .next/server .next/static -type f ! -name '*.map' -print0 | xargs -0 grep -l -- "$s" | wc -l)"
 done`
 
+/**
+ * @param {{ specs?: string[], unflaggedAssert?: boolean, control?: boolean, e2eEnv?: string }} [options]
+ * @returns {{ reserve_mb: number, timeout_s: number, database: boolean, node: string, env: Record<string, string>, steps: { name: string, run: string }[], artifacts: string[] }}
+ */
 export function buildTqSpec({ specs = [], unflaggedAssert = false, control = false, e2eEnv = "" } = {}) {
   const specArgs = specs.length > 0 ? ` -- ${specs.join(" ")}` : ""
   const e2eServer = control ? "" : "E2E_SERVER=prod "
