@@ -1,4 +1,5 @@
 import { isModuleEnabled } from "@/lib/modules/server"
+import { e2eHarnessEnabled } from "@/lib/e2e-harness"
 
 /**
  * Workspace-scoped research and PM-interview feature checks, built on workspace modules (lib/modules). Every function takes the
@@ -25,8 +26,7 @@ export async function isResearchAuthoritativeVoiceEnabled(workspaceId: string): 
 }
 
 export async function isResearchLegacyVoiceHarnessEnabled(workspaceId: string): Promise<boolean> {
-  return process.env.NODE_ENV !== "production" &&
-    process.env.E2E_FUNCTIONAL === "1" &&
+  return e2eHarnessEnabled() &&
     await isResearchAuthoritativeVoiceEnabled(workspaceId)
 }
 

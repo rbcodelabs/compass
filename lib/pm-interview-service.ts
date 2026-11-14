@@ -22,6 +22,7 @@ import { moduleDisabledMessage } from "@/lib/modules/registry"
 import { instrumentActivityClient } from "@/lib/analytics/activity"
 import { getLinkedObjectivesByOpportunity, getOpportunityKeyResultPointers } from "@/lib/typed-links"
 import { allocateOneSeq, withSequenceTransaction } from "@/lib/work-item-sequence"
+import { e2eHarnessEnabled } from "@/lib/e2e-harness"
 
 export class PmInterviewError extends Error {
   constructor(message: string, readonly status = 422) { super(message) }
@@ -274,7 +275,7 @@ export async function respondToPmInterview(scope: PmInterviewScope, actor: PmInt
       idempotencyKey: input.idempotencyKey,
       baseUrl: "https://compass.local",
       buildPrompt: ({ defaultPrompt }) => buildPmInterviewChatPrompt(defaultPrompt, snapshot),
-      runAgent: process.env.NODE_ENV !== "production" && process.env.E2E_FUNCTIONAL === "1"
+      runAgent: e2eHarnessEnabled()
         ? async () => "What concrete observation would most challenge that belief?"
         : runResearchInterviewAgent,
     })

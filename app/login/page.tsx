@@ -8,6 +8,7 @@ import { safeCallbackUrl } from "@/lib/safe-callback-url"
 import { PasskeyLoginButton } from "@/components/auth/passkey-login-button"
 import { passkeysEnabled } from "@/lib/passkeys"
 import { googleSignInEnabled } from "@/lib/google-signin"
+import { e2eMockAuthEnabled } from "@/lib/e2e-harness"
 
 export const metadata = {
   title: "Sign in",
@@ -58,7 +59,8 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
   }
 
   const checkEmail = params["check-email"] === "1"
-  const isDev = process.env.NODE_ENV === "development"
+  // Server-evaluated, so only the rendered button reaches the client. Inline build literal: see lib/e2e-harness.ts.
+  const isDev = process.env.NODE_ENV === "development" || (process.env.COMPASS_E2E_MOCK_AUTH_BUILD === "1" && e2eMockAuthEnabled())
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-surface-app px-4">
