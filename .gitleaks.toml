@@ -50,6 +50,20 @@ id = "generic-api-key"
     '''docs/.*''',
   ]
 
+  # Branding-logo tests stub BLOB_READ_WRITE_TOKEN with a made-up
+  # `vercel_blob_rw_<storeId>_<secret>` value so the own-store host check can be
+  # exercised (the host is derived from the store id). Scoped to test paths AND
+  # to `stubEnv("BLOB_READ_WRITE_TOKEN", ...)` lines, so a real token anywhere
+  # else, or assigned some other way, is still reported.
+  [[rules.allowlists]]
+  description = "Fake BLOB_READ_WRITE_TOKEN values stubbed in branding-logo tests"
+  condition = "AND"
+  regexTarget = "line"
+  regexes = ['''stubEnv\("BLOB_READ_WRITE_TOKEN",''']
+  paths = [
+    '''__tests__/.*''',
+  ]
+
   # docs/testing/geode-pilot-required-evidence.md quotes real `vercel logs`
   # output verbatim as verification evidence. One line includes the pilot's
   # synthetic workspace UUID (54a22b13-...), which trips the generic-api-key

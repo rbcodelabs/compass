@@ -31,7 +31,7 @@ test.describe("Doc Inline Comments", () => {
       await clickNewDoc(page)
       // /docs may already have redirected to an existing document. Wait for
       // the newly created document, not merely any document-shaped URL.
-      await page.waitForURL(url => url.href !== previousDocUrl && /\/docs\/[0-9a-f-]+$/.test(url.pathname), { timeout: 15_000 });
+      await page.waitForURL(url => url.href !== previousDocUrl && /\/docs\/(?:[0-9a-f-]+|DOC-\d+)$/.test(url.pathname), { timeout: 15_000 });
 
       const editor = page.locator(".ProseMirror");
       await expect(editor).toBeVisible({ timeout: 10_000 });

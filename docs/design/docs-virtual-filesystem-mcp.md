@@ -2,7 +2,7 @@
 
 Companion to **ADR 0019 — Docs as a Virtual Filesystem** (Compass Doc, workspace
 `rbcodelabs/compass`, child of *Architecture Decisions*
-[57218788-1db1-4148-b954-b98fb7055c62]). That ADR carries the decision and
+[1a6c874d-3eb0-4603-afc7-6b95a1722a3e]). That ADR carries the decision and
 consequences; this document carries the mechanics an engineer needs to build
 it. See the note at the end of this file ("Why this lives in the repo, not
 Compass Docs") for where the line between the two documents was drawn.
@@ -790,7 +790,7 @@ This repo's own `CLAUDE.md` and `docs/decisions/README.md` state, as of the
 not `docs/decisions/`, is now the system of record for architecture
 decisions.** `ADR 0019 — Docs as a Virtual Filesystem` was created as a child
 Doc of *Architecture Decisions*
-(`https://compass.rbcodelabs.com/rbcodelabs/compass/docs/57218788-1db1-4148-b954-b98fb7055c62`)
+(`https://compass.rbcodelabs.com/rbcodelabs/compass/docs/1a6c874d-3eb0-4603-afc7-6b95a1722a3e`)
 and routed for review via `request_decision`, per that convention — not
 written as a new file under `docs/decisions/` here, which would have been a
 fourth instance of the exact mistake that README already documents twice.

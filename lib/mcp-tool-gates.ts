@@ -108,9 +108,14 @@ async function assertCommentTarget(actor: McpActor, args: Args) {
 
 /** The provided evidence target (exactly one of opp/sol/assumption); returns its workspaceId. */
 async function assertEvidenceTarget(actor: McpActor, args: Args): Promise<string> {
-  if (args.opportunityId) return (await assertEntityAccess(actor, "opportunity", args.opportunityId)).workspaceId
-  if (args.solutionId) return (await assertEntityAccess(actor, "solution", args.solutionId)).workspaceId
-  if (args.assumptionId) return (await assertEntityAccess(actor, "assumption", args.assumptionId)).workspaceId
+  const [entityType, entityId] = evidenceTargetEntity(args)
+  return (await assertEntityAccess(actor, entityType, entityId)).workspaceId
+}
+
+function evidenceTargetEntity(args: Args): readonly [WorkspaceEntityType, string] {
+  if (args.opportunityId) return ["opportunity", args.opportunityId]
+  if (args.solutionId) return ["solution", args.solutionId]
+  if (args.assumptionId) return ["assumption", args.assumptionId]
   throw new McpAuthzError("An evidence target (opportunityId, solutionId, or assumptionId) is required.")
 }
 
@@ -271,8 +276,9 @@ export const TOOL_GATES: Record<string, Gate> = {
   delete_key_result: async (a, x) => void (await assertEntityAccess(a, "keyResult", x.keyResultId)),
   log_checkin: async (a, x) => void (await assertEntityAccess(a, "keyResult", x.keyResultId)),
   set_objective_parent_kr: async (a, x) => {
-    await assertEntityAccess(a, "objective", x.objectiveId)
-    if (x.keyResultId) await assertEntityAccess(a, "keyResult", x.keyResultId)
+    // Both ends must share one workspace (a member of two workspaces must not cross-link them).
+    if (x.keyResultId) await assertSameWorkspaceEntities(a, [["objective", x.objectiveId], ["keyResult", x.keyResultId]])
+    else await assertEntityAccess(a, "objective", x.objectiveId)
   },
   // Without a cycle there is no child to tie to the declared workspace; membership of the declared workspace is the whole check.
   list_eligible_parent_key_results: (a, x) =>
@@ -353,6 +359,7 @@ export const TOOL_GATES: Record<string, Gate> = {
   create_experiment: async (a, x) => {
     await assertWorkspaceMember(a, x.workspaceId)
     if (x.assumptionId) await assertChildInDeclaredWorkspace(a, "assumption", x.assumptionId, x.workspaceId)
+    if (x.squadId) await assertChildInDeclaredWorkspace(a, "squad", x.squadId, x.workspaceId)
   },
   log_experiment_result: async (a, x) => void (await assertEntityAccess(a, "experiment", x.experimentId)),
   conclude_experiment: async (a, x) => void (await assertEntityAccess(a, "experiment", x.experimentId)),
@@ -370,7 +377,10 @@ export const TOOL_GATES: Record<string, Gate> = {
     await assertWorkspaceMember(a, x.workspaceId)
     if (x.solutionId) await assertChildInDeclaredWorkspace(a, "solution", x.solutionId, x.workspaceId)
     if (x.opportunityId) await assertChildInDeclaredWorkspace(a, "opportunity", x.opportunityId, x.workspaceId)
-    if (x.keyResultId) await assertEntityAccess(a, "keyResult", x.keyResultId)
+    // Same workspace as the declared one, as update_roadmap_item does: access alone would let a member of two
+    // workspaces attach another workspace's key result, and the squad was not checked at all.
+    if (x.keyResultId) await assertChildInDeclaredWorkspace(a, "keyResult", x.keyResultId, x.workspaceId)
+    if (x.squadId) await assertChildInDeclaredWorkspace(a, "squad", x.squadId, x.workspaceId)
   },
   request_decision: async (a, x) => {
     await assertWorkspaceMember(a, x.workspaceId)
@@ -521,8 +531,8 @@ export const TOOL_GATES: Record<string, Gate> = {
     }
   },
   link_evidence: async (a, x) => {
-    await assertEntityAccess(a, "evidence", x.evidenceId)
-    await assertEvidenceTarget(a, x)
+    // Re-pointing evidence at an entity in another workspace would surface it there.
+    await assertSameWorkspaceEntities(a, [["evidence", x.evidenceId], evidenceTargetEntity(x)])
   },
   list_evidence: async (a, x) => void (await assertEntityAccess(a, x.nodeType as WorkspaceEntityType, x.nodeId)),
 
@@ -535,6 +545,8 @@ export const TOOL_GATES: Record<string, Gate> = {
   // not here -- a resource has no tool name for this table to key on.
   prepare_doc_image_upload: (a, x) => assertWorkspaceMember(a, x.workspaceId),
   write_doc: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  // Read-only listing of a workspace's docs, optionally by Library kind: workspaceId is in the input, so membership is the whole gate.
+  list_docs: (a, x) => assertWorkspaceMember(a, x.workspaceId),
   delete_doc: (a, x) => assertWorkspaceMember(a, x.workspaceId),
   move_doc: (a, x) => assertWorkspaceMember(a, x.workspaceId),
   list_doc_history: (a, x) => assertWorkspaceMember(a, x.workspaceId),
@@ -698,6 +710,7 @@ const READ_TOOLS = [
   "list_links",
   "list_notifications",
   "list_specs",
+  "list_docs",
   "get_spec",
   "list_workspace_modules",
   "slack_list_channels", "slack_read_channel", "slack_read_thread", "slack_search_users",
@@ -845,7 +858,7 @@ export const AGENT_TOOL_POLICY: Record<string, "READ" | "WRITE" | "DENY"> = Obje
   ...["generate_research_guide", "create_research_study", "update_research_study", "generate_research_synthesis", "promote_research_finding_to_evidence"].map(name => [name, "WRITE"]),
   ...["activate_research_study", "close_research_study", "archive_research_study", "issue_research_link", "rotate_research_link", "revoke_research_links"].map(name => [name, "DENY"]),
   ...[
-    "get_current_identity", "TaskList", "TaskGet", "list_task_assignees", "list_comments", "get_comment", "get_workspace_summary", "list_workspaces", "get_workspace_by_slug", "list_okr_cycles", "get_okr_cycle", "list_eligible_parent_key_results", "list_opportunities", "list_solutions", "list_assumptions", "get_opportunity", "list_solution_comments", "get_solution_comment", "list_experiments", "get_experiment", "list_roadmap_items", "list_decisions", "get_decision", "list_release_runs", "get_review_request", "list_review_requests", "list_checklist_templates", "get_launch_checklist", "list_squads", "get_squad", "get_task", "list_tasks", "list_task_links", "list_feedback", "get_feedback_item", "list_evidence", "list_doc_history", "capture_canvas", "list_doc_comments", "list_artifacts", "get_artifact", "search_help", "get_help", "slack_list_channels", "slack_read_channel", "slack_read_thread", "slack_search_users", "list_scoring_models", "get_scoring_model", "get_workspace_scoring_model", "get_opportunity_score", "get_solution_score", "list_top_opportunities", "list_custom_field_definitions", "get_custom_field_values", "group_by_custom_field", "list_links", "list_specs", "get_spec", "list_workspace_modules",
+    "get_current_identity", "TaskList", "TaskGet", "list_task_assignees", "list_comments", "get_comment", "get_workspace_summary", "list_workspaces", "get_workspace_by_slug", "list_okr_cycles", "get_okr_cycle", "list_eligible_parent_key_results", "list_opportunities", "list_solutions", "list_assumptions", "get_opportunity", "list_solution_comments", "get_solution_comment", "list_experiments", "get_experiment", "list_roadmap_items", "list_decisions", "get_decision", "list_release_runs", "get_review_request", "list_review_requests", "list_checklist_templates", "get_launch_checklist", "list_squads", "get_squad", "get_task", "list_tasks", "list_task_links", "list_feedback", "get_feedback_item", "list_evidence", "list_doc_history", "capture_canvas", "list_doc_comments", "list_artifacts", "get_artifact", "search_help", "get_help", "slack_list_channels", "slack_read_channel", "slack_read_thread", "slack_search_users", "list_scoring_models", "get_scoring_model", "get_workspace_scoring_model", "get_opportunity_score", "get_solution_score", "list_top_opportunities", "list_custom_field_definitions", "get_custom_field_values", "group_by_custom_field", "list_links", "list_specs", "list_docs", "get_spec", "list_workspace_modules",
   ].map(name => [name, "READ"]),
   ...[
     "link_artifact_to_decision", "unlink_artifact_from_decision", "link_artifact_to_experiment", "unlink_artifact_from_experiment",

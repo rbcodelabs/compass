@@ -82,7 +82,7 @@ test("opportunity layout responds to available width without losing comment draf
   await page.screenshot({ path: "public/screenshots/docs/opportunity-detail-page-1280.png", fullPage: true, animations: "disabled", style: "nextjs-portal { visibility: hidden; }" });
   await discussion.getByLabel("Add comment", { exact: true }).fill("Unfinished observation");
   await page.setViewportSize({ width: 390, height: 844 });
-  await expect(discussion.getByLabel("Add comment", { exact: true })).toHaveValue("Unfinished observation");
+  await expect(discussion.getByLabel("Add comment", { exact: true })).toHaveText("Unfinished observation");
   const mobileTabs = await tabs.boundingBox();
   const mobileDiscussion = await discussion.boundingBox();
   expect(mobileDiscussion!.y).toBeGreaterThan(mobileTabs!.y + mobileTabs!.height);
@@ -93,7 +93,7 @@ test("opportunity layout responds to available width without losing comment draf
   await page.screenshot({ path: "public/screenshots/docs/opportunity-detail-discussion-mobile.png", fullPage: true, animations: "disabled", style: "nextjs-portal { visibility: hidden; }" });
   await page.setViewportSize({ width: 320, height: 740 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  await expect(discussion.getByLabel("Add comment", { exact: true })).toHaveValue("Unfinished observation");
+  await expect(discussion.getByLabel("Add comment", { exact: true })).toHaveText("Unfinished observation");
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(`${base}/discovery?detail=opportunity:${id}`);
   const panel = page.locator('[data-slot="sheet-content"]');
@@ -137,7 +137,7 @@ test("opportunity discussion retries a failed load and retains a failed post", a
   await discussion.getByLabel("Add comment", { exact: true }).fill("Preserve this observation.");
   await discussion.getByRole("button", { name: "Post comment", exact: true }).click();
   await expect(discussion.getByRole("alert")).toHaveText("Please retry your comment");
-  await expect(discussion.getByLabel("Add comment", { exact: true })).toHaveValue("Preserve this observation.");
+  await expect(discussion.getByLabel("Add comment", { exact: true })).toHaveText("Preserve this observation.");
   rejectPost = false;
   await discussion.getByRole("button", { name: "Post comment", exact: true }).click();
   await expect(discussion.getByText("Preserve this observation.", { exact: true })).toBeVisible();

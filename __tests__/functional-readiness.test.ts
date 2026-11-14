@@ -29,6 +29,17 @@ it("waits for login HTTP readiness rather than admitting a TCP-ready 404 server"
     expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0)
     expect(webServer.url).toMatch(/\/login$/)
     expect(webServer.port).toBeUndefined()
-    expect(webServer.timeout).toBe(120_000)
+    expect(webServer.timeout).toBe(60_000)
   } finally { rmSync(directory, { recursive: true, force: true }) }
 }, 25_000)
+
+it("keeps the 120s cold-compile readiness timeout when E2E_SERVER=dev is explicitly opted in", async () => {
+  vi.stubEnv("E2E_FUNCTIONAL", "1")
+  vi.stubEnv("E2E_SERVER", "dev")
+  const config = (await import("../playwright.config")).default
+  const webServer = config.webServer as { command: string; url?: string; port?: number; timeout: number }
+  expect(webServer.command).toContain("pnpm dev")
+  expect(webServer.url).toMatch(/\/login$/)
+  expect(webServer.port).toBeUndefined()
+  expect(webServer.timeout).toBe(120_000)
+})

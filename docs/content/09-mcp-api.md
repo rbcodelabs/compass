@@ -101,9 +101,19 @@ who is connecting, not by which is newer:
 | Best for | A person connecting their own AI client | Server-to-server automation, scheduled jobs, anything unattended |
 | Expiry | Access tokens last an hour and refresh automatically | Until you revoke it (or its explicit expiry) |
 
-Nothing here is deprecated. Static `compass_…` API keys and `MCP_API_KEY`
-service-account behavior remain supported indefinitely, and their access is
+Per-user static `cmp_…` API keys are not deprecated, and their access is
 unchanged — an OAuth connection is an additional door, not a replacement one.
+The shared `MCP_API_KEY` service key is only honored when
+`MCP_SERVICE_KEY_ENABLED=1` is also set, because it bypasses every workspace
+check.
+
+On Vercel, set `MCP_SERVICE_KEY_ENABLED=1` in each environment that relies on
+the shared key; without it requests with that key get the normal invalid-token
+response and the server logs a one-time warning. REST list endpoints sign their
+pagination cursors with `REST_CURSOR_SECRET`, which is required whenever
+`NODE_ENV=production` — that includes Vercel **preview** deployments, so set it
+in Production and Preview. It no longer falls back to `MCP_API_KEY`; changing it
+restarts pagination for clients.
 
 ### Connect by URL (OAuth)
 
@@ -853,8 +863,9 @@ below) and call the standard `resources/list` and `resources/read` methods:
 - `resources/read` on one of those URIs returns the doc's full content:
   a YAML frontmatter block followed by the markdown body. Frontmatter always
   carries `compass_doc_id` (the doc's underlying UUID, exposed for reference —
-  never accepted as input), `compass_doc_type`, and — if the doc is linked —
-  `compass_roadmap_item_id`, plus any ordinary user-set properties. A `SPEC` doc
+  never accepted as input), `compass_doc_type`, `compass_kind` (only when the doc has a
+  Library kind), and — if the doc is linked — `compass_roadmap_item_id`, plus any
+  ordinary user-set properties. A `SPEC` doc
   also carries `compass_scopes`, a read-only list of `solution:<uuid>` /
   `opportunity:<uuid>` values derived from its `DOC_SPECIFIES_SCOPE` links on
   every read. Like every `compass_` key it is ignored on write, so it can be
@@ -868,7 +879,8 @@ path. Two sibling docs sharing a title are disambiguated with a suffix, e.g.
 
 | Tool | Description |
 |---|---|
-| `write_doc` | Create or update a doc by path — a write to a path that already resolves updates it; a write to a new path creates it. Missing parent directories in the path are created implicitly (e.g. writing `Product/Roadmap/Q3 Plan` under an empty workspace creates `Product` and `Product/Roadmap` too). Params: `workspaceId`, `path`, `content` (frontmatter + markdown body), optional `operationId`/`expectedRevision`, and create-only `docType` (`STANDARD` or `CANVAS`; for `CANVAS` the body is a JSON Canvas 1.0 document, validated, with a blank canvas when empty). `SPEC` docs are created only by `create_spec`; writing to an existing `SPEC` doc rejects malformed or unresolvable `compass://` embeds (see [Specs and Discovery Plans](#specs-and-discovery-plans)) |
+| `write_doc` | Create or update a doc by path — a write to a path that already resolves updates it; a write to a new path creates it. Missing parent directories in the path are created implicitly (e.g. writing `Product/Roadmap/Q3 Plan` under an empty workspace creates `Product` and `Product/Roadmap` too). Params: `workspaceId`, `path`, `content` (frontmatter + markdown body), optional `operationId`/`expectedRevision`, optional `kind` (see below), and create-only `docType` (`STANDARD` or `CANVAS`; for `CANVAS` the body is a JSON Canvas 1.0 document, validated, with a blank canvas when empty). `SPEC` docs are created only by `create_spec`; writing to an existing `SPEC` doc rejects malformed or unresolvable `compass://` embeds (see [Specs and Discovery Plans](#specs-and-discovery-plans)) |
+| `list_docs` | List a workspace's docs, most recently updated first, optionally only those of one Library kind. Params: `workspaceId`, optional `kind` (`ADR`, `QA_REPORT`, `DESIGN` or `NOTE`) and `limit` (default 50, max 200). Read-only. Data: `{ items: [{ id, path, title, kind, docType, updatedAt, url }], count, total }`, where `kind` is `null` for a doc with no type and `total` counts every match before `limit` |
 | `delete_doc` | Delete the doc at a path. Refuses (matching `rmdir` vs `rm -r`) if it has children unless `recursive: true` is passed |
 | `move_doc` | Rename and/or reparent a doc by changing its path — both are just "the path changed." Missing intermediate directories on the destination are created implicitly |
 | `list_doc_history` | List the saved versions of the doc at a path (id, label, author, created date), newest first. Does not include full content — call `restore_doc_version` to apply one |
@@ -881,6 +893,8 @@ path. Two sibling docs sharing a title are disambiguated with a suffix, e.g.
 | `create_spec` | Create a NEW Spec doc for a Solution (`scopeType: SOLUTION`) or Discovery Plan doc for an Opportunity (`scopeType: OPPORTUNITY`), pre-filled from the record's real children as `compass://` embeds. Params: `workspaceId`, `scopeType`, `scopeId`, optional `template` (`default` or `blank`) and `label`. Not idempotent: every call makes another doc. Text ends with `ID: <doc uuid>`; data: `{ id, title, path, docType: "SPEC", scopeType, scopeId, linkId, template, label, url }` |
 | `list_specs` | List the `SPEC` docs linked to a Solution or Opportunity (`workspaceId`, `scopeType`, `scopeId`), oldest first: `{ id, title, path, label, updatedAt, url }` |
 | `get_spec` | Read one `SPEC` doc resolved (`workspaceId`, and `docId` or `path`; `docId` wins when both are given): the markdown (frontmatter included, as the `docs://` resource returns it) plus each embed's LIVE title, status and key facts, and an explicit `unavailable` list. Data: `{ id, title, path, docType, kinds, scopes, revision, url, markdown, embeds: [{ kind, id, form, state, title, status, facts, href }], unavailable: [{ kind, id }], omitted }`. `href` is an app-relative path. A doc that is missing, in another workspace or not a `SPEC` returns the same not-found message |
+
+**Kind.** Every doc may carry a Library `kind`: `ADR`, `QA_REPORT`, `DESIGN` or `NOTE`, shown to people as ADR, QA report, Design and Note. It is optional and independent of `docType`: a doc with no kind is always valid, and `write_doc` never rejects a write for lacking one. On `write_doc`, omit `kind` to leave it unset on create and unchanged on update, pass one of the four values to set it, or pass `null` to clear it; any other value is refused. A change of `kind` alone (identical content) is saved. The kind is read back as the read-only `compass_kind` key in the `docs://` frontmatter (absent when unset; like every `compass_` key it is ignored if you write it into the frontmatter), and `list_docs` filters by it, so "find every ADR" is one call.
 
 `write_doc` deliberately does not split into separate create/update tools —
 the path already tells you which one it is: writing to a path you just read
@@ -1104,11 +1118,12 @@ accept an ISO `updatedSince` and/or `updatedBefore` window. Most also accept
 `leastRecentlyUpdated` — the latter is for finding work that has gone quiet,
 such as opportunities still UNREVIEWED or EXPLORING or experiments parked in DESIGNING.
 
-Docs are the one entity here **without** a recency filter: the `docs://`
-resource that replaced `list_docs` (see [Docs](#docs) above) takes no
-caller-supplied query parameters at all — `resources/list` in the MCP protocol
-is a plain enumeration, not a filterable query. There is currently no "what
-doc changed recently" digest query over MCP.
+Docs are the one entity here **without** an `updatedSince`/`updatedBefore`
+window: the `docs://` resource takes no caller-supplied query parameters at all
+— `resources/list` in the MCP protocol is a plain enumeration, not a filterable
+query. `list_docs` (see [Docs](#docs) above) returns the most recently updated
+docs first and can filter by Library kind, but it has no time window either;
+pass a small `limit` for "what changed lately".
 
 Omitting `sort` preserves each tool's own default ordering. Those defaults carry
 meaning — `list_roadmap_items` groups by horizon then rank, `list_tasks` orders

@@ -148,6 +148,40 @@ describe("POST /api/portal/auth/send", () => {
     vi.unstubAllEnvs();
   });
 
+  describe("production build without AUTH_RESEND_KEY", () => {
+    const MOCK_RUNTIME = {
+      E2E_MOCK_AUTH: "1",
+      E2E_ISOLATED_DATABASE: "1",
+      DATABASE_URL: "postgres://postgres:postgres@localhost:5432/compass_e2e",
+    };
+    beforeEach(() => {
+      vi.stubEnv("NODE_ENV", "production");
+      for (const name of ["VERCEL", "VERCEL_ENV", "PGHOST", "AWS_ROLE_ARN", "PGSCHEMA", "PREVIEW_AUTOMATION_ENABLED"]) vi.stubEnv(name, undefined);
+    });
+    afterEach(() => vi.unstubAllEnvs());
+
+    it("hands the verify link back on the e2e mock-auth build in full mock mode (no mail transport exists there)", async () => {
+      vi.stubEnv("COMPASS_E2E_MOCK_AUTH_BUILD", "1");
+      for (const [name, value] of Object.entries(MOCK_RUNTIME)) vi.stubEnv(name, value);
+      const res = await sendPOST(sendRequest({ email: "e2e-portal@example.com" }));
+      const data = await res.json();
+      expect(res.status).toBe(200);
+      expect(data.devVerifyUrl).toContain("token=");
+      expect(fetch).not.toHaveBeenCalled();
+    });
+
+    it.each([["unflagged build", { COMPASS_E2E_MOCK_AUTH_BUILD: "" }], ["flagged build without the runtime flag", { COMPASS_E2E_MOCK_AUTH_BUILD: "1", E2E_MOCK_AUTH: "" }]])(
+      "still fails closed with 503 and no token on an %s",
+      async (_label, overrides) => {
+        for (const [name, value] of Object.entries({ ...MOCK_RUNTIME, ...overrides })) vi.stubEnv(name, value);
+        const res = await sendPOST(sendRequest({ email: "prod@example.com" }));
+        expect(res.status).toBe(503);
+        expect(await res.text()).not.toContain("token=");
+        expect(mockPortalVerificationToken.create).not.toHaveBeenCalled();
+      },
+    );
+  });
+
   it("returns 502, removes the unsent token, and leaks nothing when the Resend call is rejected", async () => {
     process.env.AUTH_RESEND_KEY = "re_test_key";
     vi.mocked(fetch).mockResolvedValue({ ok: false, status: 422 } as Response);

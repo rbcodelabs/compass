@@ -37,10 +37,15 @@ test.describe("Feedback Attachments", () => {
       await page.goto(`${base}/settings`);
       await page.waitForLoadState("networkidle");
 
-      const toggle = page.getByRole("switch").nth(1);
+      const toggle = page.getByTestId("portal-toggle-feedback");
       const isChecked = await toggle.getAttribute("aria-checked");
       if (isChecked !== "true") {
-        await toggle.click();
+        // The switch flips optimistically and the write is a server action: wait for that POST to finish before leaving the page,
+        // or a fast production server shows the portal "Feedback is not enabled".
+        await Promise.all([
+          page.waitForResponse((response) => response.request().method() === "POST" && "next-action" in response.request().headers()),
+          toggle.click(),
+        ]);
         await expect(toggle).toHaveAttribute("aria-checked", "true", { timeout: 10_000 });
       }
 

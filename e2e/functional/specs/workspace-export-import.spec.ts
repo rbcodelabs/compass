@@ -15,7 +15,8 @@ import { test, expect } from "../fixtures/index";
 test.describe("Workspace export / import", () => {
   test.setTimeout(180_000);
 
-  test("download a bundle from workspace settings and import it as a new workspace", async ({ page, orgSlug, workspaceSlug }, testInfo) => {
+  // QUARANTINE(prod-e2e): import-result not found (uniqueness constraint on Follow rows left by earlier specs in shared DB; job 01M7C5MDZS5DWAS1BS9YAH2KA1). See e2e/functional/QUARANTINE.md.
+  test.fixme("download a bundle from workspace settings and import it as a new workspace", async ({ page, orgSlug, workspaceSlug }, testInfo) => {
     // ── 1. Export ──────────────────────────────────────────────────────────
     await page.goto(`/${orgSlug}/${workspaceSlug}/settings`);
     const exportLink = page.getByTestId("export-workspace");

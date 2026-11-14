@@ -275,6 +275,9 @@ export function AgentChat({
   const [roster, setRoster] = useState<Roster | null>(null)
   /** Set once the server says this conversation is no longer ours (left, or removed). */
   const [accessLost, setAccessLost] = useState<"left" | "removed" | null>(null)
+  // Leaving on the full page drops the thread from the URL, which resets the thread state. The confirmation has to outlive
+  // that navigation (until another thread opens or a new chat starts), so it is kept apart from the per-thread accessLost.
+  const [leftNotice, setLeftNotice] = useState(false)
   const [processing, setProcessing] = useState<Processing | null>(null)
   const [processingLoading, setProcessingLoading] = useState(Boolean(activeConversationId))
   const started = useRef(new Set<string>())
@@ -338,12 +341,14 @@ export function AgentChat({
   useEffect(() => {
     if (activeConversationId && selfCreated.current.has(activeConversationId)) {
       selfCreated.current.delete(activeConversationId)
+      setLeftNotice(false)
       return
     }
     // A real thread switch: stop reading the previous thread's run. The run keeps
     // going server-side, and coming back to that thread reattaches to it.
     resetTurn()
     setAccessLost(null)
+    setLeftNotice((kept) => kept && !activeConversationId)
     jumpToBottom.current = true
     setMessages(initialMessages)
   }, [activeConversationId, initialMessages, resetTurn])
@@ -574,7 +579,9 @@ export function AgentChat({
   const handleAccessLost = useCallback(
     (reason: "left" | "removed") => {
       abortViewers()
-      setAccessLost(reason)
+      // The roster read that follows a leave answers 404, which is "removed" for anyone else but must not rewrite "left".
+      setAccessLost((current) => (reason === "removed" && current === "left" ? current : reason))
+      if (reason === "left") setLeftNotice(true)
       // Leaving on the full page drops the now-inaccessible thread from the URL.
       if (reason === "left" && !isRail) router.replace(`${basePath}/agent`)
     },
@@ -829,9 +836,9 @@ export function AgentChat({
               </p>
             )}
 
-            {accessLost && (
+            {(accessLost ?? (leftNotice ? "left" : null)) && (
               <div role="alert" className="rounded-lg border border-default bg-surface-inset px-4 py-3 text-sm text-text-secondary">
-                {accessLost === "left"
+                {(accessLost ?? "left") === "left"
                   ? "You left this conversation. It no longer appears in your list."
                   : "You no longer have access to this conversation."}{" "}
                 <Link className="underline" href={`${basePath}/agent`}>

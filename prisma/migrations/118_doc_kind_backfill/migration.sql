@@ -1,0 +1,18 @@
+-- Migration 118: backfill docs.kind for existing docs from their title and parent page (see lib/doc-kind-backfill.ts).
+--
+-- NO DDL, and EXPLICIT-ONLY: an untargeted POST never runs it. POST it by name ({"script":"118_doc_kind_backfill"}) only after
+-- 117_doc_kind is applied, and only when you have decided to classify the existing docs.
+--
+-- The rules (first match wins, case-insensitive, otherwise the doc is left unset):
+--   ADR        title starts with "ADR", or with a zero-padded four digit number (0001 to 0999) then a space . : or - ("0018 Fold ...").
+--              A year or date prefix such as "2026 Roadmap" or "2026-11-07 ..." is never a decision number.
+--   QA_REPORT  title starts with "QA Report", or the parent page is "QA Reports"
+--   DESIGN     parent page is "Design" or "Designs", or the title starts with "Design:" or "Design_"
+-- Only rows whose kind IS NULL are touched, so a kind someone already set (by hand or through write_doc) is never overwritten. Rows
+-- are walked in id order in batches, and each batch is its own short statement, so it is idempotent and resumable: a re-run changes
+-- nothing that is already classified. updated_at is not touched, so the Recent view does not reorder.
+--
+-- The hook proves its postcondition (no doc the classifier would classify is still NULL) before the completion receipt, so a partial
+-- run leaves an unfinished attempt and the next POST resumes.
+--
+-- This file intentionally contains no executable statement; the work is the hook (lib/migrations/doc-kind-backfill.ts).

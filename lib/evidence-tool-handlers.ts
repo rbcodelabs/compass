@@ -32,20 +32,22 @@ async function findTargetNode(
     return {
       kind: "opportunity" as const,
       id: opportunityId,
-      node: await prisma.opportunity.findUnique({ where: { id: opportunityId }, select: { id: true, title: true } }),
+      node: await prisma.opportunity.findUnique({ where: { id: opportunityId }, select: { id: true, title: true, workspaceId: true } }),
     }
   }
   if (solutionId) {
     return {
       kind: "solution" as const,
       id: solutionId,
-      node: await prisma.solution.findUnique({ where: { id: solutionId }, select: { id: true, title: true } }),
+      node: await prisma.solution.findUnique({ where: { id: solutionId }, select: { id: true, title: true, workspaceId: true } }),
     }
   }
   return {
     kind: "assumption" as const,
     id: assumptionId!,
-    node: await prisma.assumption.findUnique({ where: { id: assumptionId }, select: { id: true, title: true } }),
+    node: await prisma.assumption
+      .findUnique({ where: { id: assumptionId }, select: { id: true, title: true, solution: { select: { workspaceId: true } } } })
+      .then((a) => a && { id: a.id, title: a.title, workspaceId: a.solution.workspaceId }),
   }
 }
 
@@ -124,6 +126,11 @@ export async function linkEvidence({
 
   const { kind, id, node } = await findTargetNode(prisma, target)
   if (!node) {
+    return fail(`${kind} "${id}" not found.`)
+  }
+
+  // Defence in depth behind the gate: evidence never moves to another workspace's entity.
+  if (node.workspaceId !== evidence.workspaceId) {
     return fail(`${kind} "${id}" not found.`)
   }
 

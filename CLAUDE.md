@@ -4,15 +4,24 @@
 
 ## Architecture decisions live in Compass, not the repo
 
-**Compass Docs is the authoritative home for Compass ADRs.** They sit under the
-[**Architecture Decisions**](https://compass.rbcodelabs.com/rbcodelabs/compass/docs/57218788-1db1-4148-b954-b98fb7055c62)
-parent doc in the `rbcodelabs/compass` workspace. This is what
-`Products/Compass/pm-config.md` already routes to — both `review_requests` and
-`decision_records` resolve to the `compass_decisions` provider.
+**Compass Docs is the authoritative home for Compass ADRs.** An ADR is a Doc in
+the `rbcodelabs/compass` workspace with **kind `ADR`**. The kind, not the
+location, is how you find ADRs: `list_docs` with `kind: "ADR"`, or the By Type
+view on the Docs page. The
+[**Architecture Decisions**](https://compass.rbcodelabs.com/rbcodelabs/compass/docs/1a6c874d-3eb0-4603-afc7-6b95a1722a3e)
+parent doc is where they conventionally sit, but placing a new ADR under it is
+optional. A decision doc with no kind (for example an older one whose title does
+not start with "ADR") will not show up under ADR; if `list_docs` misses one, look
+under that parent. `Products/Compass/pm-config.md` routes decisions to Compass
+already: both `review_requests` and `decision_records` resolve to the
+`compass_decisions` provider.
 
-- **To record a new architecture decision:** create a child Doc under that
-  parent, then route it for approval with `request_decision` using
-  `subjectType: "DOC"`.
+- **To record a new architecture decision:** write a Doc with `kind: "ADR"`
+  (`write_doc` accepts it, or set the Type in the doc's properties); putting it as
+  a child of the Architecture Decisions parent is the usual convention but not
+  required. Then route it for approval with `request_decision` using
+  `subjectType: "DOC"`. A Doc with no kind is still valid; it just will not
+  show up under ADR.
 - **Never self-certify.** Do not write `Status: Accepted` on your own record.
   Approval is an event that comes back from the provider; if it did not come
   back, the decision is not approved.
@@ -107,7 +116,7 @@ The generic recipe is the `proxmox-devbox` skill. These are the Compass-specific
 - **Node:** `engines` requires 22.x; the VM default is newer, so `fnm use 22` first.
 - **Sync size:** the checkout can hold ~50 GB in `.worktrees`, `.claude`, `.pnpm-store` and `.npm-cache`. Exclude all four (plus `node_modules`, `.next`, `.git`) from any rsync, or it hangs.
 - **Data:** run `npx tsx --env-file=.env.local scripts/seed-portal-demo.ts` to get a public roadmap at `/portal/demo/acme/roadmap`. It seeds no user, so authenticated pages won't work.
-- **Typecheck/E2E on the box:** `NODE_OPTIONS=--max-old-space-size=8192 npx tsc --noEmit`. The functional E2E needs a local `compass_e2e` database; a throwaway `postgres:16` container on `localhost:5440` works (`pnpm test:e2e:functional -- <spec>`). `launch-tiers.spec.ts` currently fails there on a trailing console-error check (four 404s), identically on `main`.
+- **Typecheck/E2E on the box:** `NODE_OPTIONS=--max-old-space-size=8192 npx tsc --noEmit`. The functional E2E defaults to `E2E_SERVER=prod` (`pnpm build:e2e && pnpm test:e2e:functional -- <spec>`, or `scripts/tq-e2e-prod-spec.mjs` on `tq`; set `E2E_SERVER=dev` to use `pnpm dev`) and needs a local `compass_e2e` database; a throwaway `postgres:16` container on `localhost:5440` works. `launch-tiers.spec.ts` is quarantined for a trailing console-error check (four 404s), identically on `main`.
 
 ## Portal SSO Identify — resyncing a drifted customer secret
 

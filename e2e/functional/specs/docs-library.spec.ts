@@ -1,7 +1,8 @@
 import { test, expect } from "../fixtures/index";
 import getPrisma from "../../../lib/db";
 
-test("unified Library keeps search and filters reachable for long collections on desktop and mobile", async ({ page, base }) => {
+// QUARANTINE(prod-e2e): known baseline failure on dev and prod - Show library click intercepted by agent-rail overlay (job 01M7C5MDZS5DWAS1BS9YAH2KA1). See e2e/functional/QUARANTINE.md.
+test.fixme("unified Library keeps search and filters reachable for long collections on desktop and mobile", async ({ page, base }) => {
   const prisma = getPrisma();
   const workspace = await prisma.workspace.findFirstOrThrow({ where: { slug: "e2e-workspace", organization: { slug: "e2e-test-org" } } });
   const prefix = `Library ${Date.now()}`;

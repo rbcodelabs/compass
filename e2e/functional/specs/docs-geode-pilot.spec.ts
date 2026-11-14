@@ -18,7 +18,7 @@ test("Headless pilot: persisted body, history restore, lost save retry and confl
     await page.waitForLoadState("networkidle");
     const previous = page.url();
     await page.getByRole("button", { name: "New", exact: true }).click();
-    await page.waitForURL(url => url.href !== previous && /\/docs\/[0-9a-f-]+$/.test(url.pathname));
+    await page.waitForURL(url => url.href !== previous && /\/docs\/(?:[0-9a-f-]+|DOC-\d+)$/.test(url.pathname));
     id = page.url().split("/").pop()!;
     const editor = page.locator(".ProseMirror");
     await expect(editor).toBeEmpty();

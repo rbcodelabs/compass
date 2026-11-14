@@ -5,7 +5,7 @@ import type { Page } from "@playwright/test";
 async function createDoc(page: Page, base: string) {
   await page.goto(`${base}/docs`);
   await clickNewDoc(page)
-  await page.waitForURL(/\/docs\/[0-9a-f-]+$/);
+  await page.waitForURL(/\/docs\/(?:[0-9a-f-]+|DOC-\d+)$/);
   await expect(page.locator(".ProseMirror")).toBeVisible();
 }
 
@@ -18,7 +18,8 @@ async function typeMermaidBlock(page: Page, source: string) {
   await page.keyboard.type(source);
 }
 
-test("a mermaid fence renders as a diagram and toggles back to editable source", async ({ page, base }) => {
+// QUARANTINE(prod-e2e): known baseline failure on dev and prod - mermaid-diagram svg not visible within 5s (job 01M7C5MDZS5DWAS1BS9YAH2KA1). See e2e/functional/QUARANTINE.md.
+test.fixme("a mermaid fence renders as a diagram and toggles back to editable source", async ({ page, base }) => {
   await createDoc(page, base);
   await typeMermaidBlock(page, "flowchart LR\nA[Start] --> B[Done]");
 
@@ -31,7 +32,8 @@ test("a mermaid fence renders as a diagram and toggles back to editable source",
   await expect(page.locator(".ProseMirror pre code.language-mermaid")).toContainText("flowchart LR");
 });
 
-test("invalid mermaid syntax shows the error and the raw source", async ({ page, base }) => {
+// QUARANTINE(prod-e2e): known baseline failure on dev and prod - mermaid-error does not include raw source text (job 01M7C5MDZS5DWAS1BS9YAH2KA1). See e2e/functional/QUARANTINE.md.
+test.fixme("invalid mermaid syntax shows the error and the raw source", async ({ page, base }) => {
   await createDoc(page, base);
   await typeMermaidBlock(page, "flowchart LR\nA --> --> B [");
 

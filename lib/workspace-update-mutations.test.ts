@@ -104,6 +104,22 @@ describe("per-workspace module decision", () => {
       vi.mocked(isModuleEnabled).mockReset()
     }
   })
+  it("asks for an update's modules before its transaction opens, never from inside it (a held connection must not wait for a second one)", async () => {
+    const calls: string[] = []
+    mocks.tablesExist = true
+    vi.mocked(isModuleEnabled).mockImplementation(async (_workspaceId, key) => { calls.push(`module:${key}`); return key === "workspace_updates" })
+    const withTx = vi.fn()
+    try {
+      findUnique.mockResolvedValue({ id: "t", workspaceId: "w", status: "TODO" })
+      await captureWorkspaceMutation(db, "task", "update", actor, "t", async () => { withTx(); calls.push("mutate"); return { id: "t", workspaceId: "w", status: "DONE" } })
+      expect(withTx).toHaveBeenCalledTimes(1)
+      // Both module answers are read first; nothing is read after the write starts.
+      expect(calls).toEqual(["module:workspace_updates", "module:following", "mutate"])
+      expect(mocks.record).toHaveBeenCalledWith(db, expect.objectContaining({ workspaceId: "w", kind: "STATUS_CHANGED" }))
+    } finally {
+      vi.mocked(isModuleEnabled).mockReset()
+    }
+  })
   it("a narrow row with no workspace does not fail the user's write; it is logged and not captured", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
     await expect(captureWorkspaceMutation(db, "task", "create", actor, undefined, async () => ({ id: "t" }))).resolves.toEqual({ id: "t" })

@@ -34,4 +34,18 @@ describe("REST cursors", () => {
     vi.stubEnv("MCP_API_KEY", "")
     expect(() => encodeCursor({ id: "row-1", createdAt: "2026-10-02T00:00:00.000Z", context: "tasks" })).toThrow(/must be configured/)
   })
+
+  it("never falls back to MCP_API_KEY in production", () => {
+    vi.stubEnv("NODE_ENV", "production")
+    vi.stubEnv("REST_CURSOR_SECRET", "")
+    vi.stubEnv("MCP_API_KEY", "service-secret")
+    expect(() => encodeCursor({ id: "row-1", createdAt: "2026-10-02T00:00:00.000Z", context: "tasks" })).toThrow(/REST_CURSOR_SECRET must be configured/)
+  })
+
+  it("signs with REST_CURSOR_SECRET in production", () => {
+    vi.stubEnv("NODE_ENV", "production")
+    vi.stubEnv("REST_CURSOR_SECRET", "cursor-secret")
+    const cursor = encodeCursor({ id: "row-1", createdAt: "2026-10-02T00:00:00.000Z", context: "tasks" })
+    expect(decodeCursor(cursor, "tasks")).toMatchObject({ id: "row-1" })
+  })
 })

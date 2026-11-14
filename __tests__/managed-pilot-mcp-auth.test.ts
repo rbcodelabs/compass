@@ -11,6 +11,7 @@ beforeEach(() => {
 afterEach(() => { vi.clearAllMocks(); vi.unstubAllEnvs(); });
 it("refuses the global service fallback and OAuth in managed pilots", async () => {
   vi.stubEnv("MCP_API_KEY", "shared");
+  vi.stubEnv("MCP_SERVICE_KEY_ENABLED", "1");
   expect(await validateMcpAuth(request("shared"))).toEqual({ valid: false });
   expect(await validateMcpAuth(request("cmp_oat_example"))).toEqual({ valid: false });
   expect(state.initialize).not.toHaveBeenCalled();

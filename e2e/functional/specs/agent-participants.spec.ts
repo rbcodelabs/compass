@@ -238,7 +238,11 @@ test("owner shares an agent conversation, the invitee sees it, outsiders are blo
     await expect(bPage.getByText(ownerMessage)).toBeVisible({ timeout: 30_000 });
     await bPage.getByRole("button", { name: /^Shared with 1 person/ }).click();
     await bPage.getByRole("button", { name: "Leave", exact: true }).click();
+    // Leaving on the full page drops the thread from the URL; the notice must outlive that navigation, and must not be
+    // replaced by the "removed" copy when the follow-up roster read answers 404.
+    await expect(bPage).not.toHaveURL(/[?&]c=/, { timeout: 15_000 });
     await expect(bPage.getByText("You left this conversation.", { exact: false })).toBeVisible({ timeout: 15_000 });
+    await expect(bPage.getByText("You no longer have access to this conversation.")).toHaveCount(0);
     expect((await bApi.get(participantsUrl())).status()).toBe(404);
     expect((await activeRows())[0].removed_at).not.toBeNull();
 

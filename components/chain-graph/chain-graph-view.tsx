@@ -529,6 +529,9 @@ function ChainGraphInner({ graph, initialFocus = null, initialGroupBy = "objecti
               onPaneClick={() => select(null)}
               onlyRenderVisibleElements
               nodesConnectable={false}
+              // The node content carries its own role="button" and key handling, so it is the tab stop;
+              // a focusable wrapper would be a second, unnamed stop that swallows Enter.
+              nodesFocusable={false}
               elementsSelectable={false}
               minZoom={0.05}
               maxZoom={3}

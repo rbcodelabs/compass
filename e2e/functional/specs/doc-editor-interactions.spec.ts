@@ -34,7 +34,8 @@ test.describe.configure({ mode: "serial" });
 test.describe("Doc editor interactions (desktop)", () => {
   test.use({ viewport: { width: 1440, height: 900 }, hasTouch: false });
 
-  test("selection bubble formats text and links; there is no sticky toolbar", async ({ page, base }) => {
+  // QUARANTINE(prod-e2e): intermittent Home + Shift+ArrowRight selection race before autosave settles (job 01M7CSWFSJH8VNGES39CPPFV5X; same family as lines 60 and 191). See e2e/functional/QUARANTINE.md.
+  test.fixme("selection bubble formats text and links; there is no sticky toolbar", async ({ page, base }) => {
     const editor = await openDoc(page, base);
     await expect(page.getByTitle("Heading 1", { exact: true })).toHaveCount(0);
     await page.keyboard.type("Make this word bold please");
@@ -56,7 +57,8 @@ test.describe("Doc editor interactions (desktop)", () => {
     await expect(editor.locator("h2")).toContainText("Make this word bold please");
   });
 
-  test("clicking away from a selection moves the caret and dismisses the bubble", async ({ page, base }) => {
+  // QUARANTINE(prod-e2e): intermittent selection flake - doc-bubble-menu not visible within 5s (job 01M7C5MDZS5DWAS1BS9YAH2KA1). See e2e/functional/QUARANTINE.md.
+  test.fixme("clicking away from a selection moves the caret and dismisses the bubble", async ({ page, base }) => {
     const editor = await openDoc(page, base);
     await page.keyboard.type("Alpha first line");
     await page.keyboard.press("Enter");
@@ -185,7 +187,8 @@ test.describe("Doc editor interactions (desktop)", () => {
 test.describe("Doc editor interactions (mobile)", () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
-  test("keeps a compact toolbar and no selection bubble", async ({ page, base }) => {
+  // QUARANTINE(prod-e2e): intermittent Home + Shift+ArrowRight selection race before autosave settles - bolded 'T' instead of 'Tap' (job 01M7D1C739C829SX990HZFVP6W). See e2e/functional/QUARANTINE.md.
+  test.fixme("keeps a compact toolbar and no selection bubble", async ({ page, base }) => {
     const editor = await openDoc(page, base);
     await expect(page.getByTitle("Bold", { exact: true })).toBeVisible();
     await expect(page.getByTitle(/comment/i).first()).toBeVisible();

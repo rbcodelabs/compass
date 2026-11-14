@@ -20,6 +20,7 @@ import {
   setDocCommentStatusCore,
   deleteDocCommentCore,
 } from "@/lib/doc-comments";
+import { isDocKind } from "@/lib/doc-kinds";
 import { postDocCommentWithOptionalTask, type CommentTaskRequest, type PostCommentResult } from "@/lib/doc-comment-tasks";
 import { getArtifactStorage } from "@/lib/artifact-storage";
 import { parseArtifactKind } from "@/lib/artifact-kind";
@@ -506,14 +507,16 @@ export async function createFirstDoc(orgSlug: string, workspaceSlug: string) {
 
 export async function updateDoc(
   docId: string,
-  data: { title?: string; content?: string; icon?: string; metadata?: Record<string, unknown> },
+  data: { title?: string; content?: string; icon?: string; metadata?: Record<string, unknown>; kind?: string | null },
   revalidatePathStr: string,
   mutation: Mutation = {}
 ) {
   const { user } = await requireDocumentMember(docId);
-  const { metadata, title, content, icon } = data;
+  const { metadata, title, content, icon, kind } = data;
   if ([title, content, icon].some(value => value !== undefined && typeof value !== "string") || (metadata !== undefined && (metadata === null || typeof metadata !== "object" || Array.isArray(metadata)))) throw new Error("Invalid document change");
-  const change = { ...(title === undefined ? {} : { title }), ...(content === undefined ? {} : { content }), ...(icon === undefined ? {} : { icon }), ...(metadata === undefined ? {} : { metadata: metadata as Prisma.InputJsonValue }) };
+  // Library kind: a known kind sets it, null clears it, undefined leaves it alone. Anything else is refused (the select only offers known kinds).
+  if (kind !== undefined && kind !== null && !isDocKind(kind)) throw new Error("Invalid document change");
+  const change = { ...(title === undefined ? {} : { title }), ...(content === undefined ? {} : { content }), ...(icon === undefined ? {} : { icon }), ...(metadata === undefined ? {} : { metadata: metadata as Prisma.InputJsonValue }), ...(kind === undefined ? {} : { kind }) };
   const doc = await updateDocument(docId, change, { ...mutationToken(mutation), authorId: user.id, authorName: user.name ?? user.email ?? "Unknown" });
   revalidatePath(revalidatePathStr);
   return { id: doc.id, revision: doc.revision };

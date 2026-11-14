@@ -10,7 +10,7 @@
  *
  * MODEL.
  *   - The acting identity is an `McpActor = { userId: string | null }`.
- *   - `purpose === SERVICE` → the shared service key (MCP_API_KEY). Trusted,
+ *   - `purpose === SERVICE` → the shared service key (MCP_API_KEY, honored only with MCP_SERVICE_KEY_ENABLED=1). Trusted,
  *     GLOBAL access — every assert here is a no-op for it. Existing
  *     server-to-server automations depend on this and must keep working.
  *   - Other actors → a per-user `cmp_…` ApiKey. Scoped to the

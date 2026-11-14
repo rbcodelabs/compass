@@ -3,8 +3,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 const apiKey = { findFirst: vi.fn(), update: vi.fn() }
 const agent = { findFirst: vi.fn() }
 const oAuthToken = { findFirst: vi.fn(), update: vi.fn() }
+vi.mock("crypto", async (orig) => {
+  const actual = await orig<typeof import("crypto")>()
+  return { ...actual, timingSafeEqual: vi.fn(actual.timingSafeEqual) }
+})
 vi.mock("@/lib/db", () => ({ default: () => ({ apiKey, agent, oAuthToken }) }))
 
+import { timingSafeEqual } from "crypto"
 import { validateMcpAuth, validateProgrammaticAuth } from "@/lib/mcp-auth"
 import { AGENT_LEGACY_SELECT, resetAgentColumnsAvailabilityCache } from "@/lib/agent-ownership"
 import { hashOAuthToken } from "@/lib/oauth/tokens"
@@ -144,6 +149,7 @@ describe("MCP credential expiry", () => {
 
   it("keeps the configured service credential independent of database expiry", async () => {
     vi.stubEnv("MCP_API_KEY", "service-secret")
+    vi.stubEnv("MCP_SERVICE_KEY_ENABLED", "1")
     const serviceRequest = new Request("https://compass.test/api/mcp", {
       headers: { authorization: "Bearer service-secret" },
     })
@@ -155,6 +161,44 @@ describe("MCP credential expiry", () => {
       scopeWorkspaceId: null,
     })
     expect(apiKey.findFirst).not.toHaveBeenCalled()
+    vi.unstubAllEnvs()
+  })
+
+  it("ignores the service key unless MCP_SERVICE_KEY_ENABLED=1", async () => {
+    vi.stubEnv("MCP_API_KEY", "service-secret")
+    const serviceRequest = new Request("https://compass.test/api/mcp", {
+      headers: { authorization: "Bearer service-secret" },
+    })
+    await expect(validateMcpAuth(serviceRequest)).resolves.toEqual({ valid: false })
+    vi.stubEnv("MCP_SERVICE_KEY_ENABLED", "true")
+    await expect(validateMcpAuth(serviceRequest)).resolves.toEqual({ valid: false })
+    vi.unstubAllEnvs()
+  })
+
+  it("compares the service key in constant time over SHA-256 digests", async () => {
+    vi.stubEnv("MCP_API_KEY", "service-secret")
+    vi.stubEnv("MCP_SERVICE_KEY_ENABLED", "1")
+    const spy = vi.mocked(timingSafeEqual)
+    spy.mockClear()
+    const wrong = new Request("https://compass.test/api/mcp", {
+      headers: { authorization: "Bearer service-secreX" },
+    })
+    await expect(validateMcpAuth(wrong)).resolves.toEqual({ valid: false })
+    expect(spy).toHaveBeenCalled()
+    // Digests, not raw secrets, are compared: both buffers are 32 bytes.
+    expect(spy.mock.calls[0][0]).toHaveLength(32)
+    expect(spy.mock.calls[0][1]).toHaveLength(32)
+    vi.unstubAllEnvs()
+  })
+
+  it("accepts the exact key and rejects a shorter, longer or empty token without throwing", async () => {
+    vi.stubEnv("MCP_API_KEY", "service-secret")
+    vi.stubEnv("MCP_SERVICE_KEY_ENABLED", "1")
+    const bearer = (token: string) => new Request("https://compass.test/api/mcp", { headers: { authorization: `Bearer ${token}` } })
+    await expect(validateMcpAuth(bearer("service-secret"))).resolves.toMatchObject({ valid: true, purpose: "SERVICE" })
+    for (const token of ["service", "service-secret-and-more", "x"]) {
+      await expect(validateMcpAuth(bearer(token))).resolves.toEqual({ valid: false })
+    }
     vi.unstubAllEnvs()
   })
 })

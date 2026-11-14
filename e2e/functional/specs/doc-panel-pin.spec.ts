@@ -5,7 +5,7 @@ import type { Page } from "@playwright/test";
 async function createDoc(page: Page, base: string) {
   await page.goto(`${base}/docs`);
   await clickNewDoc(page)
-  await page.waitForURL(/\/docs\/[0-9a-f-]+$/);
+  await page.waitForURL(/\/docs\/(?:[0-9a-f-]+|DOC-\d+)$/);
   await expect(page.locator(".ProseMirror")).toBeVisible();
   await expect(page.locator(".ProseMirror")).toBeEmpty();
 }

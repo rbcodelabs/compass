@@ -14,7 +14,7 @@ test.describe("Doc image upload privacy", () => {
     const previousDocUrl = page.url()
     await clickNewDoc(page)
     await page.waitForURL(
-      url => url.href !== previousDocUrl && /\/docs\/[0-9a-f-]+$/.test(url.pathname),
+      url => url.href !== previousDocUrl && /\/docs\/(?:[0-9a-f-]+|DOC-\d+)$/.test(url.pathname),
       { timeout: 15_000 }
     )
 

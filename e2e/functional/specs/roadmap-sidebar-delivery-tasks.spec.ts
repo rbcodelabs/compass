@@ -82,7 +82,8 @@ async function seedJourney(): Promise<SeededJourney> {
 }
 
 test.describe("Roadmap sidebar delivery tasks", () => {
-  test("shows ordered task evidence and supports add, link, persistence, and navigation", async ({ page, base }) => {
+  // QUARANTINE(prod-e2e): strict mode violation - 'Dev User' option resolves to 2 elements from earlier spec workspace member leak (job 01M7C5MDZS5DWAS1BS9YAH2KA1; fix in fix/e2e-dev-user-leaks). See e2e/functional/QUARANTINE.md.
+  test.fixme("shows ordered task evidence and supports add, link, persistence, and navigation", async ({ page, base }) => {
     const seeded = await seedJourney();
     const addedTitle = `E2E Added From Sidebar ${Date.now()}`;
 

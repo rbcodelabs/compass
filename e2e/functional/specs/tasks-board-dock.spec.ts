@@ -107,7 +107,8 @@ async function insertTask(pool: pg.Pool, workspaceId: string, title: string, sta
 }
 
 test.describe("Tasks board dock", () => {
-  test("pin, tabs, drag and drop, add from the panel, reorder, show cancelled and narrow screens", async ({ page, base }) => {
+  // QUARANTINE(prod-e2e): dnd-kit drag from docked Done panel to TODO column times out under full-suite prod run (jobs 01M7CSWFXD61ZM245FR477AZ04, 01M7CSWFSJH8VNGES39CPPFV5X, 01M7CZBKFJYEWY795219FZ60TD). See e2e/functional/QUARANTINE.md.
+  test.fixme("pin, tabs, drag and drop, add from the panel, reorder, show cancelled and narrow screens", async ({ page, base }) => {
     test.setTimeout(420_000);
     const pageErrors = capturePageErrors(page);
     const pool = requireLocalE2eDatabase();

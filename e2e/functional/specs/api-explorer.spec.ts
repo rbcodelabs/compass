@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type ElementHandle, type Page } from "@playwright/test";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 
@@ -42,17 +42,30 @@ test("method columns align operation titles on desktop and mobile", async ({
     await page.goto("/help/api-explorer#operation=getTask");
     if (width === 390)
       await page.getByRole("button", { name: "Browse operations" }).click();
-    const lefts: number[] = [];
+    const titles: ElementHandle<HTMLElement | SVGElement>[] = [];
     for (const method of methods) {
       const row = page.getByRole("button", {
         name: `${method.toUpperCase()} ${method} a synthetic task with a longer operation title`,
       });
       await expect(row).toBeVisible();
-      const title = await row.locator("span").nth(1).boundingBox();
+      const title = await row.locator("span").nth(1).elementHandle();
       expect(title).not.toBeNull();
-      lefts.push(title!.x);
+      titles.push(title!);
     }
-    expect(Math.max(...lefts) - Math.min(...lefts)).toBeLessThanOrEqual(1);
+    // Measure every title in one browser task: reading them one await at a time lets a late layout shift (the contract
+    // finishing its render, a scrollbar appearing) land between two reads and look like misalignment.
+    const measure = () =>
+      page.evaluate(
+        (elements) => elements.map((element) => element.getBoundingClientRect().x),
+        titles,
+      );
+    let lefts: number[] = [];
+    await expect
+      .poll(async () => {
+        lefts = await measure();
+        return Math.max(...lefts) - Math.min(...lefts);
+      })
+      .toBeLessThanOrEqual(1);
     await testInfo.attach(`method-alignment-${width}`, {
       body: JSON.stringify({ viewportWidth: width, methods, titleLefts: lefts }),
       contentType: "application/json",
@@ -109,7 +122,9 @@ test("deployment cookies load the contract without authorizing cookie-free API r
   ).toBeVisible();
   await page.getByLabel("API key or OAuth bearer token").fill("synthetic");
   await page.getByRole("button", { name: "Send GET request" }).click();
-  await expect(page.getByRole("status")).toContainText("Request failed.");
+  // The failure is announced in the alert; the status line only reports a completed request ("No request sent." otherwise).
+  await expect(page.getByRole("alert").filter({ hasText: "Request failed." })).toBeVisible();
+  await expect(page.getByRole("status")).toContainText("No request sent.");
   expect(calls).toBe(1);
   expect(page.url()).not.toContain("synthetic-protection-login");
 });

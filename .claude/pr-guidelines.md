@@ -7,7 +7,7 @@
 | Type-check | `pnpm tsc --noEmit` |
 | Unit tests | `pnpm test` |
 | E2E screenshots | `pnpm test:e2e` |
-| E2E functional | `pnpm test:e2e:functional` |
+| E2E functional | `pnpm build:e2e && pnpm test:e2e:functional` |
 | Build | `pnpm build` |
 
 ## Where to run (homelab first, local is the fallback)
@@ -23,7 +23,7 @@ ssh -o ConnectTimeout=3 -o BatchMode=yes dev-builder 'true' && echo REACHABLE ||
 | Type-check | `tq-check` | `pnpm tsc --noEmit` (profile runs typecheck) |
 | Unit tests | `tq-check` | `pnpm test` |
 | Real-Postgres integration tests | `dev-builder` (throwaway `postgres:16`; CI runs them too) | `INTEGRATION_TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:<port>/compass_e2e pnpm exec vitest run <file>` (see below) |
-| E2E functional | `dev-builder` (no passing `tq` profile) | `pnpm test:e2e:functional` |
+| E2E functional | `tq` custom spec (`scripts/tq-e2e-prod-spec.mjs`) or `dev-builder` | `pnpm build:e2e && pnpm test:e2e:functional` |
 | E2E screenshots | local (needs seeded local dev server + session file) | `pnpm test:e2e` |
 | Build | `dev-builder` | `pnpm build` |
 
@@ -127,10 +127,13 @@ DOCS_BASE_URL=http://localhost:<port> DOCS_SESSION_FILE=/tmp/dev-session.json pn
 
 Review every regenerated screenshot before committing — an unauthenticated or mis-seeded run silently captures a login-redirect page or empty/broken content instead of failing loudly.
 
-**Functional** (requires local Podman Postgres + dev server):
+**Functional** (defaults to `E2E_SERVER=prod` on the `pnpm build:e2e` artifact; set `E2E_SERVER=dev` for `pnpm dev`):
 ```bash
-# Auto-starts dev server on port 3002, seeds e2e-test-org, runs assertions, teardown:
-pnpm test:e2e:functional
+# Build the mock-auth e2e artifact, then auto-start next start, seed e2e-test-org, run assertions, teardown:
+pnpm build:e2e && pnpm test:e2e:functional
+
+# Opt back into the dev server (`pnpm dev`) when iterating locally without rebuilding:
+E2E_SERVER=dev pnpm test:e2e:functional
 
 # Keep DB state for post-failure inspection:
 E2E_SKIP_TEARDOWN=1 pnpm test:e2e:functional

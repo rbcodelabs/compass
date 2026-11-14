@@ -27,6 +27,8 @@ import { assertWorkspaceUpdatesMigration } from "@/lib/migrations/workspace-upda
 import { assertFollowsNotificationsMigration } from "@/lib/migrations/follows-notifications";
 import { assertPortalHomeLayoutMigration } from "@/lib/migrations/portal-home-layout";
 import { assertDocPublishingMigration } from "@/lib/migrations/doc-publishing";
+import { assertDocKindMigration } from "@/lib/migrations/doc-kind";
+import { DOC_KIND_BACKFILL_MIGRATION, assertDocKindBackfill, backfillDocKinds } from "@/lib/migrations/doc-kind-backfill";
 import { assertPortalHomeTemplateMigration } from "@/lib/migrations/portal-home-template";
 import { assertRoadmapViewsMigration } from "@/lib/migrations/roadmap-views";
 import { SAVED_VIEWS_SURFACE_MIGRATION, assertSavedViewsSurfaceMigration, backfillSavedViewsSurface } from "@/lib/migrations/saved-views-surface";
@@ -47,6 +49,7 @@ import { ENTITY_LINKS_TASK_BACKFILL_MIGRATION, assertEntityLinksTaskBackfill, ba
 import { getEntityLinksReadParityStatus } from "@/lib/migrations/entity-links-read-parity";
 import { ENTITY_LINKS_LEGACY_DROP_MIGRATION, assertLegacyDropped, dropLegacyLinkRelations, getEntityLinksLegacyDropStatus } from "@/lib/migrations/entity-links-legacy-drop";
 import { LEGACY_SOURCES_BY_MIGRATION, LEGACY_STATUS_SOURCES, missingLegacyRelations, type LegacyRelation } from "@/lib/migrations/legacy-link-relations";
+import { getEntityLinksRowDetailStatus } from "@/lib/migrations/entity-links-row-detail";
 import { ENTITY_LINKS_TASK_LINK_MOVE_MIGRATION, assertEntityLinksTaskLinkMove, getEntityLinksTaskLinkMoveStatus, moveTaskLinksToEntityLinks } from "@/lib/migrations/entity-links-task-link-move";
 import { ENTITY_LINKS_OPPORTUNITY_BACKFILL_MIGRATION, ENTITY_LINKS_OPPORTUNITY_RESIDUAL_MIGRATION, assertEntityLinksOpportunityBackfill, backfillEntityLinksOpportunity, getEntityLinksOpportunityStatus } from "@/lib/migrations/entity-links-opportunity-backfill";
 import { ENTITY_LINKS_ARTIFACT_BACKFILL_MIGRATION, assertEntityLinksArtifactBackfill, backfillEntityLinksArtifact, getEntityLinksArtifactStatus } from "@/lib/migrations/entity-links-artifact-backfill";
@@ -804,6 +807,19 @@ const MIGRATIONS: readonly MigrationEntry[] = [
     // so nothing runs before the preflight. Follow docs/maintenance/entity-links-legacy-drop.md, including the backup, before POSTing it.
     name: "116_entity_links_drop_legacy_tables",
     filePath: path.join(process.cwd(), "prisma/migrations/116_entity_links_drop_legacy_tables/migration.sql"),
+  },
+  {
+    // docs.kind (nullable VARCHAR(30), no default/index/FK/enum): what a doc is in the Library. NULL = no type, so code may ship before this applies.
+    // The hook asserts the column exists, is varchar and is nullable before the receipt.
+    name: "117_doc_kind",
+    filePath: path.join(process.cwd(), "prisma/migrations/117_doc_kind/migration.sql"),
+  },
+  {
+    // No DDL, EXPLICIT-ONLY. Sets docs.kind for existing docs from their title and parent page (ADR / QA_REPORT / DESIGN; anything the rules do not place
+    // stays NULL). Only NULL rows are written, so a kind someone already set is never overwritten; updated_at is untouched. The hook proves its postcondition
+    // (no classifiable doc still NULL) before the receipt. POST it by name after 117_doc_kind is applied; never untargeted.
+    name: "118_doc_kind_backfill",
+    filePath: path.join(process.cwd(), "prisma/migrations/118_doc_kind_backfill/migration.sql"),
   },
 ];
 
@@ -1972,6 +1988,9 @@ export async function getMigrationStatus(pool: Pool, schema: string) {
     // preflight (quarantine sizes) is readable before 071 is posted.
     const typedLinks = await statusUnlessLegacyDropped(client, schema, LEGACY_STATUS_SOURCES.typedLinks, () => getTypedLinkStatus(client, schema))
 
+    // Computed once: the row-detail block reads its ids (the parity query needs the legacy tables; the detail block does not).
+    const entityLinksReadParity = await getEntityLinksReadParityStatus(client, schema).catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error) }))
+
     return NextResponse.json({
       schema,
       schemaEnvironment: environment,
@@ -2006,7 +2025,9 @@ export async function getMigrationStatus(pool: Pool, schema: string) {
       // Counts and capped quarantine ids for 098_entity_links_backfill_solution_key_result, readable before it is POSTed.
       entityLinksSolutionKeyResultBackfill: await statusUnlessLegacyDropped(client, schema, LEGACY_STATUS_SOURCES.solutionKeyResult, () => getEntityLinksSolutionKeyResultStatus(client, schema)),
       // Read-flip parity (PR A of the entity_links read flip): per family, live legacy rows vs live mirror rows, plus the read modes. Counts and capped ids only.
-      entityLinksReadParity: await getEntityLinksReadParityStatus(client, schema).catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error) })),
+      entityLinksReadParity,
+      // READ-ONLY metadata (no content) of the entity_links rows the parity ids name, plus task-owned rows the task readers would drop. Never fails the GET.
+      entityLinksRowDetail: await getEntityLinksRowDetailStatus(client, schema, entityLinksReadParity).catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error) })),
       // 116: which legacy relations still exist and whether the drop's preflight would pass right now (blockers listed). Read-only.
       entityLinksLegacyDrop: await getEntityLinksLegacyDropStatus(client, schema).catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error) })),
       workItemIdsBackfill: await getWorkItemIdsBackfillStatus(client, schema).catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error) })),
@@ -2035,10 +2056,10 @@ async function statusUnlessLegacyDropped<T>(client: PoolClient, schema: string, 
 }
 
 /** Migrations that an untargeted run must NOT pick up on its own: they are only correct at a moment a human chooses. */
-const EXPLICIT_ONLY_MIGRATIONS: readonly string[] = [WORKSPACE_ID_RESIDUAL_MIGRATION, TYPED_LINK_RESIDUAL_MIGRATION, WORK_ITEM_IDS_RESIDUAL_MIGRATION, ENTITY_LINKS_OPPORTUNITY_BACKFILL_MIGRATION, ENTITY_LINKS_OPPORTUNITY_RESIDUAL_MIGRATION, ENTITY_LINKS_ARTIFACT_BACKFILL_MIGRATION, ENTITY_LINKS_TASK_BACKFILL_MIGRATION, ENTITY_LINKS_TASK_LINK_MOVE_MIGRATION, ENTITY_LINKS_CONVERSATION_BACKFILL_MIGRATION, ENTITY_LINKS_SOLUTION_KEY_RESULT_BACKFILL_MIGRATION, SHARED_COMPASS_AGENT_BOOTSTRAP_MIGRATION, WORKSPACE_MODULES_LEGACY_FLAG_BACKFILL_MIGRATION, ENTITY_LINKS_LEGACY_DROP_MIGRATION];
+const EXPLICIT_ONLY_MIGRATIONS: readonly string[] = [WORKSPACE_ID_RESIDUAL_MIGRATION, TYPED_LINK_RESIDUAL_MIGRATION, WORK_ITEM_IDS_RESIDUAL_MIGRATION, ENTITY_LINKS_OPPORTUNITY_BACKFILL_MIGRATION, ENTITY_LINKS_OPPORTUNITY_RESIDUAL_MIGRATION, ENTITY_LINKS_ARTIFACT_BACKFILL_MIGRATION, ENTITY_LINKS_TASK_BACKFILL_MIGRATION, ENTITY_LINKS_TASK_LINK_MOVE_MIGRATION, ENTITY_LINKS_CONVERSATION_BACKFILL_MIGRATION, ENTITY_LINKS_SOLUTION_KEY_RESULT_BACKFILL_MIGRATION, SHARED_COMPASS_AGENT_BOOTSTRAP_MIGRATION, WORKSPACE_MODULES_LEGACY_FLAG_BACKFILL_MIGRATION, ENTITY_LINKS_LEGACY_DROP_MIGRATION, DOC_KIND_BACKFILL_MIGRATION];
 
 /**
- * Which pending migrations a POST runs: the named one, or everything except the explicit-only one-shots (069, 072, 094, 095, 096, 097, 115_entity_links_task_link_move, 116_entity_links_drop_legacy_tables, 098_entity_links_backfill_solution_key_result, 103, 106_entity_links_residual_opportunity).
+ * Which pending migrations a POST runs: the named one, or everything except the explicit-only one-shots (069, 072, 094, 095, 096, 097, 115_entity_links_task_link_move, 116_entity_links_drop_legacy_tables, 098_entity_links_backfill_solution_key_result, 103, 106_entity_links_residual_opportunity, 118_doc_kind_backfill).
  * `includeExplicitOnly` is for callers that provision a FRESH schema (the scoped preview worker): there is no old
  * deployment to drain, so applying 069 straight after 068 is correct and required for the schema to reach "ready".
  * Production-style callers (the admin route, an untargeted POST) never set it.
@@ -2346,6 +2367,7 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
       if (migration.name === "074_portal_home_layout") await assertPortalHomeLayoutMigration(client, schema)
       if (migration.name === "113_doc_publishing") await assertDocPublishingMigration(client, schema)
       if (migration.name === "114_portal_home_template") await assertPortalHomeTemplateMigration(client, schema)
+      if (migration.name === "117_doc_kind") await assertDocKindMigration(client, schema)
       if (migration.name === "075_roadmap_item_provenance") await assertRoadmapItemProvenanceMigration(client, schema)
       if (migration.name === "079_roadmap_views") await assertRoadmapViewsMigration(client, schema)
       if (migration.name === SAVED_VIEWS_SURFACE_MIGRATION) {
@@ -2445,6 +2467,12 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
         // Before the receipt below, so a failure leaves an unfinished attempt and the next POST resumes.
         await backfillLaunchWorkflowModules(client, schema, log)
         await assertWorkspaceModulesMigration(client, schema)
+      }
+      if (migration.name === DOC_KIND_BACKFILL_MIGRATION) {
+        // Data half only (explicit-only): classify existing docs from their title and parent page, then prove no classifiable doc is still NULL.
+        // Before the receipt below, so a failure leaves an unfinished attempt and the next POST resumes.
+        await backfillDocKinds(client, schema, log)
+        await assertDocKindBackfill(client, schema)
       }
       if (migration.name === WORKSPACE_MODULES_LEGACY_FLAG_BACKFILL_MIGRATION) {
         // Data half only (explicit-only): enable the modules whose legacy env flag is "1" here, then prove every workspace has the row.

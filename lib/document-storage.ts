@@ -4,10 +4,13 @@ import { link, mkdir, open, realpath, unlink } from "node:fs/promises"
 import { isAbsolute, join } from "node:path"
 import getPrisma from "@/lib/db"
 import { getActiveSchema } from "@/lib/schema"
+import { e2eMockAuthEnabled } from "@/lib/e2e-harness"
 import { getManagedPilotContext } from "@/lib/preview-automation/managed-context"
 
 function isLocalPilot() {
-  if (process.env.VERCEL_ENV || process.env.NODE_ENV === "production" || process.env.E2E_ISOLATED_DATABASE !== "1") return false
+  // A production build is eligible only as the e2e mock-auth build (inline build literal: see lib/e2e-harness.ts).
+  const e2eBuild = process.env.COMPASS_E2E_MOCK_AUTH_BUILD === "1" && e2eMockAuthEnabled()
+  if (process.env.VERCEL_ENV || (process.env.NODE_ENV === "production" && !e2eBuild) || process.env.E2E_ISOLATED_DATABASE !== "1") return false
   try {
     const url = new URL(process.env.DATABASE_URL ?? "")
     return ["localhost", "127.0.0.1", "::1", "[::1]"].includes(url.hostname) && url.pathname === "/compass_e2e"

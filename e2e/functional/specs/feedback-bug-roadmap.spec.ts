@@ -37,14 +37,18 @@ test.describe("Feedback Bug → Roadmap", () => {
       await page.goto(`${base}/settings`);
       await page.waitForLoadState("networkidle");
 
-      // PortalSettingsPanel renders three toggles in a fixed order: roadmap,
-      // feedback, then (conditionally) portal-auth-required. The feedback
-      // toggle is always the second switch on the page.
-      const toggle = page.getByRole("switch").nth(1);
+      // Address the toggle by test id: its position among the page's switches
+      // is not stable (other settings panels render switches too).
+      const toggle = page.getByTestId("portal-toggle-feedback");
 
       const isChecked = await toggle.getAttribute("aria-checked");
       if (isChecked !== "true") {
-        await toggle.click();
+        // The switch flips optimistically and the write is a server action: wait for that POST to finish before leaving the page,
+        // or a fast production server shows the portal "Feedback is not enabled".
+        await Promise.all([
+          page.waitForResponse((response) => response.request().method() === "POST" && "next-action" in response.request().headers()),
+          toggle.click(),
+        ]);
         await expect(toggle).toHaveAttribute("aria-checked", "true", { timeout: 10_000 });
       }
 

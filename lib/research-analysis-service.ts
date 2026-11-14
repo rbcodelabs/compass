@@ -5,6 +5,7 @@ import { analysisFingerprint, buildAnalysisPrompt, parseAnalysisResult, readSess
 import { runResearchAnalysisAgent } from "@/lib/research-analysis-agent"
 import { isResearchCaptureEnabled } from "@/lib/research-feature"
 import { analysisOperationMs, assertAnalysisDeadline } from "@/lib/research-analysis-deadline"
+import { e2eHarnessEnabled } from "@/lib/e2e-harness"
 
 export class ResearchAnalysisError extends Error {
   constructor(message: string, public status = 422) { super(message) }
@@ -173,7 +174,7 @@ export async function storeAgentStudySynthesis(studyId: string, userId: string, 
  */
 async function analysisResponse(kind: "summary" | "coverage", prompt: string, source: AnalysisSource, deadline: number) {
   assertAnalysisDeadline(deadline)
-  if (process.env.NODE_ENV !== "production" && process.env.E2E_FUNCTIONAL === "1" && process.env.E2E_ISOLATED_DATABASE === "1") {
+  if ((process.env.NODE_ENV !== "production" || process.env.COMPASS_E2E_MOCK_AUTH_BUILD === "1") && e2eHarnessEnabled() && process.env.E2E_ISOLATED_DATABASE === "1") {
     if (kind === "coverage") return JSON.stringify({ coverage: source.guide.map(item => ({ guideItemId: item.id, covered: false, evidenceTurnIds: [] })) })
     const first = source.sessions.flatMap(session => session.turns.filter(turn => turn.role === "PARTICIPANT" && turn.content.trim()))[0]
     return JSON.stringify({ summary: "Test analysis: participant described their experience.", evidenceTurnIds: [first.id] })

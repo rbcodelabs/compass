@@ -1,8 +1,6 @@
 import pg from "pg";
 import { test, expect } from "../fixtures/index";
 import { isolatedE2EConnectionString } from "../fixtures/isolated-database";
-import getPrisma from "../../../lib/db";
-import { runTypedLinkTransaction, setKeyResultPointer } from "../../../lib/typed-links";
 
 const title = "Teams need to choose which launch stages fit their discovery process";
 const feedbackTitle = "Make marketing and launch stages optional for teams focused on continuous discovery";
@@ -21,10 +19,11 @@ async function seedRelationships() {
       (id,objective_id,title,target,current) VALUES (gen_random_uuid(),$1,$2,50,12) RETURNING id`, [objective.id, krTitle]);
     const { rows: [opportunity] } = await pool.query(`INSERT INTO compass_dev.opportunities
       (id,workspace_id,title,status) VALUES (gen_random_uuid(),$1,$2,'EXPLORING') RETURNING id`, [workspace.id,title]);
-    // The Key Result pointer is an entity_links row, written through the app's typed-link writer.
-    await runTypedLinkTransaction(getPrisma(), (tx) =>
-      setKeyResultPointer(tx, { opportunityId: opportunity.id, workspaceId: workspace.id, keyResultId: kr.id, ctx: { source: "UI", createdById: null } }),
-    );
+    // The Key Result pointer: what lib/typed-links.ts setKeyResultPointer writes (the LEGACY pointer plus the LEGACY Objective link derived
+    // from it). Seeded by SQL because Playwright's loader cannot resolve the "@/..." imports of the writer's lazy-loaded lib/links/service.ts.
+    await pool.query(`INSERT INTO compass_dev.entity_links (workspace_id, link_type, from_type, from_id, to_type, to_id, origin, source, created_at, updated_at)
+      VALUES ($1,'OPPORTUNITY_TARGETS_KEY_RESULT','OPPORTUNITY',$2,'KEY_RESULT',$3,'LEGACY','UI',NOW(),NOW()),
+             ($1,'OPPORTUNITY_TARGETS_OBJECTIVE','OPPORTUNITY',$2,'OBJECTIVE',$4,'LEGACY','UI',NOW(),NOW())`, [workspace.id, opportunity.id, kr.id, objective.id]);
     const { rows: [empty] } = await pool.query(`INSERT INTO compass_dev.opportunities
       (id,workspace_id,title,status) VALUES (gen_random_uuid(),$1,'Unlinked discovery need','EXPLORING') RETURNING id`, [workspace.id]);
     const { rows: [feedback] } = await pool.query(`INSERT INTO compass_dev.feedback

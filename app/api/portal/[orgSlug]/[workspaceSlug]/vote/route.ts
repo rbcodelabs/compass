@@ -1,3 +1,4 @@
+import { publicFeedbackItemWhere } from "@/lib/public-feedback";
 import { NextRequest, NextResponse } from "next/server";
 import getPrisma from "@/lib/db";
 import { getPortalSession } from "@/lib/portal-auth";
@@ -79,7 +80,7 @@ export async function POST(
     }
 
     const feedbackItem = await prisma.feedbackItem.findFirst({
-      where: { id: itemId, workspaceId: workspace.id },
+      where: { ...publicFeedbackItemWhere(workspace.id), id: itemId },
       select: { id: true, voteCount: true },
     });
 

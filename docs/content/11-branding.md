@@ -53,7 +53,7 @@ Custom lets you type any font name, loaded on demand from Google Fonts by name. 
 
 ## Logo
 
-Upload an image (any common format, up to 10MB) from the Branding panel. Use **Replace logo** to swap it or **Remove logo** to clear it — removing a logo only clears the reference to it, it doesn't delete the previously uploaded file.
+Upload a PNG, JPEG, WebP or GIF image (up to 10MB) from the Branding panel. Only workspace admins can change the logo, and SVG files are not accepted. Use **Replace logo** to swap it or **Remove logo** to clear it — removing a logo only clears the reference to it, it doesn't delete the previously uploaded file.
 
 ## Where Branding Applies
 

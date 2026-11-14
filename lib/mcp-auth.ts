@@ -1,4 +1,4 @@
-import { createHash } from "crypto"
+import { createHash, timingSafeEqual } from "crypto"
 import getPrisma from "@/lib/db"
 import { findActiveUserOwnedAgent } from "@/lib/agent-ownership"
 import { authorizeAgentTurnKey } from "@/lib/agent-run-identity"
@@ -34,7 +34,7 @@ export type McpAuthResult = {
 } | { valid: false }
 
 // Validates an MCP Bearer token.
-// 1. Falls back to MCP_API_KEY env var (service-account key).
+// 1. Accepts the MCP_API_KEY service-account key only when MCP_SERVICE_KEY_ENABLED=1 is also set.
 // 2. An OAuth access token (cmp_oat_…) resolves to the user it was issued for.
 // 3. Otherwise looks up a per-user ApiKey by prefix+hash, checking it's not revoked.
 // Returns the userId if a per-user key matched (null for service key), or false if invalid.
@@ -54,6 +54,17 @@ function describeError(error: unknown): string {
   return error instanceof Error ? `${error.name}: ${error.message}` : String(error)
 }
 
+let warnedServiceKeyDisabled = false
+
+// Constant-time comparison over SHA-256 digests (equal length regardless of input).
+function matchesServiceKey(token: string): boolean {
+  const key = process.env.MCP_API_KEY
+  if (!key) return false
+  const a = createHash("sha256").update(token).digest()
+  const b = createHash("sha256").update(key).digest()
+  return timingSafeEqual(a, b)
+}
+
 export async function validateProgrammaticAuth(
   request: Request,
   options: { resource: string },
@@ -64,10 +75,16 @@ export async function validateProgrammaticAuth(
   let managed
   try { managed = getManagedPilotContext() } catch { return { valid: false } }
   // Signed-run pilots never inherit a shared service credential or OAuth actor.
-  if (managed && (token === process.env.MCP_API_KEY || token.startsWith(ACCESS_TOKEN_PREFIX))) return { valid: false }
+  if (managed && (matchesServiceKey(token) || token.startsWith(ACCESS_TOKEN_PREFIX))) return { valid: false }
 
-  // Service-account fallback
-  if (process.env.MCP_API_KEY && token === process.env.MCP_API_KEY) {
+  if (process.env.MCP_API_KEY && process.env.MCP_SERVICE_KEY_ENABLED !== "1" && !warnedServiceKeyDisabled) {
+    warnedServiceKeyDisabled = true
+    console.warn("[mcp-auth] MCP_API_KEY is set but ignored: set MCP_SERVICE_KEY_ENABLED=1 to enable the static service key")
+  }
+
+  // Service-account fallback: skips every tenant check, so it needs the key AND
+  // the explicit MCP_SERVICE_KEY_ENABLED=1 opt-in. Setting the key alone does nothing.
+  if (process.env.MCP_SERVICE_KEY_ENABLED === "1" && matchesServiceKey(token)) {
     return { valid: true, userId: null, purpose: "SERVICE", scopeWorkspaceId: null }
   }
 

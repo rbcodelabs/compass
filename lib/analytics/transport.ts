@@ -1,9 +1,11 @@
 import { AnalyticsError, DAY_MS, type VercelCredentials } from "./providers"
 import { z } from "zod"
+import { e2eMockAuthEnabled } from "@/lib/e2e-harness"
 
 /** No endpoint override: fixtures cannot redirect credentials or run in deployed apps. */
 export function analyticsFixtureEnabled(): boolean {
-  if (process.env.NODE_ENV !== "development" || process.env.VERCEL_ENV || process.env.E2E_ISOLATED_DATABASE !== "1") return false
+  const devOrE2eBuild = process.env.NODE_ENV === "development" || (process.env.COMPASS_E2E_MOCK_AUTH_BUILD === "1" && e2eMockAuthEnabled())
+  if (!devOrE2eBuild || process.env.VERCEL_ENV || process.env.E2E_ISOLATED_DATABASE !== "1") return false
   try {
     const database = new URL(process.env.DATABASE_URL ?? "")
     return ["localhost", "127.0.0.1", "[::1]"].includes(database.hostname) && database.pathname === "/compass_e2e"

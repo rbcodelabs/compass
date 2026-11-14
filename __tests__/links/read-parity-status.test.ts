@@ -19,8 +19,9 @@ const read = (relative: string) => readFileSync(path.join(process.cwd(), relativ
 describe("registration and shape", () => {
   it("is reported by GET /api/admin/migrate next to the three backfill statuses", () => {
     const runner = read("lib/migrations/runner.ts");
-    expect(runner).toContain("entityLinksReadParity: await getEntityLinksReadParityStatus(client, schema)");
-    expect(runner.indexOf("entityLinksReadParity")).toBeGreaterThan(runner.indexOf("entityLinksTaskBackfill"));
+    expect(runner).toContain("const entityLinksReadParity = await getEntityLinksReadParityStatus(client, schema)");
+    expect(runner).toContain("      entityLinksReadParity,\n");
+    expect(runner.indexOf("      entityLinksReadParity,")).toBeGreaterThan(runner.indexOf("entityLinksTaskBackfill"));
   });
 
   it("covers every legacy-backed link type exactly once and writes nothing", () => {

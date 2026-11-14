@@ -79,9 +79,9 @@ function fakePrisma(opts: { queries?: string[] } = {}) {
       findMany: async (args: { where: Record<string, unknown>; select?: Record<string, boolean> }) => {
         log("feedbackItem")
         const rows = [
-          { id: id(101), workspaceId: WS, title: "Popular idea", status: "OPEN", voteCount: 9 },
-          { id: id(102), workspaceId: WS, title: "SECRET declined idea", status: "DECLINED", voteCount: 50 },
-          { id: id(103), workspaceId: OTHER_WS, title: "SECRET other ws idea", status: "OPEN", voteCount: 99 },
+          { id: id(101), workspaceId: WS, source: "PORTAL", title: "Popular idea", status: "OPEN", voteCount: 9 },
+          { id: id(102), workspaceId: WS, source: "PORTAL", title: "SECRET declined idea", status: "DECLINED", voteCount: 50 },
+          { id: id(103), workspaceId: OTHER_WS, source: "PORTAL", title: "SECRET other ws idea", status: "OPEN", voteCount: 99 },
         ].filter((r) => matches(r as never, args.where))
         return project(rows, args.select)
       },

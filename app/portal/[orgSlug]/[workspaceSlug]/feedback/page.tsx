@@ -1,6 +1,7 @@
 import getPrisma from "@/lib/db";
 import { getPortalSession } from "@/lib/portal-auth";
 import { FeedbackPortalSection } from "@/components/portal/feedback-portal-section";
+import { PUBLIC_FEEDBACK_SELECT, publicFeedbackItemWhere, serializePublicFeedbackItem } from "@/lib/public-feedback";
 import type { FeedbackType } from "@/lib/types";
 import { EmptyState } from "@/components/patterns/empty-state";
 
@@ -30,24 +31,9 @@ export default async function PortalFeedbackPage({ params }: Props) {
   }
 
   const items = await prisma.feedbackItem.findMany({
-    where: {
-      workspaceId: workspace.id,
-      status: { not: "DECLINED" },
-    },
+    where: publicFeedbackItemWhere(workspace.id),
     orderBy: [{ voteCount: "desc" }, { createdAt: "desc" }],
-    select: {
-      id: true,
-      title: true,
-      description: true,
-      status: true,
-      voteCount: true,
-      type: true,
-      submitterName: true,
-      createdAt: true,
-      attachments: {
-        select: { id: true, url: true, filename: true, fileType: true },
-      },
-    },
+    select: PUBLIC_FEEDBACK_SELECT,
   });
 
   return (
@@ -56,17 +42,7 @@ export default async function PortalFeedbackPage({ params }: Props) {
       workspaceSlug={workspaceSlug}
       portalAuthRequired={workspace.portalAuthRequired ?? false}
       portalAccountEmail={portalSession?.email ?? null}
-      initialItems={items.map((i) => ({
-        id: i.id,
-        title: i.title,
-        description: i.description,
-        status: i.status,
-        voteCount: i.voteCount,
-        type: i.type as FeedbackType,
-        submitterName: i.submitterName,
-        createdAt: i.createdAt.toISOString(),
-        attachments: i.attachments,
-      }))}
+      initialItems={items.map((i) => ({ ...serializePublicFeedbackItem(i), type: i.type as FeedbackType }))}
     />
   );
 }

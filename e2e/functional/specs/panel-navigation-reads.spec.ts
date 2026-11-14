@@ -101,7 +101,12 @@ async function idOf(workspaceSlug: string, model: "experiment" | "task" | "roadm
   return row.id;
 }
 
-async function leaveAndExpectToStay(page: Page, panelUrl: string, leave: () => Promise<void>, destination: RegExp) {
+async function leaveAndExpectToStay(page: Page, panelUrl: string, leave: () => Promise<void>, destination: string) {
+  // The suite runs against `next dev`, which compiles a route on its first request. Compile the panel page and the
+  // destination before the network is held, so the navigation commit that step 4 awaits measures the router, not a
+  // cold compile that can outlast the 5s expect timeout on a loaded worker.
+  await page.request.get(panelUrl);
+  await page.request.get(destination);
   const network = await holdNetwork(page);
   await page.goto(panelUrl);
   await network.waitForRead();                   // 1. R1 held
@@ -130,21 +135,21 @@ test.describe("Detail panel reads do not reopen a panel after navigation", () =>
     await leaveAndExpectToStay(page, `${base}/experiments?detail=experiment:${id}`, async () => {
       const link = page.locator('[data-slot="sheet-content"]').getByRole("link", { name: "Open full page" });
       await link.click();
-    }, new RegExp(`${base}/experiments/${id}$`));
+    }, `${base}/experiments/${id}`);
   });
 
   test("task panel → Open full page stays on the full page", async ({ page, base, workspaceSlug }) => {
     const id = await idOf(workspaceSlug, "task", "E2E Baseline Task");
     await leaveAndExpectToStay(page, `${base}/tasks?detail=task:${id}`, async () => {
       await page.locator('[data-slot="sheet-content"]').getByRole("link", { name: "Open full page" }).click();
-    }, new RegExp(`${base}/tasks/${id}$`));
+    }, `${base}/tasks/${id}`);
   });
 
   test("roadmap item panel → Open full page stays on the full page", async ({ page, base, workspaceSlug }) => {
     const id = await idOf(workspaceSlug, "roadmapItem", "E2E Baseline Roadmap");
     await leaveAndExpectToStay(page, `${base}/roadmap?detail=roadmapItem:${id}`, async () => {
       await page.locator('[data-slot="sheet-content"]').getByRole("link", { name: "Open full page" }).click();
-    }, new RegExp(`${base}/roadmap/${id}$`));
+    }, `${base}/roadmap/${id}`);
   });
 
   test("roadmap item panel closed with Escape stays closed", async ({ page, base, workspaceSlug }) => {
@@ -152,6 +157,6 @@ test.describe("Detail panel reads do not reopen a panel after navigation", () =>
     await leaveAndExpectToStay(page, `${base}/roadmap?detail=roadmapItem:${id}`, async () => {
       await expect(page.getByRole("dialog", { name: "Roadmap Item", exact: true })).toBeVisible();
       await page.keyboard.press("Escape");
-    }, new RegExp(`${base}/roadmap$`));
+    }, `${base}/roadmap`);
   });
 });

@@ -73,6 +73,7 @@ describe("POST /api/portal/[orgSlug]/[workspaceSlug]/feedback", () => {
       data: expect.objectContaining({
         submitterEmail: "visitor@example.com",
         portalAccountId: null,
+        source: "PORTAL",
       }),
       select: expect.any(Object),
     });
