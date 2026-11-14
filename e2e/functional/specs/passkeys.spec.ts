@@ -12,10 +12,13 @@
  * "development") intentionally has no WebAuthn provider — see auth.ts's own
  * doc comment and the project brief this spec was written against, which is
  * explicit that the dev-credentials-only branch must not be touched. The
- * functional suite's webServer always runs `pnpm dev`, and Next.js forces
- * NODE_ENV to "development" for that command regardless of what env vars are
- * passed to it — there is no way to get the production auth branch live
- * under this harness's `pnpm dev` webServer. So instead of assuming success
+ * functional suite's webServer runs `pnpm dev` (Next.js forces NODE_ENV to
+ * "development" for that command regardless of what env vars are passed to
+ * it), or, with E2E_SERVER=prod, the `pnpm build:e2e` artifact with `next
+ * start`. That artifact runs NODE_ENV=production but deliberately selects the
+ * same credentials/JWT config as dev (lib/e2e-harness.ts), because the mock
+ * login cannot work with database sessions. So there is no way to get the
+ * production auth branch live under this harness in either mode. So instead of assuming success
  * or silently no-op-ing, this spec asks NextAuth itself (GET
  * /api/auth/providers) whether "passkey" is registered and explicitly skips
  * with that reasoning when it isn't — which is every run of the local

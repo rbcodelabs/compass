@@ -1,7 +1,8 @@
 /**
  * Functional suite auth setup.
  *
- * Logs in using the dev-credentials provider (⚡ Dev Login button),
+ * Logs in using the dev-credentials provider (⚡ Dev Login button). It exists in `pnpm dev` and in the E2E_SERVER=prod build
+ * (`pnpm build:e2e` plus E2E_MOCK_AUTH=1, see lib/e2e-harness.ts); no other build has it,
  * then saves the authenticated browser storage state to
  * e2e/functional/.auth/user.json for the functional project to reuse.
  *
@@ -27,9 +28,9 @@ setup("authenticate as dev user", async ({ page }) => {
 
   // Wait for the browser to navigate away from /login
   await page.waitForURL((url) => !url.pathname.startsWith("/login"), {
-    // The first authenticated navigation cold-compiles /dashboard in Next dev.
-    // Keep this below the functional project's 90s test budget without imposing
-    // the shorter Playwright navigation default on a valid local cold start.
+    // The first authenticated navigation cold-compiles /dashboard in Next dev (E2E_SERVER unset); a prebuilt production server does
+    // not compile. Keep this below the functional project's 90s test budget without imposing the shorter Playwright navigation
+    // default on a valid local cold start.
     timeout: 60_000,
   });
 
@@ -43,7 +44,7 @@ setup("authenticate as dev user", async ({ page }) => {
   if (url.includes("/login")) {
     throw new Error(
       "[auth setup] Dev login did not succeed — still on login page. " +
-        "Ensure NODE_ENV=development and the functional webServer is running " +
+        "Ensure the functional webServer is running as `pnpm dev`, or as E2E_SERVER=prod on a `pnpm build:e2e` artifact with E2E_MOCK_AUTH=1 " +
         "(see playwright.config.ts for its per-worktree port)."
     );
   }

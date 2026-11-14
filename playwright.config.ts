@@ -44,6 +44,13 @@ const FUNCTIONAL_PORT = process.env.E2E_PORT
     ? functionalPort()
     : 3002;
 const FUNCTIONAL_BASE_URL = `http://localhost:${FUNCTIONAL_PORT}`;
+/**
+ * E2E_SERVER=prod serves a prebuilt artifact with `next start` instead of `pnpm dev` (default stays dev). The artifact must come
+ * from `pnpm build:e2e` (COMPASS_E2E_MOCK_AUTH_BUILD=1 next build): that build alone contains the mock login the suite signs in with
+ * (lib/e2e-harness.ts). The build is a separate step, never part of webServer, whose timeout would not hold.
+ * scripts/run-functional-e2e.mjs refuses to start when the build is missing or older than HEAD.
+ */
+const PROD_SERVER = process.env.E2E_SERVER === "prod";
 const VERCEL_AUTOMATION_BYPASS_SECRET =
   process.env.VERCEL_AUTOMATION_BYPASS_SECRET;
 
@@ -83,13 +90,30 @@ export default defineConfig({
     globalSetup: "./e2e/functional/global-setup.ts",
     globalTeardown: "./e2e/functional/global-teardown.ts",
     webServer: {
-      command: "pnpm dev",
+      command: PROD_SERVER ? `pnpm exec next start -H 127.0.0.1 -p ${FUNCTIONAL_PORT}` : "pnpm dev",
       // TCP can listen before Next has made the login route available.
       // Probe the actual auth entry point; a 404 must not admit the tests.
       url: `${FUNCTIONAL_BASE_URL}/login`,
-      reuseExistingServer: !process.env.CI,
+      // A production server must always be the one built for this run, never a stray server on the port.
+      reuseExistingServer: PROD_SERVER ? false : !process.env.CI,
       env: {
         PORT: String(FUNCTIONAL_PORT),
+        ...(PROD_SERVER
+          ? {
+              // Everything a `next dev` server gets for free and `next start` does not.
+              // Mock login (second half of the guard; the first half is compiled in by `pnpm build:e2e`).
+              E2E_MOCK_AUTH: "1",
+              // Auth.js refuses a host it was not told to trust under next start (UntrustedHost).
+              AUTH_TRUST_HOST: "true",
+              AUTH_URL: FUNCTIONAL_BASE_URL,
+              // lib/rest/cursor.ts throws in production without a cursor secret; dev uses a fixed constant.
+              REST_CURSOR_SECRET: "e2e-rest-cursor-secret-not-a-secret",
+              // lib/chain-graph/flag.ts is on only in development or preview unless opted in (chain-graph.spec.ts).
+              COMPASS_CHAIN_GRAPH: "1",
+              // The /ui registry (app/ui/page.tsx) is likewise development or preview only.
+              COMPASS_UI_REGISTRY: "1",
+            }
+          : {}),
         // Product features (research capture, voice, PM interviews, workspace updates, following) are workspace modules, not
         // environment flags: e2e/functional/fixtures/seed-e2e.ts enables them for the fixture workspace.
         // cloud-agents.spec.ts: assigning a task to a cloud agent starts a run only when the model credential exists. A placeholder
@@ -106,9 +130,10 @@ export default defineConfig({
         // passkeys.spec.ts needs the /login button and /settings/passkeys
         // panel visible. The underlying Passkey provider itself is only ever
         // registered in auth.ts's production/preview branch though — `pnpm
-        // dev` always runs NODE_ENV=development, so the WebAuthn ceremony
-        // portion of that spec self-skips even with this flag on. See the
-        // spec file for the exact capability check and why.
+        // dev` always runs NODE_ENV=development, and the E2E_SERVER=prod build
+        // also selects the credentials/JWT config (the mock login), so the
+        // WebAuthn ceremony portion of that spec self-skips in both modes.
+        // See the spec file for the exact capability check and why.
         COMPASS_PASSKEYS_ENABLED: "1",
         // Deterministic test-only key; production must provide its own secret.
         SSO_SECRET_ENCRYPTION_KEY: "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
@@ -116,7 +141,8 @@ export default defineConfig({
         // agent-retention.spec.ts calls the cron route with this bearer; test-only value.
         CRON_SECRET: "e2e-cron-secret",
       },
-      timeout: 120_000,
+      // next start is ready in seconds; dev needs the longer budget for its first compile.
+      timeout: PROD_SERVER ? 60_000 : 120_000,
     },
   }),
 

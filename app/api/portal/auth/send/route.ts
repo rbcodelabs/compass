@@ -3,6 +3,7 @@ import { randomBytes, createHash } from "crypto";
 import getPrisma from "@/lib/db";
 import { normalizePortalEmail } from "@/lib/portal-auth";
 import { isValidPortalEmail } from "@/lib/portal-email";
+import { e2eMockAuthEnabled } from "@/lib/e2e-harness";
 
 const TOKEN_TTL_MS = 15 * 60 * 1000; // 15 minutes
 
@@ -34,7 +35,10 @@ export async function POST(req: NextRequest) {
 
   // Fail closed in production when there is no mail transport: a link we cannot
   // deliver must not be minted, and must never be surfaced anywhere else.
-  if (!process.env.AUTH_RESEND_KEY && process.env.NODE_ENV === "production") {
+  // The e2e production build (lib/e2e-harness.ts) has no mail transport by design and reads the link from the response below;
+  // that is allowed only there, never in a deployed build (inline build literal: the branch is removed from every other artifact).
+  const e2eMockBuild = process.env.COMPASS_E2E_MOCK_AUTH_BUILD === "1" && e2eMockAuthEnabled();
+  if (!process.env.AUTH_RESEND_KEY && process.env.NODE_ENV === "production" && !e2eMockBuild) {
     console.error("[portal-auth] Sign-in email is not configured");
     return NextResponse.json({ error: "Sign-in email is temporarily unavailable" }, { status: 503 });
   }
