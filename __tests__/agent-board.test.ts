@@ -13,6 +13,7 @@ import {
   diffAgentBoardCards,
   filterBoardCards,
   formatRelativeTime,
+  formatWakeupCountdown,
   isRunHeartbeatStale,
   STALE_HEARTBEAT_MS,
   type AgentBoardCard,
@@ -78,6 +79,43 @@ describe("classifyBoardCard", () => {
   it("treats an unparseable timestamp as unreviewed rather than throwing", () => {
     expect(classifyBoardCard(card({ reviewedAt: "not-a-date" }))).toBe("new")
   })
+
+  it("puts hold-open RUNNING AWAITING_QUESTION or deadline-parked pendingQuestions in Awaiting", () => {
+    expect(classifyBoardCard(card({ runStatus: "RUNNING", substatus: "AWAITING_QUESTION" }))).toBe("awaiting")
+    expect(
+      classifyBoardCard(
+        card({
+          runStatus: "INTERRUPTED",
+          pendingQuestions: [
+            {
+              id: "q-1",
+              runId: "r-1",
+              header: "Scope",
+              question: "Which tier?",
+              options: [{ label: "Tier 1" }],
+              multiSelect: false,
+              allowOther: true,
+              status: "PENDING",
+              answerText: null,
+              createdAt: T1,
+            },
+          ],
+        }),
+      ),
+    ).toBe("awaiting")
+  })
+
+  it("puts an idle conversation with a scheduledWakeup in Waiting, while an active run stays in Working", () => {
+    const wakeup = {
+      id: "w-1",
+      fireAt: "2026-10-05T12:15:00.000Z",
+      delaySeconds: 300,
+      reason: "CI build check",
+      prompt: "Check CI status",
+    }
+    expect(classifyBoardCard(card({ runStatus: "SUCCEEDED", scheduledWakeup: wakeup }))).toBe("waiting")
+    expect(classifyBoardCard(card({ runStatus: "RUNNING", scheduledWakeup: wakeup }))).toBe("working")
+  })
 })
 
 describe("bucketizeBoard", () => {
@@ -113,7 +151,26 @@ describe("bucketizeBoard", () => {
   })
 
   it("exposes a label for every column id", () => {
-    expect(Object.keys(BOARD_COLUMN_LABELS).sort()).toEqual(["done", "failed", "new", "ready", "working"])
+    expect(Object.keys(BOARD_COLUMN_LABELS).sort()).toEqual([
+      "awaiting",
+      "done",
+      "failed",
+      "new",
+      "ready",
+      "waiting",
+      "working",
+    ])
+  })
+})
+
+describe("formatWakeupCountdown", () => {
+  const now = Date.parse("2026-10-05T12:00:00.000Z")
+  it("formats seconds, minutes, and hours cleanly", () => {
+    expect(formatWakeupCountdown("2026-10-05T11:59:55.000Z", now)).toBe("due now")
+    expect(formatWakeupCountdown("2026-10-05T12:00:40.000Z", now)).toBe("<1m")
+    expect(formatWakeupCountdown("2026-10-05T12:03:00.000Z", now)).toBe("3m")
+    expect(formatWakeupCountdown("2026-10-05T13:15:00.000Z", now)).toBe("1h 15m")
+    expect(formatWakeupCountdown("2026-10-05T14:00:00.000Z", now)).toBe("2h")
   })
 })
 

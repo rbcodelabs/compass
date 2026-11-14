@@ -268,6 +268,9 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   // Durable child-agent runs: one additive CREATE TABLE IF NOT EXISTS (agent_child_runs) plus three ASYNC indexes; no existing table altered, no backfill, no FK.
   // Postcondition pinned in REVIEWED_MIGRATION_CODE_SHA256. Digest recorded from the shipped SQL after reading it.
   "120_agent_child_runs": "48b46872dca4695083f6eb7ea3c0c17886ac78a8da4a0484ec0bbbf6c55eaf27",
+  // Interactive agent run controls: two additive CREATE TABLE IF NOT EXISTS (agent_inbox_items, agent_scheduled_wakeups) plus six ASYNC indexes; no existing table altered, no backfill, no FK.
+  // Postcondition pinned in REVIEWED_MIGRATION_CODE_SHA256. Digest recorded from the shipped SQL after reading it.
+  "121_agent_interactive_controls": "535b29c20a5c1ea489b8d6757fbe0beae1bdc06751a31940bc9d60cc65b43d52",
 };
 
 /**
@@ -462,6 +465,10 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
   // The 120 postcondition (all agent_child_runs columns + types + nullability, plus all three indexes valid, ready, and unpredicated); editing it re-reviews the migration.
   "120_agent_child_runs": {
     "lib/migrations/agent-child-runs.ts": "811cb7bb53b604cc3183b7bc0dfebd9f6ff800dc06a793909dddaaa2f190f581",
+  },
+  // The 121 postcondition (all columns + types + nullability on agent_inbox_items and agent_scheduled_wakeups, plus all six indexes valid, ready, and unpredicated); editing it re-reviews the migration.
+  "121_agent_interactive_controls": {
+    "lib/migrations/agent-interactive-controls.ts": "cf3e136b495f2e203d7969181fe3cdf39f0217611253df0477c198366e3dccb0",
   },
 };
 

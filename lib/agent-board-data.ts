@@ -34,9 +34,22 @@ import {
   type AgentBoardCardSubtasks,
 } from "@/lib/agent-board"
 import { loadChildAgentSummariesByConversation } from "@/lib/agent-child-runs"
+import { loadPendingQuestionsByConversation } from "@/lib/agent-inbox-questions"
+import { loadScheduledWakeupsByConversation } from "@/lib/agent-scheduled-wakeups"
 
 type BoardDb = Pick<AppPrismaClient, "agentConversation" | "agentConversationReview"> &
-  Partial<Pick<AppPrismaClient, "task" | "taskLink" | "squad" | "agentMessage" | "agentChildRun">>
+  Partial<
+    Pick<
+      AppPrismaClient,
+      | "task"
+      | "taskLink"
+      | "squad"
+      | "agentMessage"
+      | "agentChildRun"
+      | "agentInboxItem"
+      | "agentScheduledWakeup"
+    >
+  >
 
 /** Enough for any realistic workspace; the board is a triage surface, not an archive. */
 const BOARD_LIMIT = 100
@@ -324,7 +337,15 @@ export async function listAgentBoardCards(
     .filter((c) => c._count.messages > 0 && !c.summary)
     .map((c) => c.id)
 
-  const [reviewedAt, subtaskData, squadsById, fallbackExcerpts, childAgentsByConv] = await Promise.all([
+  const [
+    reviewedAt,
+    subtaskData,
+    squadsById,
+    fallbackExcerpts,
+    childAgentsByConv,
+    pendingQuestionsByConv,
+    scheduledWakeupsByConv,
+  ] = await Promise.all([
     (async () => {
       try {
         const reviews = await prisma.agentConversationReview.findMany({
@@ -342,6 +363,8 @@ export async function listAgentBoardCards(
     loadSquadsById(prisma, workspaceId, referencedSquadIds),
     loadFallbackAssistantExcerpts(prisma, missingSummaryIds),
     loadChildAgentSummariesByConversation(prisma, workspaceId, conversationIds),
+    loadPendingQuestionsByConversation(prisma, workspaceId, conversationIds),
+    loadScheduledWakeupsByConversation(prisma, workspaceId, conversationIds),
   ])
 
   const linkedByConv = await loadLinkedObjectsByConversation(
@@ -364,6 +387,8 @@ export async function listAgentBoardCards(
     const subtasks = subtaskData.subtasksByConv.get(c.id)
     const linked = linkedByConv.get(c.id)
     const childAgents = childAgentsByConv.get(c.id)
+    const pendingQuestions = pendingQuestionsByConv.get(c.id)
+    const scheduledWakeup = scheduledWakeupsByConv.get(c.id) ?? null
 
     return {
       id: c.id,
@@ -381,6 +406,8 @@ export async function listAgentBoardCards(
       ...(subtasks && subtasks.total > 0 ? { subtasks } : {}),
       ...(linked && linked.total > 0 ? { linkedObjects: linked.items, linkedObjectCount: linked.total } : {}),
       ...(childAgents && childAgents.total > 0 ? { childAgents } : {}),
+      ...(pendingQuestions && pendingQuestions.length > 0 ? { pendingQuestions } : {}),
+      ...(scheduledWakeup ? { scheduledWakeup } : {}),
     }
   })
 }

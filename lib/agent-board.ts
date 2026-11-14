@@ -4,13 +4,15 @@
  * conversation lands in, how columns are ordered, and which are shown.
  * Pure and import-safe from client components.
  *
- * A conversation's column comes from its LATEST run plus a per-user "reviewed" instant:
+ * A conversation's column comes from its LATEST run, interactive controls, plus a per-user "reviewed" instant:
  *
- *   Working  latest run QUEUED / RUNNING
- *   Failed   latest run FAILED / INTERRUPTED (a new turn is what clears it, as in Geode)
- *   New      idle, has messages, and not reviewed since its last activity
- *   Done     idle, has messages, reviewed at or after its last activity
- *   Ready    no messages yet
+ *   Working   latest run QUEUED / RUNNING (unless paused on AskUserQuestion)
+ *   Awaiting  pending AskUserQuestion item(s) or RUNNING with substatus AWAITING_QUESTION
+ *   Waiting   idle with a pending ScheduleWakeup timer
+ *   Failed    latest run FAILED / INTERRUPTED (without pending questions; a new turn clears it)
+ *   New       idle, has messages, and not reviewed since its last activity
+ *   Done      idle, has messages, reviewed at or after its last activity
+ *   Ready     no messages yet
  *
  * "Reviewed since last activity" is a timestamp comparison rather than a boolean, so a
  * new assistant message or run after review makes the card New again with no write.
@@ -18,19 +20,29 @@
 
 import { formatPrBadge } from "@/lib/agent-card-derive"
 
-export type BoardColumnId = "working" | "failed" | "new" | "done" | "ready"
+export type BoardColumnId = "working" | "awaiting" | "waiting" | "failed" | "new" | "done" | "ready"
 export type BoardGroupBy = "status" | "squad"
 
 export const BOARD_COLUMN_LABELS: Record<BoardColumnId, string> = {
   working: "Working",
+  awaiting: "Awaiting",
+  waiting: "Waiting",
   new: "New",
   done: "Done",
   failed: "Failed",
   ready: "Ready",
 }
 
-/** Geode's order: in-flight first, then what needs a look, then settled, then failures. */
-export const BOARD_COLUMN_ORDER: readonly BoardColumnId[] = ["working", "new", "done", "failed", "ready"]
+/** Geode's order: in-flight and interactive controls first, then what needs a look, then settled, then failures. */
+export const BOARD_COLUMN_ORDER: readonly BoardColumnId[] = [
+  "working",
+  "awaiting",
+  "waiting",
+  "new",
+  "done",
+  "failed",
+  "ready",
+]
 
 /** Shown even when empty, so the board never reads as broken. Every other empty column is hidden. */
 const ALWAYS_SHOWN: ReadonlySet<BoardColumnId> = new Set(["working", "new"])
@@ -78,6 +90,36 @@ export type AgentBoardCardChildAgents = {
   roles: string[]
 }
 
+export type AgentBoardCardQuestionOption = {
+  label: string
+  description?: string
+}
+
+export type AgentBoardCardPendingQuestion = {
+  id: string
+  conversationId?: string
+  runId: string | null
+  header: string | null
+  question: string
+  options: AgentBoardCardQuestionOption[]
+  multiSelect: boolean
+  allowOther: boolean
+  status: "PENDING" | "ANSWERED" | "CLEARED" | "EXPIRED"
+  answerText: string | null
+  createdAt: string
+}
+
+export type AgentBoardCardScheduledWakeup = {
+  id: string
+  conversationId?: string
+  fireAt: string
+  delaySeconds: number
+  reason: string | null
+  prompt: string
+  status?: "PENDING" | "FIRED" | "CANCELED" | "FAILED"
+  createdAt?: string
+}
+
 /** One conversation as the board sees it. Timestamps are ISO strings so it serializes to the client. */
 export type AgentBoardCard = {
   id: string
@@ -95,7 +137,7 @@ export type AgentBoardCard = {
   summary?: string | null
   /** Latest GitHub pull-request URL surfaced in the conversation. */
   prUrl?: string | null
-  /** Interactive sub-state while RUNNING (e.g. WAITING_INPUT | WAITING_THREADS). */
+  /** Interactive sub-state while RUNNING (e.g. AWAITING_QUESTION). */
   substatus?: string | null
   /** Latest humanized tool/subagent step while RUNNING. */
   currentActivity?: string | null
@@ -109,6 +151,10 @@ export type AgentBoardCard = {
   linkedObjectCount?: number
   /** Summary of harness-native child sub-agents spawned across this conversation's runs. */
   childAgents?: AgentBoardCardChildAgents
+  /** Pending human-in-the-loop AskUserQuestion prompts awaiting an answer. */
+  pendingQuestions?: AgentBoardCardPendingQuestion[]
+  /** Active durable ScheduleWakeup timer while the conversation waits between turns. */
+  scheduledWakeup?: AgentBoardCardScheduledWakeup | null
 }
 
 export type AgentBoardColumn = { id: BoardColumnId; label: string; cards: AgentBoardCard[] }
@@ -125,8 +171,23 @@ function time(iso: string | null | undefined): number {
   return Date.parse(iso)
 }
 
-export function classifyBoardCard(card: Pick<AgentBoardCard, "runStatus" | "messageCount" | "lastActivityAt" | "reviewedAt">): BoardColumnId {
+export function classifyBoardCard(
+  card: Pick<
+    AgentBoardCard,
+    | "runStatus"
+    | "substatus"
+    | "pendingQuestions"
+    | "scheduledWakeup"
+    | "messageCount"
+    | "lastActivityAt"
+    | "reviewedAt"
+  >,
+): BoardColumnId {
+  if ((card.pendingQuestions?.length ?? 0) > 0 || (card.runStatus === "RUNNING" && card.substatus === "AWAITING_QUESTION")) {
+    return "awaiting"
+  }
   if (card.runStatus === "QUEUED" || card.runStatus === "RUNNING") return "working"
+  if (card.scheduledWakeup) return "waiting"
   if (card.runStatus === "FAILED" || card.runStatus === "INTERRUPTED") return "failed"
   if (card.messageCount <= 0) return "ready"
   const reviewed = time(card.reviewedAt)
@@ -232,6 +293,8 @@ export function filterBoardCards(cards: readonly AgentBoardCard[], query: string
     if (card.subtasks?.items.some((item) => matchesSearchText(item.title, needle))) return true
     if (card.linkedObjects?.some((obj) => matchesSearchText(obj.title, needle) || matchesSearchText(obj.entityType, needle))) return true
     if (card.childAgents?.roles.some((role) => matchesSearchText(role, needle))) return true
+    if (card.pendingQuestions?.some((q) => matchesSearchText(q.header, needle) || matchesSearchText(q.question, needle))) return true
+    if (matchesSearchText(card.scheduledWakeup?.reason, needle) || matchesSearchText(card.scheduledWakeup?.prompt, needle)) return true
     return false
   })
 }
@@ -243,6 +306,18 @@ export function formatRelativeTime(iso: string, now: number = Date.now()): strin
   if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`
   if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`
   return `${Math.floor(diff / 86_400_000)}d ago`
+}
+
+/** Compact countdown label for `ScheduleWakeup` pills on Board cards and Chat banners. */
+export function formatWakeupCountdown(fireAtIso: string, now: number = Date.now()): string {
+  const remainingMs = Date.parse(fireAtIso) - now
+  if (Number.isNaN(remainingMs) || remainingMs <= 0) return "due now"
+  if (remainingMs < 60_000) return "<1m"
+  const totalMinutes = Math.ceil(remainingMs / 60_000)
+  if (totalMinutes < 60) return `${totalMinutes}m`
+  const hours = Math.floor(totalMinutes / 60)
+  const mins = totalMinutes % 60
+  return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`
 }
 
 /** Chat-list row: a conversation plus the optional status and rich preview fields the board derives. */
@@ -261,6 +336,8 @@ export type AgentListConversation = {
   lastHeartbeatAt?: string | null
   subtasks?: AgentBoardCardSubtasks
   childAgents?: AgentBoardCardChildAgents
+  pendingQuestions?: AgentBoardCardPendingQuestion[]
+  scheduledWakeup?: AgentBoardCardScheduledWakeup | null
 }
 
 export type AgentListGroup = { id: BoardColumnId; label: string; items: (AgentListConversation & { lastActivityAt: string })[] }
@@ -278,6 +355,8 @@ export function filterListConversations<T extends AgentListConversation>(convers
     if (matchesPrUrl(c.prUrl, needle)) return true
     if (c.subtasks?.items.some((item) => matchesSearchText(item.title, needle))) return true
     if (c.childAgents?.roles.some((role) => matchesSearchText(role, needle))) return true
+    if (c.pendingQuestions?.some((q) => matchesSearchText(q.header, needle) || matchesSearchText(q.question, needle))) return true
+    if (matchesSearchText(c.scheduledWakeup?.reason, needle) || matchesSearchText(c.scheduledWakeup?.prompt, needle)) return true
     return false
   })
 }
@@ -295,6 +374,9 @@ export function groupConversationsByStatus(conversations: readonly AgentListConv
       title: c.title,
       messageCount: c.messageCount ?? 1,
       runStatus: c.runStatus ?? null,
+      substatus: c.substatus ?? null,
+      pendingQuestions: c.pendingQuestions,
+      scheduledWakeup: c.scheduledWakeup ?? null,
       lastActivityAt: c.lastActivityAt!,
       reviewedAt: c.reviewedAt ?? null,
     }))

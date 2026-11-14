@@ -61,7 +61,10 @@ const usageSchema = z.looseObject({
     .nullish(),
 })
 const resultPayloadSchema = z.looseObject({ text: z.string().max(200_000), usage: usageSchema.nullish() })
-const errorPayloadSchema = z.looseObject({ message: z.string().max(4_000).optional() })
+const errorPayloadSchema = z.looseObject({
+  message: z.string().max(4_000).optional(),
+  code: z.enum(["WORKER_REPORTED", "AWAITING_USER"]).optional(),
+})
 
 const respond = (value: unknown, status = 200) =>
   Response.json(value, { status, headers: { "cache-control": "no-store" } })
@@ -157,11 +160,23 @@ export async function handleAgentRunCallback(
             const payload = resultPayloadSchema.parse(terminal.payload)
             return { status: "SUCCEEDED" as const, text: payload.text, usage: payload.usage ?? null }
           })()
-        : {
-            status: "FAILED" as const,
-            error: errorPayloadSchema.parse(terminal.payload ?? {}).message ?? "The agent reported an error.",
-            errorCode: "WORKER_REPORTED",
-          }
+        : (() => {
+            const payload = errorPayloadSchema.parse(terminal.payload ?? {})
+            if (payload.code === "AWAITING_USER") {
+              return {
+                status: "INTERRUPTED" as const,
+                error:
+                  payload.message ??
+                  "Paused waiting for your answer — submit your answer to resume where the agent left off.",
+                errorCode: "AWAITING_USER",
+              }
+            }
+            return {
+              status: "FAILED" as const,
+              error: payload.message ?? "The agent reported an error.",
+              errorCode: "WORKER_REPORTED",
+            }
+          })()
     const finalized = await finalizeAgentRun({ prisma, runId, rawToken, ...outcome, cleanup })
 
     return respond({

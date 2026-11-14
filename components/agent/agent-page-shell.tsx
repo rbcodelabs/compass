@@ -75,6 +75,8 @@ export function AgentPageShell({
       lastHeartbeatAt: card.lastHeartbeatAt ?? null,
       subtasks: card.subtasks,
       childAgents: card.childAgents,
+      pendingQuestions: card.pendingQuestions,
+      scheduledWakeup: card.scheduledWakeup ?? null,
     }))
   }, [chat.conversations, liveCards])
   const toggleList = useCallback(() => {

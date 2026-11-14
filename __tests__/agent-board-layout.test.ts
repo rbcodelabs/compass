@@ -11,14 +11,28 @@ import {
 
 describe("Agent board layout binding", () => {
   it("uses the board's own column order as the default (one source of truth)", () => {
-    expect([...AGENT_BOARD_COLUMN_IDS]).toEqual(["working", "new", "done", "failed", "ready"])
+    expect([...AGENT_BOARD_COLUMN_IDS]).toEqual(["working", "awaiting", "waiting", "new", "done", "failed", "ready"])
     expect([...AGENT_BOARD_COLUMN_IDS]).toEqual([...BOARD_COLUMN_ORDER])
-    // bucketizeBoard returns its columns in that same order
-    const one = (id: string, runStatus: string | null, messageCount: number, reviewedAt: string | null): AgentBoardCard => ({
-      id, title: id, messageCount, runStatus, lastActivityAt: "2026-01-01T00:00:00Z", reviewedAt,
+    // bucketizeBoard returns its columns in that same order when all columns are populated
+    const one = (id: string, overrides: Partial<AgentBoardCard>): AgentBoardCard => ({
+      id,
+      title: id,
+      messageCount: 1,
+      runStatus: "SUCCEEDED",
+      lastActivityAt: "2026-01-01T00:00:00Z",
+      reviewedAt: null,
+      ...overrides,
     })
     const columns = bucketizeBoard([
-      one("a", "RUNNING", 1, null), one("b", "SUCCEEDED", 1, null), one("c", "SUCCEEDED", 1, "2026-02-01T00:00:00Z"), one("d", "FAILED", 1, null), one("e", null, 0, null),
+      one("a", { runStatus: "RUNNING" }),
+      one("b", { runStatus: "RUNNING", substatus: "AWAITING_QUESTION" }),
+      one("c", {
+        scheduledWakeup: { id: "w1", fireAt: "2026-01-01T00:05:00Z", delaySeconds: 300, reason: null, prompt: "p" },
+      }),
+      one("d", { runStatus: "SUCCEEDED" }),
+      one("e", { runStatus: "SUCCEEDED", reviewedAt: "2026-02-01T00:00:00Z" }),
+      one("f", { runStatus: "FAILED" }),
+      one("g", { runStatus: null, messageCount: 0 }),
     ])
     expect(columns.map((c) => c.id)).toEqual([...AGENT_BOARD_COLUMN_IDS])
   })
@@ -40,7 +54,7 @@ describe("Agent board layout binding", () => {
       expect(parseAgentBoardLayout(bad)).toEqual(resolveAgentBoardLayout(undefined))
     }
     const layout = parseAgentBoardLayout({ columnOrder: ["ready", "gone"], pinnedColumnIds: ["gone", "ready"], activePinnedId: "gone" })
-    expect(layout.columnOrder).toEqual(["ready", "working", "new", "done", "failed"])
+    expect(layout.columnOrder).toEqual(["ready", "working", "awaiting", "waiting", "new", "done", "failed"])
     expect(layout.pinnedColumnIds).toEqual(["ready"])
   })
 })

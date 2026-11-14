@@ -60,6 +60,8 @@ The **Agent** page has a **Chat | Board** switch in its title bar. **Board** rep
 chat with your conversations laid out by status, newest activity first in each column:
 
 - **Working**: a run is queued or going. The card shows a live spinner and the current tool or activity step (pausing with an amber dot if no heartbeat has arrived for 45 seconds).
+- **Awaiting**: the agent asked a structured question (`AskUserQuestion`) and is paused for your input. You can answer directly on the board card or above the chat composer; if you answer while the sandbox is still open the run resumes in place within a couple of seconds, and if the run's time budget expired first Compass parks its session cleanly and starts a continuation run as soon as you submit your answer.
+- **Waiting**: the agent scheduled a self-wakeup (`ScheduleWakeup`) — for example while waiting on CI or a preview deploy. Both the board card and the chat banner show a live `Resumes in Xm — <reason>` countdown with a **Cancel** button, and sending a manual message cancels the timer automatically.
 - **New**: finished, and you have not looked at it since it last changed.
 - **Done**: finished, and you have looked at it since.
 - **Failed**: the latest run failed or was interrupted. It stays here until the conversation runs again.
@@ -243,7 +245,7 @@ changes nothing for users.
 
 The board's per-person "looked at" state needs migration `109_agent_conversation_reviews`.
 Until it is applied the board still works, but every finished conversation shows as **New**.
-Rich card metadata (conversation squad, persisted summary/PR URL, and live run substatus/activity) uses migration `119_agent_board_rich_cards`, and durable child sub-agent hierarchies use migration `120_agent_child_runs`, both falling back gracefully if unapplied.
+Rich card metadata (conversation squad, persisted summary/PR URL, and live run substatus/activity) uses migration `119_agent_board_rich_cards`, durable child sub-agent hierarchies use migration `120_agent_child_runs`, and interactive agent questions plus scheduled wake-ups use migration `121_agent_interactive_controls` (plus `/api/cron/agent-wakeups` in `vercel.json`), all falling back gracefully if unapplied.
 
 Two settings matter for a deployed environment:
 

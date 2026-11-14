@@ -111,6 +111,8 @@ export default async function AgentPage({ params, searchParams }: AgentPageProps
                 lastHeartbeatAt: card.lastHeartbeatAt,
                 subtasks: card.subtasks,
                 childAgents: card.childAgents,
+                pendingQuestions: card.pendingQuestions,
+                scheduledWakeup: card.scheduledWakeup ?? null,
               }
             : {}),
         }

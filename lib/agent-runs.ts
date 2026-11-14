@@ -42,6 +42,7 @@ import { stopSandboxByName } from "@/lib/agent-sandbox"
 import { AGENT_SANDBOX_IDLE_MS, agentSandboxReuseEnabled, type PreviousRunState } from "@/lib/agent-sandbox-reuse"
 import { deriveConversationSummary, deriveLatestRunActivity, extractLatestPrUrl } from "@/lib/agent-card-derive"
 import { settleStrandedAgentChildRuns, syncAgentChildRunsForBatch } from "@/lib/agent-child-runs"
+import { listRunQuestionsForHeartbeat, settleRunQuestionsOnFinalize } from "@/lib/agent-inbox-questions"
 
 // ── Budgets and caps ────────────────────────────────────────────────────────
 //
@@ -696,9 +697,15 @@ export async function recordAgentRunHeartbeat({
     data: { lastHeartbeatAt: now, updatedAt: now },
   })
   if (beat.count !== 1) throw new AgentRunError("Agent run heartbeat changed concurrently", 409, "HEARTBEAT_RACE")
-  // Echoing status + lastSeq lets a worker notice it has been canceled or swept
-  // and stop burning model spend without a second endpoint.
-  return { status: run.status as AgentRunStatus, lastSeq: run.lastSeq, deadlineAt: run.deadlineAt }
+  // Echoing status + lastSeq + interactive question state lets a worker notice it has been
+  // canceled or swept, or pick up a human's AskUserQuestion answer without a second polling loop.
+  const questions = await listRunQuestionsForHeartbeat(prisma, runId)
+  return {
+    status: run.status as AgentRunStatus,
+    lastSeq: run.lastSeq,
+    deadlineAt: run.deadlineAt,
+    ...(questions.length > 0 ? { questions } : {}),
+  }
 }
 
 // ── Termination ────────────────────────────────────────────────────────────
@@ -726,9 +733,12 @@ const defaultCleanup: Required<AgentRunCleanup> = {
 }
 
 /** The message a user sees in the transcript for a run that did not succeed. */
-export function agentRunFailureMessage(kind: string, status: AgentRunStatus, error?: string | null) {
+export function agentRunFailureMessage(kind: string, status: AgentRunStatus, error?: string | null, errorCode?: string | null) {
   if (kind !== "CHAT" && (HANDOFF_KINDS as readonly string[]).includes(kind)) {
     return HANDOFF_POLICIES[kind as HandoffKind].failureMessage
+  }
+  if (status === "INTERRUPTED" && errorCode === "AWAITING_USER") {
+    return error?.trim() || "Paused waiting for your answer — submit your answer to resume where the agent left off."
   }
   const detail = error?.trim() || "no further detail was reported"
   return status === "INTERRUPTED"
@@ -826,11 +836,16 @@ export async function finalizeAgentRun({
   } catch {
     /* Best-effort derived projection cleanup; terminal run status is already claimed. */
   }
+  try {
+    await settleRunQuestionsOnFinalize(prisma, { runId, terminalRunStatus: status, now })
+  } catch {
+    /* Best-effort inbox item cleanup; terminal run status is already claimed. */
+  }
 
   // ── Side effects. Each is best-effort and independently guarded: a failure to
   // stop a sandbox must not prevent the key from being revoked, and neither may
   // leave the run looking unfinished.
-  const content = status === "SUCCEEDED" ? (text ?? "") : agentRunFailureMessage(run.kind, status, error)
+  const content = status === "SUCCEEDED" ? (text ?? "") : agentRunFailureMessage(run.kind, status, error, errorCode)
   try {
     // Attributed to whoever started the run, so usage limits follow the person who asked.
     const author = await authorColumn(prisma, run.userId)
@@ -880,6 +895,15 @@ export async function finalizeAgentRun({
   if (run.apiKeyId) {
     try { await effects.revokeKey(run.apiKeyId) } catch { /* revokeAgentMcpKey never throws, but the seam might */ }
   }
+  if (status === "SUCCEEDED" && prisma.agentScheduledWakeup) {
+    try {
+      const { fireDueConversationWakeups } = await import("@/lib/agent-scheduled-wakeups")
+      await fireDueConversationWakeups(prisma, run.conversationId, { now })
+    } catch {
+      /* Cron sweeper (/api/cron/agent-wakeups) is the durable backstop. */
+    }
+  }
+
   // A conversation sandbox that just finished a turn cleanly stays up for the next one; finishedAt (written above)
   // is its idle clock and the sweeper reaps it after AGENT_SANDBOX_IDLE_MS. Every other outcome pauses it (stop; the
   // disk is kept): after a failure, cancel or sweep its state is unknown, and a process left from a timed-out run

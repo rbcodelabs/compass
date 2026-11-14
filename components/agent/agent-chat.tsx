@@ -22,7 +22,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { Archive, ArchiveRestore, FileText, GitPullRequest, Loader2, Search, Sparkles, X as XIcon } from "lucide-react"
+import { Archive, ArchiveRestore, Clock, FileText, GitPullRequest, Loader2, Search, Sparkles, X as XIcon } from "lucide-react"
 import { fetchArchivedConversations, setConversationArchived, type ArchivedConversation } from "@/lib/agent-archive-client"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -40,6 +40,7 @@ import { AgentChip } from "@/components/agent/composer/agent-chip"
 import { ComposerCard } from "@/components/agent/composer/composer-card"
 import { SubagentTeamPill } from "@/components/agent/composer/subagent-team-pill"
 import { ChildAgentTimeline } from "@/components/agent/child-agent-timeline"
+import { QuestionPromptCard, type QuestionAnswerSubmissionResult } from "@/components/agent/question-prompt-card"
 import { mergeChildAgentRuns, type SerializedChildAgentRun } from "@/lib/agent/child-agent-tree"
 import { AGENT_MAX_GOOGLE_RESOURCES_PER_TURN, GOOGLE_DRIVE_CONNECTOR_SLUG, googleResourcesFromPaste, type GoogleResourceRef } from "@/lib/agent-google-resources"
 import { Markdown } from "@/components/agent/markdown"
@@ -52,8 +53,11 @@ import {
   classifyBoardCard,
   filterListConversations,
   formatRelativeTime,
+  formatWakeupCountdown,
   groupConversationsBySquad,
   groupConversationsByStatus,
+  type AgentBoardCardPendingQuestion,
+  type AgentBoardCardScheduledWakeup,
   type AgentBoardCardSquad,
   type AgentListConversation,
   type BoardColumnId,
@@ -511,6 +515,98 @@ export function AgentChat({
     () => (durableChildState && durableChildState.conversationId === activeConversationId ? durableChildState.runs : []),
     [durableChildState, activeConversationId],
   )
+
+  // Interactive human-in-the-loop `AskUserQuestion` prompts + durable `ScheduleWakeup` countdown for this thread.
+  const [questionState, setQuestionState] = useState<{
+    conversationId: string
+    questions: AgentBoardCardPendingQuestion[]
+  } | null>(null)
+  const [wakeupState, setWakeupState] = useState<{
+    conversationId: string
+    wakeup: AgentBoardCardScheduledWakeup | null
+  } | null>(null)
+  const [cancelingWakeup, setCancelingWakeup] = useState(false)
+  const [wakeupNow, setWakeupNow] = useState(() => Date.now())
+
+  const refreshInteractiveControls = useCallback(
+    async (signal?: AbortSignal) => {
+      if (!activeConversationId) return
+      const qs = `workspaceId=${encodeURIComponent(workspaceId)}`
+      await Promise.all([
+        fetch(`/api/agent/conversations/${activeConversationId}/questions?${qs}`, { signal })
+          .then(async (res) => {
+            if (!res.ok) return
+            const body = (await res.json()) as { questions?: AgentBoardCardPendingQuestion[] }
+            setQuestionState({
+              conversationId: activeConversationId,
+              questions: Array.isArray(body.questions) ? body.questions : [],
+            })
+          })
+          .catch(() => {}),
+        fetch(`/api/agent/conversations/${activeConversationId}/wakeups?${qs}`, { signal })
+          .then(async (res) => {
+            if (!res.ok) return
+            const body = (await res.json()) as { wakeup?: AgentBoardCardScheduledWakeup | null }
+            setWakeupState({
+              conversationId: activeConversationId,
+              wakeup: body.wakeup ?? null,
+            })
+          })
+          .catch(() => {}),
+      ])
+    },
+    [activeConversationId, workspaceId],
+  )
+
+  useEffect(() => {
+    if (!activeConversationId) return
+    const lookup = new AbortController()
+    void refreshInteractiveControls(lookup.signal)
+    return () => lookup.abort()
+  }, [activeConversationId, liveToolSteps.length, isStreaming, refreshInteractiveControls])
+
+  const pendingQuestions = useMemo(
+    () =>
+      questionState && questionState.conversationId === activeConversationId
+        ? questionState.questions.filter((q) => q.status === "PENDING")
+        : [],
+    [questionState, activeConversationId],
+  )
+  const pendingWakeup = useMemo(
+    () => (wakeupState && wakeupState.conversationId === activeConversationId ? wakeupState.wakeup : null),
+    [wakeupState, activeConversationId],
+  )
+
+  // Poll gently while streaming (so a hold-open AskUserQuestion surfaces within ~2-3s) or while a wake-up
+  // timer is active (so countdown labels tick and a fired continuation run auto-attaches).
+  useEffect(() => {
+    if (!activeConversationId) return
+    if (!isStreaming && !pendingWakeup) return
+    const intervalMs = isStreaming ? 3_000 : 10_000
+    const timer = setInterval(() => {
+      setWakeupNow(Date.now())
+      if (document.visibilityState !== "visible") return
+      void refreshInteractiveControls()
+      if (!isStreaming && pendingWakeup) {
+        void (async () => {
+          try {
+            const res = await fetch(
+              `/api/agent/conversations/${activeConversationId}/run?workspaceId=${encodeURIComponent(workspaceId)}`,
+            )
+            if (!res.ok) return
+            const body = (await res.json()) as { run: SerializedRun | null }
+            if (body.run && !body.run.done) {
+              setWakeupState({ conversationId: activeConversationId, wakeup: null })
+              void attachToRun(body.run)
+            }
+          } catch {
+            /* next tick catches up */
+          }
+        })()
+      }
+    }, intervalMs)
+    return () => clearInterval(timer)
+  }, [activeConversationId, workspaceId, isStreaming, pendingWakeup, refreshInteractiveControls, attachToRun])
   const childAgentRuns = useMemo(
     () =>
       mergeChildAgentRuns({
@@ -978,7 +1074,19 @@ export function AgentChat({
                           <ConversationRow
                             key={c.id}
                             c={c}
-                            status={c.lastActivityAt ? classifyBoardCard({ runStatus: c.runStatus ?? null, messageCount: c.messageCount ?? 1, lastActivityAt: c.lastActivityAt, reviewedAt: c.reviewedAt ?? null }) : null}
+                            status={
+                              c.lastActivityAt
+                                ? classifyBoardCard({
+                                    runStatus: c.runStatus ?? null,
+                                    substatus: c.substatus ?? null,
+                                    pendingQuestions: c.pendingQuestions,
+                                    scheduledWakeup: c.scheduledWakeup ?? null,
+                                    messageCount: c.messageCount ?? 1,
+                                    lastActivityAt: c.lastActivityAt,
+                                    reviewedAt: c.reviewedAt ?? null,
+                                  })
+                                : null
+                            }
                             active={c.id === activeConversationId}
                             basePath={basePath}
                             archived={false}
@@ -1156,6 +1264,69 @@ export function AgentChat({
                 }}
               >
                 {suggestion}
+              </button>
+            </div>
+          )}
+          {pendingQuestions.length > 0 && (
+            <QuestionPromptCard
+              questions={pendingQuestions}
+              className="mb-2.5"
+              onAnswered={(result: QuestionAnswerSubmissionResult) => {
+                void refreshInteractiveControls()
+                void reconcile(true)
+                if (result.delivery === "continuation_run" && result.runId && activeConversationId) {
+                  void (async () => {
+                    try {
+                      const res = await fetch(
+                        `/api/agent/conversations/${activeConversationId}/run?workspaceId=${encodeURIComponent(workspaceId)}`,
+                      )
+                      if (!res.ok) return
+                      const body = (await res.json()) as { run: SerializedRun | null }
+                      if (body.run && !body.run.done) void attachToRun(body.run)
+                    } catch {
+                      /* best-effort stream attach */
+                    }
+                  })()
+                }
+              }}
+            />
+          )}
+          {pendingWakeup && !isStreaming && pendingQuestions.length === 0 && activeConversationId && (
+            <div
+              data-testid="chat-wakeup-banner"
+              className="mb-2.5 flex items-center justify-between gap-2 rounded-xl border border-border-default bg-surface-inset px-3 py-2 text-xs"
+            >
+              <span className="flex min-w-0 items-center gap-2 text-text-secondary">
+                <Clock aria-hidden="true" className="size-3.5 shrink-0 text-status-info" />
+                <span className="min-w-0 truncate">
+                  <span className="font-medium text-text-primary tabular-nums">
+                    Resumes in {formatWakeupCountdown(pendingWakeup.fireAt, wakeupNow)}
+                  </span>
+                  {pendingWakeup.reason ? ` — ${pendingWakeup.reason}` : ""}
+                </span>
+              </span>
+              <button
+                type="button"
+                data-testid="chat-wakeup-cancel"
+                disabled={cancelingWakeup}
+                onClick={async () => {
+                  if (cancelingWakeup) return
+                  setCancelingWakeup(true)
+                  try {
+                    const qs = new URLSearchParams({ workspaceId, wakeupId: pendingWakeup.id })
+                    const res = await fetch(`/api/agent/conversations/${activeConversationId}/wakeups?${qs.toString()}`, {
+                      method: "DELETE",
+                    })
+                    if (res.ok) {
+                      setWakeupState({ conversationId: activeConversationId, wakeup: null })
+                    }
+                  } finally {
+                    setCancelingWakeup(false)
+                  }
+                }}
+                className="shrink-0 rounded-md border border-border-default bg-surface-card px-2.5 py-1 text-[11px] font-medium text-text-secondary transition-colors hover:border-border-strong hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 disabled:opacity-50"
+              >
+                {cancelingWakeup ? "Canceling…" : "Cancel"}
               </button>
             </div>
           )}
@@ -1341,6 +1512,8 @@ function MessageRow({
 
 const STATUS_STYLE: Record<BoardColumnId, { label: string; dot: string; badge: string }> = {
   working: { label: "Working", dot: "bg-status-info animate-pulse", badge: "bg-status-info-surface text-status-info" },
+  awaiting: { label: "Awaiting", dot: "bg-status-warning animate-pulse", badge: "bg-status-warning-surface text-status-warning" },
+  waiting: { label: "Waiting", dot: "bg-status-info", badge: "bg-status-info-surface text-status-info" },
   new: { label: "New", dot: "bg-status-warning", badge: "bg-status-warning-surface text-status-warning" },
   done: { label: "Done", dot: "bg-status-success", badge: "bg-status-success-surface text-status-success" },
   failed: { label: "Failed", dot: "bg-status-danger", badge: "bg-status-danger-surface text-status-danger" },
@@ -1367,7 +1540,14 @@ function ConversationRow({
 }) {
   const archiveLabel = archived ? "Restore chat" : "Archive chat"
   const style = status ? STATUS_STYLE[status] : null
-  const preview = status === "working" ? c.currentActivity : c.summary
+  const preview =
+    status === "awaiting" && c.pendingQuestions?.[0]
+      ? c.pendingQuestions[0].question
+      : status === "waiting" && c.scheduledWakeup
+        ? `Resumes in ${formatWakeupCountdown(c.scheduledWakeup.fireAt)}${c.scheduledWakeup.reason ? ` — ${c.scheduledWakeup.reason}` : ""}`
+        : status === "working"
+          ? c.currentActivity
+          : c.summary
   const prBadge = formatPrBadge(c.prUrl)
   const subtasks = c.subtasks && c.subtasks.total > 0 ? c.subtasks : null
   const childAgents = c.childAgents && c.childAgents.total > 0 ? c.childAgents : null

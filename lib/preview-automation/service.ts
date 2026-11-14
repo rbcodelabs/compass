@@ -7,6 +7,8 @@ import { getActiveSchema } from "@/lib/schema";
 import { deleteWorkspaceCascade } from "@/lib/delete-workspace-cascade";
 import { deleteWorkspaceAgentSessions } from "@/lib/agent-session";
 import { deleteWorkspaceAgentChildRuns } from "@/lib/agent-child-runs";
+import { deleteWorkspaceAgentInboxItems } from "@/lib/agent-inbox-questions";
+import { deleteWorkspaceAgentScheduledWakeups } from "@/lib/agent-scheduled-wakeups";
 import { deleteWorkspaceConversationReviews } from "@/lib/agent-board-data";
 import { deleteWorkspaceResearchData } from "@/lib/research-workspace-cleanup";
 import { assertDocumentPilotCleanupReviewed } from "@/lib/document-cleanup";
@@ -69,6 +71,8 @@ export async function cleanupPreviewRun(prisma: AppPrismaClient, runId: string, 
     await prisma.apiKey.deleteMany({ where: { scopeWorkspaceId: workspaceId, scopeConversationId: { not: null } } });
     await prisma.pMInterview.updateMany({ where: { workspaceId }, data: { agentConversationId: null } });
     await deleteWorkspaceAgentChildRuns(prisma, workspaceId);
+    await deleteWorkspaceAgentInboxItems(prisma, workspaceId);
+    await deleteWorkspaceAgentScheduledWakeups(prisma, workspaceId);
     await deleteWorkspaceConversationReviews(prisma, workspaceId);
     await prisma.agentConversation.deleteMany({ where: { workspaceId } });
     await prisma.agentAuditLog.deleteMany({ where: { workspaceId } });
