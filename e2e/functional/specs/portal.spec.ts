@@ -92,6 +92,11 @@ test.describe("Portal — account authentication (portalAuthRequired)", () => {
       if (!feedbackWasEnabled) {
         await feedbackToggle.click();
         await page.waitForLoadState("networkidle");
+        // The switch flips optimistically and the write is a server action, so on a fast production server networkidle can
+        // resolve before it lands. Wait until the portal itself reports feedback as enabled (the GET answers 403 until then).
+        await expect
+          .poll(async () => (await page.request.get(`/api/portal/${orgSlug}/${workspaceSlug}/feedback`)).status(), { timeout: 15_000 })
+          .toBe(200);
       }
 
       // ── 3. Submit a feedback item anonymously WHILE portalAuthRequired is

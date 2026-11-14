@@ -23,10 +23,10 @@ const ENV = {
 }
 
 /**
- * @param {{ specs?: string[], unflaggedAssert?: boolean, control?: boolean }} [options]
+ * @param {{ specs?: string[], unflaggedAssert?: boolean, control?: boolean, e2eEnv?: string }} [options]
  * @returns {{ reserve_mb: number, timeout_s: number, database: boolean, node: string, env: Record<string, string>, steps: { name: string, run: string }[], artifacts: string[] }}
  */
-export function buildTqSpec({ specs = [], unflaggedAssert = false, control = false } = {}) {
+export function buildTqSpec({ specs = [], unflaggedAssert = false, control = false, e2eEnv = "" } = {}) {
   const specArgs = specs.length > 0 ? ` -- ${specs.join(" ")}` : ""
   const e2eServer = control ? "" : "E2E_SERVER=prod "
   const steps = [
@@ -58,7 +58,7 @@ test "$n" -gt 0`,
     name: "e2e",
     run: `export DATABASE_URL="\${DATABASE_URL%/*}/compass_e2e"
 mkdir -p diag
-${e2eServer}corepack pnpm run test:e2e:functional${specArgs}`,
+${e2eEnv ? `export ${e2eEnv}\n` : ""}${e2eServer}corepack pnpm run test:e2e:functional${specArgs}`,
   })
   return { reserve_mb: 8192, timeout_s: 2700, database: true, node: "22", env: ENV, steps, artifacts: ["test-results", "playwright-report"] }
 }
@@ -67,11 +67,13 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
   const args = process.argv.slice(2)
   const specs = []
   let out
+  let e2eEnv = ""
   for (let index = 0; index < args.length; index += 1) {
     if (args[index] === "--spec") specs.push(args[++index])
     else if (args[index] === "--out") out = args[++index]
+    else if (args[index] === "--e2e-env") e2eEnv = args[++index]
   }
-  const spec = buildTqSpec({ specs, unflaggedAssert: args.includes("--unflagged-assert"), control: args.includes("--control") })
+  const spec = buildTqSpec({ specs, unflaggedAssert: args.includes("--unflagged-assert"), control: args.includes("--control"), e2eEnv })
   const json = JSON.stringify(spec, null, 1)
   if (out) fs.writeFileSync(out, json)
   else process.stdout.write(json + "\n")
