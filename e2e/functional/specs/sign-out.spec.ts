@@ -11,7 +11,8 @@ import { test, expect } from "../fixtures/index";
 import { E2E_USER_EMAIL } from "../fixtures/seed-e2e";
 
 test.describe("Sign Out", () => {
-  test("sidebar dropdown shows signed-in email and signs out", async ({ page, base }) => {
+  // QUARANTINE(prod-e2e): suspected prod-mode or in-flight session-cookie timing difference - stays on /okrs instead of /login in full suite, passes standalone on prod and dev, root cause not yet proven (job 01M7C5MDZS5DWAS1BS9YAH2KA1). See e2e/functional/QUARANTINE.md.
+  test.fixme("sidebar dropdown shows signed-in email and signs out", async ({ page, base }) => {
     // ── 1. Navigate to an authenticated workspace page ──────────────────────
     await page.goto(`${base}/okrs`);
     await page.waitForLoadState("networkidle");

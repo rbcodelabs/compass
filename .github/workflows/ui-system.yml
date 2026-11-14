@@ -75,6 +75,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup
       - uses: ./.github/actions/playwright
+      - run: pnpm build:e2e
       - run: pnpm test:e2e:roadmap
       - run: pnpm e2e:db:verify-clean
         if: always()
@@ -110,6 +111,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup
       - uses: ./.github/actions/playwright
+      - run: pnpm build:e2e
       - run: pnpm test:e2e:functional -- e2e/functional/specs/capture-research.spec.ts e2e/functional/specs/research-browser-voice.spec.ts e2e/functional/specs/capture-results.spec.ts e2e/functional/specs/research-mcp.spec.ts e2e/functional/specs/capture-attachment-formats.spec.ts e2e/functional/specs/pm-interview.spec.ts e2e/functional/specs/card-sort.spec.ts
       - run: pnpm e2e:db:verify-clean
         if: always()

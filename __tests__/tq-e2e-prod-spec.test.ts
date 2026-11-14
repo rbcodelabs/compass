@@ -42,6 +42,10 @@ describe("buildTqSpec", () => {
     )
   })
 
+  it("a control job pins the dev server explicitly, since prod is now the default", () => {
+    expect(step("e2e", buildTqSpec({ specs: [], control: true })).run).toContain("E2E_SERVER=dev")
+  })
+
   it("runs the full suite when no specs are given", () => {
     expect(step("e2e", buildTqSpec({ specs: [] })).run).not.toContain("e2e/functional/specs/")
   })

@@ -1,8 +1,8 @@
 /**
  * Functional suite auth setup.
  *
- * Logs in using the dev-credentials provider (⚡ Dev Login button). It exists in `pnpm dev` and in the E2E_SERVER=prod build
- * (`pnpm build:e2e` plus E2E_MOCK_AUTH=1, see lib/e2e-harness.ts); no other build has it,
+ * Logs in using the dev-credentials provider (⚡ Dev Login button). It exists in the default `prod` server mode
+ * (`pnpm build:e2e` plus E2E_MOCK_AUTH=1, see lib/e2e-harness.ts) and in `pnpm dev` (`E2E_SERVER=dev`); no other build has it,
  * then saves the authenticated browser storage state to
  * e2e/functional/.auth/user.json for the functional project to reuse.
  *
@@ -28,9 +28,9 @@ setup("authenticate as dev user", async ({ page }) => {
 
   // Wait for the browser to navigate away from /login
   await page.waitForURL((url) => !url.pathname.startsWith("/login"), {
-    // The first authenticated navigation cold-compiles /dashboard in Next dev (E2E_SERVER unset); a prebuilt production server does
-    // not compile. Keep this below the functional project's 90s test budget without imposing the shorter Playwright navigation
-    // default on a valid local cold start.
+    // A prebuilt production server (the default `prod` mode) does not compile; Next dev (`E2E_SERVER=dev`) cold-compiles /dashboard
+    // on the first authenticated navigation. Keep this below the functional project's 90s test budget without imposing the shorter
+    // Playwright navigation default on a valid local cold start.
     timeout: 60_000,
   });
 

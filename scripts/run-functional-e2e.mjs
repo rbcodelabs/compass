@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { withE2ERunLock } from "./e2e-run-lock.mjs";
-import { prodBuildProblem } from "./e2e-prod-build-check.mjs";
+import { e2eServerMode, prodBuildProblem } from "./e2e-prod-build-check.mjs";
 
 try {
   process.loadEnvFile(path.resolve(process.cwd(), ".env.local"));
@@ -189,10 +189,12 @@ function acquireLockOrExit() {
 
 acquireLockOrExit();
 
-// E2E_SERVER=prod serves the `pnpm build:e2e` artifact with `next start` (playwright.config.ts); the default is `pnpm dev`.
-const serverMode = process.env.E2E_SERVER === "prod" ? "prod" : "dev";
-if (process.env.E2E_SERVER && process.env.E2E_SERVER !== "prod" && process.env.E2E_SERVER !== "dev") {
-  console.error(`[e2e] E2E_SERVER=${process.env.E2E_SERVER} is not recognised. Use "prod" or leave it unset (dev).`);
+// E2E_SERVER defaults to "prod" (`next start` on the `pnpm build:e2e` artifact); E2E_SERVER=dev opts back into `pnpm dev`.
+let serverMode;
+try {
+  serverMode = e2eServerMode(process.env.E2E_SERVER);
+} catch (error) {
+  console.error(`[e2e] ${error instanceof Error ? error.message : String(error)}`);
   process.exit(1);
 }
 if (serverMode === "prod") {
@@ -200,7 +202,7 @@ if (serverMode === "prod") {
   const headCommitMs = Number(headCommit.stdout.trim()) * 1000;
   // Fail closed: a checkout without git metadata cannot prove the build is fresh.
   if (!Number.isFinite(headCommitMs) || headCommitMs <= 0) {
-    console.error("[e2e] E2E_SERVER=prod could not read the HEAD commit time, so it cannot prove the build is current.");
+    console.error("[e2e] E2E_SERVER=prod could not read the HEAD commit time, so it cannot prove the build is current. Run in a git checkout or set E2E_SERVER=dev.");
     process.exit(1);
   }
   const problem = prodBuildProblem({ buildIdPath: path.resolve(process.cwd(), ".next/BUILD_ID"), headCommitMs });

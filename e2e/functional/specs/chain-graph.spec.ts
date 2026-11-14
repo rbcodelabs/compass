@@ -1,7 +1,7 @@
 /**
- * Functional coverage for the chain graph (docs/design/chain-graph.md), flag-gated: `pnpm dev` runs NODE_ENV=development,
- * which turns the graph on (lib/chain-graph/flag.ts). With E2E_SERVER=prod the NODE_ENV is production, so playwright.config.ts
- * sets COMPASS_CHAIN_GRAPH=1 for that server instead.
+ * Functional coverage for the chain graph (docs/design/chain-graph.md), flag-gated: in the default `prod` server mode NODE_ENV is
+ * production, so playwright.config.ts sets COMPASS_CHAIN_GRAPH=1; under E2E_SERVER=dev `pnpm dev` runs NODE_ENV=development, which
+ * turns the graph on directly (lib/chain-graph/flag.ts).
  *
  * Seeds Opportunity -> Solution -> Assumption through the UI (same journey as assumption-experiment-linking.spec.ts), then:
  * deep-links with a display ID, checks the outline lists upstream and downstream, clears the trace, collapses and expands a

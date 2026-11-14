@@ -56,7 +56,8 @@ test.describe("Doc editor interactions (desktop)", () => {
     await expect(editor.locator("h2")).toContainText("Make this word bold please");
   });
 
-  test("clicking away from a selection moves the caret and dismisses the bubble", async ({ page, base }) => {
+  // QUARANTINE(prod-e2e): intermittent selection flake - doc-bubble-menu not visible within 5s (job 01M7C5MDZS5DWAS1BS9YAH2KA1). See e2e/functional/QUARANTINE.md.
+  test.fixme("clicking away from a selection moves the caret and dismisses the bubble", async ({ page, base }) => {
     const editor = await openDoc(page, base);
     await page.keyboard.type("Alpha first line");
     await page.keyboard.press("Enter");

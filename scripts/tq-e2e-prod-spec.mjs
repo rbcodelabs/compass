@@ -9,7 +9,7 @@
  * Steps: install, playwright-browsers, create-e2e-db, [build-unflagged-assert], build, assert, e2e.
  *   --unflagged-assert  first builds WITHOUT the flag with `pnpm build` (which runs scripts/assert-no-mock-auth.mjs and fails on a
  *                       leak), then discards it. This is the same command Vercel runs.
- *   --control           e2e on the default dev server instead of the prod build (same SHA, same worker: the comparison control).
+ *   --control           e2e on the dev server (E2E_SERVER=dev) instead of the default prod build (same SHA, same worker: the comparison control).
  * Never edit tq workers, and never run this from the Mac: the steps are heavy.
  */
 import fs from "node:fs"
@@ -32,7 +32,7 @@ done`
  */
 export function buildTqSpec({ specs = [], unflaggedAssert = false, control = false, e2eEnv = "" } = {}) {
   const specArgs = specs.length > 0 ? ` -- ${specs.join(" ")}` : ""
-  const e2eServer = control ? "" : "E2E_SERVER=prod "
+  const e2eServer = control ? "E2E_SERVER=dev " : "E2E_SERVER=prod "
   const steps = [
     { name: "install", run: "corepack pnpm install --frozen-lockfile" },
     { name: "playwright-browsers", run: "corepack pnpm exec playwright install chromium" },

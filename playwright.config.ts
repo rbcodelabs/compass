@@ -1,5 +1,6 @@
 import { defineConfig, devices } from "@playwright/test";
 import crypto from "node:crypto";
+import { e2eServerMode } from "./scripts/e2e-prod-build-check.mjs";
 
 /**
  * Set E2E_FUNCTIONAL=1 to enable the functional test suite.
@@ -45,12 +46,12 @@ const FUNCTIONAL_PORT = process.env.E2E_PORT
     : 3002;
 const FUNCTIONAL_BASE_URL = `http://localhost:${FUNCTIONAL_PORT}`;
 /**
- * E2E_SERVER=prod serves a prebuilt artifact with `next start` instead of `pnpm dev` (default stays dev). The artifact must come
- * from `pnpm build:e2e` (COMPASS_E2E_MOCK_AUTH_BUILD=1 next build): that build alone contains the mock login the suite signs in with
- * (lib/e2e-harness.ts). The build is a separate step, never part of webServer, whose timeout would not hold.
+ * Functional E2E defaults to `prod`, serving a prebuilt artifact with `next start` (`E2E_SERVER=dev` opts back into `pnpm dev`).
+ * The artifact must come from `pnpm build:e2e` (COMPASS_E2E_MOCK_AUTH_BUILD=1 next build): that build alone contains the mock login
+ * the suite signs in with (lib/e2e-harness.ts). The build is a separate step, never part of webServer, whose timeout would not hold.
  * scripts/run-functional-e2e.mjs refuses to start when the build is missing or older than HEAD.
  */
-const PROD_SERVER = process.env.E2E_SERVER === "prod";
+const PROD_SERVER = functional ? e2eServerMode(process.env.E2E_SERVER) === "prod" : process.env.E2E_SERVER !== "dev";
 const VERCEL_AUTOMATION_BYPASS_SECRET =
   process.env.VERCEL_AUTOMATION_BYPASS_SECRET;
 

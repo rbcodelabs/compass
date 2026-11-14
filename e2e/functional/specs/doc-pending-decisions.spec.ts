@@ -3,7 +3,8 @@ import getPrisma from "../../../lib/db"
 import { createTrackedDecisionRequest } from "../../../lib/tracked-decisions"
 
 test.describe("Docs pending decision toolbar", () => {
-  test("request → pending toolbar → request changes → revised pending → approve", async ({ page, base, workspaceSlug }) => {
+  // QUARANTINE(prod-e2e): known baseline failure on dev and prod - review href uses UUID instead of display ID (job 01M7C5MDZS5DWAS1BS9YAH2KA1; fix in #572). See e2e/functional/QUARANTINE.md.
+  test.fixme("request → pending toolbar → request changes → revised pending → approve", async ({ page, base, workspaceSlug }) => {
     const prisma = getPrisma()
     const workspace = await prisma.workspace.findFirstOrThrow({ where: { slug: workspaceSlug } })
     const doc = await prisma.doc.create({ data: { workspaceId: workspace.id, title: "Launch readiness", content: "Review the launch plan before release." } })

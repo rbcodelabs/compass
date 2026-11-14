@@ -8,14 +8,14 @@
  *   - POST /api/auth/callback/dev-credentials with a real CSRF token does not authenticate anyone (no session cookie, and
  *     /api/auth/session stays null).
  *
- * Only meaningful against the production artifact, so it skips in the default dev-server mode (E2E_SERVER unset).
+ * Only meaningful against the production artifact (the default `prod` server mode), so it skips under E2E_SERVER=dev.
  */
 import { test, expect } from "@playwright/test";
 import { spawn, type ChildProcess } from "node:child_process";
 import net from "node:net";
 
 test.describe("mock login is off without E2E_MOCK_AUTH", () => {
-  test.skip(process.env.E2E_SERVER !== "prod", "needs the E2E_SERVER=prod artifact (pnpm build:e2e)");
+  test.skip(process.env.E2E_SERVER === "dev", "needs the prod e2e artifact (pnpm build:e2e); skipped under E2E_SERVER=dev");
 
   let server: ChildProcess | undefined;
   let baseUrl = "";

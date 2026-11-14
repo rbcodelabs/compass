@@ -209,7 +209,8 @@ test.describe("Doc comment @mention -> task", () => {
     for (const api of apis) await api.dispose();
   });
 
-  test("person: pick, task row, post, card + pin, notifications, Done resolves and reopen reopens the thread", async ({ page, base }) => {
+  // QUARANTINE(prod-e2e): mention picker shows 2 options instead of 1 due to shared-DB 'Quinn' leak from earlier spec (job 01M7C5MDZS5DWAS1BS9YAH2KA1; fix in #570 / fix/e2e-dev-user-leaks). See e2e/functional/QUARANTINE.md.
+  test.fixme("person: pick, task row, post, card + pin, notifications, Done resolves and reopen reopens the thread", async ({ page, base }) => {
     test.setTimeout(240_000);
     const consoleErrors = watchConsoleErrors(page);
     const docTitle = `Launch plan ${suffix}`;
