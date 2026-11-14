@@ -42,7 +42,6 @@ type BoardDb = Pick<AppPrismaClient, "agentConversation" | "agentConversationRev
     Pick<
       AppPrismaClient,
       | "task"
-      | "taskLink"
       | "squad"
       | "agentMessage"
       | "agentChildRun"
