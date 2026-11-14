@@ -56,6 +56,9 @@ test.describe("Discussion comment @mention -> task", () => {
   });
 
   test.afterAll(async () => {
+    // Left as a workspace member, "Quinn Discussion" becomes the first member any later spec finds (roadmap-sidebar-delivery-tasks
+    // assigned its seeded blocked task to it and then looked for "Dev User").
+    if (bUserId) await pool?.query(`DELETE FROM "${S}".workspace_members WHERE user_id = $1`, [bUserId]).catch(() => undefined);
     await pool?.end();
   });
 

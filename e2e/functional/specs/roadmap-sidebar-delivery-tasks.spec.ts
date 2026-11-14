@@ -29,7 +29,8 @@ async function seedJourney(): Promise<SeededJourney> {
       FROM "${S}".workspaces w
       JOIN "${S}".organizations o ON o.id = w.organization_id
       JOIN "${S}".workspace_members wm ON wm.workspace_id = w.id
-      WHERE o.slug = 'e2e-test-org' AND w.slug = 'e2e-workspace'
+      JOIN "${S}".users u ON u.id = wm.user_id
+      WHERE o.slug = 'e2e-test-org' AND w.slug = 'e2e-workspace' AND u.email = 'dev@localhost.dev'
       LIMIT 1
     `);
     if (!workspace) throw new Error("E2E workspace has not been seeded");
