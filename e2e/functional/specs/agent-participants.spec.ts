@@ -148,7 +148,7 @@ test("owner shares an agent conversation, the invitee sees it, outsiders are blo
     // ── Owner opens the conversation and invites B in the participants panel ────
     await page.goto(`${base}/agent?c=${conversationId}`);
     await expect(page.getByText(ownerMessage)).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByText(agentReply)).toBeVisible();
+    await expect(page.getByTestId("main-conversation-pane").getByText(agentReply)).toBeVisible();
     const panelToggle = page.getByRole("button", { name: /^Only you/ });
     await expect(panelToggle).toBeVisible({ timeout: 15_000 });
     await panelToggle.click();
@@ -183,7 +183,7 @@ test("owner shares an agent conversation, the invitee sees it, outsiders are blo
     await bPage.getByRole("link", { name: title }).click();
     await bPage.waitForURL(new RegExp(`c=${conversationId}`));
     await expect(bPage.getByText(ownerMessage)).toBeVisible({ timeout: 30_000 });
-    await expect(bPage.getByText(agentReply)).toBeVisible();
+    await expect(bPage.getByTestId("main-conversation-pane").getByText(agentReply)).toBeVisible();
     await expect(bPage.getByText("Dev User", { exact: true }).first(), "the owner's message carries their name").toBeVisible();
     await bPage.getByRole("button", { name: /^Shared with 1 person/ }).click();
     const bList = bPage.getByRole("list", { name: "Participants" });

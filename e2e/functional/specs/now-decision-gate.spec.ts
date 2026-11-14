@@ -33,7 +33,7 @@ test.describe("Roadmap decision and NOW commitment", () => {
     await page.getByLabel("Decision question").fill(question);
     await page.getByRole("textbox", { name: /^Context/ }).fill("Capacity is available; record the decision before scheduling delivery.");
     await page.getByRole("button", { name: "Request decision", exact: true }).click();
-    await expect(page).toHaveURL(/\/reviews\/[0-9a-f-]{36}$/);
+    await expect(page).toHaveURL(/\/reviews\/(?:[0-9a-f-]{36}|DEC-\d+)$/);
     await expect(
       page.getByRole("heading", { name: question })
     ).toBeVisible();

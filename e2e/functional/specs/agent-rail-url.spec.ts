@@ -171,7 +171,7 @@ test("the rail's view, thread and Help article survive refresh, share by link, c
     await expect(rail(page).getByRole("button", { name: "Open in full page" })).toBeEnabled();
     await rail(page).getByRole("button", { name: "Open in full page" }).click();
     await expect(page).toHaveURL(new RegExp(`/agent\\?c=${conversationId}`));
-    await expect(page.getByText(seededReply)).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId("main-conversation-pane").getByText(seededReply)).toBeVisible({ timeout: 30_000 });
     await expect(rail(page)).toHaveCount(0);
     // Back out the in-app way (a reload would discard client state): the page's
     // ?c= is adopted by the rail, so reopening it lands on the same thread.
