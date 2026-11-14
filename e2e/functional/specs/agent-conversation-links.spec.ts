@@ -158,6 +158,9 @@ test("the chat lists linked objects; opportunities and tasks list only the conve
     await pool.query(`DELETE FROM "${S}".solutions WHERE id = $1`, [solutionId]);
     await pool.query(`DELETE FROM "${S}".opportunities WHERE id = $1`, [oppId]);
     await pool.query(`DELETE FROM "${S}".tasks WHERE id = $1`, [taskId]);
+    // The second user is signed in through the mock login, which names every new user "Dev User". Left as a workspace member it adds
+    // a second "Dev User" option to every later assignee picker (linked-tasks-panels, roadmap-sidebar-delivery-tasks).
+    await pool.query(`DELETE FROM "${S}".workspace_members WHERE user_id IN (SELECT id FROM "${S}".users WHERE email = $1)`, [bEmail]);
     await pool.end();
   }
 });

@@ -80,6 +80,9 @@ test("tool approval is hidden from members, a pointer for admins, and absent fro
     await expect(page.getByRole("button", { name: "Approve" })).toBeVisible()
     await expect(page.getByText("This approval is decided on its own page.")).toHaveCount(0)
   } finally {
+    // The member is created through the mock login (named "Dev User"); left in the workspace it adds a second "Dev User" option to
+    // every later assignee picker.
+    await prisma.workspaceMember.deleteMany({ where: { userId: member.id } }).catch(() => undefined)
     await memberContext.close()
     await login.dispose()
   }

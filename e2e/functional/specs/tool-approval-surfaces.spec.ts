@@ -162,6 +162,9 @@ test("admins see the effect and decide; members get a 404; every state reads rig
       expect(await noPageOverflow(page), `list fits at ${viewport.width}px`).toBe(true)
     }
   } finally {
+    // The member is created through the mock login (named "Dev User"); left in the workspace it adds a second "Dev User" option to
+    // every later assignee picker.
+    await prisma.workspaceMember.deleteMany({ where: { userId: member.id } }).catch(() => undefined)
     await memberContext.close()
     await login.dispose()
   }
