@@ -41,6 +41,10 @@ async function setLaunchWorkflowEnabled(page: Page, base: string, enabled: boole
   const wasEnabled = (await toggle.getAttribute("aria-checked")) === "true";
   if (wasEnabled !== enabled) {
     await toggle.click();
+    // The switch is disabled while the server action is in flight; networkidle alone can
+    // return before it settles, letting the next navigation read the old module state.
+    await expect(toggle).toHaveAttribute("aria-checked", String(enabled));
+    await expect(toggle).toBeEnabled();
     await page.waitForLoadState("networkidle");
   }
   return wasEnabled;
@@ -108,6 +112,8 @@ test.describe("Launch tiers, checklist & positioning brief", () => {
       const consoleErrors: string[] = [];
       page.on("console", (msg) => {
         if (msg.type() !== "error") return;
+        // /_vercel/insights/script.js (Vercel Analytics) only exists on Vercel; it 404s locally.
+        if (msg.location().url.includes("/_vercel/insights/")) return;
         const text = msg.text();
         if (KNOWN.some((s) => text.includes(s))) return;
         consoleErrors.push(text);
@@ -177,7 +183,8 @@ test.describe("Launch tiers, checklist & positioning brief", () => {
       await page.waitForLoadState("networkidle");
 
       // The Launching column exists and the item's chip reflects 1-of-2 done.
-      const launchChip = page.locator('[title="Launch checklist: 1 of 2 done"]');
+      // Scoped to this run's card: repeat runs leave earlier "1 of 2" items on the board.
+      const launchChip = page.locator('[data-slot="card"]').filter({ hasText: itemTitle }).locator('[title="Launch checklist: 1 of 2 done"]');
       await expect(launchChip).toBeVisible({ timeout: 10_000 });
       await expect(launchChip).toContainText("1/2");
 
@@ -191,6 +198,8 @@ test.describe("Launch tiers, checklist & positioning brief", () => {
       const wasEnabled = (await toggle.getAttribute("aria-checked")) === "true";
       if (!wasEnabled) {
         await toggle.click();
+        await expect(toggle).toHaveAttribute("aria-checked", "true");
+        await expect(toggle).toBeEnabled();
         await page.waitForLoadState("networkidle");
       }
 
@@ -213,6 +222,8 @@ test.describe("Launch tiers, checklist & positioning brief", () => {
         const stillOn = (await toggle.getAttribute("aria-checked")) === "true";
         if (stillOn) {
           await toggle.click();
+          await expect(toggle).toHaveAttribute("aria-checked", "false");
+          await expect(toggle).toBeEnabled();
           await page.waitForLoadState("networkidle");
         }
       }

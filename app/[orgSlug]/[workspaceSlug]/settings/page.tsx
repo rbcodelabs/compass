@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
-import { Button } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button";
 import getPrisma from "@/lib/db";
 import { ManageFieldsPanel } from "@/components/custom-fields/manage-fields-panel";
 import { SharedOptionSetsPanel } from "@/components/custom-fields/shared-option-sets-panel";
@@ -446,7 +446,7 @@ export default async function SettingsPage({ params }: Props) {
 
       {/* Links to the Modules page. No switch here, so it cannot shift the positional switch indices the Portal specs rely on. */}
       <SettingsSection title="Modules" description="Turn product modules on or off for this workspace: research, voice, notifications, the marketing launch workflow and more. Workspace administrators only.">
-        <Button variant="outline" render={<Link href={`/${orgSlug}/${workspaceSlug}/settings/modules`} />}>Manage modules</Button>
+        <Link href={`/${orgSlug}/${workspaceSlug}/settings/modules`} className={buttonVariants({ variant: "outline" })}>Manage modules</Link>
       </SettingsSection>
 
       <SettingsSection title="Anthropic API key" description="Use your own Anthropic account for this workspace's cloud agent. When set, agent runs use this key instead of the Compass platform key.">
