@@ -192,7 +192,7 @@ describe.skipIf(!databaseUrl)("116 entity_links legacy drop through the register
     // #558's read-only row detail keeps working with the tables gone: every legacy source reports legacyDropped, nothing errors.
     const detail = status.entityLinksRowDetail as { error?: string; legacyOnly: { sources: Record<string, { legacyDropped?: boolean; error?: string }> } }
     expect(detail.error).toBeUndefined()
-    expect(Object.keys(detail.legacyOnly.sources)).toHaveLength(4)
+    expect(Object.keys(detail.legacyOnly.sources).sort()).toEqual(["artifact_links", "opportunities.linked_key_result_id", "opportunity_objective_links", "solution_key_result_links", "task_links"])
     expect(Object.values(detail.legacyOnly.sources).every((entry) => entry.legacyDropped === true && entry.error === undefined)).toBe(true)
     expect(status.appliedMigrations).toContain(NAME)
   }, 120_000)
