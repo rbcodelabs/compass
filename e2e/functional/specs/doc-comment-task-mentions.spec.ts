@@ -364,7 +364,8 @@ test.describe("Doc comment @mention -> task", () => {
     expect(JSON.stringify(await panel.json())).toContain("Comment on");
   });
 
-  test("edge cases: mention only, someone outside the workspace, an agent's first assignment", async ({ page, base }) => {
+  // QUARANTINE(prod-e2e): previously masked when the preceding serial test aborted; Enter on '@Quinn' picks the leaked 'Quinn Discussion' user so unread(bApi) stays 0 (job 01M7CZBKFJYEWY795219FZ60TD; fix in #570 / fix/e2e-dev-user-leaks). See e2e/functional/QUARANTINE.md.
+  test.fixme("edge cases: mention only, someone outside the workspace, an agent's first assignment", async ({ page, base }) => {
     test.setTimeout(240_000);
     const consoleErrors = watchConsoleErrors(page);
     // Docked panel again: the thread and the passage pin read together without the sheet's blur.
