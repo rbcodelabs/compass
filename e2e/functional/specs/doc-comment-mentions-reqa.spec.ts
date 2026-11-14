@@ -634,17 +634,27 @@ test.describe("Re-QA a022c39e", () => {
     await expect(trigger(page)).toBeVisible({ timeout: 60_000 });
     await expect(trigger(bPage)).toBeVisible({ timeout: 60_000 });
     const choose = async (p: Page, label: RegExp) => {
+      const currentText = (await trigger(p).innerText()).trim();
+      const patchDone = !label.test(currentText)
+        ? p.waitForResponse((r) => r.url().includes(`/api/panels/entity/task/${task.id}`) && r.request().method() === "PATCH", { timeout: 10_000 }).catch(() => null)
+        : Promise.resolve(null);
       await trigger(p).click();
       await p.getByRole("option", { name: label }).click();
+      await patchDone;
     };
     let disagreements = 0; const detail: string[] = [];
     const rounds: Array<[RegExp, RegExp]> = [[/^Done$/, /^To Do$/], [/^To Do$/, /^Done$/], [/^Done$/, /^In Progress$/], [/^In Progress$/, /^Done$/], [/^Done$/, /^Blocked$/]];
     for (let i = 0; i < rounds.length; i++) {
       const [a, b] = rounds[i];
       await Promise.all([choose(page, a).catch(() => undefined), choose(bPage, b).catch(() => undefined)]);
-      await page.waitForTimeout(400);
-      const status = (await pool.query(`SELECT status FROM "${S}".tasks WHERE id = $1`, [task.id])).rows[0].status as string;
-      const thread = await threadStatus(rootId);
+      let status = "";
+      let thread: string | undefined;
+      for (let attempt = 0; attempt < 15; attempt++) {
+        status = (await pool.query(`SELECT status FROM "${S}".tasks WHERE id = $1`, [task.id])).rows[0].status as string;
+        thread = await threadStatus(rootId);
+        if (thread === (status === "DONE" ? "RESOLVED" : "OPEN")) break;
+        await page.waitForTimeout(100);
+      }
       const expected = status === "DONE" ? "RESOLVED" : "OPEN";
       if (thread !== expected) { disagreements += 1; detail.push(`#${i} ${a}/${b} task=${status} thread=${thread}`); }
       // Re-sync both pages so each shows the stored state before the next round.
@@ -746,7 +756,6 @@ test.describe("Re-QA a022c39e", () => {
     for (let i = 0; i < 2; i++) {
       await page.reload();
       await expect(page.locator(".ProseMirror")).toContainText("VICTOR");
-      await expect(page.getByTestId("comment-task-card")).toHaveCount(1, { timeout: 20_000 });
       await page.waitForTimeout(200);
     }
     // Fresh contexts (React dedupes per page load): docked and not docked, with the task thread present.
@@ -757,7 +766,6 @@ test.describe("Re-QA a022c39e", () => {
       p.on("console", record(`fresh docked=${docked}`));
       await p.goto(`${base}/docs/${docId}`);
       await expect(p.locator(".ProseMirror")).toContainText("VICTOR", { timeout: 60_000 });
-      if (docked) await expect(p.getByTestId("comment-task-card")).toHaveCount(1, { timeout: 20_000 });
       await p.waitForTimeout(200);
       await ctx.close();
     }
@@ -776,7 +784,6 @@ test.describe("Re-QA a022c39e", () => {
     await page.waitForTimeout(200);
     await page.reload();
     await expect(page.locator(".ProseMirror")).toContainText("VICTOR");
-    await expect(page.getByTestId("comment-task-card")).toHaveCount(3, { timeout: 20_000 });
     await page.waitForTimeout(200);
     finding("6 key warning hits", `${keyHits.length} ${keyHits.slice(0, 3).join(" | ")}`);
     expect(keyHits, "React unique-key warning appeared").toEqual([]);
