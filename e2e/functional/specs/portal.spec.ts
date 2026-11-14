@@ -117,7 +117,12 @@ test.describe("Portal — account authentication (portalAuthRequired)", () => {
       const authWasRequired =
         (await portalAuthToggle.getAttribute("aria-checked")) === "true";
       if (!authWasRequired) {
-        await portalAuthToggle.click();
+        // The switch flips optimistically and the write is a server action; wait for that POST to finish rather than for
+        // network idle, which a fast production server can satisfy before the write lands.
+        await Promise.all([
+          page.waitForResponse((response) => response.request().method() === "POST" && "next-action" in response.request().headers()),
+          portalAuthToggle.click(),
+        ]);
         await page.waitForLoadState("networkidle");
       }
 
