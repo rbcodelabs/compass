@@ -1,6 +1,6 @@
 import fs from "node:fs"
 import path from "node:path"
-import { describe, expect, test } from "vitest"
+import { afterEach, describe, expect, test, vi } from "vitest"
 
 const root = process.cwd()
 const read = (rel: string) => fs.readFileSync(path.resolve(root, rel), "utf8")
@@ -8,6 +8,21 @@ const FLAGS = ["COMPASS_E2E_MOCK_AUTH_BUILD", "E2E_MOCK_AUTH"]
 
 /** Files that configure a deployed build. None may ever turn the e2e mock login on. */
 const DEPLOY_CONFIG = ["vercel.json", ".env.example"]
+
+const savedEnv = { ...process.env }
+afterEach(() => {
+  process.env = { ...savedEnv }
+})
+
+async function loadNextConfig(env: { COMPASS_E2E_MOCK_AUTH_BUILD?: string; VERCEL?: string }) {
+  vi.resetModules()
+  if (env.COMPASS_E2E_MOCK_AUTH_BUILD === undefined) delete process.env.COMPASS_E2E_MOCK_AUTH_BUILD
+  else process.env.COMPASS_E2E_MOCK_AUTH_BUILD = env.COMPASS_E2E_MOCK_AUTH_BUILD
+  if (env.VERCEL === undefined) delete process.env.VERCEL
+  else process.env.VERCEL = env.VERCEL
+  const mod = await import("../next.config")
+  return mod.default
+}
 
 describe("e2e mock login is never enabled by deploy configuration", () => {
   test.each(DEPLOY_CONFIG)("%s does not mention the mock-auth flags", (file) => {
@@ -47,5 +62,12 @@ describe("e2e mock login is never enabled by deploy configuration", () => {
     const text = read("next.config.ts")
     expect(text).not.toContain("NEXT_PUBLIC_E2E")
     expect(text).not.toContain("NEXT_PUBLIC_COMPASS_E2E")
+  })
+
+  test("next.config.ts skips built-in TypeScript checking ONLY for non-Vercel COMPASS_E2E_MOCK_AUTH_BUILD=1 builds", async () => {
+    expect((await loadNextConfig({})).typescript?.ignoreBuildErrors).toBe(false)
+    expect((await loadNextConfig({ COMPASS_E2E_MOCK_AUTH_BUILD: "" })).typescript?.ignoreBuildErrors).toBe(false)
+    expect((await loadNextConfig({ COMPASS_E2E_MOCK_AUTH_BUILD: "1" })).typescript?.ignoreBuildErrors).toBe(true)
+    expect((await loadNextConfig({ COMPASS_E2E_MOCK_AUTH_BUILD: "1", VERCEL: "1" })).typescript?.ignoreBuildErrors).toBe(false)
   })
 })

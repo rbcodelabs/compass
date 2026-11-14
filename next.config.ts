@@ -12,6 +12,12 @@ const nextConfig: NextConfig = {
   env: {
     COMPASS_E2E_MOCK_AUTH_BUILD: process.env.COMPASS_E2E_MOCK_AUTH_BUILD === "1" ? "1" : "",
   },
+  typescript: {
+    // `pnpm typecheck` and `compass-unit` enforce TypeScript separately. Skipping Next's built-in `tsc` pass
+    // ONLY for the non-deployed `pnpm build:e2e` artifact saves ~88s on every `tq` and CI E2E build; `!process.env.VERCEL`
+    // ensures a Vercel build never skips type checking.
+    ignoreBuildErrors: process.env.COMPASS_E2E_MOCK_AUTH_BUILD === "1" && !process.env.VERCEL,
+  },
   // Load these server-only SDKs via Node require at runtime instead of bundling
   // them. In `next dev` this keeps their sources out of Turbopack's module
   // graph, cutting next-server RssAnon by ~25% (cold) / ~12% (warm) on a
