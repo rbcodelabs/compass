@@ -55,6 +55,7 @@ export function readEntryModules(harness: AgentHarness): { path: string; content
   }
   return [
     { path: "run-reporter.ts", content: readFileSync(path.join(process.cwd(), "scripts/agent/run-reporter.ts"), "utf8") },
+    { path: "interactive-questions.ts", content: readFileSync(path.join(process.cwd(), "scripts/agent/interactive-questions.ts"), "utf8") },
     { path: "docs-path-guard.ts", content: readFileSync(path.join(process.cwd(), "scripts/agent/docs-path-guard.ts"), "utf8") },
     { path: "docs-final-state.ts", content: readFileSync(path.join(process.cwd(), "scripts/agent/docs-final-state.ts"), "utf8") },
     { path: "bash-guard.ts", content: readFileSync(path.join(process.cwd(), "scripts/agent/bash-guard.ts"), "utf8") },

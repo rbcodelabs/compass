@@ -1,6 +1,8 @@
 import type { AppPrismaClient, AppTransactionClient } from "@/lib/db";
 import { agentRunsAvailable } from "@/lib/agent-runs";
 import { deleteWorkspaceAgentChildRuns } from "@/lib/agent-child-runs";
+import { deleteWorkspaceAgentInboxItems } from "@/lib/agent-inbox-questions";
+import { deleteWorkspaceAgentScheduledWakeups } from "@/lib/agent-scheduled-wakeups";
 import { deleteWorkspaceAgentSessions } from "@/lib/agent-session";
 import { deleteWorkspaceConversationReviews } from "@/lib/agent-board-data";
 
@@ -25,6 +27,8 @@ export async function deleteWorkspaceAgentData(prisma: AppPrismaClient, workspac
   // the conversations do. Guarded on availability: a deployment that has not yet
   // applied 069 must still be able to delete a workspace (same approach as the workspace-updates migration).
   await deleteWorkspaceAgentChildRuns(prisma, workspaceId);
+  await deleteWorkspaceAgentInboxItems(prisma, workspaceId);
+  await deleteWorkspaceAgentScheduledWakeups(prisma, workspaceId);
   if (await agentRunsAvailable(prisma)) {
     const runs = await prisma.agentRun.findMany({ where: { workspaceId }, select: { id: true } });
     if (runs.length) await prisma.agentRunEvent.deleteMany({ where: { runId: { in: runs.map((run) => run.id) } } });

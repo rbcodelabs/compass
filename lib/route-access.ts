@@ -113,12 +113,13 @@ export function isPublicPath(pathname: string): boolean {
     // any session, bound to one run by its worker bearer token. Enumerated the
     // same way as the voice callbacks — a `startsWith("/api/internal/")` would
     // make every future internal route public by default.
-    /^\/api\/internal\/agent\/runs\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\/(?:heartbeat|events|session|docs|images)$/i.test(pathname) ||
+    /^\/api\/internal\/agent\/runs\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\/(?:heartbeat|events|session|docs|images|questions)$/i.test(pathname) ||
     // Vercel Cron invokes production URLs with no session at all. The sweeper
     // authenticates CRON_SECRET (or MIGRATION_SECRET for a manual run) itself and
     // fails closed when neither is configured. Enumerated rather than a
     // `startsWith("/api/cron/")` so a future cron route is not public by default.
     pathname === "/api/cron/agent-run-sweeper" ||
+    pathname === "/api/cron/agent-wakeups" ||
     // Same contract for the daily agent-data retention job: it authenticates CRON_SECRET (or MIGRATION_SECRET) itself and fails closed.
     pathname === "/api/cron/agent-retention" ||
     // Docs API routes use session auth internally — let them handle 401 themselves

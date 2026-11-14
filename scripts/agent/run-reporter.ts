@@ -8,6 +8,14 @@
 export type RunEventType = "status" | "agent" | "result" | "error" | "heartbeat"
 type OutboundEvent = { seq: number; type: RunEventType; payload: unknown }
 
+export type HeartbeatQuestionSnapshot = {
+  id: string
+  header: string | null
+  question: string
+  status: string
+  answerText: string | null
+}
+
 /** Server caps a batch at 32 events / 256 KiB; stay comfortably inside both. */
 const FLUSH_EVENT_COUNT = 32
 const FLUSH_INTERVAL_MS = 500
@@ -21,6 +29,7 @@ const MAX_EVENT_BYTES = 64 * 1024
 /** Bound on unsent events when Compass is unreachable. Beyond this the oldest go. */
 const MAX_BACKLOG = 256
 export const DEFAULT_HEARTBEAT_MS = 15_000
+export const FAST_HEARTBEAT_MS = 2_000
 
 export class RunReporter {
   private queue: OutboundEvent[] = []
@@ -29,8 +38,14 @@ export class RunReporter {
   private timer: NodeJS.Timeout | undefined
   private heartbeat: NodeJS.Timeout | undefined
   private dropped = 0
+  private fastPolling = false
+  private listeners = new Set<() => void>()
   /** Set when the server reports this run already terminal — the agent should stop. */
   canceledStatus: string | undefined
+  /** Latest interactive question snapshots echoed by `/heartbeat`. */
+  latestQuestions: HeartbeatQuestionSnapshot[] = []
+  /** Latest run `deadlineAt` ISO timestamp echoed by `/heartbeat`. */
+  latestDeadlineAt: string | undefined
 
   private readonly eventsUrl: string
   private readonly heartbeatUrl: string
@@ -59,10 +74,57 @@ export class RunReporter {
     this.note = note
   }
 
-  start() {
-    this.heartbeat = setInterval(() => { void this.sendHeartbeat() }, this.heartbeatMs)
+  private scheduleHeartbeatInterval() {
+    if (this.heartbeat) clearInterval(this.heartbeat)
+    const intervalMs = this.fastPolling ? Math.min(this.heartbeatMs, FAST_HEARTBEAT_MS) : this.heartbeatMs
+    this.heartbeat = setInterval(() => {
+      void this.sendHeartbeat()
+    }, intervalMs)
     // The interval must never be the reason the process stays alive.
     this.heartbeat.unref?.()
+  }
+
+  private notifyListeners() {
+    for (const listener of [...this.listeners]) {
+      listener()
+    }
+  }
+
+  start() {
+    this.scheduleHeartbeatInterval()
+  }
+
+  /**
+   * Switches between the 15s idle heartbeat and 2s interactive polling while the
+   * worker is paused inside `AskUserQuestion` (or `threads_wait` in Phase 4).
+   */
+  setFastPolling(enabled: boolean) {
+    if (this.fastPolling === enabled) return
+    this.fastPolling = enabled
+    if (this.heartbeat) {
+      this.scheduleHeartbeatInterval()
+    }
+    if (enabled) {
+      void this.sendHeartbeat()
+    }
+  }
+
+  /** Resolves as soon as the next heartbeat response lands (or after `timeoutMs`). */
+  waitForHeartbeatUpdate(timeoutMs: number): Promise<void> {
+    if (this.canceledStatus) return Promise.resolve()
+    return new Promise((resolve) => {
+      let settled = false
+      const done = () => {
+        if (settled) return
+        settled = true
+        clearTimeout(timeout)
+        this.listeners.delete(done)
+        resolve()
+      }
+      const timeout = setTimeout(done, timeoutMs)
+      timeout.unref?.()
+      this.listeners.add(done)
+    })
   }
 
   enqueue(type: RunEventType, payload: unknown) {
@@ -81,7 +143,9 @@ export class RunReporter {
       return
     }
     if (!this.timer) {
-      this.timer = setTimeout(() => { void this.flush() }, FLUSH_INTERVAL_MS)
+      this.timer = setTimeout(() => {
+        void this.flush()
+      }, FLUSH_INTERVAL_MS)
       this.timer.unref?.()
     }
   }
@@ -136,17 +200,19 @@ export class RunReporter {
           body: JSON.stringify(body),
         })
         if (response.ok) {
-          const data = await response.json().catch(() => null) as { status?: string } | null
+          const data = (await response.json().catch(() => null)) as { status?: string } | null
           // 4xx other than 409 means retrying cannot help: a revoked token, a
           // finished run, or a batch the server will never accept.
           if (data?.status && data.status !== "QUEUED" && data.status !== "RUNNING") {
             this.canceledStatus = data.status
+            this.notifyListeners()
           }
           return true
         }
         if (response.status === 401 || response.status === 403 || response.status === 404) {
           this.canceledStatus = `HTTP_${response.status}`
           this.note(`callback rejected with ${response.status}; giving up on this channel`)
+          this.notifyListeners()
           return false
         }
         if (response.status >= 400 && response.status < 500 && response.status !== 409 && response.status !== 429) {
@@ -166,11 +232,27 @@ export class RunReporter {
     try {
       const response = await fetch(this.heartbeatUrl, { method: "POST", headers: this.headers })
       if (!response.ok) {
-        if (response.status === 401 || response.status === 404) this.canceledStatus = `HTTP_${response.status}`
+        if (response.status === 401 || response.status === 404) {
+          this.canceledStatus = `HTTP_${response.status}`
+          this.notifyListeners()
+        }
         return
       }
-      const data = await response.json().catch(() => null) as { status?: string } | null
-      if (data?.status && data.status !== "QUEUED" && data.status !== "RUNNING") this.canceledStatus = data.status
+      const data = (await response.json().catch(() => null)) as {
+        status?: string
+        deadlineAt?: string
+        questions?: HeartbeatQuestionSnapshot[]
+      } | null
+      if (data?.status && data.status !== "QUEUED" && data.status !== "RUNNING") {
+        this.canceledStatus = data.status
+      }
+      if (typeof data?.deadlineAt === "string") {
+        this.latestDeadlineAt = data.deadlineAt
+      }
+      if (Array.isArray(data?.questions)) {
+        this.latestQuestions = data.questions
+      }
+      this.notifyListeners()
     } catch {
       // A missed heartbeat is not itself fatal; the sweeper's margin covers
       // several of them, and event batches also refresh the heartbeat.
@@ -194,4 +276,3 @@ export class RunReporter {
     await this.flush(5)
   }
 }
-

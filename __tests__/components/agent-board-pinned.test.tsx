@@ -112,7 +112,8 @@ describe("Agent board dock (md and up)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Working column options" }));
     fireEvent.click(await screen.findByRole("menuitem", { name: "Move right" }));
     expect(headings(scroller())).toEqual(["New", "Working", "Failed"]);
-    expect(JSON.parse(window.localStorage.getItem(STORAGE_KEY)!).columnOrder.slice(0, 2)).toEqual(["new", "working"]);
+    const savedOrder = JSON.parse(window.localStorage.getItem(STORAGE_KEY)!).columnOrder as string[];
+    expect(savedOrder.filter((id) => id === "working" || id === "new")).toEqual(["new", "working"]);
   });
 
   it("restores a stored layout, and degrades a corrupt one to the defaults", () => {

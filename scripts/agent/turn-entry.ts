@@ -99,6 +99,7 @@ import {
 } from "./github-access.ts"
 import { collectFinalDocState, isValidDocName, type CollectedDocState } from "./docs-final-state.ts"
 import { DEFAULT_HEARTBEAT_MS, RunReporter } from "./run-reporter.ts"
+import { askUserQuestionsInRun } from "./interactive-questions.ts"
 import { createHash, randomUUID } from "node:crypto"
 import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs"
 import { basename, resolve as resolvePath } from "node:path"
@@ -159,7 +160,7 @@ const toolText = (text: string, isError = false) => ({ content: [{ type: "text" 
  * never holds a credential, and the server decides what is actually a servable image
  * (magic bytes, size, workspace) rather than trusting anything said here.
  */
-function createShowImageServer(baseUrl: string) {
+function createShowImageServer(baseUrl: string, onDeadlinePark: (reason: string) => void) {
   return createSdkMcpServer({
     name: SHOW_IMAGE_SERVER,
     version: "1.0.0",
@@ -192,6 +193,58 @@ function createShowImageServer(baseUrl: string) {
             return toolText(`Could not show the image: ${error instanceof Error ? error.message : String(error)}`, true)
           }
         },
+      ),
+      tool(
+        "AskUserQuestion",
+        "Ask the user 1 to 4 structured clarifying questions and pause this run until they answer in the Board or Chat UI. " +
+          "Prefer offering 2 to 4 concise options with descriptions when choices are clear; custom text ('Other') is enabled by default.",
+        {
+          questions: z
+            .array(
+              z.object({
+                question: z.string().min(1).max(2000).describe("Clear question to ask the user"),
+                header: z.string().min(1).max(60).optional().describe("Short chip label (1-3 words), e.g. 'Scope' or 'Target tier'"),
+                options: z
+                  .array(
+                    z.object({
+                      label: z.string().min(1).max(200).describe("Concise choice label"),
+                      description: z.string().max(500).optional().describe("Tradeoff or explanation for this option"),
+                    }),
+                  )
+                  .max(8)
+                  .optional()
+                  .describe("Optional structured choices"),
+                multiSelect: z.boolean().optional().describe("Allow selecting multiple options"),
+                allowOther: z.boolean().optional().describe("Allow free-text custom input (defaults to true)"),
+              }),
+            )
+            .min(1)
+            .max(4)
+            .describe("1 to 4 structured questions to ask together"),
+        },
+        async ({ questions }, extra) => {
+          if (!runCallbackHeaders || !AGENT_RUN_ID || !reporter) {
+            return toolText("AskUserQuestion requires an active durable run; ask your question in plain text instead.", true)
+          }
+          const reqId = (extra as { requestId?: unknown } | null)?.requestId
+          const nativeToolUseId =
+            typeof reqId === "string" || typeof reqId === "number" ? `chat-ask-${String(reqId)}` : randomUUID()
+          try {
+            const result = await askUserQuestionsInRun({
+              baseUrl,
+              runId: AGENT_RUN_ID,
+              headers: runCallbackHeaders,
+              reporter,
+              nativeToolUseId,
+              questions,
+              onDeadlinePark,
+            })
+            return toolText(result.formattedText)
+          } catch (error) {
+            return toolText(error instanceof Error ? error.message : String(error), true)
+          }
+        },
+        { alwaysLoad: true },
       ),
     ],
   })
@@ -637,6 +690,13 @@ async function main(): Promise<void> {
   // `alwaysLoad` is deliberately NOT set on the connectors: Compass's own catalog
   // is what the agent needs every turn, whereas a connector's tools are worth
   // discovering on demand rather than spending context on unconditionally.
+  let parkedReason: string | undefined
+  let activeParkAbort: AbortController | undefined
+  const onDeadlinePark = (reason: string) => {
+    parkedReason = reason
+    activeParkAbort?.abort()
+  }
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- docsfs is an SDK-instance server, not an HTTP one; a shared union type buys nothing here.
   const mcpServers: Record<string, McpHttpServer | any> = {
     compass: {
@@ -649,8 +709,8 @@ async function main(): Promise<void> {
       alwaysLoad: true,
     },
     ...(docsSession ? { docsfs: buildDocsFsServer(docsSession, deletedByAgent) } : {}),
-    // `chat` (show_image) only exists for a durable run: the upload needs the run bearer token.
-    ...(runCallbackHeaders ? { [SHOW_IMAGE_SERVER]: createShowImageServer(baseUrl) } : {}),
+    // `chat` (show_image + AskUserQuestion) only exists for a durable run: callbacks need the run bearer token.
+    ...(runCallbackHeaders ? { [SHOW_IMAGE_SERVER]: createShowImageServer(baseUrl, onDeadlinePark) } : {}),
   }
   // Compass-hosted search. The name is reserved before connectors are
   // read so a connector slug cannot shadow it.
@@ -775,8 +835,9 @@ async function main(): Promise<void> {
     // §2.5), as do the docId-addressed edit_doc/edit_canvas/build_canvas_tree/
     // capture_canvas, which act on the saved doc directly.
     disallowedTools: [
-      // The SDK's own task tools would duplicate (and not persist like) the Compass-backed mcp__compass__TaskCreate/TaskUpdate/TaskList/TaskGet ones. (Keep any glob character out of this list's comments: agent-turn-entry-policy.test.ts scans from "allowedTools: [" for one.)
+      // The SDK's own task, question, and wakeup tools would duplicate (and not persist like) the Compass-backed MCP tools. (Keep any glob character out of this list's comments: agent-turn-entry-policy.test.ts scans from "allowedTools: [" for one.)
       "TaskCreate", "TaskUpdate", "TaskList", "TaskGet", "TodoWrite",
+      "AskUserQuestion", "ScheduleWakeup",
       "mcp__compass__delete_assumption",
       "mcp__compass__delete_solution_comment",
       ...(docsSession ? ["mcp__compass__write_doc", "mcp__compass__delete_doc", "mcp__compass__move_doc"] : []),
@@ -790,7 +851,10 @@ async function main(): Promise<void> {
     maxTurns: Number(process.env.AGENT_MAX_TURNS) || 30,
   }
 
-  type AttemptOutcome = { kind: "ok"; finalText: string; usage: unknown } | { kind: "canceled" }
+  type AttemptOutcome =
+    | { kind: "ok"; finalText: string; usage: unknown }
+    | { kind: "parked"; message: string }
+    | { kind: "canceled" }
 
   /** One pass of the SDK loop. `state.sawAssistant` lets the caller tell a failed resume from a failed turn. */
   async function runAttempt(
@@ -800,36 +864,50 @@ async function main(): Promise<void> {
   ): Promise<AttemptOutcome> {
     let finalText: string | undefined
     let usage: unknown
-    for await (const message of query({ prompt: attemptPrompt, options: { ...baseOptions, ...sessionOptions } })) {
-      emit("AGENT_EVENT", { type: message.type, message })
-      reporter?.enqueue("agent", { type: message.type, message })
-      if (message.type === "assistant") state.sawAssistant = true
+    const abortController = new AbortController()
+    activeParkAbort = abortController
+    parkedReason = undefined
+    try {
+      for await (const message of query({
+        prompt: attemptPrompt,
+        options: { ...baseOptions, ...sessionOptions, abortController },
+      })) {
+        emit("AGENT_EVENT", { type: message.type, message })
+        reporter?.enqueue("agent", { type: message.type, message })
+        if (message.type === "assistant") state.sawAssistant = true
 
-      // Canceled or swept out from under us: stop spending model tokens on a
-      // result nobody will accept. The server is already terminal, so there is
-      // nothing to report back.
-      if (reporter?.canceledStatus) {
-        note(`stopping early: run is ${reporter.canceledStatus}`)
-        emit("AGENT_ERROR", { message: `run terminated server-side (${reporter.canceledStatus})` })
-        process.exitCode = 1
-        return { kind: "canceled" }
-      }
+        // Canceled or swept out from under us: stop spending model tokens on a
+        // result nobody will accept. The server is already terminal, so there is
+        // nothing to report back.
+        if (reporter?.canceledStatus) {
+          note(`stopping early: run is ${reporter.canceledStatus}`)
+          emit("AGENT_ERROR", { message: `run terminated server-side (${reporter.canceledStatus})` })
+          process.exitCode = 1
+          return { kind: "canceled" }
+        }
 
-      if (message.type === "result") {
-        if (message.subtype === "success") {
-          finalText = message.result
-          usage = {
-            durationMs: message.duration_ms,
-            durationApiMs: message.duration_api_ms,
-            numTurns: message.num_turns,
-            totalCostUsd: message.total_cost_usd,
-            usage: message.usage,
+        if (message.type === "result") {
+          if (message.subtype === "success") {
+            finalText = message.result
+            usage = {
+              durationMs: message.duration_ms,
+              durationApiMs: message.duration_api_ms,
+              numTurns: message.num_turns,
+              totalCostUsd: message.total_cost_usd,
+              usage: message.usage,
+            }
+          } else if (parkedReason) {
+            return { kind: "parked", message: parkedReason }
+          } else {
+            throw new Error(`query() ended with subtype: ${message.subtype}`)
           }
-        } else {
-          throw new Error(`query() ended with subtype: ${message.subtype}`)
         }
       }
+    } catch (error) {
+      if (parkedReason) return { kind: "parked", message: parkedReason }
+      throw error
     }
+    if (parkedReason) return { kind: "parked", message: parkedReason }
     if (finalText === undefined) throw new Error("query() ended without a success result")
     return { kind: "ok", finalText, usage }
   }
@@ -889,12 +967,18 @@ async function main(): Promise<void> {
   // ADR 0019 §2.4: reconcile the doc tree the agent edited as files. Before the
   // terminal report and the session upload for the same reason as the session:
   // a detached run's worker token stops working the moment the run is terminal.
-  let finalText = outcome.finalText
+  let finalText = outcome.kind === "ok" ? outcome.finalText : outcome.message
   if (docsSession) finalText = await reportDocState(docsSession, baseUrl, finalText, deletedByAgent)
 
   // Before the terminal report: a detached run's worker token stops working the
   // moment the run is terminal, so the upload has to land first.
   if (activeStore && activeSessionId) await publishSession(activeStore, activeSessionId, baseUrl)
+
+  if (outcome.kind === "parked") {
+    emit("AGENT_ERROR", { message: finalText })
+    await reporter?.finish("error", { message: finalText, code: "AWAITING_USER" })
+    return
+  }
 
   emit("AGENT_RESULT", { text: finalText, usage: outcome.usage })
   await reporter?.finish("result", { text: finalText, usage: outcome.usage })

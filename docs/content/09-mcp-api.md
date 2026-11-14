@@ -1312,3 +1312,11 @@ These tools act on the calling user's own open Compass tab, and only after the u
 | `ui_get_state` | Returns the tab's path, title and visible headings. Cheaper than a screenshot. |
 
 If the user has not opted in, or the tab is asleep, the call fails with a message saying so.
+
+### Self-scheduling wake-ups (`AGENT_TURN` only)
+
+In-app cloud agent turns can schedule a durable follow-up run on their own conversation when waiting on an external check (such as CI, a preview deployment, or a slow job) instead of burning sandbox time in a sleep loop. External MCP clients (`PERSONAL` or `AGENT` keys outside an active turn) are refused.
+
+| Tool | Description |
+|---|---|
+| `ScheduleWakeup` | Schedule a continuation turn on the current conversation (`delaySeconds` clamped to `60..3600`, `reason`, `prompt`), replacing any earlier pending wake-up, or pass `stop: true` to cancel the pending wake-up. Short delays (`<= 240s`) arm an inline timer alongside `/api/cron/agent-wakeups`. Sending a manual user message or clicking **Cancel** in the UI cancels any pending wake-up automatically. |

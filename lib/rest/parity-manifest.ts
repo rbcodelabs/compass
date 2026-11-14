@@ -1,7 +1,7 @@
 /** Auditable MCP → REST ledger. It documents parity but never drives routing. */
 export const MCP_PARITY_CATALOG = {
-  toolCount: 215,
-  sortedToolNamesSha256: "3215881e4253019914197350d67e1e5bea0d988caddf5b2d7ead9d102db49bf6",
+  toolCount: 216,
+  sortedToolNamesSha256: "5855354ca5adb280ae0c27a003bb4a63cfce107e8bc72cfee44c4b6e1377b798",
 } as const
 
 export type McpRestParityDisposition =
@@ -16,8 +16,10 @@ const excluded = (category: "human-governance" | "execution-boundary" | "model-o
 
 const slackExcluded = excluded("execution-boundary", "None; read Slack directly, or ask an agent that has the MCP slack_* tools.", "These tools act through the deployment's single Slack bot credential (Vercel Connect), scoped by Slack channel invitation rather than Compass resources; REST exposes only Compass resources and has no per-caller Slack authorization to offer.")
 const agentTaskExcluded = excluded("execution-boundary", "create_task, update_task, list_tasks and get_task operate on the team task board over REST.", "The agent's own conversation-scoped plan list, registered only for agent turns and resolved from the turn key's live agent run; a stateless REST client has no agent conversation.")
+const agentWakeupExcluded = excluded("execution-boundary", "None; scheduled wake-ups belong to an in-app agent conversation's runtime lifecycle.", "Schedules or cancels a future self-wakeup on the calling agent turn's own conversation; a stateless REST client has no live agent run.")
 
 export const MCP_REST_PARITY_MANIFEST = {
+  ScheduleWakeup: agentWakeupExcluded,
   TaskCreate: agentTaskExcluded,
   TaskGet: agentTaskExcluded,
   TaskList: agentTaskExcluded,

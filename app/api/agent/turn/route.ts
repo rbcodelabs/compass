@@ -42,6 +42,8 @@ import { agentRunCredentialSource, logAgentRunCredentialSource } from "@/lib/age
 import { resolveAgentHandoffContext } from "@/lib/agent-context"
 import { resolveAgentPageContext } from "@/lib/agent-page-context"
 import { resolveConversationAccess } from "@/lib/agent-conversation-access"
+import { clearConversationPendingQuestions } from "@/lib/agent-inbox-questions"
+import { cancelAllPendingConversationWakeups } from "@/lib/agent-scheduled-wakeups"
 import { deriveConversationSummary, extractLatestPrUrl } from "@/lib/agent-card-derive"
 import { getGoldenSnapshotId } from "@/lib/agent-runtime-config"
 import { resolveRunSnapshot } from "@/lib/agent-sandbox-class"
@@ -407,6 +409,12 @@ export async function POST(request: NextRequest) {
     // Not the default RETURNING-everything: naming no columns would ask for author_user_id.
     select: { id: true },
   })
+  if (!isNewConversationRequest) {
+    await Promise.all([
+      clearConversationPendingQuestions(prisma, { conversationId: conversationIdResolved }),
+      cancelAllPendingConversationWakeups(prisma, { conversationId: conversationIdResolved }),
+    ])
+  }
 
   // Load recent history (excluding the just-added message is fine — it's the tail).
   const historyRows = await prisma.agentMessage.findMany({

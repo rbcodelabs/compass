@@ -7,7 +7,9 @@ import {
   AlertCircle,
   CheckCircle2,
   Circle,
+  Clock,
   GitPullRequest,
+  HelpCircle,
   Layers,
   Loader2,
   Search,
@@ -25,6 +27,7 @@ import {
 } from "@/components/patterns"
 import { useBoardDock } from "@/components/patterns/use-board-dock"
 import { useAgentBoardColumnLayout } from "@/components/agent/agent-board-column-layout"
+import { QuestionPromptCard } from "@/components/agent/question-prompt-card"
 import {
   applyAgentBoardPatch,
   BOARD_COLUMN_LABELS,
@@ -33,6 +36,7 @@ import {
   classifyBoardCard,
   filterBoardCards,
   formatRelativeTime,
+  formatWakeupCountdown,
   isRunHeartbeatStale,
   type AgentBoardCard,
   type AgentBoardCardLinkedObject,
@@ -54,6 +58,8 @@ const CLOCK_TICK_MS = 15_000
 
 const COLUMN_ACCENT: Record<BoardColumnId, "neutral" | "info" | "success" | "warning" | "danger"> = {
   working: "info",
+  awaiting: "warning",
+  waiting: "info",
   new: "warning",
   done: "success",
   failed: "danger",
@@ -62,6 +68,8 @@ const COLUMN_ACCENT: Record<BoardColumnId, "neutral" | "info" | "success" | "war
 
 const EMPTY_COPY: Record<BoardColumnId, string> = {
   working: "Nothing running right now.",
+  awaiting: "No threads awaiting input.",
+  waiting: "No scheduled wake-ups.",
   new: "Nothing new to review.",
   done: "Nothing reviewed yet.",
   failed: "Nothing failed.",
@@ -89,6 +97,10 @@ function StatusIcon({ column, staleHeartbeat = false }: { column: BoardColumnId;
           )}
         />
       )
+    case "awaiting":
+      return <HelpCircle aria-hidden="true" className={cn(common, "text-status-warning")} />
+    case "waiting":
+      return <Clock aria-hidden="true" className={cn(common, "text-status-info")} />
     case "failed":
       return <AlertCircle aria-hidden="true" className={cn(common, "text-status-danger")} />
     case "new":
@@ -291,6 +303,7 @@ export function AgentBoard({ workspaceId, basePath, initialCards, squads = [], o
           column.cards.map((card) => (
             <BoardCard
               key={card.id}
+              workspaceId={workspaceId}
               card={card}
               column={column.id}
               showSquadBadge
@@ -299,6 +312,7 @@ export function AgentBoard({ workspaceId, basePath, initialCards, squads = [], o
               teamHref={`${basePath}/agent?c=${card.id}&team=1`}
               onOpen={() => onOpenConversation(card.id)}
               onOpenTeam={() => onOpenConversation(card.id, { openTeam: true })}
+              onMutated={() => void refresh()}
             />
           ))
         )}
@@ -323,6 +337,7 @@ export function AgentBoard({ workspaceId, basePath, initialCards, squads = [], o
           column.cards.map((card) => (
             <BoardCard
               key={card.id}
+              workspaceId={workspaceId}
               card={card}
               column={classifyBoardCard(card)}
               showSquadBadge={false}
@@ -331,6 +346,7 @@ export function AgentBoard({ workspaceId, basePath, initialCards, squads = [], o
               teamHref={`${basePath}/agent?c=${card.id}&team=1`}
               onOpen={() => onOpenConversation(card.id)}
               onOpenTeam={() => onOpenConversation(card.id, { openTeam: true })}
+              onMutated={() => void refresh()}
             />
           ))
         )}
@@ -457,6 +473,7 @@ export function AgentBoard({ workspaceId, basePath, initialCards, squads = [], o
 }
 
 function BoardCard({
+  workspaceId,
   card,
   column,
   showSquadBadge,
@@ -465,7 +482,9 @@ function BoardCard({
   teamHref,
   onOpen,
   onOpenTeam,
+  onMutated,
 }: {
+  workspaceId: string
   card: AgentBoardCard
   column: BoardColumnId
   showSquadBadge: boolean
@@ -474,7 +493,11 @@ function BoardCard({
   teamHref: string
   onOpen: () => void
   onOpenTeam: () => void
+  onMutated: () => void
 }) {
+  const [cancelingWakeup, setCancelingWakeup] = useState(false)
+  const [wakeupOptimisticallyCanceledId, setWakeupOptimisticallyCanceledId] = useState<string | null>(null)
+
   const label = BOARD_COLUMN_LABELS[column]
   const staleHeartbeat = isRunHeartbeatStale(card, now)
   const prBadge = formatPrBadge(card.prUrl)
@@ -482,12 +505,37 @@ function BoardCard({
   const linkedObjects = card.linkedObjects && card.linkedObjects.length > 0 ? card.linkedObjects : null
   const extraLinkedCount = Math.max(0, (card.linkedObjectCount ?? 0) - (linkedObjects?.length ?? 0))
   const childAgents = card.childAgents && card.childAgents.total > 0 ? card.childAgents : null
+  const pendingQuestions = card.pendingQuestions && card.pendingQuestions.length > 0 ? card.pendingQuestions : null
+  const activeWakeup =
+    card.scheduledWakeup && card.scheduledWakeup.id !== wakeupOptimisticallyCanceledId ? card.scheduledWakeup : null
 
   const liveLine =
     column === "working"
       ? card.currentActivity || (staleHeartbeat ? "Heartbeat delayed · awaiting worker…" : null)
       : null
-  const idleSummary = column !== "working" ? (card.summary ?? null) : null
+  const idleSummary =
+    column !== "working" && !pendingQuestions ? (card.summary ?? null) : null
+
+  const handleCancelWakeup = async (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (!activeWakeup || cancelingWakeup) return
+    setCancelingWakeup(true)
+    try {
+      const qs = new URLSearchParams({ workspaceId, wakeupId: activeWakeup.id })
+      const res = await fetch(`/api/agent/conversations/${card.id}/wakeups?${qs.toString()}`, {
+        method: "DELETE",
+      })
+      if (res.ok) {
+        setWakeupOptimisticallyCanceledId(activeWakeup.id)
+        onMutated()
+      }
+    } catch {
+      /* next board poll/SSE reconciles */
+    } finally {
+      setCancelingWakeup(false)
+    }
+  }
 
   const childBadgeLabel = childAgents
     ? `${childAgents.total} ${childAgents.total === 1 ? "sub-agent" : "sub-agents"}${
@@ -506,7 +554,7 @@ function BoardCard({
       className={cn(
         "group/card relative flex items-start gap-2.5 rounded-xl border border-border-default bg-surface-card p-3 shadow-[var(--shadow-card)] transition",
         "hover:border-border-strong hover:shadow-[var(--shadow-panel)] has-[a:focus-visible]:border-border-focus has-[a:focus-visible]:ring-2 has-[a:focus-visible]:ring-ring/30",
-        column === "new" && "border-l-[3px] border-l-status-warning",
+        (column === "new" || column === "awaiting") && "border-l-[3px] border-l-status-warning",
       )}
     >
       <StatusIcon column={column} staleHeartbeat={staleHeartbeat} />
@@ -553,6 +601,44 @@ function BoardCard({
             className="mt-1 line-clamp-2 block text-xs leading-relaxed text-text-secondary"
           >
             {idleSummary}
+          </span>
+        )}
+
+        {/* Inline AskUserQuestion prompt (Awaiting) */}
+        {pendingQuestions && (
+          <QuestionPromptCard
+            questions={pendingQuestions}
+            compact
+            onAnswered={() => onMutated()}
+            className="mt-2"
+          />
+        )}
+
+        {/* Scheduled wake-up countdown + 1-click Cancel (Waiting) */}
+        {column === "waiting" && activeWakeup && (
+          <span
+            data-testid="board-card-wakeup"
+            onClick={(e) => e.stopPropagation()}
+            className="relative z-10 mt-2 flex items-center justify-between gap-2 rounded-lg border border-border-default bg-surface-inset px-2.5 py-1.5 text-xs"
+          >
+            <span className="flex min-w-0 items-center gap-1.5 text-text-secondary">
+              <Clock aria-hidden="true" className="size-3.5 shrink-0 text-status-info" />
+              <span className="min-w-0 truncate">
+                <span className="font-medium text-text-primary tabular-nums">
+                  Resumes in {formatWakeupCountdown(activeWakeup.fireAt, now)}
+                </span>
+                {activeWakeup.reason ? ` — ${activeWakeup.reason}` : ""}
+              </span>
+            </span>
+            <button
+              type="button"
+              data-testid="board-card-wakeup-cancel"
+              disabled={cancelingWakeup}
+              onClick={(e) => void handleCancelWakeup(e)}
+              className="shrink-0 rounded-md border border-border-default bg-surface-card px-2 py-0.5 text-[11px] font-medium text-text-secondary transition-colors hover:border-border-strong hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 disabled:opacity-50"
+            >
+              {cancelingWakeup ? "Canceling…" : "Cancel"}
+            </button>
           </span>
         )}
 

@@ -233,6 +233,7 @@ import {
   getCardSortTallyTool,
 } from "@/lib/card-sort-tool-handlers"
 import { allocateOneSeq, withSequenceTransaction } from "@/lib/work-item-sequence"
+import { scheduleAgentWakeup } from "@/lib/agent-scheduled-wakeups"
 
 // Roadmap item start/end dates come from a plain "YYYY-MM-DD" string (an
 // <input type="date"> value, or an MCP caller's ISO date string), which
@@ -3085,6 +3086,26 @@ const _handler = createMcpHandler(
       register("TaskUpdate", { title: "Update Task", description: "Update a task in your task list for this conversation: change its subject or description, or set status to pending, in_progress, completed, or deleted. Mark a task in_progress when you start it and completed when it is done.", inputSchema: { taskId: z.string().describe("The ID of the task to update"), subject: z.string().min(1).optional().describe("New subject for the task"), description: z.string().optional().describe("New description for the task"), activeForm: z.string().optional().describe("Present continuous form shown while in progress"), status: z.enum(["pending", "in_progress", "completed", "deleted"]).optional().describe("New status for the task") }, outputSchema: TOOL_OUTPUT_SCHEMA }, agentTaskUpdate)
       register("TaskList", { title: "List Tasks", description: "List the tasks in your task list for this conversation.", inputSchema: {}, outputSchema: TOOL_OUTPUT_SCHEMA }, agentTaskList)
       register("TaskGet", { title: "Get Task", description: "Get one task from your task list for this conversation by ID.", inputSchema: { taskId: z.string().describe("The ID of the task to retrieve") }, outputSchema: TOOL_OUTPUT_SCHEMA }, agentTaskGet)
+      register(
+        "ScheduleWakeup",
+        {
+          title: "Schedule Wake-up",
+          description:
+            "Schedule a durable self-wakeup for this agent conversation after `delaySeconds` (clamped to 60–3600 seconds: " +
+            "use ~60–270s to keep prompt cache warm when polling CI/deploys, or 900–3600s for longer backoffs). " +
+            "After calling ScheduleWakeup, finish your current response cleanly; Compass places the thread in the Waiting " +
+            "column with a live countdown and automatically resumes this conversation with `prompt` when the timer fires. " +
+            "Pass `stop: true` to cancel a pending wake-up.",
+          inputSchema: {
+            delaySeconds: z.number().int().min(1).max(86_400).optional().describe("Seconds until wake-up (clamped to [60, 3600])"),
+            reason: z.string().max(300).optional().describe("Short reason displayed on the Waiting card (e.g. 'CI build check')"),
+            prompt: z.string().max(4_000).optional().describe("Prompt delivered back to you when the wake-up fires (required unless stop is true)"),
+            stop: z.boolean().optional().describe("Set true to cancel any pending wake-up on this conversation"),
+          },
+          outputSchema: TOOL_OUTPUT_SCHEMA,
+        },
+        scheduleAgentWakeup,
+      )
     }
 
     register(

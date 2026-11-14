@@ -3133,6 +3133,69 @@ model AgentChildRun {
   @@map("agent_child_runs")
 }
 
+/// Interactive human-in-the-loop prompt or inbox item surfaced by an agent run (`AskUserQuestion`,
+/// plus Phase 6 `DECISION` / `PROPOSED_REPLY`) in migration 121. Bare UUID references (no FKs or
+/// emulated Restrict relations) keep workspace/conversation teardown safe before or after migration.
+/// DSQL: no FKs, no @updatedAt trigger (set explicitly), structured options serialized as TEXT.
+model AgentInboxItem {
+  id                   String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId          String    @map("workspace_id") @db.Uuid
+  conversationId       String    @map("conversation_id") @db.Uuid
+  recipientUserId      String?   @map("recipient_user_id") @db.Uuid
+  sourceConversationId String?   @map("source_conversation_id") @db.Uuid
+  runId                String?   @map("run_id") @db.Uuid
+  nativeToolUseId      String?   @map("native_tool_use_id") @db.VarChar(191)
+  /// QUESTION | DECISION | PROPOSED_REPLY
+  kind                 String    @db.VarChar(30)
+  header               String?   @db.VarChar(120)
+  question             String    @db.Text
+  optionsJson          String?   @map("options_json") @db.Text
+  multiSelect          Boolean   @default(false) @map("multi_select")
+  allowOther           Boolean   @default(true) @map("allow_other")
+  /// PENDING | ANSWERED | CLEARED | EXPIRED
+  status               String    @default("PENDING") @db.VarChar(20)
+  answerText           String?   @map("answer_text") @db.Text
+  resolvedByUserId     String?   @map("resolved_by_user_id") @db.Uuid
+  createdAt            DateTime  @default(now()) @map("created_at")
+  resolvedAt           DateTime? @map("resolved_at")
+  updatedAt            DateTime  @default(now()) @map("updated_at")
+
+  @@index([conversationId, status, createdAt], map: "idx_agent_inbox_items_conversation_status")
+  @@index([workspaceId, recipientUserId, status], map: "idx_agent_inbox_items_workspace_recipient")
+  @@index([runId, status], map: "idx_agent_inbox_items_run_status")
+  @@map("agent_inbox_items")
+}
+
+/// Durable self-scheduled agent wake-up (`ScheduleWakeup` MCP tool) in migration 121. Allows an
+/// agent turn to finish cleanly, park the conversation in the `Waiting` board column with a live
+/// countdown, and resume via a new continuation run at `fireAt` (fired by `after()` or cron).
+/// DSQL: no FKs, no @updatedAt trigger (set explicitly).
+model AgentScheduledWakeup {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId    String    @map("workspace_id") @db.Uuid
+  conversationId String    @map("conversation_id") @db.Uuid
+  userId         String    @map("user_id") @db.Uuid
+  agentId        String?   @map("agent_id") @db.Uuid
+  sourceRunId    String?   @map("source_run_id") @db.Uuid
+  fireAt         DateTime  @map("fire_at")
+  delaySeconds   Int       @map("delay_seconds")
+  reason         String?   @db.VarChar(300)
+  prompt         String    @db.Text
+  /// PENDING | FIRED | CANCELED | FAILED
+  status         String    @default("PENDING") @db.VarChar(20)
+  firedRunId     String?   @map("fired_run_id") @db.Uuid
+  failureReason  String?   @map("failure_reason") @db.VarChar(500)
+  createdAt      DateTime  @default(now()) @map("created_at")
+  firedAt        DateTime? @map("fired_at")
+  canceledAt     DateTime? @map("canceled_at")
+  updatedAt      DateTime  @default(now()) @map("updated_at")
+
+  @@index([status, fireAt], map: "idx_agent_scheduled_wakeups_status_fire_at")
+  @@index([conversationId, status, fireAt], map: "idx_agent_scheduled_wakeups_conversation_status")
+  @@index([workspaceId, status], map: "idx_agent_scheduled_wakeups_workspace_status")
+  @@map("agent_scheduled_wakeups")
+}
+
 /// Append-only trace of one run: status phases, agent stream messages, the
 /// result, and heartbeats. The unique (runId, seq) is what makes a retried
 /// callback batch idempotent — a duplicate delivery collides and is discarded

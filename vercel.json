@@ -7,6 +7,10 @@
       "schedule": "*/5 * * * *"
     },
     {
+      "path": "/api/cron/agent-wakeups",
+      "schedule": "* * * * *"
+    },
+    {
       "path": "/api/cron/agent-retention",
       "schedule": "30 6 * * *"
     }
