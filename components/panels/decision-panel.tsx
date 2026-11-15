@@ -111,7 +111,7 @@ export function DecisionPanel({ id, orgSlug, workspaceSlug }: { id: string; orgS
 
   return (
     <PanelContainer>
-      <div className="flex flex-col items-start gap-2.5">
+      <div className="flex w-full min-w-0 flex-col items-start gap-2.5">
         <div className="flex flex-wrap items-center gap-2">
           {data.displayId && (
             <span className="rounded bg-surface-inset px-1.5 py-0.5 font-mono text-xs text-text-secondary" data-testid="display-id">
@@ -134,7 +134,7 @@ export function DecisionPanel({ id, orgSlug, workspaceSlug }: { id: string; orgS
         </h2>
 
         {(data.linkedTo?.title || data.requester) && (
-          <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs text-muted-foreground">
+          <div className="flex w-full min-w-0 flex-wrap items-center gap-2 text-xs text-muted-foreground">
             {data.linkedTo?.title && (
               linkedPanelType && data.linkedTo.id && panelCtx ? (
                 <button
