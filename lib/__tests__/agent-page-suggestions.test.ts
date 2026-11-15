@@ -7,7 +7,7 @@ const prismaMock = {
   opportunity: { findFirst: vi.fn(), findMany: vi.fn() },
   solution: { findFirst: vi.fn(), findMany: vi.fn() },
   roadmapItem: { findFirst: vi.fn(), findMany: vi.fn() },
-  okrCycle: { findFirst: vi.fn() },
+  oKRCycle: { findFirst: vi.fn() },
   objective: { findFirst: vi.fn(), findMany: vi.fn() },
   keyResult: { findFirst: vi.fn(), findMany: vi.fn() },
   task: { findFirst: vi.fn(), findMany: vi.fn() },
@@ -76,7 +76,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   resetPageSuggestionsServerState()
 
-  prismaMock.okrCycle.findFirst.mockResolvedValue(null)
+  prismaMock.oKRCycle.findFirst.mockResolvedValue(null)
   prismaMock.opportunity.findMany.mockResolvedValue([])
   prismaMock.roadmapItem.findMany.mockResolvedValue([])
   prismaMock.solution.findMany.mockResolvedValue([])

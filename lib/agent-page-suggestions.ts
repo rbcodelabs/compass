@@ -17,7 +17,7 @@ import {
   readEntityLinksOpportunityKeyResultPointer,
   readEntityLinksOpportunityObjective,
 } from "@/lib/links/readers"
-import { getTaskLinks, getTasksLinkedTo } from "@/lib/task-links-read"
+import { getTaskLinks, getTasksLinkedTo, type TaskLinkView } from "@/lib/task-links-read"
 import { type ThinkingModelSource } from "@/lib/thinking-model/resolve"
 import { excludeToolApprovals } from "@/lib/tool-approval/gate"
 
@@ -154,10 +154,10 @@ async function safeQuery<T>(fn: () => Promise<T>, fallback: T): Promise<T> {
 }
 
 async function loadActiveOkrLines(prisma: AppPrismaClient, workspaceId: string): Promise<string[]> {
-  if (!prisma.okrCycle?.findFirst) return []
+  if (!prisma.oKRCycle?.findFirst) return []
   const cycle = await safeQuery(
     () =>
-      prisma.okrCycle.findFirst({
+      prisma.oKRCycle.findFirst({
         where: { workspaceId, status: "ACTIVE" },
         orderBy: { updatedAt: "desc" },
         select: {
@@ -824,9 +824,9 @@ async function resolveEntityContext(
         const lines = defaultSummaryLines()
         return { mode: "reading", revisionKey: revisionFromDateOrDigest(null, lines), groundingLines: lines }
       }
-      const linkMap = await safeQuery(
+      const linkMap = await safeQuery<Map<string, TaskLinkView[]>>(
         () => getTaskLinks(prisma, [{ id: row.id, workspaceId: workspace.id }]),
-        new Map(),
+        new Map<string, TaskLinkView[]>(),
       )
       const taskLinks = linkMap.get(row.id) ?? []
       const oppIds = taskLinks.filter((l) => l.linkedType === "OPPORTUNITY").map((l) => l.linkedId)

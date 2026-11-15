@@ -86,7 +86,7 @@ test("blank Agent Rail surfaces screen-responsive starter questions, pins while 
   await expect(composer).toHaveValue(
     "Which NOW roadmap items lack validated discovery assumptions?",
   );
-  await expect(stack.getByTestId("empty-rail-suggestions-pinned")).toHaveTextContent(
+  await expect(stack.getByTestId("empty-rail-suggestions-pinned")).toHaveText(
     "Pinned while typing",
   );
   expect(capturedTurnBody).toBeNull();
