@@ -19,7 +19,7 @@
 // Both reduce through lib/agent-run-stream.ts so the two views of one turn cannot
 // drift apart.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { Archive, ArchiveRestore, Clock, FileText, GitPullRequest, Loader2, Search, Sparkles, X as XIcon } from "lucide-react"
@@ -38,6 +38,7 @@ import { ToolsMenu, connectorsEnabledFor } from "@/components/agent/tools-menu"
 import { ModelPicker, modelLabelFor, useModelPick } from "@/components/agent/model-picker"
 import { AgentChip } from "@/components/agent/composer/agent-chip"
 import { ComposerCard } from "@/components/agent/composer/composer-card"
+import { EmptyRailSuggestions } from "@/components/agent/empty-rail-suggestions"
 import { SubagentTeamPill } from "@/components/agent/composer/subagent-team-pill"
 import { ChildAgentTimeline } from "@/components/agent/child-agent-timeline"
 import { DecisionCard } from "@/components/agent/decision-card"
@@ -126,6 +127,11 @@ type Props = {
    */
   variant?: "page" | "rail"
   /**
+   * Whether the docked rail's Agent pane is currently visible (`open && view === "agent"`).
+   * Defaults to `true` when `variant === "rail"` so standalone renders work seamlessly.
+   */
+  railActive?: boolean
+  /**
    * Whether the page variant's conversation list is shown. Controlled by the
    * page shell, which owns the toggle in its title bar (and the cookie behind
    * it); ignored by the rail, which has no inline list.
@@ -193,6 +199,7 @@ export function AgentChat({
   onComposerSeedApplied,
   initialAgentId,
   variant = "page",
+  railActive,
   listOpen = true,
   reviewedIds,
   squads = [],
@@ -407,13 +414,15 @@ export function AgentChat({
   // closure would still see the previous value. Optimistic text only: the server
   // replaces a claimed turn's message with the registered per-kind instruction
   // (lib/agent-handoff-kinds.ts).
-  const send = useCallback(async (handoff = false, retry = false, handoffKind?: Processing["kind"], queuedText?: string) => {
-    const text = queuedText ?? (handoff
-      ? handoffKind === "RESEARCH_SYNTHESIS" ? "Synthesize my saved research for this study." : "Use my saved interview to update the item."
-      : input.trim())
+  const send = useCallback(async (handoff = false, retry = false, handoffKind?: Processing["kind"], queuedText?: string, starterOverride?: { text: string; pageUrl: string }) => {
+    const text = starterOverride
+      ? starterOverride.text.trim()
+      : (queuedText ?? (handoff
+        ? handoffKind === "RESEARCH_SYNTHESIS" ? "Synthesize my saved research for this study." : "Use my saved interview to update the item."
+        : input.trim()))
     if (!text || sending.current) return
-    // A queued message was already cleared from the field; whatever is typed now is the next draft.
-    if (queuedText === undefined) setInput("")
+    // A queued message or 1-click starter leaves whatever draft is typed in the field untouched.
+    if (queuedText === undefined && !starterOverride) setInput("")
     setMessages((m) => [...m, { id: `local-${Date.now()}`, role: "user", content: text }])
 
     // Only turn 1 of a brand-new conversation carries seedContext — never a
@@ -445,8 +454,8 @@ export function AgentChat({
       model: modelPick.model || undefined,
       // The rail floats over whatever page the user is on, so tell the server which one.
       // Read at send time (not from render state) so it is the page NOW, not when the
-      // component last rendered. The full-page agent screen has no page behind it.
-      pageUrl: isRail ? window.location.pathname + window.location.search : undefined,
+      // component last rendered. A 1-click starter row forwards its snapshotted pageUrl.
+      pageUrl: starterOverride?.pageUrl ?? (isRail ? window.location.pathname + window.location.search : undefined),
       retry,
       continueTurn: !handoff && Boolean(processing?.canContinue),
     })
@@ -923,6 +932,17 @@ export function AgentChat({
   const runStartedByOther = Boolean(runStarterId && runStarterId !== userId)
   const canCancelRun = !runStartedByOther || roster?.viewerRole === "OWNER"
   const composerDisabled = isStreaming || composerBlocked || Boolean(accessLost)
+  const showEmptyRailSuggestions =
+    isRail &&
+    (railActive ?? true) &&
+    !activeConversationId &&
+    messages.length === 0 &&
+    !isStreaming &&
+    !processing &&
+    !processingLoading &&
+    !pendingSeedEntity &&
+    !docChip &&
+    !accessLost
   // While a turn streams the user can still write a follow-up; it is held here and sent when the turn settles.
   const canQueue = isStreaming && !composerBlocked && !accessLost
   const [queued, setQueued] = useState<string | null>(null)
@@ -1426,6 +1446,23 @@ export function AgentChat({
               composerRef.current?.focus()
             }}
           />
+          {showEmptyRailSuggestions && (
+            <Suspense fallback={null}>
+              <EmptyRailSuggestions
+                workspaceId={workspaceId}
+                enabled={showEmptyRailSuggestions}
+                hasDraft={Boolean(input.trim())}
+                disabled={composerDisabled}
+                onFire={(promptText, snapshotPageUrl) => {
+                  void send(false, false, undefined, undefined, { text: promptText, pageUrl: snapshotPageUrl })
+                }}
+                onEdit={(promptText) => {
+                  setInput(promptText)
+                  composerRef.current?.focus()
+                }}
+              />
+            </Suspense>
+          )}
           <ComposerCard
             textareaRef={composerRef}
             value={input}

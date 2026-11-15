@@ -38,6 +38,7 @@ import { WorkspaceCreateButton, WorkspaceHeader, WorkspaceIconButton, WorkspaceM
 import { AppShell, Board, BoardColumn, ConfirmDialog, DetailPanel, DetailPanelSection, EmptyState, EntityCard, FilterBar, FormField, LoadingState, MetricBadge, PageHeader, PageSection, SettingsSection, StatusBadge, Toolbar } from "@/components/patterns";
 import { DataGrid, type GridColumnDef, type GridSort } from "@/components/data-grid";
 import { EntityPill, PILL, type EntityPillData } from "@/components/patterns/entity-pill";
+import { EmptyRailSuggestionsStack } from "@/components/agent/empty-rail-suggestions";
 import { cn } from "@/lib/utils";
 
 function WorkspaceHeaderExamples() {
@@ -332,6 +333,75 @@ function EntityPillExamples() {
   );
 }
 
+const RAIL_READING_SUGGESTIONS = [
+  "Which Q4 OKRs lack supporting evidence in Q4 Discovery Synthesis?",
+  "What untested high-risk assumptions block the onboarding redesign?",
+  "Compare top enterprise interview pain points against our NOW roadmap",
+] as const;
+
+const RAIL_AUTHORING_SUGGESTIONS = [
+  "Draft a crisp outline for Untitled RFC grounded in our active Q4 OKRs",
+  "What open product questions should Untitled RFC resolve before kickoff?",
+  "Propose key architecture tradeoffs and success metrics for Untitled RFC",
+] as const;
+
+function EmptyRailSuggestionsExamples() {
+  const [lastAction, setLastAction] = useState<string | null>(null);
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-4 lg:grid-cols-2">
+        <div className="rounded-lg border border-border-default bg-surface-panel p-3">
+          <p className="mb-2 text-xs font-medium text-text-subtle">1. Doc reading state</p>
+          <EmptyRailSuggestionsStack
+            label="Q4 Discovery Synthesis"
+            pageUrl="/acme/compass/docs/doc-q4-synthesis"
+            suggestions={RAIL_READING_SUGGESTIONS}
+            onFire={(prompt, url) => setLastAction(`Fired (${url}): ${prompt}`)}
+            onEdit={(prompt) => setLastAction(`Staged in composer: ${prompt}`)}
+          />
+        </div>
+        <div className="rounded-lg border border-border-default bg-surface-panel p-3">
+          <p className="mb-2 text-xs font-medium text-text-subtle">2. Blank Doc authoring state</p>
+          <EmptyRailSuggestionsStack
+            label="Untitled RFC"
+            pageUrl="/acme/compass/docs/doc-untitled-rfc"
+            suggestions={RAIL_AUTHORING_SUGGESTIONS}
+            onFire={(prompt, url) => setLastAction(`Fired (${url}): ${prompt}`)}
+            onEdit={(prompt) => setLastAction(`Staged in composer: ${prompt}`)}
+          />
+        </div>
+        <div className="rounded-lg border border-border-default bg-surface-panel p-3">
+          <p className="mb-2 text-xs font-medium text-text-subtle">3. Pinned while typing</p>
+          <EmptyRailSuggestionsStack
+            label="Q4 Discovery Synthesis"
+            pageUrl="/acme/compass/docs/doc-q4-synthesis"
+            suggestions={RAIL_READING_SUGGESTIONS}
+            pinnedWhileTyping
+            onFire={(prompt, url) => setLastAction(`Fired (${url}): ${prompt}`)}
+            onEdit={(prompt) => setLastAction(`Staged in composer: ${prompt}`)}
+          />
+        </div>
+        <div className="rounded-lg border border-border-default bg-surface-panel p-3">
+          <p className="mb-2 text-xs font-medium text-text-subtle">4. Loading hairlines skeleton</p>
+          <EmptyRailSuggestionsStack
+            label={null}
+            pageUrl="/acme/compass/roadmap"
+            suggestions={[]}
+            loading
+            onFire={() => undefined}
+            onEdit={() => undefined}
+          />
+        </div>
+      </div>
+      {lastAction && (
+        <p className="rounded-md bg-surface-inset px-3 py-1.5 text-xs text-text-secondary">
+          {lastAction}
+        </p>
+      )}
+    </div>
+  );
+}
+
 function Section({ id, title, description, children }: { id: string; title: string; description: string; children: React.ReactNode }) {
   return (
     <section id={id} className="scroll-mt-8 border-t border-border-default pt-10">
@@ -410,6 +480,7 @@ export function UIRegistry() {
                 <Example title="Board and columns"><Board label="Example opportunity board"><BoardColumn title="Exploring" count={1} accent="info"><EntityCard title="Clarify first-run guidance" description="Synthesize onboarding signals." status={<StatusBadge status="info">Open</StatusBadge>} /></BoardColumn><BoardColumn title="Validating" count={1} accent="warning"><EntityCard title="Test guided setup" description="Prototype a first-session checklist." status={<StatusBadge status="warning">Running</StatusBadge>} /></BoardColumn><BoardColumn title="Learned" count={0} accent="success" emptyState={<EmptyState compact title="Nothing learned yet" description="Concluded experiments appear here." />} /></Board></Example>
                 <div className="grid gap-4 lg:grid-cols-2"><Example title="Form field and settings section"><SettingsSection title="Workspace defaults" description="Applied to new opportunities."><FormField id="registry-pattern-name" label="Default owner" description="The teammate responsible for new work."><Input id="registry-pattern-name" placeholder="Choose an owner" /></FormField></SettingsSection></Example><Example title="Detail panel and loading"><div className="h-80 overflow-hidden rounded-xl border border-border-default"><DetailPanel eyebrow="Opportunity" title="Reduce setup uncertainty" description="Customer onboarding"><DetailPanelSection title="Summary"><p className="text-sm text-text-secondary">Help teams reach their first useful plan with less ambiguity.</p></DetailPanelSection><DetailPanelSection title="Activity"><LoadingState rows={2} label="Loading activity" /></DetailPanelSection></DetailPanel></div></Example></div>
                 <Example title="Entity pill and hover card"><EntityPillExamples /></Example>
+                <Example title="Agent rail starter stack (Quiet Editorial Stack)"><EmptyRailSuggestionsExamples /></Example>
                 <Example title="Confirmation pattern"><ConfirmDialog trigger={<Button variant="destructive"><Trash2 />Delete opportunity</Button>} title="Delete opportunity?" description="This permanently removes the opportunity and its links." confirmLabel="Delete" destructive onConfirm={() => undefined} /></Example>
               </div>
             </Section>
