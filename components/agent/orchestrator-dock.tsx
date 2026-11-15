@@ -255,7 +255,7 @@ export function OrchestratorDock({
   return (
     <div
       data-testid="orchestrator-dock"
-      className="pointer-events-none fixed inset-x-0 bottom-5 z-40 flex flex-col items-center px-3 sm:px-6"
+      className="pointer-events-none fixed inset-x-0 bottom-20 z-40 flex flex-col items-center px-3 sm:px-6 md:bottom-5"
     >
       {/* 8s Unread Peek Banner */}
       {!sheetOpen && peekMessage && (
