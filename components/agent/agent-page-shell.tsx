@@ -10,6 +10,7 @@ import { AGENT_VIEW_COOKIE, parseAgentView, type AgentView } from "@/lib/agent-v
 import type { AgentBoardCard, AgentBoardCardSquad } from "@/lib/agent-board"
 import { AgentChat } from "@/components/agent/agent-chat"
 import { AgentBoard } from "@/components/agent/agent-board"
+import { ThreadLinkNavigationProvider } from "@/components/agent/markdown"
 import { cn } from "@/lib/utils"
 
 type ChatProps = Omit<Parameters<typeof AgentChat>[0], "listOpen" | "variant" | "reviewedIds" | "squads" | "teamOpenRequest">
@@ -77,6 +78,10 @@ export function AgentPageShell({
       childAgents: card.childAgents,
       pendingQuestions: card.pendingQuestions,
       scheduledWakeup: card.scheduledWakeup ?? null,
+      orchestratorRole: card.orchestratorRole ?? null,
+      managerNotes: card.managerNotes ?? null,
+      proposedReply: card.proposedReply ?? null,
+      pendingDecisions: card.pendingDecisions,
     }))
   }, [chat.conversations, liveCards])
   const toggleList = useCallback(() => {
@@ -184,27 +189,32 @@ export function AgentPageShell({
       }
       contentClassName="p-0 sm:p-0 md:p-0"
     >
-      <div className={cn("flex min-h-0 flex-1 flex-col", view !== "chat" && "hidden")}>
-        <AgentChat
-          {...chat}
-          conversations={mergedConversations}
-          basePath={basePath}
-          listOpen={listOpen}
-          reviewedIds={reviewedIds}
-          squads={initialSquads}
-          teamOpenRequest={teamOpenRequest}
-        />
-      </div>
-      {view === "board" && (
-        <AgentBoard
-          workspaceId={workspaceId}
-          basePath={basePath}
-          initialCards={boardSeed}
-          squads={initialSquads}
-          onOpenConversation={openFromBoard}
-          onCardsChange={setLiveCards}
-        />
-      )}
+      <ThreadLinkNavigationProvider
+        basePath={basePath}
+        onOpenThread={(threadId) => openFromBoard(threadId)}
+      >
+        <div className={cn("flex min-h-0 flex-1 flex-col", view !== "chat" && "hidden")}>
+          <AgentChat
+            {...chat}
+            conversations={mergedConversations}
+            basePath={basePath}
+            listOpen={listOpen}
+            reviewedIds={reviewedIds}
+            squads={initialSquads}
+            teamOpenRequest={teamOpenRequest}
+          />
+        </div>
+        {view === "board" && (
+          <AgentBoard
+            workspaceId={workspaceId}
+            basePath={basePath}
+            initialCards={boardSeed}
+            squads={initialSquads}
+            onOpenConversation={openFromBoard}
+            onCardsChange={setLiveCards}
+          />
+        )}
+      </ThreadLinkNavigationProvider>
     </WorkspacePage>
   )
 }

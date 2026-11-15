@@ -30,11 +30,15 @@ import {
   MAX_CARD_SUBTASK_ITEMS,
   type AgentBoardCard,
   type AgentBoardCardLinkedObject,
+  type AgentBoardCardManagerNotes,
+  type AgentBoardCardOrchestratorRole,
+  type AgentBoardCardPendingDecision,
+  type AgentBoardCardProposedReply,
   type AgentBoardCardSquad,
   type AgentBoardCardSubtasks,
 } from "@/lib/agent-board"
 import { loadChildAgentSummariesByConversation } from "@/lib/agent-child-runs"
-import { loadPendingQuestionsByConversation } from "@/lib/agent-inbox-questions"
+import { loadPendingQuestionsByConversation, parseQuestionOptions } from "@/lib/agent-inbox-questions"
 import { loadScheduledWakeupsByConversation } from "@/lib/agent-scheduled-wakeups"
 
 type BoardDb = Pick<AppPrismaClient, "agentConversation" | "agentConversationReview"> &
@@ -47,6 +51,8 @@ type BoardDb = Pick<AppPrismaClient, "agentConversation" | "agentConversationRev
       | "agentChildRun"
       | "agentInboxItem"
       | "agentScheduledWakeup"
+      | "agentConversationSupervision"
+      | "agentOrchestrator"
     >
   >
 
@@ -306,6 +312,150 @@ async function loadFallbackAssistantExcerpts(
   return result
 }
 
+async function loadSupervisionByConversation(
+  prisma: BoardDb,
+  workspaceId: string,
+  userId: string,
+  conversationIds: readonly string[],
+): Promise<Map<string, { managerNotes: AgentBoardCardManagerNotes | null; proposedReply: AgentBoardCardProposedReply | null }>> {
+  const result = new Map<string, { managerNotes: AgentBoardCardManagerNotes | null; proposedReply: AgentBoardCardProposedReply | null }>()
+  if (!prisma.agentConversationSupervision || conversationIds.length === 0) return result
+  try {
+    const rows = await prisma.agentConversationSupervision.findMany({
+      where: {
+        workspaceId,
+        supervisorUserId: userId,
+        conversationId: { in: [...conversationIds] },
+      },
+      select: {
+        conversationId: true,
+        managerNotes: true,
+        managerNotesUpdatedAt: true,
+        managerSourceOrchestratorId: true,
+        proposedReplyText: true,
+        proposedReplyGeneratedAt: true,
+        proposedReplyAuthorOrchestratorId: true,
+      },
+    })
+    for (const row of rows) {
+      const notesText = row.managerNotes?.trim()
+      const replyText = row.proposedReplyText?.trim()
+      result.set(row.conversationId, {
+        managerNotes: notesText
+          ? {
+              text: notesText,
+              updatedAt: row.managerNotesUpdatedAt ? row.managerNotesUpdatedAt.toISOString() : null,
+              sourceOrchestratorId: row.managerSourceOrchestratorId ?? null,
+            }
+          : null,
+        proposedReply: replyText
+          ? {
+              text: replyText,
+              generatedAt: row.proposedReplyGeneratedAt ? row.proposedReplyGeneratedAt.toISOString() : null,
+              authorOrchestratorId: row.proposedReplyAuthorOrchestratorId ?? null,
+            }
+          : null,
+      })
+    }
+  } catch (error) {
+    if (!isMissingTable(error) && !isMissingColumn(error)) throw error
+  }
+  return result
+}
+
+async function loadPendingDecisionsByConversation(
+  prisma: BoardDb,
+  workspaceId: string,
+  userId: string,
+  conversationIds: readonly string[],
+): Promise<Map<string, AgentBoardCardPendingDecision[]>> {
+  const grouped = new Map<string, AgentBoardCardPendingDecision[]>()
+  if (!prisma.agentInboxItem || conversationIds.length === 0) return grouped
+  try {
+    const rows = await prisma.agentInboxItem.findMany({
+      where: {
+        workspaceId,
+        recipientUserId: userId,
+        conversationId: { in: [...conversationIds] },
+        kind: "DECISION",
+        status: "PENDING",
+      },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      select: {
+        id: true,
+        conversationId: true,
+        sourceConversationId: true,
+        header: true,
+        question: true,
+        optionsJson: true,
+        multiSelect: true,
+        allowOther: true,
+        status: true,
+        answerText: true,
+        createdAt: true,
+      },
+    })
+    for (const row of rows) {
+      const list = grouped.get(row.conversationId) ?? []
+      list.push({
+        id: row.id,
+        conversationId: row.conversationId,
+        sourceConversationId: row.sourceConversationId ?? null,
+        header: row.header ?? null,
+        question: row.question,
+        options: parseQuestionOptions(row.optionsJson),
+        multiSelect: row.multiSelect,
+        allowOther: row.allowOther,
+        status: "PENDING",
+        answerText: row.answerText ?? null,
+        createdAt: row.createdAt.toISOString(),
+      })
+      grouped.set(row.conversationId, list)
+    }
+  } catch (error) {
+    if (!isMissingTable(error) && !isMissingColumn(error)) throw error
+  }
+  return grouped
+}
+
+async function loadOrchestratorRolesByConversation(
+  prisma: BoardDb,
+  workspaceId: string,
+  userId: string,
+  conversationIds: readonly string[],
+): Promise<Map<string, AgentBoardCardOrchestratorRole>> {
+  const byConv = new Map<string, AgentBoardCardOrchestratorRole>()
+  if (!prisma.agentOrchestrator || conversationIds.length === 0) return byConv
+  try {
+    const rows = await prisma.agentOrchestrator.findMany({
+      where: {
+        workspaceId,
+        userId,
+        conversationId: { in: [...conversationIds] },
+      },
+      select: {
+        id: true,
+        conversationId: true,
+        scopeType: true,
+        scopeKey: true,
+        enabled: true,
+      },
+    })
+    for (const row of rows) {
+      if (!row.conversationId) continue
+      byConv.set(row.conversationId, {
+        id: row.id,
+        scopeType: row.scopeType === "SQUAD" ? "SQUAD" : "WORKSPACE",
+        scopeKey: row.scopeKey,
+        enabled: row.enabled,
+      })
+    }
+  } catch (error) {
+    if (!isMissingTable(error) && !isMissingColumn(error)) throw error
+  }
+  return byConv
+}
+
 export async function listWorkspaceBoardSquads(
   prisma: Pick<AppPrismaClient, "squad" | "workspaceMember">,
   { workspaceId, userId }: { workspaceId: string; userId: string },
@@ -344,6 +494,9 @@ export async function listAgentBoardCards(
     childAgentsByConv,
     pendingQuestionsByConv,
     scheduledWakeupsByConv,
+    supervisionByConv,
+    pendingDecisionsByConv,
+    orchestratorRolesByConv,
   ] = await Promise.all([
     (async () => {
       try {
@@ -364,6 +517,9 @@ export async function listAgentBoardCards(
     loadChildAgentSummariesByConversation(prisma, workspaceId, conversationIds),
     loadPendingQuestionsByConversation(prisma, workspaceId, conversationIds),
     loadScheduledWakeupsByConversation(prisma, workspaceId, conversationIds),
+    loadSupervisionByConversation(prisma, workspaceId, userId, conversationIds),
+    loadPendingDecisionsByConversation(prisma, workspaceId, userId, conversationIds),
+    loadOrchestratorRolesByConversation(prisma, workspaceId, userId, conversationIds),
   ])
 
   const linkedByConv = await loadLinkedObjectsByConversation(
@@ -388,6 +544,11 @@ export async function listAgentBoardCards(
     const childAgents = childAgentsByConv.get(c.id)
     const pendingQuestions = pendingQuestionsByConv.get(c.id)
     const scheduledWakeup = scheduledWakeupsByConv.get(c.id) ?? null
+    const supervision = supervisionByConv.get(c.id)
+    const managerNotes = supervision?.managerNotes ?? null
+    const proposedReply = supervision?.proposedReply ?? null
+    const pendingDecisions = pendingDecisionsByConv.get(c.id)
+    const orchestratorRole = orchestratorRolesByConv.get(c.id) ?? null
 
     return {
       id: c.id,
@@ -407,6 +568,10 @@ export async function listAgentBoardCards(
       ...(childAgents && childAgents.total > 0 ? { childAgents } : {}),
       ...(pendingQuestions && pendingQuestions.length > 0 ? { pendingQuestions } : {}),
       ...(scheduledWakeup ? { scheduledWakeup } : {}),
+      ...(orchestratorRole ? { orchestratorRole } : {}),
+      ...(managerNotes ? { managerNotes } : {}),
+      ...(proposedReply ? { proposedReply } : {}),
+      ...(pendingDecisions && pendingDecisions.length > 0 ? { pendingDecisions } : {}),
     }
   })
 }

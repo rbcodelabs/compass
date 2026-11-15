@@ -5,6 +5,7 @@ import Link from "next/link"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   AlertCircle,
+  Bot,
   CheckCircle2,
   Circle,
   Clock,
@@ -27,12 +28,18 @@ import {
 } from "@/components/patterns"
 import { useBoardDock } from "@/components/patterns/use-board-dock"
 import { useAgentBoardColumnLayout } from "@/components/agent/agent-board-column-layout"
+import { DecisionCard } from "@/components/agent/decision-card"
+import { ManagerNotesDisclosure } from "@/components/agent/manager-notes-disclosure"
+import { ThreadLinkNavigationProvider } from "@/components/agent/markdown"
+import { OrchestratorDock } from "@/components/agent/orchestrator-dock"
+import { ProposedReplyCard } from "@/components/agent/proposed-reply-card"
 import { QuestionPromptCard } from "@/components/agent/question-prompt-card"
 import {
   applyAgentBoardPatch,
   BOARD_COLUMN_LABELS,
   bucketizeBoard,
   bucketizeBoardBySquad,
+  cardNeedsYou,
   classifyBoardCard,
   filterBoardCards,
   formatRelativeTime,
@@ -57,6 +64,7 @@ const BOARD_POLL_MS = 4_000
 const CLOCK_TICK_MS = 15_000
 
 const COLUMN_ACCENT: Record<BoardColumnId, "neutral" | "info" | "success" | "warning" | "danger"> = {
+  needs_you: "warning",
   working: "info",
   awaiting: "warning",
   waiting: "info",
@@ -67,6 +75,7 @@ const COLUMN_ACCENT: Record<BoardColumnId, "neutral" | "info" | "success" | "war
 }
 
 const EMPTY_COPY: Record<BoardColumnId, string> = {
+  needs_you: "Nothing needing your attention.",
   working: "Nothing running right now.",
   awaiting: "No threads awaiting input.",
   waiting: "No scheduled wake-ups.",
@@ -86,6 +95,8 @@ const ENTITY_PREFIX: Record<AgentBoardCardLinkedObject["entityType"], string> = 
 function StatusIcon({ column, staleHeartbeat = false }: { column: BoardColumnId; staleHeartbeat?: boolean }) {
   const common = "mt-0.5 size-4 shrink-0"
   switch (column) {
+    case "needs_you":
+      return <Sparkles aria-hidden="true" className={cn(common, "text-status-warning")} />
     case "working":
       return (
         <Loader2
@@ -137,6 +148,7 @@ export function AgentBoard({ workspaceId, basePath, initialCards, squads = [], o
   const [failed, setFailed] = useState(false)
   const [sseFallback, setSseFallback] = useState(() => typeof EventSource === "undefined")
   const [searchQuery, setSearchQuery] = useState("")
+  const [onlyNeedsYou, setOnlyNeedsYou] = useState(false)
   const [groupBy, setGroupBy] = useState<BoardGroupBy>("status")
   const [now, setNow] = useState(() => Date.now())
   const lastBody = useRef<string | null>(initialCards ? JSON.stringify({ cards: initialCards }) : null)
@@ -257,7 +269,14 @@ export function AgentBoard({ workspaceId, basePath, initialCards, squads = [], o
     }
   }, [refresh, sseFallback])
 
-  const filteredCards = useMemo(() => filterBoardCards(cards ?? [], searchQuery), [cards, searchQuery])
+  const totalNeedsYouCount = useMemo(
+    () => (cards ?? []).filter((c) => cardNeedsYou(c)).length,
+    [cards],
+  )
+  const filteredCards = useMemo(() => {
+    const searched = filterBoardCards(cards ?? [], searchQuery)
+    return onlyNeedsYou ? searched.filter((c) => cardNeedsYou(c)) : searched
+  }, [cards, onlyNeedsYou, searchQuery])
   const columns = useMemo(() => bucketizeBoard(filteredCards), [filteredCards])
   const squadColumns = useMemo(
     () => bucketizeBoardBySquad(filteredCards, liveSquads),
@@ -382,41 +401,71 @@ export function AgentBoard({ workspaceId, basePath, initialCards, squads = [], o
             </button>
           )}
         </div>
-        <div className="flex items-center gap-1.5" role="group" aria-label="Group board by">
-          <span className="hidden items-center gap-1 text-xs text-text-subtle sm:inline-flex">
-            <Layers aria-hidden="true" className="size-3.5" />
-            Group:
-          </span>
-          <div className="inline-flex rounded-lg border border-border-default bg-surface-inset p-0.5 text-xs">
-            <button
-              type="button"
-              aria-pressed={groupBy === "status"}
-              onClick={() => setGroupBy("status")}
-              className={cn(
-                "rounded-md px-2.5 py-1 font-medium",
-                groupBy === "status"
-                  ? "bg-surface-card text-text-primary shadow-xs"
-                  : "text-text-subtle hover:text-text-primary",
-              )}
-            >
-              Status
-            </button>
-            <button
-              type="button"
-              aria-pressed={groupBy === "squad"}
-              onClick={() => {
-                setGroupBy("squad")
-                if (liveSquads.length === 0) void refresh(true)
-              }}
-              className={cn(
-                "rounded-md px-2.5 py-1 font-medium",
-                groupBy === "squad"
-                  ? "bg-surface-card text-text-primary shadow-xs"
-                  : "text-text-subtle hover:text-text-primary",
-              )}
-            >
-              Squad
-            </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            data-testid="agent-board-only-needs-you"
+            aria-pressed={onlyNeedsYou}
+            onClick={() => setOnlyNeedsYou((prev) => !prev)}
+            className={cn(
+              "inline-flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
+              onlyNeedsYou
+                ? "border-status-warning/50 bg-status-warning-surface text-status-warning shadow-2xs"
+                : "border-border-default bg-surface-card text-text-secondary hover:border-border-strong hover:text-text-primary",
+            )}
+          >
+            <Sparkles aria-hidden="true" className="size-3.5 shrink-0" />
+            <span>Only needs you</span>
+            {totalNeedsYouCount > 0 && (
+              <span
+                className={cn(
+                  "rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums",
+                  onlyNeedsYou
+                    ? "bg-surface-card text-status-warning"
+                    : "bg-status-warning-surface text-status-warning",
+                )}
+              >
+                {totalNeedsYouCount}
+              </span>
+            )}
+          </button>
+
+          <div className="flex items-center gap-1.5" role="group" aria-label="Group board by">
+            <span className="hidden items-center gap-1 text-xs text-text-subtle sm:inline-flex">
+              <Layers aria-hidden="true" className="size-3.5" />
+              Group:
+            </span>
+            <div className="inline-flex rounded-lg border border-border-default bg-surface-inset p-0.5 text-xs">
+              <button
+                type="button"
+                aria-pressed={groupBy === "status"}
+                onClick={() => setGroupBy("status")}
+                className={cn(
+                  "rounded-md px-2.5 py-1 font-medium",
+                  groupBy === "status"
+                    ? "bg-surface-card text-text-primary shadow-xs"
+                    : "text-text-subtle hover:text-text-primary",
+                )}
+              >
+                Status
+              </button>
+              <button
+                type="button"
+                aria-pressed={groupBy === "squad"}
+                onClick={() => {
+                  setGroupBy("squad")
+                  if (liveSquads.length === 0) void refresh(true)
+                }}
+                className={cn(
+                  "rounded-md px-2.5 py-1 font-medium",
+                  groupBy === "squad"
+                    ? "bg-surface-card text-text-primary shadow-xs"
+                    : "text-text-subtle hover:text-text-primary",
+                )}
+              >
+                Squad
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -433,7 +482,7 @@ export function AgentBoard({ workspaceId, basePath, initialCards, squads = [], o
             <Board
               label="Agent conversations by status"
               fadeEnd={dock.dockedIds.length > 0}
-              className="block min-h-[24rem] flex-1 scroll-px-3 overflow-x-auto p-0 sm:scroll-px-4 md:overflow-y-hidden"
+              className="block min-h-[24rem] flex-1 scroll-px-3 overflow-x-auto p-0 pb-20 sm:scroll-px-4 md:overflow-y-hidden"
             >
               <div
                 className={cn(
@@ -460,7 +509,7 @@ export function AgentBoard({ workspaceId, basePath, initialCards, squads = [], o
         ) : (
           <Board
             label="Agent conversations by squad"
-            className="block min-h-[24rem] flex-1 scroll-px-3 overflow-x-auto p-0 sm:scroll-px-4 md:overflow-y-hidden"
+            className="block min-h-[24rem] flex-1 scroll-px-3 overflow-x-auto p-0 pb-20 sm:scroll-px-4 md:overflow-y-hidden"
           >
             <div className="flex h-full w-max min-w-full items-stretch gap-3 px-3 pt-3 pb-3 sm:px-4 sm:pt-4 md:px-4 md:pt-3">
               {squadColumns.map((column) => renderSquadColumn(column))}
@@ -468,6 +517,19 @@ export function AgentBoard({ workspaceId, basePath, initialCards, squads = [], o
           </Board>
         )}
       </div>
+
+      <ThreadLinkNavigationProvider
+        basePath={basePath}
+        onOpenThread={(threadId) => onOpenConversation(threadId)}
+      >
+        <OrchestratorDock
+          workspaceId={workspaceId}
+          basePath={basePath}
+          cards={cards ?? []}
+          onOpenConversation={(id) => onOpenConversation(id)}
+          onMutated={() => void refresh()}
+        />
+      </ThreadLinkNavigationProvider>
     </div>
   )
 }
@@ -506,6 +568,10 @@ function BoardCard({
   const extraLinkedCount = Math.max(0, (card.linkedObjectCount ?? 0) - (linkedObjects?.length ?? 0))
   const childAgents = card.childAgents && card.childAgents.total > 0 ? card.childAgents : null
   const pendingQuestions = card.pendingQuestions && card.pendingQuestions.length > 0 ? card.pendingQuestions : null
+  const pendingDecisions = card.pendingDecisions && card.pendingDecisions.length > 0 ? card.pendingDecisions : null
+  const proposedReply = card.proposedReply?.text?.trim() ? card.proposedReply : null
+  const managerNotes = card.managerNotes?.text?.trim() ? card.managerNotes : null
+  const orchestratorRole = card.orchestratorRole ?? null
   const activeWakeup =
     card.scheduledWakeup && card.scheduledWakeup.id !== wakeupOptimisticallyCanceledId ? card.scheduledWakeup : null
 
@@ -514,7 +580,7 @@ function BoardCard({
       ? card.currentActivity || (staleHeartbeat ? "Heartbeat delayed · awaiting worker…" : null)
       : null
   const idleSummary =
-    column !== "working" && !pendingQuestions ? (card.summary ?? null) : null
+    column !== "working" && !pendingQuestions && !pendingDecisions && !proposedReply ? (card.summary ?? null) : null
 
   const handleCancelWakeup = async (e: React.MouseEvent) => {
     e.preventDefault()
@@ -554,12 +620,12 @@ function BoardCard({
       className={cn(
         "group/card relative flex items-start gap-2.5 rounded-xl border border-border-default bg-surface-card p-3 shadow-[var(--shadow-card)] transition",
         "hover:border-border-strong hover:shadow-[var(--shadow-panel)] has-[a:focus-visible]:border-border-focus has-[a:focus-visible]:ring-2 has-[a:focus-visible]:ring-ring/30",
-        (column === "new" || column === "awaiting") && "border-l-[3px] border-l-status-warning",
+        (column === "needs_you" || column === "new" || column === "awaiting") && "border-l-[3px] border-l-status-warning",
       )}
     >
       <StatusIcon column={column} staleHeartbeat={staleHeartbeat} />
       <span className="min-w-0 flex-1">
-        {/* Title + optional Squad pill */}
+        {/* Title + optional Orchestrator / Squad pills */}
         <span className="flex items-start justify-between gap-2">
           <Link
             href={href}
@@ -568,19 +634,30 @@ function BoardCard({
           >
             {card.title || "Untitled chat"}
           </Link>
-          {showSquadBadge && card.squad && (
-            <span
-              data-testid="board-card-squad-badge"
-              className="inline-flex max-w-[96px] shrink-0 items-center gap-1 rounded-full border border-border-default bg-surface-inset px-1.5 py-0.5 text-[10px] font-medium text-text-secondary"
-            >
+          <span className="flex shrink-0 items-center gap-1">
+            {orchestratorRole && (
               <span
-                aria-hidden="true"
-                className="size-1.5 shrink-0 rounded-full"
-                style={{ backgroundColor: card.squad.color }}
-              />
-              <span className="truncate">{card.squad.name}</span>
-            </span>
-          )}
+                data-testid="board-card-orchestrator-badge"
+                className="inline-flex items-center gap-1 rounded-full border border-status-info/40 bg-status-info-surface px-1.5 py-0.5 text-[10px] font-semibold text-status-info"
+              >
+                <Bot aria-hidden="true" className="size-2.5 shrink-0" />
+                <span>{orchestratorRole.scopeType === "SQUAD" ? "Squad Orchestrator" : "Orchestrator"}</span>
+              </span>
+            )}
+            {showSquadBadge && card.squad && (
+              <span
+                data-testid="board-card-squad-badge"
+                className="inline-flex max-w-[96px] shrink-0 items-center gap-1 rounded-full border border-border-default bg-surface-inset px-1.5 py-0.5 text-[10px] font-medium text-text-secondary"
+              >
+                <span
+                  aria-hidden="true"
+                  className="size-1.5 shrink-0 rounded-full"
+                  style={{ backgroundColor: card.squad.color }}
+                />
+                <span className="truncate">{card.squad.name}</span>
+              </span>
+            )}
+          </span>
         </span>
 
         {/* Live activity line (working) or 1-2 line outcome excerpt (idle) */}
@@ -604,12 +681,47 @@ function BoardCard({
           </span>
         )}
 
-        {/* Inline AskUserQuestion prompt (Awaiting) */}
+        {/* Inline ProposedReplyCard (Needs you) */}
+        {proposedReply && (
+          <ProposedReplyCard
+            workspaceId={workspaceId}
+            conversationId={card.id}
+            proposedReply={proposedReply}
+            compact
+            now={now}
+            onApproved={() => onMutated()}
+            onDiscarded={() => onMutated()}
+            className="mt-2"
+          />
+        )}
+
+        {/* Inline Orchestrator DecisionCard (Needs you) */}
+        {pendingDecisions && (
+          <DecisionCard
+            conversationId={card.id}
+            decisions={pendingDecisions}
+            compact
+            onAnswered={() => onMutated()}
+            onDismissed={() => onMutated()}
+            className="mt-2"
+          />
+        )}
+
+        {/* Inline AskUserQuestion prompt (Awaiting / Needs you) */}
         {pendingQuestions && (
           <QuestionPromptCard
             questions={pendingQuestions}
             compact
             onAnswered={() => onMutated()}
+            className="mt-2"
+          />
+        )}
+
+        {/* Read-only Manager Notes v2 collapsible disclosure */}
+        {managerNotes && (
+          <ManagerNotesDisclosure
+            notes={managerNotes}
+            now={now}
             className="mt-2"
           />
         )}

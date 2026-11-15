@@ -113,6 +113,10 @@ export default async function AgentPage({ params, searchParams }: AgentPageProps
                 childAgents: card.childAgents,
                 pendingQuestions: card.pendingQuestions,
                 scheduledWakeup: card.scheduledWakeup ?? null,
+                orchestratorRole: card.orchestratorRole ?? null,
+                managerNotes: card.managerNotes ?? null,
+                proposedReply: card.proposedReply ?? null,
+                pendingDecisions: card.pendingDecisions,
               }
             : {}),
         }
