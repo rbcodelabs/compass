@@ -11,7 +11,16 @@ import {
 
 describe("Agent board layout binding", () => {
   it("uses the board's own column order as the default (one source of truth)", () => {
-    expect([...AGENT_BOARD_COLUMN_IDS]).toEqual(["working", "awaiting", "waiting", "new", "done", "failed", "ready"])
+    expect([...AGENT_BOARD_COLUMN_IDS]).toEqual([
+      "needs_you",
+      "working",
+      "awaiting",
+      "waiting",
+      "new",
+      "done",
+      "failed",
+      "ready",
+    ])
     expect([...AGENT_BOARD_COLUMN_IDS]).toEqual([...BOARD_COLUMN_ORDER])
     // bucketizeBoard returns its columns in that same order when all columns are populated
     const one = (id: string, overrides: Partial<AgentBoardCard>): AgentBoardCard => ({
@@ -24,6 +33,7 @@ describe("Agent board layout binding", () => {
       ...overrides,
     })
     const columns = bucketizeBoard([
+      one("ny", { proposedReply: { text: "Approve this", generatedAt: null, authorOrchestratorId: null } }),
       one("a", { runStatus: "RUNNING" }),
       one("b", { runStatus: "RUNNING", substatus: "AWAITING_QUESTION" }),
       one("c", {
@@ -54,7 +64,7 @@ describe("Agent board layout binding", () => {
       expect(parseAgentBoardLayout(bad)).toEqual(resolveAgentBoardLayout(undefined))
     }
     const layout = parseAgentBoardLayout({ columnOrder: ["ready", "gone"], pinnedColumnIds: ["gone", "ready"], activePinnedId: "gone" })
-    expect(layout.columnOrder).toEqual(["ready", "working", "awaiting", "waiting", "new", "done", "failed"])
+    expect(layout.columnOrder).toEqual(["ready", "needs_you", "working", "awaiting", "waiting", "new", "done", "failed"])
     expect(layout.pinnedColumnIds).toEqual(["ready"])
   })
 })

@@ -9,12 +9,14 @@ import {
   BOARD_COLUMN_LABELS,
   bucketizeBoard,
   bucketizeBoardBySquad,
+  cardNeedsYou,
   classifyBoardCard,
   diffAgentBoardCards,
   filterBoardCards,
   formatRelativeTime,
   formatWakeupCountdown,
   isRunHeartbeatStale,
+  splitNeedsYouCards,
   STALE_HEARTBEAT_MS,
   type AgentBoardCard,
 } from "@/lib/agent-board"
@@ -116,6 +118,46 @@ describe("classifyBoardCard", () => {
     expect(classifyBoardCard(card({ runStatus: "SUCCEEDED", scheduledWakeup: wakeup }))).toBe("waiting")
     expect(classifyBoardCard(card({ runStatus: "RUNNING", scheduledWakeup: wakeup }))).toBe("working")
   })
+
+  it("puts threads with a staged proposedReply or pendingDecision in Needs you and splits needs-you cards cleanly", () => {
+    const withReply = card({
+      id: "c-reply",
+      proposedReply: {
+        text: "Run the migration verification script on dev-builder",
+        generatedAt: T1,
+        authorOrchestratorId: "orch-1",
+      },
+    })
+    const withDecision = card({
+      id: "c-decision",
+      pendingDecisions: [
+        {
+          id: "d-1",
+          conversationId: "c-decision",
+          sourceConversationId: "orch-conv-1",
+          header: "Rollout",
+          question: "Ship to staging or prod?",
+          options: [{ label: "Staging" }, { label: "Production" }],
+          multiSelect: false,
+          allowOther: true,
+          status: "PENDING",
+          answerText: null,
+          createdAt: T1,
+        },
+      ],
+    })
+    const idle = card({ id: "c-idle" })
+
+    expect(classifyBoardCard(withReply)).toBe("needs_you")
+    expect(classifyBoardCard(withDecision)).toBe("needs_you")
+    expect(cardNeedsYou(withReply)).toBe(true)
+    expect(cardNeedsYou(withDecision)).toBe(true)
+    expect(cardNeedsYou(idle)).toBe(false)
+
+    const split = splitNeedsYouCards([idle, withReply, withDecision])
+    expect(split.needsYou.map((c) => c.id)).toEqual(["c-reply", "c-decision"])
+    expect(split.rest.map((c) => c.id)).toEqual(["c-idle"])
+  })
 })
 
 describe("bucketizeBoard", () => {
@@ -155,6 +197,7 @@ describe("bucketizeBoard", () => {
       "awaiting",
       "done",
       "failed",
+      "needs_you",
       "new",
       "ready",
       "waiting",

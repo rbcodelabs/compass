@@ -20,10 +20,19 @@
 
 import { formatPrBadge } from "@/lib/agent-card-derive"
 
-export type BoardColumnId = "working" | "awaiting" | "waiting" | "failed" | "new" | "done" | "ready"
+export type BoardColumnId =
+  | "needs_you"
+  | "working"
+  | "awaiting"
+  | "waiting"
+  | "failed"
+  | "new"
+  | "done"
+  | "ready"
 export type BoardGroupBy = "status" | "squad"
 
 export const BOARD_COLUMN_LABELS: Record<BoardColumnId, string> = {
+  needs_you: "Needs you",
   working: "Working",
   awaiting: "Awaiting",
   waiting: "Waiting",
@@ -33,8 +42,9 @@ export const BOARD_COLUMN_LABELS: Record<BoardColumnId, string> = {
   ready: "Ready",
 }
 
-/** Geode's order: in-flight and interactive controls first, then what needs a look, then settled, then failures. */
+/** Geode's order: Needs you + in-flight and interactive controls first, then what needs a look, then settled, then failures. */
 export const BOARD_COLUMN_ORDER: readonly BoardColumnId[] = [
+  "needs_you",
   "working",
   "awaiting",
   "waiting",
@@ -120,6 +130,39 @@ export type AgentBoardCardScheduledWakeup = {
   createdAt?: string
 }
 
+export type AgentBoardCardOrchestratorRole = {
+  id: string
+  scopeType: "WORKSPACE" | "SQUAD"
+  scopeKey: string
+  enabled: boolean
+}
+
+export type AgentBoardCardManagerNotes = {
+  text: string
+  updatedAt: string | null
+  sourceOrchestratorId: string | null
+}
+
+export type AgentBoardCardProposedReply = {
+  text: string
+  generatedAt: string | null
+  authorOrchestratorId: string | null
+}
+
+export type AgentBoardCardPendingDecision = {
+  id: string
+  conversationId: string
+  sourceConversationId: string | null
+  header: string | null
+  question: string
+  options: AgentBoardCardQuestionOption[]
+  multiSelect: boolean
+  allowOther: boolean
+  status: "PENDING" | "ANSWERED" | "CLEARED" | "EXPIRED"
+  answerText: string | null
+  createdAt: string
+}
+
 /** One conversation as the board sees it. Timestamps are ISO strings so it serializes to the client. */
 export type AgentBoardCard = {
   id: string
@@ -155,6 +198,14 @@ export type AgentBoardCard = {
   pendingQuestions?: AgentBoardCardPendingQuestion[]
   /** Active durable ScheduleWakeup timer while the conversation waits between turns. */
   scheduledWakeup?: AgentBoardCardScheduledWakeup | null
+  /** Present when this conversation is the caller's Workspace or Squad Orchestrator. */
+  orchestratorRole?: AgentBoardCardOrchestratorRole | null
+  /** Owner-scoped Manager Notes v2 cursor written by the caller's orchestrator. */
+  managerNotes?: AgentBoardCardManagerNotes | null
+  /** Owner-scoped AI-proposed next user message awaiting human approval. */
+  proposedReply?: AgentBoardCardProposedReply | null
+  /** Pending orchestrator decisions (`kind = "DECISION"`) awaiting human answer. */
+  pendingDecisions?: AgentBoardCardPendingDecision[]
 }
 
 export type AgentBoardColumn = { id: BoardColumnId; label: string; cards: AgentBoardCard[] }
@@ -171,12 +222,54 @@ function time(iso: string | null | undefined): number {
   return Date.parse(iso)
 }
 
+function hasSupervisionPrompt(
+  card: Pick<AgentBoardCard, "proposedReply" | "pendingDecisions">,
+): boolean {
+  return Boolean(card.proposedReply?.text?.trim()) || (card.pendingDecisions?.length ?? 0) > 0
+}
+
+/**
+ * True when a conversation requires human action: an orchestrator staged a proposed reply or
+ * decision (`needs_you`), or a worker paused on `AskUserQuestion` (`awaiting`).
+ * Powers the board's "Only needs you" filter, the OrchestratorDock badge dot, and the Attention Tray.
+ */
+export function cardNeedsYou(
+  card: Pick<
+    AgentBoardCard,
+    "runStatus" | "substatus" | "pendingQuestions" | "pendingDecisions" | "proposedReply"
+  >,
+): boolean {
+  return (
+    hasSupervisionPrompt(card) ||
+    (card.pendingQuestions?.length ?? 0) > 0 ||
+    (card.runStatus === "RUNNING" && card.substatus === "AWAITING_QUESTION")
+  )
+}
+
+/** Splits board cards into those needing user action (`needsYou`) and the rest, preserving order. */
+export function splitNeedsYouCards<
+  T extends Pick<
+    AgentBoardCard,
+    "runStatus" | "substatus" | "pendingQuestions" | "pendingDecisions" | "proposedReply"
+  >,
+>(cards: readonly T[]): { needsYou: T[]; rest: T[] } {
+  const needsYou: T[] = []
+  const rest: T[] = []
+  for (const card of cards) {
+    if (cardNeedsYou(card)) needsYou.push(card)
+    else rest.push(card)
+  }
+  return { needsYou, rest }
+}
+
 export function classifyBoardCard(
   card: Pick<
     AgentBoardCard,
     | "runStatus"
     | "substatus"
     | "pendingQuestions"
+    | "pendingDecisions"
+    | "proposedReply"
     | "scheduledWakeup"
     | "messageCount"
     | "lastActivityAt"
@@ -184,9 +277,10 @@ export function classifyBoardCard(
   >,
 ): BoardColumnId {
   if ((card.pendingQuestions?.length ?? 0) > 0 || (card.runStatus === "RUNNING" && card.substatus === "AWAITING_QUESTION")) {
-    return "awaiting"
+    return hasSupervisionPrompt(card) ? "needs_you" : "awaiting"
   }
   if (card.runStatus === "QUEUED" || card.runStatus === "RUNNING") return "working"
+  if (hasSupervisionPrompt(card)) return "needs_you"
   if (card.scheduledWakeup) return "waiting"
   if (card.runStatus === "FAILED" || card.runStatus === "INTERRUPTED") return "failed"
   if (card.messageCount <= 0) return "ready"
@@ -294,6 +388,10 @@ export function filterBoardCards(cards: readonly AgentBoardCard[], query: string
     if (card.linkedObjects?.some((obj) => matchesSearchText(obj.title, needle) || matchesSearchText(obj.entityType, needle))) return true
     if (card.childAgents?.roles.some((role) => matchesSearchText(role, needle))) return true
     if (card.pendingQuestions?.some((q) => matchesSearchText(q.header, needle) || matchesSearchText(q.question, needle))) return true
+    if (card.pendingDecisions?.some((d) => matchesSearchText(d.header, needle) || matchesSearchText(d.question, needle))) return true
+    if (matchesSearchText(card.proposedReply?.text, needle)) return true
+    if (matchesSearchText(card.managerNotes?.text, needle)) return true
+    if (card.orchestratorRole && matchesSearchText("orchestrator", needle)) return true
     if (matchesSearchText(card.scheduledWakeup?.reason, needle) || matchesSearchText(card.scheduledWakeup?.prompt, needle)) return true
     return false
   })
@@ -338,6 +436,10 @@ export type AgentListConversation = {
   childAgents?: AgentBoardCardChildAgents
   pendingQuestions?: AgentBoardCardPendingQuestion[]
   scheduledWakeup?: AgentBoardCardScheduledWakeup | null
+  orchestratorRole?: AgentBoardCardOrchestratorRole | null
+  managerNotes?: AgentBoardCardManagerNotes | null
+  proposedReply?: AgentBoardCardProposedReply | null
+  pendingDecisions?: AgentBoardCardPendingDecision[]
 }
 
 export type AgentListGroup = { id: BoardColumnId; label: string; items: (AgentListConversation & { lastActivityAt: string })[] }
@@ -356,6 +458,10 @@ export function filterListConversations<T extends AgentListConversation>(convers
     if (c.subtasks?.items.some((item) => matchesSearchText(item.title, needle))) return true
     if (c.childAgents?.roles.some((role) => matchesSearchText(role, needle))) return true
     if (c.pendingQuestions?.some((q) => matchesSearchText(q.header, needle) || matchesSearchText(q.question, needle))) return true
+    if (c.pendingDecisions?.some((d) => matchesSearchText(d.header, needle) || matchesSearchText(d.question, needle))) return true
+    if (matchesSearchText(c.proposedReply?.text, needle)) return true
+    if (matchesSearchText(c.managerNotes?.text, needle)) return true
+    if (c.orchestratorRole && matchesSearchText("orchestrator", needle)) return true
     if (matchesSearchText(c.scheduledWakeup?.reason, needle) || matchesSearchText(c.scheduledWakeup?.prompt, needle)) return true
     return false
   })
@@ -376,6 +482,8 @@ export function groupConversationsByStatus(conversations: readonly AgentListConv
       runStatus: c.runStatus ?? null,
       substatus: c.substatus ?? null,
       pendingQuestions: c.pendingQuestions,
+      pendingDecisions: c.pendingDecisions,
+      proposedReply: c.proposedReply ?? null,
       scheduledWakeup: c.scheduledWakeup ?? null,
       lastActivityAt: c.lastActivityAt!,
       reviewedAt: c.reviewedAt ?? null,

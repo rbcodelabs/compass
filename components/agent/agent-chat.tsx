@@ -40,6 +40,9 @@ import { AgentChip } from "@/components/agent/composer/agent-chip"
 import { ComposerCard } from "@/components/agent/composer/composer-card"
 import { SubagentTeamPill } from "@/components/agent/composer/subagent-team-pill"
 import { ChildAgentTimeline } from "@/components/agent/child-agent-timeline"
+import { DecisionCard } from "@/components/agent/decision-card"
+import { ManagerNotesDisclosure } from "@/components/agent/manager-notes-disclosure"
+import { ProposedReplyCard } from "@/components/agent/proposed-reply-card"
 import { QuestionPromptCard, type QuestionAnswerSubmissionResult } from "@/components/agent/question-prompt-card"
 import { mergeChildAgentRuns, type SerializedChildAgentRun } from "@/lib/agent/child-agent-tree"
 import { AGENT_MAX_GOOGLE_RESOURCES_PER_TURN, GOOGLE_DRIVE_CONNECTOR_SLUG, googleResourcesFromPaste, type GoogleResourceRef } from "@/lib/agent-google-resources"
@@ -56,7 +59,10 @@ import {
   formatWakeupCountdown,
   groupConversationsBySquad,
   groupConversationsByStatus,
+  type AgentBoardCardManagerNotes,
+  type AgentBoardCardPendingDecision,
   type AgentBoardCardPendingQuestion,
+  type AgentBoardCardProposedReply,
   type AgentBoardCardScheduledWakeup,
   type AgentBoardCardSquad,
   type AgentListConversation,
@@ -525,6 +531,12 @@ export function AgentChat({
     conversationId: string
     wakeup: AgentBoardCardScheduledWakeup | null
   } | null>(null)
+  const [supervisionState, setSupervisionState] = useState<{
+    conversationId: string
+    managerNotes: AgentBoardCardManagerNotes | null
+    proposedReply: AgentBoardCardProposedReply | null
+    pendingDecisions: AgentBoardCardPendingDecision[]
+  } | null>(null)
   const [cancelingWakeup, setCancelingWakeup] = useState(false)
   const [wakeupNow, setWakeupNow] = useState(() => Date.now())
 
@@ -553,6 +565,22 @@ export function AgentChat({
             })
           })
           .catch(() => {}),
+        fetch(`/api/agent/conversations/${activeConversationId}/supervision?${qs}`, { signal })
+          .then(async (res) => {
+            if (!res.ok) return
+            const body = (await res.json()) as {
+              managerNotes?: AgentBoardCardManagerNotes | null
+              proposedReply?: AgentBoardCardProposedReply | null
+              pendingDecisions?: AgentBoardCardPendingDecision[]
+            }
+            setSupervisionState({
+              conversationId: activeConversationId,
+              managerNotes: body.managerNotes ?? null,
+              proposedReply: body.proposedReply ?? null,
+              pendingDecisions: Array.isArray(body.pendingDecisions) ? body.pendingDecisions : [],
+            })
+          })
+          .catch(() => {}),
       ])
     },
     [activeConversationId, workspaceId],
@@ -575,6 +603,10 @@ export function AgentChat({
   const pendingWakeup = useMemo(
     () => (wakeupState && wakeupState.conversationId === activeConversationId ? wakeupState.wakeup : null),
     [wakeupState, activeConversationId],
+  )
+  const activeSupervision = useMemo(
+    () => (supervisionState && supervisionState.conversationId === activeConversationId ? supervisionState : null),
+    [supervisionState, activeConversationId],
   )
 
   // Poll gently while streaming (so a hold-open AskUserQuestion surfaces within ~2-3s) or while a wake-up
@@ -1080,6 +1112,8 @@ export function AgentChat({
                                     runStatus: c.runStatus ?? null,
                                     substatus: c.substatus ?? null,
                                     pendingQuestions: c.pendingQuestions,
+                                    pendingDecisions: c.pendingDecisions,
+                                    proposedReply: c.proposedReply ?? null,
                                     scheduledWakeup: c.scheduledWakeup ?? null,
                                     messageCount: c.messageCount ?? 1,
                                     lastActivityAt: c.lastActivityAt,
@@ -1266,6 +1300,61 @@ export function AgentChat({
                 {suggestion}
               </button>
             </div>
+          )}
+          {activeConversationId && activeSupervision?.proposedReply && (
+            <ProposedReplyCard
+              workspaceId={workspaceId}
+              conversationId={activeConversationId}
+              proposedReply={activeSupervision.proposedReply}
+              now={wakeupNow}
+              className="mb-2.5"
+              onEditInChat={(text) => {
+                setInput(text)
+                composerRef.current?.focus()
+              }}
+              onApproved={(result) => {
+                void refreshInteractiveControls()
+                void reconcile(true)
+                if (result.runId) {
+                  void (async () => {
+                    try {
+                      const res = await fetch(
+                        `/api/agent/conversations/${activeConversationId}/run?workspaceId=${encodeURIComponent(workspaceId)}`,
+                      )
+                      if (!res.ok) return
+                      const body = (await res.json()) as { run: SerializedRun | null }
+                      if (body.run && !body.run.done) void attachToRun(body.run)
+                    } catch {
+                      /* best-effort stream attach */
+                    }
+                  })()
+                }
+              }}
+              onDiscarded={() => {
+                void refreshInteractiveControls()
+              }}
+            />
+          )}
+          {activeConversationId && activeSupervision && activeSupervision.pendingDecisions.length > 0 && (
+            <DecisionCard
+              conversationId={activeConversationId}
+              decisions={activeSupervision.pendingDecisions}
+              className="mb-2.5"
+              onAnswered={() => {
+                void refreshInteractiveControls()
+                void reconcile(true)
+              }}
+              onDismissed={() => {
+                void refreshInteractiveControls()
+              }}
+            />
+          )}
+          {activeConversationId && activeSupervision?.managerNotes && (
+            <ManagerNotesDisclosure
+              notes={activeSupervision.managerNotes}
+              now={wakeupNow}
+              className="mb-2.5"
+            />
           )}
           {pendingQuestions.length > 0 && (
             <QuestionPromptCard
@@ -1511,6 +1600,7 @@ function MessageRow({
 }
 
 const STATUS_STYLE: Record<BoardColumnId, { label: string; dot: string; badge: string }> = {
+  needs_you: { label: "Needs you", dot: "bg-status-warning animate-pulse", badge: "bg-status-warning-surface text-status-warning" },
   working: { label: "Working", dot: "bg-status-info animate-pulse", badge: "bg-status-info-surface text-status-info" },
   awaiting: { label: "Awaiting", dot: "bg-status-warning animate-pulse", badge: "bg-status-warning-surface text-status-warning" },
   waiting: { label: "Waiting", dot: "bg-status-info", badge: "bg-status-info-surface text-status-info" },
@@ -1541,13 +1631,15 @@ function ConversationRow({
   const archiveLabel = archived ? "Restore chat" : "Archive chat"
   const style = status ? STATUS_STYLE[status] : null
   const preview =
-    status === "awaiting" && c.pendingQuestions?.[0]
-      ? c.pendingQuestions[0].question
-      : status === "waiting" && c.scheduledWakeup
-        ? `Resumes in ${formatWakeupCountdown(c.scheduledWakeup.fireAt)}${c.scheduledWakeup.reason ? ` — ${c.scheduledWakeup.reason}` : ""}`
-        : status === "working"
-          ? c.currentActivity
-          : c.summary
+    status === "needs_you"
+      ? c.pendingDecisions?.[0]?.question ?? c.proposedReply?.text ?? c.summary
+      : status === "awaiting" && c.pendingQuestions?.[0]
+        ? c.pendingQuestions[0].question
+        : status === "waiting" && c.scheduledWakeup
+          ? `Resumes in ${formatWakeupCountdown(c.scheduledWakeup.fireAt)}${c.scheduledWakeup.reason ? ` — ${c.scheduledWakeup.reason}` : ""}`
+          : status === "working"
+            ? c.currentActivity
+            : c.summary
   const prBadge = formatPrBadge(c.prUrl)
   const subtasks = c.subtasks && c.subtasks.total > 0 ? c.subtasks : null
   const childAgents = c.childAgents && c.childAgents.total > 0 ? c.childAgents : null
