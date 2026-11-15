@@ -50,7 +50,7 @@ export function ProposedReplyCard({
   conversationId,
   proposedReply,
   compact = false,
-  now = Date.now(),
+  now,
   onApproved,
   onDiscarded,
   onEditInChat,

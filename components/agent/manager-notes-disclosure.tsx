@@ -17,7 +17,7 @@ type ManagerNotesDisclosureProps = {
  */
 export function ManagerNotesDisclosure({
   notes,
-  now = Date.now(),
+  now,
   className,
 }: ManagerNotesDisclosureProps) {
   const [open, setOpen] = useState(false)
