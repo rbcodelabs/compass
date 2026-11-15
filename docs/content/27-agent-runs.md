@@ -245,7 +245,7 @@ changes nothing for users.
 
 The board's per-person "looked at" state needs migration `109_agent_conversation_reviews`.
 Until it is applied the board still works, but every finished conversation shows as **New**.
-Rich card metadata (conversation squad, persisted summary/PR URL, and live run substatus/activity) uses migration `119_agent_board_rich_cards`, durable child sub-agent hierarchies use migration `120_agent_child_runs`, and interactive agent questions plus scheduled wake-ups use migration `121_agent_interactive_controls` (plus `/api/cron/agent-wakeups` in `vercel.json`), all falling back gracefully if unapplied.
+Rich card metadata (conversation squad, persisted summary/PR URL, and live run substatus/activity) uses migration `119_agent_board_rich_cards`, durable child sub-agent hierarchies use migration `120_agent_child_runs`, interactive agent questions plus scheduled wake-ups use migration `121_agent_interactive_controls` (plus `/api/cron/agent-wakeups` in `vercel.json`), and personal Workspace/Squad orchestrator supervision uses migration `122_agent_orchestrator_supervision`, all falling back gracefully if unapplied.
 
 Two settings matter for a deployed environment:
 

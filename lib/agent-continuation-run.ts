@@ -323,6 +323,7 @@ export async function startConversationContinuationRun(
     sandboxName: created.sandboxName,
     userId: input.userId,
     workspace: { id: input.workspaceId },
+    conversationId: input.conversationId,
     agent: runAgent,
     prompt: turnPrompt,
     snapshotId,
