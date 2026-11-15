@@ -18,6 +18,8 @@ import { AgentGithubReposPanel } from "@/components/settings/agent-github-repos-
 import { AnthropicKeyPanel } from "@/components/settings/anthropic-key-panel";
 import { readAnthropicKeyLast4 } from "@/lib/workspace-anthropic-key";
 import { AgentDeveloperSandboxPanel } from "@/components/settings/agent-developer-sandbox-panel";
+import { AgentOrchestratorsPanel } from "@/components/settings/agent-orchestrators-panel";
+import { loadPersonalOrchestratorSettings } from "@/lib/orchestrator/wakeups";
 import { loadAgentSandboxClasses, readWorkspaceDeveloperSandboxEnabled } from "@/lib/agent-sandbox-class";
 import { WorkspaceBrandingPanel } from "@/components/settings/workspace-branding-panel";
 import { ThinkingModelPanel } from "@/components/settings/thinking-model-panel";
@@ -468,6 +470,22 @@ export default async function SettingsPage({ params }: Props) {
           workspaceSlug={workspaceSlug}
           initialRepos={parseStoredRepos(workspace.agentGithubRepos)}
           canEdit={canManageCapabilityPacks}
+        />
+      </SettingsSection>
+
+      <SettingsSection
+        title="Agent orchestrators"
+        description="Your personal Workspace and Squad orchestrators supervise your threads, coalesce completed turns across a 60s quiet wait and 12s batch window, and stage human-gated proposed replies or decisions."
+      >
+        <AgentOrchestratorsPanel
+          orgSlug={orgSlug}
+          workspaceSlug={workspaceSlug}
+          initialSettings={await loadPersonalOrchestratorSettings(
+            prisma,
+            workspace.id,
+            session.user.id,
+            squads
+          )}
         />
       </SettingsSection>
 

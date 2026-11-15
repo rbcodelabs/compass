@@ -903,6 +903,23 @@ export async function finalizeAgentRun({
       /* Cron sweeper (/api/cron/agent-wakeups) is the durable backstop. */
     }
   }
+  if (prisma.agentOrchestrator && prisma.agentOrchestratorWakeup) {
+    try {
+      const { enqueueOrchestratorWakeupOnRunFinalize } = await import("@/lib/orchestrator/wakeups")
+      await enqueueOrchestratorWakeupOnRunFinalize({
+        prisma,
+        runId,
+        workspaceId: run.workspaceId,
+        conversationId: run.conversationId,
+        userId: run.userId,
+        status,
+        errorCode: errorCode ?? null,
+        now,
+      })
+    } catch {
+      /* Cron sweeper (/api/cron/agent-orchestrator) is the durable backstop. */
+    }
+  }
 
   // A conversation sandbox that just finished a turn cleanly stays up for the next one; finishedAt (written above)
   // is its idle clock and the sweeper reaps it after AGENT_SANDBOX_IDLE_MS. Every other outcome pauses it (stop; the

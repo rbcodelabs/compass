@@ -274,6 +274,9 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   // Personal Workspace/Squad orchestrator configuration & conversation supervision: two additive CREATE TABLE IF NOT EXISTS (agent_orchestrators, agent_conversation_supervision) plus five ASYNC indexes; no existing table altered, no backfill, no FK.
   // Postcondition pinned in REVIEWED_MIGRATION_CODE_SHA256. Digest recorded from the shipped SQL after reading it.
   "122_agent_orchestrator_supervision": "363fc87c38ba6222071967aa801e0e8a18992f5f5f9d1ac25f02988848d406be",
+  // Durable two-stage wakeup state machine for an AgentOrchestrator: one additive CREATE TABLE IF NOT EXISTS (agent_orchestrator_wakeups) plus four ASYNC indexes; no existing table altered, no backfill, no FK.
+  // Postcondition pinned in REVIEWED_MIGRATION_CODE_SHA256. Digest recorded from the shipped SQL after reading it.
+  "123_agent_orchestrator_wakeups": "f12e35032531b7866494511ceb935d2db17f6d715de85a335be7eaca71cc3170",
 };
 
 /**
@@ -476,6 +479,10 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
   // The 122 postcondition (all columns + types + nullability on agent_orchestrators and agent_conversation_supervision, plus all five indexes valid, ready, and unpredicated); editing it re-reviews the migration.
   "122_agent_orchestrator_supervision": {
     "lib/migrations/agent-orchestrator-supervision.ts": "0cc90fcb63e8eddaa357db82c9dc23741eae379d20261320c9f2ae4b38065ea5",
+  },
+  // The 123 postcondition (all columns + types + nullability on agent_orchestrator_wakeups, plus all four indexes valid, ready, and unpredicated); editing it re-reviews the migration.
+  "123_agent_orchestrator_wakeups": {
+    "lib/migrations/agent-orchestrator-wakeups.ts": "a3c124d2fc0438cd63514d408a32429eea21fc35d17be48bbb636ec4a06f2e2b",
   },
 };
 
