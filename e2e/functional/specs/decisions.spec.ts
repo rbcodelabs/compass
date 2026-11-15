@@ -34,9 +34,11 @@ test.describe("Decisions", () => {
 
     await page.goto(`${base}/reviews/${revision.requestId}`)
     await expect(page.getByRole("heading", { name: `Is the brand test ready? ${suffix}` })).toBeVisible()
+    await expect(page.getByText("Keep the experiment in Designing until recruitment is ready.")).toBeVisible()
+
+    await page.getByRole("tab", { name: /Sources & Artifacts/ }).click()
     await expect(page.getByRole("heading", { name: "Sources" })).toBeVisible()
     await expect(page.getByText(`Visitors recognize the product ${suffix}`)).toBeVisible()
-    await expect(page.getByText("Keep the experiment in Designing until recruitment is ready.")).toBeVisible()
 
     await page.getByRole("link", { name: new RegExp(`Visitors recognize the product ${suffix}`) }).click()
     await expect(page).toHaveURL(/detail=assumption/)
@@ -92,6 +94,7 @@ test.describe("Decisions", () => {
 
     await page.getByRole("button", { name: "Approve" }).click()
     await expect(page.getByText(/Decision recorded:/)).toBeVisible()
+    await page.getByRole("tab", { name: /History/ }).click()
     await expect(page.getByRole("heading", { name: "History" })).toBeVisible()
     await page.goto(`${base}/decisions?tab=decided&q=${encodeURIComponent(question)}`)
     await expect(page.getByText(question).first()).toBeVisible()

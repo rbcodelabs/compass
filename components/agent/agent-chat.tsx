@@ -30,6 +30,8 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { APPROVAL_UPDATE_PREFIX, isApprovalUpdateMessage } from "@/lib/tool-approval/messages"
 import { type PlanItem, type SerializedRun, type Subagent, type ToolStep } from "@/lib/agent-run-stream"
 import { AgentActivity, PlanCard } from "@/components/agent/agent-activity"
+import { TrackedDecisionChatCard } from "@/components/agent/tracked-decision-card"
+import { trackedDecisionIdsFromText, trackedDecisionRequestIds } from "@/lib/tracked-decision-chat-detect"
 import { LinkedObjectsCard } from "@/components/agent/linked-objects-card"
 import type { ConversationObjectLink } from "@/lib/links/conversation-links"
 import { useAgentTurn } from "@/components/agent/use-agent-turn"
@@ -1557,6 +1559,12 @@ function MessageRow({
   // A message with no recorded author is this tab's own, not yet reported back.
   const fromOther = shared && isUser && Boolean(message.authorUserId) && message.authorUserId !== userId
   const authorName = fromOther ? (message.authorName ?? "Participant") : null
+  const stepDecisionIds = !isUser && workspaceId
+    ? trackedDecisionRequestIds([...(message.toolCalls ?? []), ...(message.subagents ?? []).flatMap((agent) => agent.steps)])
+    : []
+  const persistedDecisionIds = !isUser && workspaceId && message.content
+    ? trackedDecisionIdsFromText(message.content, basePath).filter((id) => !stepDecisionIds.includes(id))
+    : []
   return (
     <div className={`flex gap-3 ${isUser && !fromOther ? "flex-row-reverse" : "flex-row"}`}>
       <Avatar className="size-7 shrink-0">
@@ -1576,6 +1584,13 @@ function MessageRow({
           }`}
         >
           {!isUser && <AgentActivity toolCalls={message.toolCalls} plan={message.plan} subagents={message.subagents} running={message.id === "streaming"} workspaceId={workspaceId} conversationId={conversationId} basePath={basePath} onInspectSubagent={onInspectSubagent} />}
+          {persistedDecisionIds.length > 0 && (
+            <div className="mb-2.5 flex flex-col gap-2">
+              {persistedDecisionIds.map((id) => (
+                <TrackedDecisionChatCard key={id} requestId={id} basePath={basePath} />
+              ))}
+            </div>
+          )}
           {isUser && isApprovalUpdateMessage(message.content) ? (
             <div data-testid="approval-update-message">
               <p className="mb-1 text-xs font-medium text-text-subtle">Approval update (system-generated)</p>

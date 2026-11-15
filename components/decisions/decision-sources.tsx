@@ -49,7 +49,7 @@ export function parseTrackedDecisionPacket(raw: string): TrackedDecisionPacket |
   } catch { return null }
 }
 
-function typeLabel(type: TrackedSourceType, labels: ResolvedLabels) {
+export function subjectTypeLabel(type: TrackedSourceType, labels: ResolvedLabels = CLASSIC_THINKING_MODEL.labels) {
   if (type === "OPPORTUNITY") return labels.opportunity.singular
   if (type === "SOLUTION") return labels.solution.singular
   return type === "ROADMAP_ITEM" ? "Roadmap item" : type.charAt(0) + type.slice(1).toLowerCase()
@@ -62,7 +62,7 @@ function capturedLabel(updatedAt?: string) {
   return `Captured ${new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }).format(date)}`
 }
 
-function destination(source: TrackedDecisionPacket["entity"], orgSlug: string, workspaceSlug: string) {
+export function subjectDestination(source: Pick<TrackedDecisionPacket["entity"], "type" | "id">, orgSlug: string, workspaceSlug: string) {
   const panelType = PANEL_TYPES[source.type]
   if (panelType) return `?detail=${encodeURIComponent(`${panelType}:${source.id}`)}`
   if (source.type === "DOC") return `/${orgSlug}/${workspaceSlug}/docs/${source.id}`
@@ -70,21 +70,26 @@ function destination(source: TrackedDecisionPacket["entity"], orgSlug: string, w
   return null
 }
 
+export function subjectPanelType(type?: string): string | null {
+  if (!type) return null
+  return PANEL_TYPES[type as TrackedSourceType] ?? null
+}
+
 function SourceRow({ source, orgSlug, workspaceSlug, labels, primary = false }: { source: TrackedDecisionPacket["entity"]; orgSlug: string; workspaceSlug: string; labels: ResolvedLabels; primary?: boolean }) {
-  const href = destination(source, orgSlug, workspaceSlug)
+  const href = subjectDestination(source, orgSlug, workspaceSlug)
   const content = <>
     <span className="min-w-0 flex-1">
       <span className="block whitespace-normal break-words [overflow-wrap:anywhere] font-medium text-foreground">{source.title}</span>
       {capturedLabel(source.updatedAt) && <span className="mt-0.5 block text-xs text-muted-foreground">{capturedLabel(source.updatedAt)}</span>}
     </span>
     <span className="flex shrink-0 flex-col items-start gap-1 sm:items-end">
-      <span className="rounded-full border bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">{typeLabel(source.type, labels)}</span>
+      <span className="rounded-full border bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">{subjectTypeLabel(source.type, labels)}</span>
       {!href && <span className="text-xs text-muted-foreground">Snapshot only</span>}
     </span>
   </>
   const className = "flex min-w-0 max-w-full flex-col items-start gap-2 rounded-md border bg-background px-3 py-2 text-left sm:flex-row sm:items-center sm:gap-3"
   return <li>{href
-    ? <Link aria-label={`${primary ? "Primary: " : ""}${source.title} (${typeLabel(source.type, labels)})`} className={`${className} transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring`} href={href}>{content}</Link>
+    ? <Link aria-label={`${primary ? "Primary: " : ""}${source.title} (${subjectTypeLabel(source.type, labels)})`} className={`${className} transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring`} href={href}>{content}</Link>
     : <div className={className}>{content}</div>}
   </li>
 }

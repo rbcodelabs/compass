@@ -424,6 +424,7 @@ const KNOWN_PRISMA_CREATE_SITES: Record<string, number> = {
   "app/[orgSlug]/[workspaceSlug]/okrs/actions.ts": 1,
   "app/api/mcp/route.ts": 1,
   "e2e/functional/specs/canvas-doc.spec.ts": 3, // three solution fixtures (one card test, two for the tree builder), each created with the e2e workspace's workspaceId
+  "e2e/functional/specs/decision-triage-and-chat.spec.ts": 1, // one solution fixture for Inbox Triage review QA, created with workspace.id
   "e2e/functional/specs/decisions.spec.ts": 1,
   "e2e/functional/specs/objective-linked-opportunities.spec.ts": 1, // one objective fixture helper, created with the e2e workspace's workspaceId
   "e2e/functional/specs/pm-interview.spec.ts": 1,

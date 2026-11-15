@@ -1,12 +1,15 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, within } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-const { findWorkspace, resolvePage, auth, findFirst, findArtifacts, linkedArtifacts, findTaskLinks, eligibleAssignees } = vi.hoisted(() => ({
+const { findWorkspace, resolvePage, auth, findFirst, findPendingQueue, findAgent, findUser, findArtifacts, linkedArtifacts, findTaskLinks, eligibleAssignees } = vi.hoisted(() => ({
   auth: vi.fn(),
   findWorkspace: vi.fn(),
   resolvePage: vi.fn(),
   findFirst: vi.fn(),
+  findPendingQueue: vi.fn(),
+  findAgent: vi.fn(),
+  findUser: vi.fn(),
   findArtifacts: vi.fn(), linkedArtifacts: vi.fn(),
   // Direction B: the decided branch now loads follow-through data.
   findTaskLinks: vi.fn(), eligibleAssignees: vi.fn(),
@@ -17,7 +20,15 @@ vi.mock("@/lib/work-item-page", async () => {
   return { resolveWorkItemPage: async (args: { type: string; param: string }) => { resolvePage(args); return mock.resolveWorkItemPage(args) } }
 })
 vi.mock("@/auth", () => ({ auth }))
-vi.mock("@/lib/db", () => ({ default: () => ({ workspace: { findFirst: findWorkspace }, reviewRequest: { findFirst }, artifact: { findMany: findArtifacts } }) }))
+vi.mock("@/lib/db", () => ({
+  default: () => ({
+    workspace: { findFirst: findWorkspace },
+    reviewRequest: { findFirst, findMany: findPendingQueue },
+    agent: { findUnique: findAgent },
+    user: { findUnique: findUser },
+    artifact: { findMany: findArtifacts },
+  }),
+}))
 vi.mock("@/lib/task-links-read", () => ({ getTasksLinkedTo: findTaskLinks }))
 vi.mock("@/lib/artifacts", () => ({ getDecisionArtifacts: linkedArtifacts }))
 vi.mock("@/lib/task-assignment", () => ({ eligibleTaskAssignees: eligibleAssignees }))
@@ -71,6 +82,9 @@ describe("review request page eyebrow", () => {
     vi.clearAllMocks()
     auth.mockResolvedValue({ user: { id: "user-1" } })
     findWorkspace.mockResolvedValue(member)
+    findPendingQueue.mockResolvedValue([])
+    findAgent.mockResolvedValue(null)
+    findUser.mockResolvedValue(null)
     findTaskLinks.mockResolvedValue([])
     eligibleAssignees.mockResolvedValue([])
     findArtifacts.mockResolvedValue([{ id: "new", title: "New prototype" }])
@@ -109,9 +123,10 @@ describe("review request page eyebrow", () => {
     expect(screen.queryByText(/Legacy system decision/)).toBeNull()
   })
 
-  it("places supporting Artifacts alongside the subject and offers only unlinked active choices", async () => {
+  it("places supporting Artifacts alongside the subject in the Sources & Artifacts tab and offers only unlinked active choices", async () => {
     findFirst.mockResolvedValue(reviewRequest("TRACKED_DECISION"))
     render(await ReviewRequestPage({ params: Promise.resolve({ orgSlug: "acme", workspaceSlug: "product", requestId: "request-1" }) }))
+    fireEvent.click(screen.getByRole("tab", { name: /Sources & Artifacts/ }))
     expect(screen.getByRole("link", { name: "Existing prototype" })).toBeDefined()
     expect(screen.getByRole("combobox", { name: "Artifact to link" })).toBeDefined()
     expect(findArtifacts.mock.calls[0][0].where).toEqual({ workspaceId: "workspace-1", status: "ACTIVE", id: { notIn: ["linked"] } })
@@ -123,10 +138,35 @@ describe("review request page eyebrow", () => {
     request.workspace.organization.members = [{ role: "ADMIN" }] as never[]
     findFirst.mockResolvedValue(request)
     render(await ReviewRequestPage({ params: Promise.resolve({ orgSlug: "acme", workspaceSlug: "product", requestId: "request-1" }) }))
+    fireEvent.click(screen.getByRole("tab", { name: /Sources & Artifacts/ }))
     expect(screen.getByRole("link", { name: "Existing prototype" })).toBeDefined()
     expect(screen.queryByRole("combobox", { name: "Artifact to link" })).toBeNull()
     expect(screen.queryByRole("button", { name: "Unlink Existing prototype" })).toBeNull()
     expect(findArtifacts).not.toHaveBeenCalled()
+  })
+
+  it("renders DEC-n display ID, requester attribution, and pending queue stepper on Inbox Triage", async () => {
+    const request = {
+      ...reviewRequest("TRACKED_DECISION"),
+      seqPrefix: "DEC",
+      seqNumber: 12,
+      state: "PENDING",
+      requestedByAgentId: "agent-1",
+      requestedById: "user-1",
+    }
+    findFirst.mockResolvedValue(request)
+    findAgent.mockResolvedValue({ id: "agent-1", name: "Product Strategist" })
+    findPendingQueue.mockResolvedValue([
+      { id: "request-0", seqPrefix: "DEC", seqNumber: 14 },
+      { id: "request-1", seqPrefix: "DEC", seqNumber: 12 },
+      { id: "request-2", seqPrefix: "DEC", seqNumber: 9 },
+    ])
+    render(await ReviewRequestPage({ params: Promise.resolve({ orgSlug: "acme", workspaceSlug: "product", requestId: "request-1" }) }))
+    expect(screen.getByTestId("decision-display-id").textContent).toBe("DEC-12")
+    expect(screen.getByText("Requested by Product Strategist")).toBeDefined()
+    expect(screen.getByText("2 of 3 pending")).toBeDefined()
+    expect(screen.getByRole("link", { name: "Previous pending decision" }).getAttribute("href")).toBe("/acme/product/reviews/DEC-14")
+    expect(screen.getByRole("link", { name: "Next pending decision" }).getAttribute("href")).toBe("/acme/product/reviews/DEC-9")
   })
 })
 
@@ -163,10 +203,18 @@ describe("review request page — \"Send to agent\" on a decided banner", () => 
     expect(findTaskLinks).toHaveBeenCalledWith(expect.anything(), { workspaceIds: ["workspace-1"], linkedType: "DECISION", linkedIds: ["request-1"] })
   })
 
-  it("hides the link when the decided TRACKED_DECISION outcome is REJECT", async () => {
-    findFirst.mockResolvedValue(decidedRequest("TRACKED_DECISION", "REJECT"))
+  it("hides the link when the decided TRACKED_DECISION outcome is REJECT and renders danger outcome styling", async () => {
+    const req = decidedRequest("TRACKED_DECISION", "REJECT")
+    req.currentRevision.decisions = [
+      { option: { label: "Reject", outcomeClass: "REJECT" }, actorUserId: "user-9", actorRole: "ADMIN", decidedAt: new Date("2026-09-01T00:00:00Z"), rationale: "Out of scope." },
+    ] as never[]
+    findUser.mockResolvedValue({ name: "Rick Bowman", email: "rick@example.com" })
+    findFirst.mockResolvedValue(req)
     render(await ReviewRequestPage({ params: Promise.resolve({ orgSlug: "acme", workspaceSlug: "product", requestId: "request-1" }) }))
     expect(screen.queryByRole("link", { name: /send to agent/i })).toBeNull()
+    const banner = screen.getByTestId("decision-outcome-banner")
+    expect(banner.getAttribute("data-outcome")).toBe("REJECT")
+    expect(banner.textContent).toContain("by Rick Bowman")
   })
 
   it("hides the link when the decided TRACKED_DECISION outcome is REQUEST_CHANGES", async () => {

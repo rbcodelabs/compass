@@ -33,8 +33,11 @@ test.describe("Decision supporting artifacts", () => {
       const artifactId = artifactUrl.split("/").at(-1)!
 
       await page.goto(decisionUrl)
-      await expect(page.getByLabel("Artifact to link")).toBeVisible()
-      await page.getByLabel("Artifact to link").selectOption(artifactId)
+      await page.getByRole("tab", { name: /Sources & Artifacts/ }).click()
+      const artifactPicker = page.getByRole("combobox", { name: "Artifact to link" })
+      await expect(artifactPicker).toBeVisible()
+      await artifactPicker.click()
+      await page.getByRole("option", { name: title, exact: true }).click()
       await page.getByRole("button", { name: "Link", exact: true }).click()
       const artifactLink = page.getByRole("link", { name: title, exact: true })
       await expect(artifactLink).toBeVisible()
@@ -56,6 +59,7 @@ test.describe("Decision supporting artifacts", () => {
       }
       await page.getByRole("link", { name: question, exact: true }).click()
       await expect(page).toHaveURL(DECISION_PAGE)
+      await page.getByRole("tab", { name: /Sources & Artifacts/ }).click()
 
       // Replace through the real upload action, then follow the backlink without a hard reload.
       // Each hop between these two pages is a client-side navigation, and both
@@ -70,6 +74,7 @@ test.describe("Decision supporting artifacts", () => {
       await expect(activePreview.getByRole("button", { name: "Try direction A" })).toHaveCount(0)
       await page.getByRole("link", { name: question, exact: true }).click()
       await expect(page).toHaveURL(DECISION_PAGE)
+      await page.getByRole("tab", { name: /Sources & Artifacts/ }).click()
       await expect(page.getByText(/Revision 2/i).first()).toBeVisible()
       expect(await snapshot()).toEqual(before)
 
@@ -89,6 +94,7 @@ test.describe("Decision supporting artifacts", () => {
       await expect(page.getByText("This artifact is archived.")).toBeVisible()
       await page.getByRole("link", { name: question, exact: true }).click()
       await expect(page).toHaveURL(DECISION_PAGE)
+      await page.getByRole("tab", { name: /Sources & Artifacts/ }).click()
       await expect(artifactLink).toBeVisible()
       await expect(page.getByText("Archived", { exact: true }).first()).toBeVisible()
       await page.getByRole("button", { name: /Unlink/ }).click()

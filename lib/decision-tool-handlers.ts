@@ -65,13 +65,13 @@ export type ResolvedRequester = { type: "USER" | "AGENT"; id: string; name: stri
  * suggested-assignee default. See feedback f546cf13-e6a0-4213-8be9-0cfdebbf4ff7
  * and the requested_by_agent_id column comment in prisma/schema.prisma.
  */
-async function resolveRequester(request: { requestedById: string | null; requestedByAgentId: string | null }): Promise<ResolvedRequester> {
+export async function resolveRequester(request: { requestedById?: string | null; requestedByAgentId?: string | null }): Promise<ResolvedRequester> {
   const prisma = getPrisma()
-  if (request.requestedByAgentId) {
+  if (request.requestedByAgentId && prisma.agent?.findUnique) {
     const agent = await prisma.agent.findUnique({ where: { id: request.requestedByAgentId }, select: { id: true, name: true } })
     if (agent) return { type: "AGENT", id: agent.id, name: agent.name }
   }
-  if (request.requestedById) {
+  if (request.requestedById && prisma.user?.findUnique) {
     const user = await prisma.user.findUnique({ where: { id: request.requestedById }, select: { id: true, name: true, email: true } })
     if (user) return { type: "USER", id: user.id, name: user.name ?? user.email }
   }
