@@ -2,6 +2,10 @@ import { test, expect } from "../fixtures/index";
 import { isolatedE2EConnectionString } from "../fixtures/isolated-database";
 import pg from "pg";
 import { randomUUID } from "node:crypto";
+import { mkdirSync } from "node:fs";
+
+const SHOTS_DIR = "/tmp/compass-pr6-screenshots";
+mkdirSync(SHOTS_DIR, { recursive: true });
 
 /**
  * Milestone 2 (Phases 4–6 / PRs 4–6) Functional E2E:
@@ -245,7 +249,7 @@ test("Needs you column, ProposedReply & Decision inline inbox cards, Orchestrato
     await expect(page.getByTestId("orchestrator-dock-badge")).toBeVisible();
 
     // Screenshot 1: Desktop Board with Needs you column (ProposedReply + Decision + ManagerNotes) & OrchestratorDock pill
-    await page.screenshot({ path: test.info().outputPath("01-pr6-desktop-board-needs-you.png"), fullPage: false });
+    await page.screenshot({ path: `${SHOTS_DIR}/01-pr6-desktop-board-needs-you.png`, fullPage: false });
 
     // Toggle "Only needs you" filter chip
     const onlyNeedsYouBtn = page.getByTestId("agent-board-only-needs-you");
@@ -269,7 +273,7 @@ test("Needs you column, ProposedReply & Decision inline inbox cards, Orchestrato
     await expect(replyCard).toHaveAttribute("data-highlighted", "true");
 
     // Screenshot 2: Desktop Board with OrchestratorDock sheet open + [[thread:...]] hover highlight active
-    await page.screenshot({ path: test.info().outputPath("02-pr6-desktop-orchestrator-dock-sheet.png"), fullPage: false });
+    await page.screenshot({ path: `${SHOTS_DIR}/02-pr6-desktop-orchestrator-dock-sheet.png`, fullPage: false });
 
     // Close dock sheet to interact with inline cards
     await dockSheet.getByTestId("orchestrator-dock-close").click();
@@ -302,7 +306,7 @@ test("Needs you column, ProposedReply & Decision inline inbox cards, Orchestrato
     await expect(board).toBeVisible();
     await page.getByTestId("orchestrator-dock-orb").click();
     await expect(page.getByTestId("orchestrator-dock-sheet")).toBeVisible();
-    await page.screenshot({ path: test.info().outputPath("03-pr6-mobile-board-dock.png"), fullPage: false });
+    await page.screenshot({ path: `${SHOTS_DIR}/03-pr6-mobile-board-dock.png`, fullPage: false });
 
     // Verify Workspace Settings -> Agent orchestrators panel on Desktop (1280x800) and Mobile (390x844)
     await page.setViewportSize({ width: 1280, height: 800 });
@@ -310,12 +314,12 @@ test("Needs you column, ProposedReply & Decision inline inbox cards, Orchestrato
     const orchSettingsPanel = page.getByTestId("agent-orchestrators-panel");
     await orchSettingsPanel.scrollIntoViewIfNeeded();
     await expect(orchSettingsPanel).toBeVisible({ timeout: 30_000 });
-    await page.screenshot({ path: test.info().outputPath("04-pr5-desktop-settings-orchestrators.png"), fullPage: false });
+    await page.screenshot({ path: `${SHOTS_DIR}/04-pr5-desktop-settings-orchestrators.png`, fullPage: false });
 
     await page.setViewportSize({ width: 390, height: 844 });
     await orchSettingsPanel.scrollIntoViewIfNeeded();
     await expect(orchSettingsPanel).toBeVisible();
-    await page.screenshot({ path: test.info().outputPath("05-pr5-mobile-settings-orchestrators.png"), fullPage: false });
+    await page.screenshot({ path: `${SHOTS_DIR}/05-pr5-mobile-settings-orchestrators.png`, fullPage: false });
   } finally {
     await pool
       .query(`DELETE FROM "${S}".agent_orchestrator_wakeups WHERE target_conversation_id = ANY($1::uuid[])`, [allConvIds])

@@ -11,6 +11,7 @@
  */
 
 import type { AppPrismaClient } from "@/lib/db"
+import { authorColumn } from "@/lib/agent-attribution"
 import { isMissingTable } from "@/lib/batched-delete"
 import { resolveConversationAccess } from "@/lib/agent-conversation-access"
 import {
@@ -24,6 +25,37 @@ import type {
   AgentBoardCardPendingDecision,
   AgentBoardCardProposedReply,
 } from "@/lib/agent-board"
+
+async function persistSupervisionUserMessage(
+  prisma: AppPrismaClient,
+  {
+    conversationId,
+    userId,
+    content,
+    now,
+  }: {
+    conversationId: string
+    userId: string
+    content: string
+    now: Date
+  },
+): Promise<string> {
+  const authorData = await authorColumn(prisma, userId)
+  const saved = await prisma.agentMessage.create({
+    data: {
+      conversationId,
+      role: "user",
+      content,
+      createdAt: now,
+      ...authorData,
+    },
+    select: { id: true },
+  })
+  await prisma.agentConversation
+    .update({ where: { id: conversationId }, data: { updatedAt: now }, select: { id: true } })
+    .catch(() => {})
+  return saved.id
+}
 
 export class AgentSupervisionError extends Error {
   readonly status: number
@@ -232,12 +264,20 @@ export async function approveProposedReply({
     if (!isMissingSchemaObject(error)) throw error
   }
 
+  const existingUserMessageId = await persistSupervisionUserMessage(prisma, {
+    conversationId,
+    userId,
+    content: finalText,
+    now,
+  })
+
   const continuation = await startConversationContinuationRun(
     {
       workspaceId,
       conversationId,
       userId,
       message: finalText,
+      existingUserMessageId,
       deferLaunch: true,
     },
     continuationDeps,
@@ -424,6 +464,12 @@ export async function answerAgentDecision({
           userId,
         })
   const dispatchConversationId = targetAccess ? targetConversationId : item.conversationId
+  const existingUserMessageId = await persistSupervisionUserMessage(prisma, {
+    conversationId: dispatchConversationId,
+    userId,
+    content: formattedMessage,
+    now,
+  })
 
   const continuation = await startConversationContinuationRun(
     {
@@ -431,6 +477,7 @@ export async function answerAgentDecision({
       conversationId: dispatchConversationId,
       userId,
       message: formattedMessage,
+      existingUserMessageId,
       deferLaunch: true,
     },
     continuationDeps,
@@ -744,12 +791,20 @@ export async function sendOrchestratorDockMessage({
       select: { id: true, conversationId: true },
     })
 
+    const existingUserMessageId = await persistSupervisionUserMessage(prisma, {
+      conversationId,
+      userId,
+      content: cleanMessage,
+      now,
+    })
+
     const continuation = await startConversationContinuationRun(
       {
         workspaceId,
         conversationId,
         userId,
         message: cleanMessage,
+        existingUserMessageId,
         deferLaunch: true,
       },
       continuationDeps,
