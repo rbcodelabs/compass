@@ -87,9 +87,10 @@ export async function assertAgentOrchestratorWakeupsMigration(client: PoolClient
       `SELECT i.indisvalid AS valid, i.indisready AS ready, i.indisunique AS unique,
               t.relname AS table_name,
               ARRAY(
-                SELECT a.attname
+                SELECT a.attname::text
                 FROM unnest(i.indkey) WITH ORDINALITY AS k(attnum, ord)
                 JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum
+                WHERE k.ord <= i.indnkeyatts
                 ORDER BY k.ord
               ) AS columns,
               pg_get_expr(i.indpred, i.indrelid) AS predicate,

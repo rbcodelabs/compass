@@ -482,7 +482,7 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
   },
   // The 123 postcondition (all columns + types + nullability on agent_orchestrator_wakeups, plus all four indexes valid, ready, and unpredicated); editing it re-reviews the migration.
   "123_agent_orchestrator_wakeups": {
-    "lib/migrations/agent-orchestrator-wakeups.ts": "a3c124d2fc0438cd63514d408a32429eea21fc35d17be48bbb636ec4a06f2e2b",
+    "lib/migrations/agent-orchestrator-wakeups.ts": "b20dde3d4ef9a62f91fe843633d3ec7f84f3203e6b4a214dd8e3b1df07861426",
   },
 };
 
