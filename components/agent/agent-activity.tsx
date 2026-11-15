@@ -8,7 +8,9 @@ import { useState } from "react"
 import { AlertCircle, Check, ChevronRight, Circle, ListChecks, Loader2, Users } from "lucide-react"
 import type { PlanItem, StepStatus, Subagent, ToolStep } from "@/lib/agent-run-stream"
 import { approvalRequestIds } from "@/lib/tool-approval/chat-detect"
+import { trackedDecisionRequestIds } from "@/lib/tracked-decision-chat-detect"
 import { ToolApprovalCard } from "@/components/tool-approval/approval-card"
+import { TrackedDecisionChatCard } from "@/components/agent/tracked-decision-card"
 
 export type TurnActivity = { toolCalls?: ToolStep[]; plan?: PlanItem[]; subagents?: Subagent[] }
 
@@ -166,10 +168,13 @@ function SubagentCard({ agent, onInspectSubagent }: { agent: Subagent; onInspect
 
 export function AgentActivity({ toolCalls = [], plan = [], subagents = [], running, workspaceId, conversationId = null, basePath, onInspectSubagent }: TurnActivity & { running: boolean; /** Where approval cards look their request up; without it no card is drawn. */ workspaceId?: string; conversationId?: string | null; /** `/org/workspace`, for the card's fallback link. */ basePath?: string; onInspectSubagent?: (subagentId: string) => void }) {
   if (!hasActivity({ toolCalls, plan, subagents })) return null
-  const approvalIds = workspaceId ? approvalRequestIds([...toolCalls, ...subagents.flatMap((agent) => agent.steps)]) : []
+  const allSteps = [...toolCalls, ...subagents.flatMap((agent) => agent.steps)]
+  const approvalIds = workspaceId ? approvalRequestIds(allSteps) : []
+  const decisionIds = workspaceId ? trackedDecisionRequestIds(allSteps) : []
   return (
     <div className="mb-2 flex flex-col gap-2 border-b border-default pb-2">
       {workspaceId && approvalIds.map((id) => <ToolApprovalCard key={id} workspaceId={workspaceId} requestId={id} conversationId={conversationId} approvalsHref={basePath ? `${basePath}/approvals` : undefined} />)}
+      {workspaceId && decisionIds.map((id) => <TrackedDecisionChatCard key={id} requestId={id} basePath={basePath} />)}
       <PlanCard plan={plan} running={running} />
       {subagents.length > 0 && (
         <section aria-label="Subagents" className="flex flex-col gap-1.5">

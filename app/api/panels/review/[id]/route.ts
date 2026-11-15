@@ -6,13 +6,16 @@ import { canDecideReview, isOrgAdminRole } from "@/lib/roles"
 import { isChoiceActionKey, parseDecisionAnswers, parsePacketQuestions } from "@/lib/tracked-decision-types"
 import { parseTrackedDecisionPacket } from "@/components/decisions/decision-sources"
 import { excludeToolApprovals } from "@/lib/tool-approval/gate"
+import { displayIdFromRow } from "@/lib/work-item-ids"
+import { resolveRequester } from "@/lib/decision-tool-handlers"
+import { resolveDeciderName } from "@/lib/decision-review-view"
 
 /**
- * Detail-panel data source for a decision request. GET
+ * Detail-panel and inline chat-card data source for a decision request. GET
  *   /api/panels/review/<uuid>?orgSlug=<>&workspaceSlug=<>
  * Same two-layer rule as /api/panels/entity: a session, plus membership of the named workspace (or org admin),
  * then a lookup scoped to that workspace — a foreign or missing request is the same 404.
- * Decisions are addressed by UUID only, so this sits beside the entity route rather than in it.
+ * `excludeToolApprovals` guarantees a TOOL_APPROVAL gate is never exposed on this surface.
  */
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth()
@@ -40,10 +43,15 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   const isTracked = request.gateType === "TRACKED_DECISION"
   const tracked = isTracked ? parseTrackedDecisionPacket(revision.packetJson) : null
   const retired = ["NOW_COMMITMENT", "NOW_POLICY_ACTIVATION", "BUILDING_INVESTMENT", "BUILDING_INVESTMENT_REVOCATION"].includes(request.gateType)
+  const [requester, decidedByName] = await Promise.all([
+    isTracked ? resolveRequester(request) : Promise.resolve(null),
+    decided ? resolveDeciderName(decided) : Promise.resolve(null),
+  ])
 
   return NextResponse.json({
     data: {
       id: request.id,
+      displayId: displayIdFromRow("reviewRequest", request),
       workspaceId: request.workspaceId,
       state: request.state,
       isTracked,
@@ -52,8 +60,12 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       title: revision.title,
       summary: isTracked ? null : revision.summary,
       context: tracked?.context ?? (isTracked ? revision.summary : null),
-      linkedTo: tracked?.entity ? { type: tracked.entity.type, title: tracked.entity.title } : null,
+      linkedTo: tracked?.entity ? { type: tracked.entity.type, id: tracked.entity.id, title: tracked.entity.title } : null,
+      sourcesCount: tracked?.sources.length ?? 0,
+      requester,
       revisionId: revision.id,
+      revisionNumber: revision.revisionNumber,
+      createdAt: revision.createdAt ? revision.createdAt.toISOString() : null,
       fingerprint: revision.fingerprint,
       canDecide: isTracked && canDecideReview(memberRole, orgRole),
       options: revision.options.map((o) => ({ id: o.id, label: o.label, outcomeClass: o.outcomeClass, actionKey: o.actionKey ?? undefined, description: o.description })),
@@ -65,6 +77,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
             description: decided.option.description,
             outcomeClass: decided.option.outcomeClass,
             actorRole: decided.actorRole,
+            decidedByName: decidedByName ?? decided.actorRole,
             decidedAt: decided.decidedAt.toISOString(),
             rationale: decided.rationale,
             answers: parseDecisionAnswers(decided.answersJson),

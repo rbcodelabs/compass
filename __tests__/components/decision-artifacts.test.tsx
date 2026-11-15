@@ -18,9 +18,10 @@ it("renders live supporting material, current revision and archive status", () =
   expect(screen.getByText(/not frozen approval evidence/)).toBeInTheDocument()
   expect(screen.queryByRole("option", { name: "Existing prototype" })).toBeNull()
 })
-it("links through an accessible selector then refreshes", async () => {
+it("links through the governed Select combobox then refreshes", async () => {
   render(<DecisionArtifacts {...props} />)
-  fireEvent.change(screen.getByRole("combobox", { name: "Artifact to link" }), { target: { value: "new" } })
+  fireEvent.click(screen.getByRole("combobox", { name: "Artifact to link" }))
+  fireEvent.click(await screen.findByRole("option", { name: "New prototype" }))
   fireEvent.click(screen.getByRole("button", { name: "Link" }))
   await waitFor(() => expect(mocks.link).toHaveBeenCalledWith("workspace", "new", "decision", "/acme/product/docs"))
   expect(mocks.refresh).toHaveBeenCalled()
@@ -44,7 +45,7 @@ it("disables controls while a request is pending", async () => {
   render(<DecisionArtifacts {...props} />)
   fireEvent.click(screen.getByRole("button", { name: "Unlink Existing prototype" }))
   await waitFor(() => expect(screen.getByRole("button", { name: "Unlink Existing prototype" })).toBeDisabled())
-  expect(screen.getByRole("combobox")).toBeDisabled()
+  expect(screen.getByRole("combobox", { name: "Artifact to link" })).toBeDisabled()
   finish()
   await waitFor(() => expect(mocks.refresh).toHaveBeenCalled())
 })
