@@ -4023,7 +4023,7 @@ model UiCommand {
 
 /// Durable two-stage wakeup state machine for an AgentOrchestrator (migration 123).
 /// Coalesces thread completion events across a 60s quiet wait (0s on ERROR) and 12s batch window.
-/// DSQL-safe: no @relation, no @updatedAt, TIMESTAMP(3), and ASYNC indexes.
+/// DSQL-safe: no relations, explicit updatedAt writes, TIMESTAMP(3), and ASYNC indexes.
 model AgentOrchestratorWakeup {
   id                   String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   orchestratorId       String    @map("orchestrator_id") @db.Uuid
