@@ -4020,3 +4020,31 @@ model UiCommand {
   @@index([sessionId, status, createdAt], map: "idx_ui_commands_session_status")
   @@map("ui_commands")
 }
+
+/// Durable two-stage wakeup state machine for an AgentOrchestrator (migration 123).
+/// Coalesces thread completion events across a 60s quiet wait (0s on ERROR) and 12s batch window.
+/// DSQL-safe: no relations, explicit updatedAt writes, TIMESTAMP(3), and ASYNC indexes.
+model AgentOrchestratorWakeup {
+  id                   String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orchestratorId       String    @map("orchestrator_id") @db.Uuid
+  workspaceId          String    @map("workspace_id") @db.Uuid
+  targetConversationId String    @map("target_conversation_id") @db.Uuid
+  /// DONE | ERROR
+  eventStatus          String    @default("DONE") @map("event_status") @db.VarChar(20)
+  targetUpdatedAtIso   String    @map("target_updated_at_iso") @db.VarChar(64)
+  quietUntil           DateTime  @map("quiet_until")
+  flushAfter           DateTime? @map("flush_after")
+  generation           Int       @default(1)
+  busyRetries          Int       @default(0) @map("busy_retries")
+  /// QUIET_WAIT | BATCH_WAIT | HELD_BUSY | DISPATCHED | DROPPED
+  state                String    @default("QUIET_WAIT") @db.VarChar(24)
+  dispatchedRunId      String?   @map("dispatched_run_id") @db.Uuid
+  createdAt            DateTime  @default(now()) @map("created_at")
+  updatedAt            DateTime  @default(now()) @map("updated_at")
+
+  @@unique([orchestratorId, targetConversationId], map: "agent_orchestrator_wakeups_orch_target_key")
+  @@index([state, quietUntil], map: "idx_agent_orchestrator_wakeups_state_quiet")
+  @@index([state, flushAfter], map: "idx_agent_orchestrator_wakeups_state_flush")
+  @@index([workspaceId, orchestratorId], map: "idx_agent_orchestrator_wakeups_workspace_orch")
+  @@map("agent_orchestrator_wakeups")
+}

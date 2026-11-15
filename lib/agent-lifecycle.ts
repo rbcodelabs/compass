@@ -7,6 +7,7 @@ import {
   deleteWorkspaceAgentOrchestrators,
   deleteWorkspaceConversationSupervision,
 } from "@/lib/orchestrator/scope";
+import { deleteWorkspaceAgentOrchestratorWakeups } from "@/lib/orchestrator/wakeups";
 import { deleteWorkspaceAgentSessions } from "@/lib/agent-session";
 import { deleteWorkspaceConversationReviews } from "@/lib/agent-board-data";
 
@@ -33,6 +34,7 @@ export async function deleteWorkspaceAgentData(prisma: AppPrismaClient, workspac
   await deleteWorkspaceAgentChildRuns(prisma, workspaceId);
   await deleteWorkspaceAgentInboxItems(prisma, workspaceId);
   await deleteWorkspaceAgentScheduledWakeups(prisma, workspaceId);
+  await deleteWorkspaceAgentOrchestratorWakeups(prisma, workspaceId);
   await deleteWorkspaceConversationSupervision(prisma, workspaceId);
   await deleteWorkspaceAgentOrchestrators(prisma, workspaceId);
   if (await agentRunsAvailable(prisma)) {

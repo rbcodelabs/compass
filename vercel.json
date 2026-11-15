@@ -11,6 +11,10 @@
       "schedule": "* * * * *"
     },
     {
+      "path": "/api/cron/agent-orchestrator",
+      "schedule": "* * * * *"
+    },
+    {
       "path": "/api/cron/agent-retention",
       "schedule": "30 6 * * *"
     }

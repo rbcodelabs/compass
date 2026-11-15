@@ -158,7 +158,7 @@ async function resolveWorkspace(orgSlug: string, workspaceSlug: string) {
   });
 
   if (!workspace) throw new Error("Workspace not found");
-  return { prisma, workspaceId: workspace.id, organizationId: workspace.organizationId };
+  return { prisma, workspaceId: workspace.id, organizationId: workspace.organizationId, userId: session.user.id };
 }
 
 // ─── Workspace Members ─────────────────────────────────────────────────────────
@@ -1102,4 +1102,139 @@ export async function updateMemberWorkspaceReadOnlyAccess(
 
   revalidatePath(`/${orgSlug}/${workspaceSlug}/settings`);
   revalidatePath("/", "layout");
+}
+
+// ─── Personal Agent Orchestrators (Migration 122) ─────────────────────────────
+
+export async function updatePersonalOrchestratorConfig(
+  orgSlug: string,
+  workspaceSlug: string,
+  input: {
+    scopeType: "WORKSPACE" | "SQUAD";
+    squadId?: string | null;
+    enabled: boolean;
+    wakeOnActivity: boolean;
+    heartbeatEnabled: boolean;
+    heartbeatMinutes: number;
+    escalationsEnabled?: boolean;
+    agentId?: string | null;
+  }
+): Promise<{
+  ok: true;
+  id: string;
+  conversationId: string | null;
+  enabled: boolean;
+  wakeOnActivity: boolean;
+  heartbeatEnabled: boolean;
+  heartbeatMinutes: number;
+  escalationsEnabled: boolean;
+}> {
+  const { prisma, workspaceId, userId } = await resolveWorkspace(orgSlug, workspaceSlug);
+  const now = new Date();
+  const scopeType = input.scopeType === "SQUAD" ? "SQUAD" : "WORKSPACE";
+  let scopeKey = "workspace";
+  let titleHint = "Workspace Orchestrator";
+
+  if (scopeType === "SQUAD") {
+    const squadId = input.squadId?.trim();
+    if (!squadId) throw new Error("squadId is required for Squad orchestrators");
+    const squad = await prisma.squad.findFirst({
+      where: { id: squadId, workspaceId },
+      select: { id: true, name: true },
+    });
+    if (!squad) throw new Error("Squad not found in this workspace");
+    scopeKey = squad.id;
+    titleHint = `${squad.name} Orchestrator`;
+  }
+
+  const heartbeatMinutes = Math.max(
+    5,
+    Math.min(1440, Math.round(Number.isFinite(input.heartbeatMinutes) ? input.heartbeatMinutes : 60))
+  );
+  const enabled = input.enabled === true;
+  const wakeOnActivity = input.wakeOnActivity === true;
+  const heartbeatEnabled = input.heartbeatEnabled === true;
+  const escalationsEnabled = input.escalationsEnabled !== false;
+
+  const existing = await prisma.agentOrchestrator.findFirst({
+    where: {
+      userId,
+      workspaceId,
+      scopeType,
+      scopeKey,
+    },
+    select: {
+      id: true,
+      conversationId: true,
+    },
+  });
+
+  let conversationId = existing?.conversationId ?? null;
+  if (enabled && !conversationId) {
+    const createdConv = await prisma.agentConversation.create({
+      data: {
+        workspaceId,
+        userId,
+        title: titleHint,
+        squadId: scopeType === "SQUAD" ? scopeKey : null,
+        createdAt: now,
+        updatedAt: now,
+      },
+      select: { id: true },
+    });
+    conversationId = createdConv.id;
+  }
+
+  let savedId: string;
+  if (existing) {
+    const updated = await prisma.agentOrchestrator.update({
+      where: { id: existing.id },
+      data: {
+        conversationId,
+        ...(input.agentId !== undefined ? { agentId: input.agentId } : {}),
+        enabled,
+        wakeOnActivity,
+        heartbeatEnabled,
+        heartbeatMinutes,
+        escalationsEnabled,
+        updatedAt: now,
+      },
+      select: { id: true },
+    });
+    savedId = updated.id;
+  } else {
+    const created = await prisma.agentOrchestrator.create({
+      data: {
+        workspaceId,
+        userId,
+        scopeType,
+        scopeKey,
+        conversationId,
+        agentId: input.agentId ?? null,
+        enabled,
+        wakeOnActivity,
+        heartbeatEnabled,
+        heartbeatMinutes,
+        escalationsEnabled,
+        createdAt: now,
+        updatedAt: now,
+      },
+      select: { id: true },
+    });
+    savedId = created.id;
+  }
+
+  revalidatePath(`/${orgSlug}/${workspaceSlug}/settings`);
+  revalidatePath(`/${orgSlug}/${workspaceSlug}/agent`);
+
+  return {
+    ok: true,
+    id: savedId,
+    conversationId,
+    enabled,
+    wakeOnActivity,
+    heartbeatEnabled,
+    heartbeatMinutes,
+    escalationsEnabled,
+  };
 }
