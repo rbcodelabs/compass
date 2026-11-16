@@ -65,6 +65,7 @@ function buildProps(overrides: Partial<Parameters<typeof ArtifactDetail>[0]> = {
     shareState: {
       enabled: false,
       enabledAt: null,
+      passwordChangedAt: null,
       commentsEnabled: false,
       commentingAvailable: true,
       events: [],
@@ -240,7 +241,7 @@ describe("ArtifactDetail full-bleed stage & inspector drawer (SOL-101)", () => {
     rerender(
       <ArtifactDetail
         {...buildProps({
-          shareState: { enabled: true, enabledAt: "2026-11-16T20:00:00Z", commentsEnabled: false, commentingAvailable: true, events: [] },
+          shareState: { enabled: true, enabledAt: "2026-11-16T20:00:00Z", passwordChangedAt: "2026-11-16T20:00:00Z", commentsEnabled: false, commentingAvailable: true, events: [] },
         })}
       />,
     )
