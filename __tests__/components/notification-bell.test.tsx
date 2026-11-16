@@ -5,15 +5,16 @@ import "@testing-library/jest-dom/vitest"
 
 let pathname = "/acme/ws/okrs"
 const routerPush = vi.fn()
+const openPanel = vi.fn()
 vi.mock("next/navigation", () => ({ usePathname: () => pathname, useSearchParams: () => new URLSearchParams(), useRouter: () => ({ push: routerPush }) }))
 vi.mock("@/lib/actions/auth-actions", () => ({ signOutAction: vi.fn() }))
 vi.mock("@/lib/meta-feedback-actions", () => ({ sendCompassFeedback: vi.fn() }))
-vi.mock("@/components/panels/panel-context", () => ({ usePanelContext: () => ({ openPanel: vi.fn() }) }))
+vi.mock("@/components/panels/panel-context", () => ({ usePanelContext: () => ({ openPanel }) }))
 
 import { NOTIFICATIONS_CHANGED_EVENT, NotificationBellHeaderLink, NotificationBellIconButton } from "@/components/notifications/notification-bell"
+import { LiveNotificationCardHost } from "@/components/notifications/live-notification-card-host"
 import { POLL_INTERVAL_MS, resetLiveNotificationStoresForTests } from "@/lib/notifications-live-client"
-import { resetUndoToasts } from "@/lib/ui/undo-toast"
-import { UndoToastHost } from "@/components/ui/undo-toast-host"
+import { resetLiveNotificationCards } from "@/lib/ui/live-notification-cards"
 import { Sidebar } from "@/components/sidebar"
 import { MobileHeader } from "@/components/mobile-header"
 import { SidebarProvider } from "@/components/ui/sidebar"
@@ -29,15 +30,16 @@ const renderIcon = (over: Partial<typeof props> = {}) =>
 beforeEach(() => {
   pathname = "/acme/ws/okrs"
   routerPush.mockReset()
+  openPanel.mockReset()
   resetLiveNotificationStoresForTests()
-  resetUndoToasts()
+  resetLiveNotificationCards()
   vi.stubGlobal("fetch", fetchMock)
   fetchMock.mockReturnValue(unread(3))
 })
 afterEach(() => {
   cleanup()
   resetLiveNotificationStoresForTests()
-  resetUndoToasts()
+  resetLiveNotificationCards()
   vi.useRealTimers()
   vi.clearAllMocks()
   vi.unstubAllGlobals()
@@ -83,7 +85,7 @@ describe("NotificationBellIconButton (beside Search)", () => {
     expect(fetchMock).toHaveBeenCalledWith(expect.stringMatching(/^\/api\/notifications\/unread\?orgSlug=acme&workspaceSlug=ws&since=/))
   })
 
-  it("polls every 20s, updates the badge, and surfaces a live Open toast for new personal alerts", async () => {
+  it("polls every 20s, updates the badge, and surfaces a top-right live card that opens the detail panel in place", async () => {
     vi.useFakeTimers()
     vi.spyOn(document, "hasFocus").mockReturnValue(true)
     fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
@@ -99,11 +101,19 @@ describe("NotificationBellIconButton (beside Search)", () => {
             {
               id: "live-1",
               kind: "ASSIGNED",
-              sentence: "Ada assigned this to you",
               subjectType: "TASK",
+              subjectId: "t-99",
               subjectLabel: "Task",
+              displayId: "TASK-99",
               title: "Review release plan",
               path: "tasks/t-99",
+              priority: "HIGH",
+              status: "TODO",
+              actorType: "USER",
+              actorName: "Ada",
+              action: "assigned this to you",
+              sentence: "Ada assigned this to you",
+              commentSnippet: null,
               createdAt: "2026-11-15T12:00:10.000Z",
             },
           ],
@@ -115,7 +125,7 @@ describe("NotificationBellIconButton (beside Search)", () => {
       <TooltipProvider>
         <SidebarProvider>
           <NotificationBellIconButton {...props} initialCount={0} />
-          <UndoToastHost />
+          <LiveNotificationCardHost orgSlug="acme" workspaceSlug="ws" />
         </SidebarProvider>
       </TooltipProvider>,
     )
@@ -125,14 +135,15 @@ describe("NotificationBellIconButton (beside Search)", () => {
     })
 
     expect(screen.getByTestId("notification-count")).toHaveTextContent("4")
-    const toast = screen.getByTestId("undo-toast")
-    expect(toast).toHaveTextContent("Ada assigned this to you: Review release plan")
+    const card = screen.getByTestId("live-notification-card")
+    expect(card).toHaveTextContent("TASK-99")
+    expect(card).toHaveTextContent("Review release plan")
 
     await act(async () => {
-      screen.getByRole("button", { name: "Open" }).click()
+      screen.getByTestId("live-notification-open").click()
       await Promise.resolve()
     })
-    expect(routerPush).toHaveBeenCalledWith("/acme/ws/tasks/t-99")
+    expect(openPanel).toHaveBeenCalledWith("task", "t-99")
   })
 
   it("deduplicates polling and state across desktop and mobile bells mounted in the same workspace", async () => {

@@ -3,7 +3,11 @@
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react"
 import { isDesktopNotificationsActive } from "@/lib/desktop-notifications-pref"
 import type { LiveNotificationAlert } from "@/lib/notifications"
-import { pushUndoToast } from "@/lib/ui/undo-toast"
+import {
+  clearLiveNotificationCards,
+  dismissLiveNotificationCard,
+  pushLiveNotificationCard,
+} from "@/lib/ui/live-notification-cards"
 
 /** Dispatched after notifications are marked read so the bell updates immediately. */
 export const NOTIFICATIONS_CHANGED_EVENT = "compass:notifications-changed"
@@ -31,6 +35,7 @@ type BroadcastMessage =
   | { type: "focus"; tabId: string; focused: boolean }
   | { type: "bye"; tabId: string }
   | { type: "alerted"; tabId: string; ids: string[] }
+  | { type: "dismissed"; tabId: string; id: string }
   | {
       type: "sync"
       tabId: string
@@ -102,8 +107,47 @@ export type WorkspaceLiveStore = {
   subscriberCount: () => number
   setNavigate: (navigate: ((href: string) => void) | undefined) => void
   notifyPathname: (pathname: string) => void
+  broadcastDismissed: (id: string) => void
   refetch: (reason?: "poll" | "navigation" | "visibility" | "changed") => Promise<void>
   destroy: () => void
+}
+
+const workspaceStores = new Map<string, WorkspaceLiveStore>()
+
+function storeKey(orgSlug: string, workspaceSlug: string): string {
+  return `${orgSlug}/${workspaceSlug}`
+}
+
+/**
+ * Marks a live notification read on the server, immediately dismisses its card
+ * locally and across sibling tabs, and dispatches NOTIFICATIONS_CHANGED_EVENT
+ * so both desktop and mobile bell badges decrement immediately.
+ */
+export async function markLiveNotificationRead(
+  orgSlug: string,
+  workspaceSlug: string,
+  id: string,
+): Promise<boolean> {
+  dismissLiveNotificationCard(id)
+  workspaceStores.get(storeKey(orgSlug, workspaceSlug))?.broadcastDismissed(id)
+  try {
+    const response = await fetch("/api/notifications/read", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        orgSlug,
+        workspaceSlug,
+        ids: [id],
+      }),
+      keepalive: true,
+    })
+    if (response.ok && typeof window !== "undefined") {
+      window.dispatchEvent(new Event(NOTIFICATIONS_CHANGED_EVENT))
+    }
+    return response.ok
+  } catch {
+    return false
+  }
 }
 
 export function createWorkspaceLiveStore(options: WorkspaceLiveStoreOptions): WorkspaceLiveStore {
@@ -161,39 +205,20 @@ export function createWorkspaceLiveStore(options: WorkspaceLiveStoreOptions): Wo
     return lastPathname.startsWith(`/${orgSlug}/${workspaceSlug}/notifications`)
   }
 
-  async function openAlert(alert: LiveNotificationAlert) {
-    try {
-      const response = await fetch("/api/notifications/read", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          orgSlug,
-          workspaceSlug,
-          ids: [alert.id],
-        }),
-        keepalive: true,
-      })
-      if (response.ok && typeof window !== "undefined") {
-        window.dispatchEvent(new Event(NOTIFICATIONS_CHANGED_EVENT))
-      }
-    } catch {
-      // Best-effort mark-read; still navigate to the target item.
-    }
-
+  async function openAlertFromDesktopNotification(alert: LiveNotificationAlert) {
+    await markLiveNotificationRead(orgSlug, workspaceSlug, alert.id)
     const cleanPath = alert.path.replace(/^\/+/, "")
     const href = `/${orgSlug}/${workspaceSlug}/${cleanPath}`
     navigateFn?.(href)
   }
 
-  function surfaceFocusedToast(alert: LiveNotificationAlert) {
+  function surfaceFocusedCard(alert: LiveNotificationAlert) {
     markAlertsSeen([alert.id])
     if (isOnNotificationsPage()) return
-    pushUndoToast({
-      message: `${alert.sentence}: ${alert.title}`,
-      actionLabel: "Open",
-      tone: "auto",
-      durationMs: 8000,
-      onAction: () => openAlert(alert),
+    pushLiveNotificationCard({
+      ...alert,
+      orgSlug,
+      workspaceSlug,
     })
   }
 
@@ -202,14 +227,15 @@ export function createWorkspaceLiveStore(options: WorkspaceLiveStoreOptions): Wo
     if (!isDesktopNotificationsActive()) return
     if (typeof window === "undefined" || !("Notification" in window) || !window.Notification) return
     try {
-      const notification = new window.Notification(`${alert.subjectLabel}: ${alert.title}`, {
+      const prefix = alert.displayId ?? alert.subjectLabel
+      const notification = new window.Notification(`${prefix}: ${alert.title}`, {
         body: alert.sentence,
         tag: `compass-notif-${alert.id}`,
       })
       notification.onclick = () => {
         if (typeof window.focus === "function") window.focus()
         notification.close()
-        void openAlert(alert)
+        void openAlertFromDesktopNotification(alert)
       }
     } catch {
       // Ignore environments where constructing Notification directly is disallowed.
@@ -245,6 +271,9 @@ export function createWorkspaceLiveStore(options: WorkspaceLiveStoreOptions): Wo
           state = { count: nextCount, overflow: nextOverflow }
           emit()
         }
+        if (nextCount === 0) {
+          clearLiveNotificationCards({ orgSlug, workspaceSlug })
+        }
       } else if (nextCursor > cursor) {
         cursor = nextCursor
       }
@@ -256,7 +285,7 @@ export function createWorkspaceLiveStore(options: WorkspaceLiveStoreOptions): Wo
 
       if (isFocused()) {
         for (const alert of unseen) {
-          surfaceFocusedToast(alert)
+          surfaceFocusedCard(alert)
         }
         postBroadcast({
           type: "sync",
@@ -267,7 +296,7 @@ export function createWorkspaceLiveStore(options: WorkspaceLiveStoreOptions): Wo
           alerts: [],
         })
       } else if (focusedSiblingTabs.size > 0) {
-        // Delegate toast surfacing to the focused sibling tab without firing an OS notification.
+        // Delegate card surfacing to the focused sibling tab without firing an OS notification.
         postBroadcast({
           type: "sync",
           tabId,
@@ -328,6 +357,12 @@ export function createWorkspaceLiveStore(options: WorkspaceLiveStoreOptions): Wo
             }
             break
           }
+          case "dismissed": {
+            if (typeof msg.id === "string") {
+              dismissLiveNotificationCard(msg.id)
+            }
+            break
+          }
           case "sync": {
             lastSyncedAt = Date.now()
             if (typeof msg.cursor === "string" && msg.cursor > cursor) {
@@ -337,10 +372,13 @@ export function createWorkspaceLiveStore(options: WorkspaceLiveStoreOptions): Wo
               state = { count: msg.count, overflow: msg.overflow }
               emit()
             }
+            if (msg.count === 0) {
+              clearLiveNotificationCards({ orgSlug, workspaceSlug })
+            }
             if (isFocused() && Array.isArray(msg.alerts) && msg.alerts.length > 0) {
               for (const alert of msg.alerts) {
                 if (alert && typeof alert.id === "string" && !hasSeenAlert(alert.id)) {
-                  surfaceFocusedToast(alert)
+                  surfaceFocusedCard(alert)
                 }
               }
             }
@@ -433,17 +471,17 @@ export function createWorkspaceLiveStore(options: WorkspaceLiveStoreOptions): Wo
       }
       if (pathname === lastPathname) return
       lastPathname = pathname
+      if (isOnNotificationsPage()) {
+        clearLiveNotificationCards({ orgSlug, workspaceSlug })
+      }
       void refetch("navigation")
+    },
+    broadcastDismissed(id: string) {
+      postBroadcast({ type: "dismissed", tabId, id })
     },
     refetch,
     destroy,
   }
-}
-
-const workspaceStores = new Map<string, WorkspaceLiveStore>()
-
-function storeKey(orgSlug: string, workspaceSlug: string): string {
-  return `${orgSlug}/${workspaceSlug}`
 }
 
 /** Test helper: tear down any active stores and clear seen-alert storage. */
@@ -452,6 +490,7 @@ export function resetLiveNotificationStoresForTests(): void {
     store.destroy()
   }
   workspaceStores.clear()
+  clearLiveNotificationCards()
   if (typeof window !== "undefined") {
     try {
       window.localStorage.removeItem(SEEN_ALERTS_STORAGE_KEY)

@@ -6,10 +6,11 @@ import type { LiveNotificationAlert } from "@/lib/notifications"
 import {
   POLL_INTERVAL_MS,
   createWorkspaceLiveStore,
+  markLiveNotificationRead,
   resetLiveNotificationStoresForTests,
   useLiveUnread,
 } from "@/lib/notifications-live-client"
-import { getUndoToasts, resetUndoToasts } from "@/lib/ui/undo-toast"
+import { getLiveNotificationCards, resetLiveNotificationCards } from "@/lib/ui/live-notification-cards"
 
 class FakeBroadcastChannel {
   static channels = new Map<string, Set<FakeBroadcastChannel>>()
@@ -51,11 +52,19 @@ class FakeBroadcastChannel {
 const sampleAlert = (overrides: Partial<LiveNotificationAlert> = {}): LiveNotificationAlert => ({
   id: "alert-1",
   kind: "ASSIGNED",
-  sentence: "Ada assigned this to you",
   subjectType: "TASK",
+  subjectId: "task-123",
   subjectLabel: "Task",
+  displayId: "TASK-123",
   title: "Fix flaky sync",
   path: "tasks/task-123",
+  priority: "HIGH",
+  status: "TODO",
+  actorType: "USER",
+  actorName: "Ada",
+  action: "assigned this to you",
+  sentence: "Ada assigned this to you",
+  commentSnippet: null,
   createdAt: "2026-11-15T12:00:05.000Z",
   ...overrides,
 })
@@ -65,7 +74,7 @@ const fetchMock = vi.fn()
 beforeEach(() => {
   vi.useFakeTimers()
   window.localStorage.clear()
-  resetUndoToasts()
+  resetLiveNotificationCards()
   resetLiveNotificationStoresForTests()
   FakeBroadcastChannel.reset()
   vi.stubGlobal("fetch", fetchMock)
@@ -75,7 +84,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup()
   resetLiveNotificationStoresForTests()
-  resetUndoToasts()
+  resetLiveNotificationCards()
   FakeBroadcastChannel.reset()
   window.localStorage.clear()
   vi.useRealTimers()
@@ -126,60 +135,59 @@ describe("notifications-live-client", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
-  it("surfaces an actionable Open toast on a focused tab, deduplicates seen IDs, and marks read + navigates on Open", async () => {
+  it("surfaces a live notification card on a focused tab, deduplicates seen IDs, and marks read cleanly", async () => {
     vi.spyOn(document, "hasFocus").mockReturnValue(true)
     const alert = sampleAlert()
+    let unreadRemaining = 1
     fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input)
       if (url.startsWith("/api/notifications/read")) {
+        unreadRemaining = 0
         return { ok: true, json: async () => ({ marked: 1 }) }
       }
       return {
         ok: true,
         json: async () => ({
           available: true,
-          count: 1,
+          count: unreadRemaining,
           overflow: false,
           serverNow: "2026-11-15T12:00:20.000Z",
-          alerts: [alert],
+          alerts: unreadRemaining > 0 ? [alert] : [],
         }),
       }
     })
 
     const navigate = vi.fn()
-    renderHook(() => useLiveUnread("acme", "ws", { count: 0, overflow: false }, "/acme/ws/okrs", navigate))
+    const bell = renderHook(() => useLiveUnread("acme", "ws", { count: 0, overflow: false }, "/acme/ws/okrs", navigate))
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS)
     })
 
-    const toasts = getUndoToasts()
-    expect(toasts).toHaveLength(1)
-    expect(toasts[0]).toMatchObject({
-      message: "Ada assigned this to you: Fix flaky sync",
-      actionLabel: "Open",
-      tone: "auto",
-    })
-
-    // Second poll returning the same alert within the 2s overlap window does not re-toast
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS)
-    })
-    expect(getUndoToasts()).toHaveLength(1)
-
-    // Clicking Open marks the alert read and navigates to the task
-    await act(async () => {
-      await toasts[0].onAction?.()
-    })
-
-    const readCall = fetchMock.mock.calls.find(([url]) => url === "/api/notifications/read")
-    expect(readCall).toBeTruthy()
-    expect(JSON.parse(readCall![1].body)).toEqual({
+    const cards = getLiveNotificationCards()
+    expect(cards).toHaveLength(1)
+    expect(cards[0]).toMatchObject({
+      id: "alert-1",
+      displayId: "TASK-123",
+      title: "Fix flaky sync",
       orgSlug: "acme",
       workspaceSlug: "ws",
-      ids: ["alert-1"],
     })
-    expect(navigate).toHaveBeenCalledWith("/acme/ws/tasks/task-123")
+    expect(bell.result.current).toEqual({ count: 1, overflow: false })
+
+    // Second poll returning the same alert within the 2s overlap window does not duplicate
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS)
+    })
+    expect(getLiveNotificationCards()).toHaveLength(1)
+
+    // Marking the live card read removes the card and refreshes the bell count back to 0
+    await act(async () => {
+      await markLiveNotificationRead("acme", "ws", "alert-1")
+    })
+
+    expect(getLiveNotificationCards()).toHaveLength(0)
+    expect(bell.result.current).toEqual({ count: 0, overflow: false })
   })
 
   it("fires window.Notification when unfocused with no focused sibling tabs and desktop alerts enabled", async () => {
@@ -228,9 +236,9 @@ describe("notifications-live-client", () => {
       await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS)
     })
 
-    expect(getUndoToasts()).toHaveLength(0)
+    expect(getLiveNotificationCards()).toHaveLength(0)
     expect(created).toHaveLength(1)
-    expect(created[0].title).toBe("Task: Fix flaky sync")
+    expect(created[0].title).toBe("TASK-123: Fix flaky sync")
     expect(created[0].options).toEqual({
       body: "Ada assigned this to you",
       tag: "compass-notif-bg-alert-1",
@@ -245,7 +253,7 @@ describe("notifications-live-client", () => {
     expect(navigate).toHaveBeenCalledWith("/acme/ws/tasks/task-123")
   })
 
-  it("coordinates across tabs via BroadcastChannel: unfocused polling tab suppresses OS alert while focused sibling tab shows toast", async () => {
+  it("coordinates across tabs via BroadcastChannel: unfocused polling tab suppresses OS alert while focused sibling tab pushes card", async () => {
     const createdOsNotifications: string[] = []
     class MockNotification {
       static permission: NotificationPermission = "granted"
@@ -290,10 +298,10 @@ describe("notifications-live-client", () => {
       expect(tabBackground.getState()).toEqual({ count: 4, overflow: false })
       expect(tabFocused.getState()).toEqual({ count: 4, overflow: false })
 
-      // OS notification was suppressed because tabFocused is active, and tabFocused pushed the in-app toast
+      // OS notification was suppressed because tabFocused is active, and tabFocused pushed the live card
       expect(createdOsNotifications).toHaveLength(0)
-      expect(getUndoToasts()).toHaveLength(1)
-      expect(getUndoToasts()[0].message).toBe("Ada assigned this to you: Fix flaky sync")
+      expect(getLiveNotificationCards()).toHaveLength(1)
+      expect(getLiveNotificationCards()[0].title).toBe("Fix flaky sync")
     } finally {
       tabBackground.destroy()
       tabFocused.destroy()

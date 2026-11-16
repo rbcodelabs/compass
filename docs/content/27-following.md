@@ -56,10 +56,13 @@ have not read (up to 99+); on a collapsed sidebar it shows a dot instead of the
 number. On a phone it is the **Inbox** button in the header.
 While Compass is open, the unread count refreshes automatically every ~20 seconds as
 well as when you move around the app or return to the tab. Direct personal events
-(Tasks assigned to you and `@`-mentions) surface as an actionable in-app toast when
-you are viewing Compass, or as an optional desktop browser notification when Compass
-is in the background (toggled per browser via **Desktop alerts** in the Notifications
-inbox).
+(Tasks assigned to you and `@`-mentions) surface in a top-right live notification
+card stack when you are viewing Compass — complete with the item's ID, status/priority
+pills, `@`-mention comment excerpt, **Open in panel ↗** (sliding open the detail drawer
+without leaving your current page), **Mark read**, a hover-paused countdown bar, and a
+collapsible burst stack when several arrive together — or as an optional desktop browser
+notification when Compass is in the background (toggled per browser via **Desktop alerts**
+in the Notifications inbox).
 
 ![Notifications inbox on desktop](/screenshots/docs/following-inbox-desktop.png)
 

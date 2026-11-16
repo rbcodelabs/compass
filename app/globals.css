@@ -686,6 +686,19 @@ html[data-panel-resizing] * {
 .react-flow__node.canvas-live-enter { animation: canvas-live-in 220ms cubic-bezier(0.2, 0, 0, 1); }
 .react-flow__node.canvas-live-leave, .react-flow__edge.canvas-live-leave { opacity: 0; transition: opacity 220ms; pointer-events: none; }
 @keyframes canvas-live-in { from { opacity: 0; } to { opacity: 1; } }
+
+/* Top-right Studio Quiet live notification cards (SOL-121): gentle slide-in + 10s hover-paused countdown hairline. */
+.live-notification-enter { animation: live-notification-in 220ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+@keyframes live-notification-in {
+  from { opacity: 0; transform: translate3d(18px, -4px, 0) scale(0.985); }
+  to   { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+}
+@keyframes live-notification-countdown {
+  from { transform: scaleX(1); }
+  to   { transform: scaleX(0); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .canvas-live-motion .react-flow__node, .react-flow__node.canvas-live-enter { transition: none; animation: none; }
+  .live-notification-enter { animation: none; }
 }

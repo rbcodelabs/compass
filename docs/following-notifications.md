@@ -1,4 +1,4 @@
-# Following and in-app notifications (engineering notes)
+    # Following and in-app notifications (engineering notes)
 
 The decision record is the ADR "Following and in-app notifications" in Compass
 Docs (workspace `rbcodelabs/compass`, kind ADR, conventionally under Architecture Decisions). This file
@@ -43,7 +43,7 @@ Everything is gated by the per-workspace Following module (plus the tables exist
 | Follow, unfollow, auto-follow | `lib/follows.ts` |
 | Emit (post-commit, best-effort), list, live alerts (`listLiveAlertsSince`), unread count, mark read | `lib/notifications.ts` |
 | Live unread poll + cursor alerts (`GET /api/notifications/unread?since=...`) | `app/api/notifications/unread/route.ts` |
-| Shared per-workspace live client store, `BroadcastChannel` sync & adaptive toast/desktop routing | `lib/notifications-live-client.ts`, `lib/desktop-notifications-pref.ts`, `components/notifications/desktop-notification-toggle.tsx` |
+| Shared per-workspace live client store, `BroadcastChannel` sync & adaptive live-card / desktop routing | `lib/notifications-live-client.ts`, `lib/ui/live-notification-cards.ts`, `components/notifications/live-notification-card-host.tsx`, `lib/desktop-notifications-pref.ts`, `components/notifications/desktop-notification-toggle.tsx` |
 | Cleanup helpers | `lib/follow-cleanup.ts`, called from the workspace cascade, `deleteWorkspace`, and member removal |
 
 ## Rules worth remembering

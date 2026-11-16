@@ -1,9 +1,11 @@
 import getPrisma from "@/lib/db"
 import type { AppPrismaClient } from "@/lib/db"
+import { plainTextOf } from "@/lib/comment-mentions"
 import { followingAvailable } from "@/lib/following-flag"
 import { getFollowable, isSubjectTypeActive, passesTypeAccessRule, viewerIdsFor, type SubjectDisplay } from "@/lib/followable"
 import { listFollowers } from "@/lib/follows"
-import { notificationSentence, subjectTypeLabel } from "@/lib/notification-text"
+import { notificationAction, notificationSentence, subjectTypeLabel } from "@/lib/notification-text"
+import { displayIdFromRow } from "@/lib/work-item-ids"
 
 /**
  * Notifications (ADR "Following and in-app notifications", sections 2.5 to 2.8).
@@ -261,13 +263,242 @@ export async function listNotifications(
 export type LiveNotificationAlert = {
   id: string
   kind: LiveNotificationKind
-  sentence: string
   subjectType: string
+  subjectId: string
   subjectLabel: string
+  displayId: string | null
   title: string
   /** Workspace-relative path from SubjectDisplay, e.g. `tasks/<id>` or `docs/<id>` */
   path: string
+  priority: string | null
+  status: string | null
+  actorType: NotificationActorType
+  actorName: string
+  action: string
+  sentence: string
+  commentSnippet: string | null
   createdAt: string
+}
+
+type SubjectCardMeta = {
+  displayId: string | null
+  priority: string | null
+  status: string | null
+}
+
+const COMMENT_SNIPPET_MAX = 140
+
+function formatCommentSnippet(rawBody: string | null | undefined): string | null {
+  if (!rawBody) return null
+  const plain = plainTextOf(rawBody).replace(/\s+/g, " ").trim()
+  if (!plain) return null
+  return plain.length > COMMENT_SNIPPET_MAX ? `${plain.slice(0, COMMENT_SNIPPET_MAX - 1).trimEnd()}…` : plain
+}
+
+async function resolveLiveSubjectMeta(
+  workspaceId: string,
+  items: NotificationItem[],
+  prisma: AppPrismaClient,
+): Promise<Map<string, SubjectCardMeta>> {
+  const idsByType = new Map<string, Set<string>>()
+  for (const item of items) {
+    if (!item.subject) continue
+    idsByType.set(item.subjectType, (idsByType.get(item.subjectType) ?? new Set()).add(item.subjectId))
+  }
+
+  const meta = new Map<string, SubjectCardMeta>()
+  const key = (type: string, id: string) => `${type}:${id}`
+
+  await Promise.all(
+    [...idsByType.entries()].map(async ([type, idSet]) => {
+      const ids = [...idSet]
+      switch (type) {
+        case "TASK": {
+          const rows = (await prisma.task?.findMany({
+            where: { workspaceId, id: { in: ids } },
+            select: { id: true, seqPrefix: true, seqNumber: true, status: true, priority: true },
+          })) ?? []
+          for (const r of rows) {
+            meta.set(key(type, r.id), {
+              displayId: displayIdFromRow("task", r),
+              priority: r.priority ?? null,
+              status: r.status ?? null,
+            })
+          }
+          break
+        }
+        case "OPPORTUNITY": {
+          const rows = (await prisma.opportunity?.findMany({
+            where: { workspaceId, id: { in: ids } },
+            select: { id: true, seqPrefix: true, seqNumber: true, status: true },
+          })) ?? []
+          for (const r of rows) {
+            meta.set(key(type, r.id), {
+              displayId: displayIdFromRow("opportunity", r),
+              priority: null,
+              status: r.status ?? null,
+            })
+          }
+          break
+        }
+        case "SOLUTION": {
+          const rows = (await prisma.solution?.findMany({
+            where: { workspaceId, id: { in: ids } },
+            select: { id: true, seqPrefix: true, seqNumber: true, status: true },
+          })) ?? []
+          for (const r of rows) {
+            meta.set(key(type, r.id), {
+              displayId: displayIdFromRow("solution", r),
+              priority: null,
+              status: r.status ?? null,
+            })
+          }
+          break
+        }
+        case "DOC": {
+          const rows = (await prisma.doc?.findMany({
+            where: { workspaceId, id: { in: ids } },
+            select: { id: true, seqPrefix: true, seqNumber: true },
+          })) ?? []
+          for (const r of rows) {
+            meta.set(key(type, r.id), {
+              displayId: displayIdFromRow("doc", r),
+              priority: null,
+              status: null,
+            })
+          }
+          break
+        }
+        case "ROADMAP_ITEM": {
+          const rows = (await prisma.roadmapItem?.findMany({
+            where: { workspaceId, id: { in: ids } },
+            select: { id: true, seqPrefix: true, seqNumber: true, horizon: true },
+          })) ?? []
+          for (const r of rows) {
+            meta.set(key(type, r.id), {
+              displayId: displayIdFromRow("roadmapItem", r),
+              priority: null,
+              status: r.horizon ?? null,
+            })
+          }
+          break
+        }
+        case "EXPERIMENT": {
+          const rows = (await prisma.experiment?.findMany({
+            where: { workspaceId, id: { in: ids } },
+            select: { id: true, seqPrefix: true, seqNumber: true, status: true },
+          })) ?? []
+          for (const r of rows) {
+            meta.set(key(type, r.id), {
+              displayId: displayIdFromRow("experiment", r),
+              priority: null,
+              status: r.status ?? null,
+            })
+          }
+          break
+        }
+        case "ASSUMPTION": {
+          const rows = (await prisma.assumption?.findMany({
+            where: { id: { in: ids } },
+            select: { id: true, workspaceId: true, seqPrefix: true, seqNumber: true, status: true },
+          })) ?? []
+          for (const r of rows) {
+            if (r.workspaceId && r.workspaceId !== workspaceId) continue
+            meta.set(key(type, r.id), {
+              displayId: displayIdFromRow("assumption", r),
+              priority: null,
+              status: r.status ?? null,
+            })
+          }
+          break
+        }
+        case "FEEDBACK_ITEM": {
+          const rows = (await prisma.feedbackItem?.findMany({
+            where: { workspaceId, id: { in: ids } },
+            select: { id: true, seqPrefix: true, seqNumber: true, status: true },
+          })) ?? []
+          for (const r of rows) {
+            meta.set(key(type, r.id), {
+              displayId: displayIdFromRow("feedback", r),
+              priority: null,
+              status: r.status ?? null,
+            })
+          }
+          break
+        }
+        case "REVIEW_REQUEST": {
+          const rows = (await prisma.reviewRequest?.findMany({
+            where: { workspaceId, id: { in: ids } },
+            select: { id: true, seqPrefix: true, seqNumber: true, state: true },
+          })) ?? []
+          for (const r of rows) {
+            meta.set(key(type, r.id), {
+              displayId: displayIdFromRow("reviewRequest", r),
+              priority: null,
+              status: r.state ?? null,
+            })
+          }
+          break
+        }
+      }
+    }),
+  )
+
+  return meta
+}
+
+async function resolveLiveCommentSnippets(
+  workspaceId: string,
+  items: NotificationItem[],
+  prisma: AppPrismaClient,
+): Promise<Map<string, string>> {
+  const mentioned = items.filter(
+    (item) => item.subject && item.kind === "MENTIONED" && item.payload.commentId && UUID.test(item.payload.commentId),
+  )
+  const snippets = new Map<string, string>()
+  if (mentioned.length === 0) return snippets
+
+  const allCommentIds = [...new Set(mentioned.map((item) => item.payload.commentId!))]
+  const docMentionItems = mentioned.filter((item) => item.subjectType === "DOC")
+  const docCommentIds = [...new Set(docMentionItems.map((item) => item.payload.commentId!))]
+  const visibleDocIds = [...new Set(docMentionItems.map((item) => item.subjectId))]
+
+  const [sharedComments, docComments] = await Promise.all([
+    prisma.comment
+      ? prisma.comment.findMany({
+          where: { id: { in: allCommentIds }, workspaceId },
+          select: { id: true, targetType: true, targetId: true, body: true },
+        })
+      : Promise.resolve([]),
+    docCommentIds.length > 0 && visibleDocIds.length > 0 && prisma.docComment
+      ? prisma.docComment.findMany({
+          where: { id: { in: docCommentIds }, docId: { in: visibleDocIds } },
+          select: { id: true, docId: true, body: true },
+        })
+      : Promise.resolve([]),
+  ])
+
+  const sharedById = new Map(sharedComments.map((c) => [c.id, c]))
+  const docCommentById = new Map(docComments.map((c) => [c.id, c]))
+
+  for (const item of mentioned) {
+    const commentId = item.payload.commentId!
+    const shared = sharedById.get(commentId)
+    if (shared && shared.targetType === item.subjectType && shared.targetId === item.subjectId) {
+      const formatted = formatCommentSnippet(shared.body)
+      if (formatted) snippets.set(item.id, formatted)
+      continue
+    }
+    if (item.subjectType === "DOC") {
+      const dc = docCommentById.get(commentId)
+      if (dc && dc.docId === item.subjectId) {
+        const formatted = formatCommentSnippet(dc.body)
+        if (formatted) snippets.set(item.id, formatted)
+      }
+    }
+  }
+
+  return snippets
 }
 
 async function resolveNotificationItems(
@@ -340,17 +571,35 @@ export async function listLiveAlertsSince(
     take: limit,
   })
   const items = await resolveNotificationItems(rows, userId, workspaceId, prisma)
+  const visibleItems = items.filter((item) => item.subject !== null)
+  if (visibleItems.length === 0) return []
+
+  const [subjectMeta, commentSnippets] = await Promise.all([
+    resolveLiveSubjectMeta(workspaceId, visibleItems, prisma),
+    resolveLiveCommentSnippets(workspaceId, visibleItems, prisma),
+  ])
+
   const alerts: LiveNotificationAlert[] = []
-  for (const item of items) {
+  for (const item of visibleItems) {
     if (!item.subject) continue
+    const cardMeta = subjectMeta.get(`${item.subjectType}:${item.subjectId}`)
+    const action = notificationAction({ kind: item.kind, payload: item.payload })
     alerts.push({
       id: item.id,
       kind: item.kind as LiveNotificationKind,
-      sentence: notificationSentence({ kind: item.kind, actorName: item.actor.name, payload: item.payload }),
       subjectType: item.subjectType,
+      subjectId: item.subjectId,
       subjectLabel: subjectTypeLabel(item.subjectType),
+      displayId: cardMeta?.displayId ?? null,
       title: item.subject.title,
       path: item.subject.path,
+      priority: cardMeta?.priority ?? null,
+      status: cardMeta?.status ?? null,
+      actorType: item.actor.type as NotificationActorType,
+      actorName: item.actor.name,
+      action,
+      sentence: notificationSentence({ kind: item.kind, actorName: item.actor.name, payload: item.payload }),
+      commentSnippet: commentSnippets.get(item.id) ?? null,
       createdAt: item.createdAt.toISOString(),
     })
   }
