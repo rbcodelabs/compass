@@ -16,7 +16,7 @@ import { isPanelOpen } from "@/components/panels/is-panel-open";
 import { TaskLinksBadge } from "./task-links-badge";
 import { UNASSIGNED_ASSIGNEE_CLASS, taskAssigneeDisplay } from "@/lib/task-assignee-display";
 import { TASK_PRIORITY_LABELS } from "@/lib/task-meta";
-import type { TaskStatus, TaskPriority, TaskLinkedType } from "@/lib/types";
+import type { TaskStatus, TaskPriority, TaskLinkData } from "@/lib/types";
 import type { MemberData } from "@/lib/types";
 
 export type TaskCardData = {
@@ -40,7 +40,7 @@ export type TaskCardData = {
   iteration: string | null;
   parentTaskId: string | null;
   subtaskCount: number;
-  links: { id: string; linkedType: TaskLinkedType; linkedId: string; linkedTitle: string }[];
+  links: TaskLinkData[];
 };
 
 const PRIORITY_STATUS: Record<TaskPriority, "danger" | "warning" | "info" | "neutral"> = {
