@@ -242,6 +242,9 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   // External artifact share: four new tables plus their ASYNC indexes (no foreign keys, IF NOT EXISTS, one DDL per statement). Additive: nothing
   // touches `artifacts`. The 110 postcondition proves the columns and that every index is valid and ready.
   "110_artifact_external_share": "f68abc7262d4152869d68a11b41451384caa4ab0f8377d0759daec98782e3cd7",
+  // Per-agent git author: two nullable ADD COLUMNs on agents. Additive, no backfill, no index, no postcondition hook.
+  // Digest recorded from the shipped SQL, not a fresh audit: please review this line.
+  "111_agent_git_author": "933a63e17f38f7439fce166e524609d1982ee81fd4f83574197cb13e0fe784fe",
   // Agent conversation archive: one nullable ADD COLUMN (agent_conversations.archived_at), no default, no backfill, no index, no FK. Additive.
   // Digest recorded from the shipped SQL after reading it (single ALTER TABLE ... ADD COLUMN IF NOT EXISTS).
   "112_agent_conversation_archive": "5b9d029dd2de58f7e91adc163491fd2d56616de655ebeecaaae0ddc5b27eeba7",

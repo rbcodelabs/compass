@@ -29,7 +29,7 @@ describe("agent entry capability-pack policy", () => {
     for (const forbidden of ["Bash", "MultiEdit", "NotebookEdit", "Grep", "Task", "Skill", "WebSearch", "WebFetch"]) {
       expect(source).not.toMatch(new RegExp(`tools:[^\\n]*"${forbidden}"`))
     }
-    expect(source).toMatch(/prepareBashJail\(\{ docsRoot, note, npmToken: [^\n]*\}\)\n\s+githubShell = true/)
+    expect(source).toMatch(/prepareBashJail\(\{ docsRoot, note, author: gitAuthorFromEnv\(process\.env\), npmToken: [^\n]*\}\)\n\s+githubShell = true/)
     expect(source).toContain('...(githubShell ? ["Bash"] : []),')
     // Every Bash call goes through the policy + jail-rewrite hook, and the CLI gets the
     // GitHub token only on a shell turn.
