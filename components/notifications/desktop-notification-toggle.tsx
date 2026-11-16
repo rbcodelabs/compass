@@ -39,7 +39,8 @@ export function DesktopNotificationToggle() {
         data-testid="desktop-notifications-toggle"
         title="Notifications are blocked for this site in your browser settings."
       >
-        <BellOff aria-hidden="true" /> Desktop alerts blocked
+        <BellOff aria-hidden="true" />
+        {"Desktop alerts blocked"}
       </Button>
     )
   }

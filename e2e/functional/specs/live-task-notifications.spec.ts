@@ -108,12 +108,37 @@ test("live 20s poll surfaces actionable toast for ASSIGNED, updates bell silentl
     expect(assignedTaskId).toBeTruthy();
     expect(passiveTaskId).toBeTruthy();
 
-    // Grant browser notification permission in User B's context so real Chromium Notification API is active
+    // Headless Linux Chromium reports Notification.permission === "denied" without an OS notification daemon;
+    // install a spec-faithful Notification shim starting at "default" -> requestPermission() -> "granted".
     bContext = await browser.newContext({
       storageState: bState,
       baseURL,
       viewport: { width: 1280, height: 800 },
-      permissions: ["notifications"],
+    });
+    await bContext.addInitScript(() => {
+      const KEY = "__e2e_notif_perm";
+      class E2ENotification {
+        title: string;
+        options?: NotificationOptions;
+        onclick: (() => void) | null = null;
+        static get permission(): NotificationPermission {
+          return (window.sessionStorage.getItem(KEY) as NotificationPermission | null) ?? "default";
+        }
+        static async requestPermission(): Promise<NotificationPermission> {
+          window.sessionStorage.setItem(KEY, "granted");
+          return "granted";
+        }
+        constructor(title: string, options?: NotificationOptions) {
+          this.title = title;
+          this.options = options;
+        }
+        close() {}
+      }
+      Object.defineProperty(window, "Notification", {
+        configurable: true,
+        writable: true,
+        value: E2ENotification,
+      });
     });
     const bPage = await bContext.newPage();
     const bClient = bPage.request;

@@ -1,6 +1,7 @@
 import { test, expect } from "../fixtures/index";
 import type { APIRequestContext, Page } from "@playwright/test";
 import pg from "pg";
+import fs from "node:fs";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 
 /**
@@ -63,6 +64,16 @@ test("follow, notify exactly once, mark read, unfollow stays unfollowed, removed
     expect([200, 302]).toContain(signedIn.status());
     const bState = await login.storageState();
     bContext = await browser.newContext({ storageState: bState, baseURL });
+    if (process.env.FOLLOWING_SCREENSHOTS) {
+      // Headless Linux Chromium reports Notification.permission === "denied"; default matches a real fresh browser for docs screenshots.
+      await bContext.addInitScript(() => {
+        Object.defineProperty(window, "Notification", {
+          configurable: true,
+          writable: true,
+          value: { permission: "default", requestPermission: async () => "granted" },
+        });
+      });
+    }
     const bPage = await bContext.newPage();
 
     const { rows: [member] } = await pool.query<{ user_id: string; workspace_id: string }>(
@@ -151,12 +162,16 @@ test("follow, notify exactly once, mark read, unfollow stays unfollowed, removed
     // Docs screenshots, regenerated only on request: FOLLOWING_SCREENSHOTS=1.
     if (process.env.FOLLOWING_SCREENSHOTS) {
       const out = "public/screenshots/docs";
+      const artifactOut = "test-results/docs-screenshots";
+      fs.mkdirSync(artifactOut, { recursive: true });
       await bPage.screenshot({ path: `${out}/following-inbox-desktop.png` });
+      fs.copyFileSync(`${out}/following-inbox-desktop.png`, `${artifactOut}/following-inbox-desktop.png`);
       await page.screenshot({ path: `${out}/following-button-desktop.png` });
       await bPage.setViewportSize({ width: 390, height: 844 });
       await bPage.reload();
       await expect(bPage.getByText("4 new")).toBeVisible({ timeout: 30_000 });
       await bPage.screenshot({ path: `${out}/following-inbox-mobile.png` });
+      fs.copyFileSync(`${out}/following-inbox-mobile.png`, `${artifactOut}/following-inbox-mobile.png`);
       await bPage.setViewportSize({ width: 1280, height: 720 });
       await bPage.reload();
       await expect(bPage.getByText("4 new")).toBeVisible({ timeout: 30_000 });

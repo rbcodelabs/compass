@@ -110,7 +110,9 @@ describe("NotificationInbox", () => {
       view([group()])
       expect(screen.queryByTestId("desktop-notifications-toggle")).not.toBeInTheDocument()
     } finally {
-      if (original !== undefined) ;(window as unknown as Record<string, unknown>).Notification = original
+      if (original !== undefined) {
+        ;(window as unknown as Record<string, unknown>).Notification = original
+      }
     }
   })
 
