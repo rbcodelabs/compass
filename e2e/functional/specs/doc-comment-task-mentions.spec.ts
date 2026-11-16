@@ -26,15 +26,20 @@ const SHOTS = process.env.COMMENT_TASK_SHOTS_DIR;
 test.describe("Doc comment @mention -> task", () => {
   test.describe.configure({ mode: "serial" });
 
-  const suffix = randomUUID().slice(0, 6);
-  const bEmail = `mention-b-${suffix}@localhost.dev`;
-  const wEmail = `mention-w-${suffix}@localhost.dev`;
-  const dEmail = `mention-d-${suffix}@localhost.dev`;
-  const bName = `Quinn Mentionable ${suffix}`;
-  const wName = `Wendy Watcher ${suffix}`;
-  const dName = `Dana Outsider ${suffix}`;
-  const agentName = `QA Agent ${suffix}`;
-  const agentId = randomUUID();
+  let suffix = "";
+  let bEmail = "";
+  let wEmail = "";
+  let dEmail = "";
+  // The mention query is the run-unique first word. The picker matches by name, so a bare "@Quinn" also matches any "Quinn ..." user left
+  // behind by an earlier repeat or another spec (the users table is never swept), changing the option count and the first option.
+  let bFirst = "";
+  let bName = "";
+  let wFirst = "";
+  let wName = "";
+  let dFirst = "";
+  let dName = "";
+  let agentName = "";
+  let agentId = "";
   const query = `orgSlug=${ORG}&workspaceSlug=${WORKSPACE}`;
 
   let pool: pg.Pool;
@@ -79,6 +84,7 @@ test.describe("Doc comment @mention -> task", () => {
     // and can reset the DOM selection once.
     await expect(async () => {
       await page.evaluate((w) => {
+        (document.querySelector(".ProseMirror") as HTMLElement | null)?.focus();
         // Comment highlights split the paragraph into several text nodes; walk them.
         const walker = document.createTreeWalker(document.querySelector(".ProseMirror p")!, NodeFilter.SHOW_TEXT);
         const first = walker.nextNode() as Text;
@@ -155,8 +161,40 @@ test.describe("Doc comment @mention -> task", () => {
     return editor;
   }
 
+  /** Place the caret at the end of the contenteditable composer without clicking its geometric centre (which can land on a non-editable mention chip and swallow keystrokes). */
+  async function focusEditorEnd(editor: ReturnType<Page["locator"]>) {
+    await editor.evaluate((el) => {
+      (el as HTMLElement).focus();
+      const sel = window.getSelection();
+      const range = document.createRange();
+      const last = el.lastChild;
+      if (last && last.nodeType === Node.TEXT_NODE) {
+        range.setStart(last, last.textContent?.length ?? 0);
+        range.collapse(true);
+      } else {
+        range.selectNodeContents(el);
+        range.collapse(false);
+      }
+      sel?.removeAllRanges();
+      sel?.addRange(range);
+    });
+  }
+
   test.beforeAll(async ({ playwright }) => {
     test.setTimeout(120_000);
+    // Generate fresh identities per beforeAll invocation so --repeat-each=2 starts each repeat with 0 unread notifications and a fresh agent.
+    suffix = randomUUID().slice(0, 6);
+    bEmail = `mention-b-${suffix}@localhost.dev`;
+    wEmail = `mention-w-${suffix}@localhost.dev`;
+    dEmail = `mention-d-${suffix}@localhost.dev`;
+    bFirst = `Quinn${suffix}`;
+    bName = `${bFirst} Mentionable`;
+    wFirst = `Wendy${suffix}`;
+    wName = `${wFirst} Watcher`;
+    dFirst = `Dana${suffix}`;
+    dName = `${dFirst} Outsider`;
+    agentName = `QA Agent ${suffix}`;
+    agentId = randomUUID();
     pool = new pg.Pool({ connectionString: isolatedE2EConnectionString() });
     const baseURL = test.info().project.use.baseURL as string;
     bApi = await signIn(playwright, baseURL, bEmail);
@@ -201,16 +239,22 @@ test.describe("Doc comment @mention -> task", () => {
         ).catch(() => undefined);
         await pool.query(`DELETE FROM "${S}".entity_links WHERE link_type = 'TASK_REFERENCES' AND to_type = 'DOC' AND to_id = $1`, [docId]).catch(() => undefined);
       }
+      // Memberships and notifications of this run's users: left behind they would show up as extra members in later specs of the same workspace.
+      await pool.query(`DELETE FROM "${S}".notifications WHERE user_id = ANY($1::uuid[])`, [[bUserId, wUserId, dUserId]]).catch(() => undefined);
+      await pool.query(`DELETE FROM "${S}".workspace_members WHERE workspace_id = $1 AND user_id = ANY($2::uuid[])`, [workspaceId, [bUserId, wUserId]]).catch(() => undefined);
+      await pool.query(`DELETE FROM "${S}".organization_members WHERE user_id = $1`, [dUserId]).catch(() => undefined);
       await pool.query(`DELETE FROM "${S}".agent_workspace_grants WHERE agent_id = $1`, [agentId]).catch(() => undefined);
       await pool.query(`DELETE FROM "${S}".agents WHERE id = $1`, [agentId]).catch(() => undefined);
       await pool.end();
     }
     for (const context of contexts) await context.close();
     for (const api of apis) await api.dispose();
+    seededDocIds.length = 0;
+    contexts.length = 0;
+    apis.length = 0;
   });
 
-  // QUARANTINE(prod-e2e): mention picker shows 2 options instead of 1 due to shared-DB 'Quinn' leak from earlier spec (job 01M7C5MDZS5DWAS1BS9YAH2KA1; fix in #570 / fix/e2e-dev-user-leaks). See e2e/functional/QUARANTINE.md.
-  test.fixme("person: pick, task row, post, card + pin, notifications, Done resolves and reopen reopens the thread", async ({ page, base }) => {
+  test("person: pick, task row, post, card + pin, notifications, Done resolves and reopen reopens the thread", async ({ page, base }) => {
     test.setTimeout(240_000);
     const consoleErrors = watchConsoleErrors(page);
     const docTitle = `Launch plan ${suffix}`;
@@ -222,25 +266,25 @@ test.describe("Doc comment @mention -> task", () => {
     // ── Frame 1: type "@" -> one grouped picker of people and agents ─────────
     const editor = await startComment(page);
     await editor.click();
-    await page.keyboard.type("Can you draft this by Friday? @Quinn");
+    await page.keyboard.type(`Can you draft this by Friday? @${bFirst}`);
     const picker = page.getByTestId("mention-picker");
     await expect(picker).toBeVisible();
     await expect(picker.getByText("People", { exact: true })).toBeVisible();
     await expect(picker.getByTestId("mention-option")).toHaveCount(1);
     await expect(picker.getByTestId("mention-option")).toContainText(bName);
     // Agents sit in their own group with an Agent badge; clear the query to see it.
-    for (let i = 0; i < "Quinn".length; i++) await page.keyboard.press("Backspace");
+    for (let i = 0; i < bFirst.length; i++) await page.keyboard.press("Backspace");
     await expect(picker.getByText("Agents", { exact: true })).toBeVisible();
     await expect(picker.getByTestId("mention-option").filter({ hasText: agentName })).toContainText("Agent");
     await shot(page, "frame-1-picker");
-    await page.keyboard.type("Quinn");
+    await page.keyboard.type(bFirst);
 
     // Esc leaves a literal "@" and closes the picker; typing on re-opens it.
     await page.keyboard.press("Escape");
     await expect(picker).toBeHidden();
-    await expect(editor).toContainText("@Quinn");
+    await expect(editor).toContainText(`@${bFirst}`);
     await page.keyboard.press("Backspace");
-    await page.keyboard.type("n");
+    await page.keyboard.type(bFirst.slice(-1));
     await expect(picker).toBeVisible();
 
     // ── Frame 2: select with the keyboard -> chip + "Create task" on ────────
@@ -264,9 +308,9 @@ test.describe("Doc comment @mention -> task", () => {
     await expect(page.getByRole("button", { name: "Comment & create task" })).toBeVisible();
 
     // Add a watcher: the second mention only follows.
-    await editor.click();
-    await page.keyboard.press("End");
-    await page.keyboard.type("cc @Wendy");
+    await focusEditorEnd(editor);
+    await page.keyboard.type(`cc @${wFirst}`);
+    await expect(picker).toBeVisible();
     await page.keyboard.press("Enter");
     await expect(page.getByTestId("mention-roles")).toContainText("Assignee");
     await expect(page.getByTestId("mention-roles")).toContainText("Watcher");
@@ -364,8 +408,7 @@ test.describe("Doc comment @mention -> task", () => {
     expect(JSON.stringify(await panel.json())).toContain("Comment on");
   });
 
-  // QUARANTINE(prod-e2e): previously masked when the preceding serial test aborted; Enter on '@Quinn' picks the leaked 'Quinn Discussion' user so unread(bApi) stays 0 (job 01M7CZBKFJYEWY795219FZ60TD; fix in #570 / fix/e2e-dev-user-leaks). See e2e/functional/QUARANTINE.md.
-  test.fixme("edge cases: mention only, someone outside the workspace, an agent's first assignment", async ({ page, base }) => {
+  test("edge cases: mention only, someone outside the workspace, an agent's first assignment", async ({ page, base }) => {
     test.setTimeout(240_000);
     const consoleErrors = watchConsoleErrors(page);
     // Docked panel again: the thread and the passage pin read together without the sheet's blur.
@@ -376,7 +419,8 @@ test.describe("Doc comment @mention -> task", () => {
     // ── Mention only: toggle off -> a comment, no task, mentioned person told ─
     let editor = await startComment(page);
     await editor.click();
-    await page.keyboard.type("Heads up @Quinn");
+    await page.keyboard.type(`Heads up @${bFirst}`);
+    await expect(page.getByTestId("mention-picker")).toBeVisible();
     await page.keyboard.press("Enter");
     await page.getByTestId("create-task-toggle").click();
     await page.getByRole("button", { name: "Comment", exact: true }).click();
@@ -392,7 +436,7 @@ test.describe("Doc comment @mention -> task", () => {
     await selectLeadingWord(page, "NOTE");
     editor = await startComment(page);
     await editor.click();
-    await page.keyboard.type(`@Dana`);
+    await page.keyboard.type(`@${dFirst}`);
     const picker = page.getByTestId("mention-picker");
     await expect(picker.getByText("Not in this workspace")).toBeVisible();
     await page.keyboard.press("Enter");
@@ -402,8 +446,7 @@ test.describe("Doc comment @mention -> task", () => {
     await expect(alert.getByTestId("invite-as-viewer")).toBeDisabled();
     await shot(page, "frame-4-outside-workspace");
     await alert.getByTestId("mention-only").click();
-    await editor.click();
-    await page.keyboard.press("End");
+    await focusEditorEnd(editor);
     await page.keyboard.type("can you take this?");
     await page.getByRole("button", { name: "Comment", exact: true }).click();
     await expect(page.getByTestId("doc-comment-thread")).toHaveCount(2, { timeout: 15_000 });
@@ -416,6 +459,7 @@ test.describe("Doc comment @mention -> task", () => {
     editor = await startComment(page);
     await editor.click();
     await page.keyboard.type("Pull baseline numbers @QA Agent");
+    await expect(picker).toBeVisible();
     await page.keyboard.press("Enter");
     await expect(page.getByTestId("mention-chip")).toHaveText(`@${agentName}`);
     await page.getByRole("button", { name: "Comment & create task" }).click();
@@ -458,7 +502,7 @@ test.describe("Doc comment @mention -> task", () => {
     await openDocWithSelection(page, base, `Mobile ${suffix}`, "MOBILE");
     const editor = await startComment(page);
     await editor.click();
-    await page.keyboard.type("Please look @Quinn");
+    await page.keyboard.type(`Please look @${bFirst}`);
     const picker = page.getByTestId("mention-picker");
     await expect(picker).toBeVisible();
     const inside = async (locator: ReturnType<Page["locator"]>) => {
@@ -486,7 +530,7 @@ test.describe("Doc comment @mention -> task", () => {
         await openDocWithSelection(page, base, `Reach ${viewport.width} ${suffix}`, "REACH");
         const editor = await startComment(page);
         await editor.click();
-        await page.keyboard.type("please @Quinn");
+        await page.keyboard.type(`please @${bFirst}`);
         await page.keyboard.press("Enter");
         await page.keyboard.type("and @Wolfe");
         await page.keyboard.press("Enter");
@@ -517,8 +561,7 @@ test.describe("Doc comment @mention -> task", () => {
         await shot(page, `reach-${viewport.width}-two-mentions`);
 
         // A third picker open inside the same popover: still scrollable to the button, and the picker stays usable.
-        await editor.click();
-        await page.keyboard.press("End");
+        await focusEditorEnd(editor);
         await page.keyboard.type(" cc @");
         await expect(page.getByTestId("mention-picker")).toBeVisible();
         await shot(page, `reach-${viewport.width}-picker-open`);
@@ -543,7 +586,7 @@ test.describe("Doc comment @mention -> task", () => {
     await openDocWithSelection(page, base, `Rotate ${suffix}`, "ROTATE");
     const editor = await startComment(page);
     await editor.click();
-    await page.keyboard.type("hi @Quinn");
+    await page.keyboard.type(`hi @${bFirst}`);
     await page.keyboard.press("Enter");
     await page.keyboard.type(" and @");
     for (const size of [{ width: 667, height: 375 }, { width: 844, height: 390 }, { width: 360, height: 420 }, { width: 390, height: 844 }, { width: 1024, height: 400 }]) {

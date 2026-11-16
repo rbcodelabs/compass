@@ -6,6 +6,25 @@ const title = "Teams need to choose which launch stages fit their discovery proc
 const feedbackTitle = "Make marketing and launch stages optional for teams focused on continuous discovery";
 const krTitle = "Increase the number of teams practicing continuous discovery";
 
+// Rows each seedRelationships() call inserts, deleted in afterAll. The objective and Key Result are the ones that matter to other specs:
+// a Key Result under a cycle-less or open-cycle Objective is an eligible parent Key Result for the OKR specs (lib/okr-hierarchy.ts).
+const seeded = { objectives: [] as string[], keyResults: [] as string[], opportunities: [] as string[], workspaces: [] as string[], workspaceId: "" };
+
+test.afterAll(async () => {
+  if (seeded.objectives.length === 0) return;
+  const pool = new pg.Pool({ connectionString: isolatedE2EConnectionString() });
+  try {
+    const subjects = [...seeded.objectives, ...seeded.keyResults, ...seeded.opportunities];
+    await pool.query(`DELETE FROM compass_dev.entity_links WHERE workspace_id = $1 AND (from_id = ANY($2::uuid[]) OR to_id = ANY($2::uuid[]))`, [seeded.workspaceId, subjects]);
+    await pool.query(`DELETE FROM compass_dev.feedback WHERE opportunity_id = ANY($1::uuid[])`, [seeded.opportunities]);
+    await pool.query(`DELETE FROM compass_dev.opportunities WHERE id = ANY($1::uuid[])`, [seeded.opportunities]);
+    await pool.query(`DELETE FROM compass_dev.check_ins WHERE key_result_id = ANY($1::uuid[])`, [seeded.keyResults]);
+    await pool.query(`DELETE FROM compass_dev.key_results WHERE id = ANY($1::uuid[])`, [seeded.keyResults]);
+    await pool.query(`DELETE FROM compass_dev.objectives WHERE id = ANY($1::uuid[])`, [seeded.objectives]);
+    await pool.query(`DELETE FROM compass_dev.workspaces WHERE id = ANY($1::uuid[])`, [seeded.workspaces]);
+  } finally { await pool.end(); }
+});
+
 async function seedRelationships() {
   const pool = new pg.Pool({ connectionString: isolatedE2EConnectionString() });
   try {
@@ -35,6 +54,11 @@ async function seedRelationships() {
     // Deliberately inconsistent legacy relation: the UI must still scope its children.
     await pool.query(`INSERT INTO compass_dev.feedback
       (id,workspace_id,opportunity_id,title,status) VALUES (gen_random_uuid(),$1,$2,'Private other-workspace feedback','OPEN')`, [other.id,opportunity.id]);
+    seeded.workspaceId = workspace.id;
+    seeded.objectives.push(objective.id);
+    seeded.keyResults.push(kr.id);
+    seeded.opportunities.push(opportunity.id, empty.id);
+    seeded.workspaces.push(other.id);
     return { opportunity: opportunity.id as string, feedback: feedback.id as string, kr: kr.id as string, empty: empty.id as string };
   } finally { await pool.end(); }
 }
