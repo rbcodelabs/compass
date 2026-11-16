@@ -318,7 +318,7 @@ export function ArtifactDetail({
                 onClick={() => activateTab(tab.id)}
                 onKeyDown={(event) => handleTabKeyDown(event, index)}
                 className={cn(
-                  "relative shrink-0 cursor-pointer border-b-2 px-2.5 py-2.5 text-xs font-medium whitespace-nowrap transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-inset",
+                  "relative shrink-0 cursor-pointer border-b-2 px-2 py-2.5 text-xs font-medium whitespace-nowrap transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-inset",
                   selected
                     ? "border-primary text-primary"
                     : "border-transparent text-text-subtle hover:text-text-primary",
@@ -621,7 +621,7 @@ export function ArtifactDetail({
         <header className="flex min-h-12 shrink-0 items-center justify-between gap-2 border-b border-border-default bg-surface-panel/95 px-3 py-1.5 backdrop-blur-sm @2xl:px-4">
           <div className="flex min-w-0 flex-1 items-center gap-2">
             <DocsLibraryButton />
-            <h1 className="min-w-0 truncate text-sm font-semibold text-text-primary @2xl:text-base" title={artifact.title}>
+            <h1 className="min-w-0 truncate text-sm font-semibold text-text-primary @3xl:text-base" title={artifact.title}>
               {artifact.title}
             </h1>
             <span className="hidden shrink-0 items-center rounded-full bg-surface-inset px-2.5 py-0.5 text-xs font-medium text-text-secondary @lg:inline-flex">
