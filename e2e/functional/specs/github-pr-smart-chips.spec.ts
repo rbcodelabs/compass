@@ -134,17 +134,23 @@ test.describe("GitHub PR smart chips", () => {
       await page.mouse.move(10, 10);
       await expect(page.getByText("feat/pr-chips → main")).toBeHidden({ timeout: 5_000 });
 
-      // 4. Wait for autosave, then step cursor via ArrowRight into customChip's MarkViewContent and anchor an inline comment onto `Custom`.
+      // 4. Wait for autosave, then select `Custom` inside customChip's MarkViewContent via native DOM Range (proving ProseMirror owns MarkViewContent) and anchor an inline comment.
       await page.waitForTimeout(1500);
       await expect(page.getByTestId("doc-save-status")).toHaveAttribute("data-state", "saved", { timeout: 15_000 });
-      await editor.locator("p").nth(1).click({ position: { x: 4, y: 10 } });
-      await page.keyboard.press("Home");
-      for (let i = 0; i < "See ".length; i++) {
-        await page.keyboard.press("ArrowRight");
-      }
-      for (let i = 0; i < "Custom".length; i++) {
-        await page.keyboard.press("Shift+ArrowRight");
-      }
+      await customChip.locator("[data-mark-view-content]").evaluate((el) => {
+        const editorEl = el.closest<HTMLElement>(".ProseMirror");
+        editorEl?.focus();
+        const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+        const textNode = walker.nextNode();
+        if (!textNode) throw new Error("Missing text node inside MarkViewContent");
+        const range = document.createRange();
+        range.setStart(textNode, 0);
+        range.setEnd(textNode, "Custom".length);
+        const sel = window.getSelection();
+        sel?.removeAllRanges();
+        sel?.addRange(range);
+        document.dispatchEvent(new Event("selectionchange"));
+      });
       const commentBtn = page.getByTitle("Comment on selection");
       await expect(commentBtn).toBeVisible({ timeout: 5_000 });
       await commentBtn.click();
