@@ -54,7 +54,12 @@ does not cover its Assumptions or Experiments. Follow each thing you care about.
 The **bell** beside Search at the top of the sidebar shows how many notifications you
 have not read (up to 99+); on a collapsed sidebar it shows a dot instead of the
 number. On a phone it is the **Inbox** button in the header.
-The count refreshes when you move around the app and when you return to the tab.
+While Compass is open, the unread count refreshes automatically every ~20 seconds as
+well as when you move around the app or return to the tab. Direct personal events
+(Tasks assigned to you and `@`-mentions) surface as an actionable in-app toast when
+you are viewing Compass, or as an optional desktop browser notification when Compass
+is in the background (toggled per browser via **Desktop alerts** in the Notifications
+inbox).
 
 ![Notifications inbox on desktop](/screenshots/docs/following-inbox-desktop.png)
 
@@ -70,10 +75,10 @@ you only see them while you are a member of that workspace.
 
 ## What is not included yet
 
-Email, mentions, digests and a cross-workspace inbox are not part of this first
-version. Experiments, Roadmap items, Assumptions, Objectives and Key Results,
-Feedback, Decisions, Metrics and Research studies will become followable in a
-later release.
+Email, digests, a cross-workspace inbox and closed-browser push notifications are
+not part of this version. Experiments, Roadmap items, Assumptions, Objectives and
+Key Results, Feedback, Decisions, Metrics and Research studies will become
+followable in a later release.
 
 ## MCP
 

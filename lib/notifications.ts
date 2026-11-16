@@ -3,6 +3,7 @@ import type { AppPrismaClient } from "@/lib/db"
 import { followingAvailable } from "@/lib/following-flag"
 import { getFollowable, isSubjectTypeActive, passesTypeAccessRule, viewerIdsFor, type SubjectDisplay } from "@/lib/followable"
 import { listFollowers } from "@/lib/follows"
+import { notificationSentence, subjectTypeLabel } from "@/lib/notification-text"
 
 /**
  * Notifications (ADR "Following and in-app notifications", sections 2.5 to 2.8).
@@ -20,6 +21,9 @@ import { listFollowers } from "@/lib/follows"
  */
 export const NOTIFICATION_KINDS = ["STATUS_CHANGED", "COMMENT_ADDED", "COMMENT_REPLIED", "ASSIGNED", "MENTIONED"] as const
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number]
+/** Direct personal events eligible for live in-session toasts and desktop browser alerts. */
+export const LIVE_ALERT_KINDS = ["ASSIGNED", "MENTIONED"] as const
+export type LiveNotificationKind = (typeof LIVE_ALERT_KINDS)[number]
 export const NOTIFICATION_ACTOR_TYPES = ["USER", "AGENT", "EXTERNAL", "SYSTEM"] as const
 export type NotificationActorType = (typeof NOTIFICATION_ACTOR_TYPES)[number]
 
@@ -241,9 +245,40 @@ export async function listNotifications(
   })
   const page = rows.slice(0, limit)
   const nextCursor = rows.length > limit ? encodeCursor(page[page.length - 1].createdAt, page[page.length - 1].id) : null
+  const items = await resolveNotificationItems(page, userId, workspaceId, prisma)
 
+  const groups = new Map<string, NotificationGroup>()
+  for (const item of items) {
+    const key = `${item.subjectType}:${item.subjectId}`
+    const group = groups.get(key) ?? { subjectType: item.subjectType, subjectId: item.subjectId, subject: item.subject, unreadCount: 0, latestAt: item.createdAt, items: [] }
+    group.items.push(item)
+    if (!item.read) group.unreadCount++
+    groups.set(key, group)
+  }
+  return { items, groups: [...groups.values()], nextCursor }
+}
+
+export type LiveNotificationAlert = {
+  id: string
+  kind: LiveNotificationKind
+  sentence: string
+  subjectType: string
+  subjectLabel: string
+  title: string
+  /** Workspace-relative path from SubjectDisplay, e.g. `tasks/<id>` or `docs/<id>` */
+  path: string
+  createdAt: string
+}
+
+async function resolveNotificationItems(
+  rows: Awaited<ReturnType<AppPrismaClient["notification"]["findMany"]>>,
+  userId: string,
+  workspaceId: string,
+  prisma: AppPrismaClient,
+): Promise<NotificationItem[]> {
+  if (rows.length === 0) return []
   const idsByType = new Map<string, Set<string>>()
-  for (const row of page) idsByType.set(row.subjectType, (idsByType.get(row.subjectType) ?? new Set()).add(row.subjectId))
+  for (const row of rows) idsByType.set(row.subjectType, (idsByType.get(row.subjectType) ?? new Set()).add(row.subjectId))
   const displays = new Map<string, Map<string, SubjectDisplay>>()
   const visibleTypes = new Set<string>()
   for (const [type, ids] of idsByType) {
@@ -253,7 +288,7 @@ export async function listNotifications(
     displays.set(type, await def.resolveDisplay(workspaceId, [...ids], prisma))
   }
 
-  const visible = page.filter((row) => visibleTypes.has(row.subjectType))
+  const visible = rows.filter((row) => visibleTypes.has(row.subjectType))
   const userIds = [...new Set(visible.filter((r) => r.actorType === "USER" && r.actorId).map((r) => r.actorId!))]
   const agentIds = [...new Set(visible.filter((r) => r.actorType === "AGENT" && r.actorId).map((r) => r.actorId!))]
   const [users, agents] = await Promise.all([
@@ -262,7 +297,7 @@ export async function listNotifications(
   ])
   const names = new Map<string, string | null>([...users, ...agents].map((entry) => [entry.id, entry.name]))
 
-  const items: NotificationItem[] = visible.map((row) => ({
+  return visible.map((row) => ({
     id: row.id,
     kind: row.kind,
     subjectType: row.subjectType,
@@ -274,16 +309,52 @@ export async function listNotifications(
     createdAt: row.createdAt,
     subject: displays.get(row.subjectType)?.get(row.subjectId) ?? null,
   }))
+}
 
-  const groups = new Map<string, NotificationGroup>()
+/**
+ * Unread personal alerts (ASSIGNED, MENTIONED) since `since` (with a 2s overlap
+ * window so concurrent commits are never missed; the client deduplicates by id).
+ * Deleted or inaccessible subjects are omitted, and the batch is returned in
+ * chronological arrival order (oldest first).
+ */
+export async function listLiveAlertsSince(
+  userId: string,
+  workspaceId: string,
+  since: Date,
+  options: { limit?: number; prisma?: AppPrismaClient } = {},
+): Promise<LiveNotificationAlert[]> {
+  const prisma = options.prisma ?? getPrisma()
+  if (!(await followingAvailable(prisma, workspaceId))) return []
+  if (!(await isCurrentMember(prisma, workspaceId, userId))) return []
+
+  const limit = Math.min(Math.max(options.limit ?? 5, 1), 20)
+  const rows = await prisma.notification.findMany({
+    where: {
+      recipientUserId: userId,
+      workspaceId,
+      readAt: null,
+      kind: { in: [...LIVE_ALERT_KINDS] },
+      createdAt: { gte: new Date(since.getTime() - 2_000) },
+    },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    take: limit,
+  })
+  const items = await resolveNotificationItems(rows, userId, workspaceId, prisma)
+  const alerts: LiveNotificationAlert[] = []
   for (const item of items) {
-    const key = `${item.subjectType}:${item.subjectId}`
-    const group = groups.get(key) ?? { subjectType: item.subjectType, subjectId: item.subjectId, subject: item.subject, unreadCount: 0, latestAt: item.createdAt, items: [] }
-    group.items.push(item)
-    if (!item.read) group.unreadCount++
-    groups.set(key, group)
+    if (!item.subject) continue
+    alerts.push({
+      id: item.id,
+      kind: item.kind as LiveNotificationKind,
+      sentence: notificationSentence({ kind: item.kind, actorName: item.actor.name, payload: item.payload }),
+      subjectType: item.subjectType,
+      subjectLabel: subjectTypeLabel(item.subjectType),
+      title: item.subject.title,
+      path: item.subject.path,
+      createdAt: item.createdAt.toISOString(),
+    })
   }
-  return { items, groups: [...groups.values()], nextCursor }
+  return alerts.reverse()
 }
 
 /** Unread count for the bell, bounded at 99 so the query never scans an unbounded backlog. */

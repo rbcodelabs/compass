@@ -23,8 +23,17 @@ const group = (over: Partial<InboxGroup> = {}): InboxGroup => ({
 const view = (groups: InboxGroup[], over: Partial<React.ComponentProps<typeof NotificationInbox>> = {}) =>
   render(<NotificationInbox orgSlug="acme" workspaceSlug="ws" groups={groups} unreadOnly={false} nextHref={null} totalUnread={2} {...over} />)
 
-beforeEach(() => { vi.stubGlobal("fetch", fetchMock); fetchMock.mockResolvedValue({ ok: true, json: async () => ({ marked: 1 }) }) })
-afterEach(() => { cleanup(); vi.clearAllMocks(); vi.unstubAllGlobals() })
+beforeEach(() => {
+  window.localStorage.clear()
+  vi.stubGlobal("fetch", fetchMock)
+  fetchMock.mockResolvedValue({ ok: true, json: async () => ({ marked: 1 }) })
+})
+afterEach(() => {
+  cleanup()
+  window.localStorage.clear()
+  vi.clearAllMocks()
+  vi.unstubAllGlobals()
+})
 
 describe("NotificationInbox", () => {
   it("groups by item with a link, the new count and each plain-language sentence", () => {
@@ -92,5 +101,52 @@ describe("NotificationInbox", () => {
     expect(screen.getByRole("link", { name: /^Unread/ })).toHaveAttribute("href", "/acme/ws/notifications?filter=unread")
     expect(screen.getByRole("link", { name: "All" })).toHaveAttribute("aria-current", "page")
     expect(screen.getByRole("link", { name: "Older notifications" })).toHaveAttribute("href", "/acme/ws/notifications?cursor=abc")
+  })
+
+  it("omits the desktop alerts toggle when browser Notification API is unsupported", () => {
+    const original = (window as unknown as Record<string, unknown>).Notification
+    delete (window as unknown as Record<string, unknown>).Notification
+    try {
+      view([group()])
+      expect(screen.queryByTestId("desktop-notifications-toggle")).not.toBeInTheDocument()
+    } finally {
+      if (original !== undefined) ;(window as unknown as Record<string, unknown>).Notification = original
+    }
+  })
+
+  it("renders a disabled blocked button when browser notification permission is denied", () => {
+    vi.stubGlobal("Notification", { permission: "denied", requestPermission: vi.fn() })
+    view([group()])
+    const btn = screen.getByTestId("desktop-notifications-toggle")
+    expect(btn).toBeDisabled()
+    expect(btn).toHaveTextContent("Desktop alerts blocked")
+  })
+
+  it("requests permission and toggles Desktop alerts Off -> On -> Off", async () => {
+    let perm: NotificationPermission = "default"
+    const requestPermission = vi.fn(async () => {
+      perm = "granted"
+      return perm
+    })
+    vi.stubGlobal("Notification", {
+      get permission() {
+        return perm
+      },
+      requestPermission,
+    })
+
+    view([group()])
+    const btn = screen.getByTestId("desktop-notifications-toggle")
+    expect(btn).toHaveTextContent("Desktop alerts: Off")
+    expect(btn).toHaveAttribute("aria-pressed", "false")
+
+    fireEvent.click(btn)
+    await waitFor(() => expect(btn).toHaveTextContent("Desktop alerts: On"))
+    expect(requestPermission).toHaveBeenCalledTimes(1)
+    expect(btn).toHaveAttribute("aria-pressed", "true")
+
+    fireEvent.click(btn)
+    await waitFor(() => expect(btn).toHaveTextContent("Desktop alerts: Off"))
+    expect(btn).toHaveAttribute("aria-pressed", "false")
   })
 })

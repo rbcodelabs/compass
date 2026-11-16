@@ -1,61 +1,15 @@
 "use client"
 
 import Link from "next/link"
-import { usePathname } from "next/navigation"
-import { useCallback, useEffect, useRef, useState } from "react"
+import { usePathname, useRouter } from "next/navigation"
+import { useCallback } from "react"
 import { Bell } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { formatUnread } from "@/lib/notification-text"
+import { NOTIFICATIONS_CHANGED_EVENT, useLiveUnread } from "@/lib/notifications-live-client"
 import { SidebarMenuButton } from "@/components/ui/sidebar"
 
-/** Dispatched by the inbox after it marks things read, so the bell updates without a round trip. */
-export const NOTIFICATIONS_CHANGED_EVENT = "compass:notifications-changed"
-
-type Unread = { count: number; overflow: boolean }
-
-/**
- * The bounded unread count (ADR 2.8): seeded by the server layout for the first
- * paint, then refetched from one small route on navigation and whenever the tab
- * becomes visible again. No websockets, no polling timer.
- */
-function useUnread(orgSlug: string, workspaceSlug: string, initial: Unread) {
-  const pathname = usePathname()
-  const [unread, setUnread] = useState(initial)
-  const latest = useRef(0)
-
-  const refetch = useCallback(() => {
-    const mine = ++latest.current
-    fetch(`/api/notifications/unread?orgSlug=${encodeURIComponent(orgSlug)}&workspaceSlug=${encodeURIComponent(workspaceSlug)}`)
-      .then((response) => (response.ok ? response.json() : null))
-      .then((data: { available?: boolean; count?: number; overflow?: boolean } | null) => {
-        if (data?.available && mine === latest.current) setUnread({ count: data.count ?? 0, overflow: Boolean(data.overflow) })
-      })
-      // A failed refetch keeps the last known count rather than flashing zero.
-      .catch(() => {})
-  }, [orgSlug, workspaceSlug])
-
-  // Skip the very first run: the server already rendered this value.
-  const first = useRef(true)
-  useEffect(() => {
-    if (first.current) {
-      first.current = false
-      return
-    }
-    refetch()
-  }, [pathname, refetch])
-
-  useEffect(() => {
-    const onVisible = () => { if (document.visibilityState === "visible") refetch() }
-    document.addEventListener("visibilitychange", onVisible)
-    window.addEventListener(NOTIFICATIONS_CHANGED_EVENT, refetch)
-    return () => {
-      document.removeEventListener("visibilitychange", onVisible)
-      window.removeEventListener(NOTIFICATIONS_CHANGED_EVENT, refetch)
-    }
-  }, [refetch])
-
-  return unread
-}
+export { NOTIFICATIONS_CHANGED_EVENT }
 
 type BellProps = {
   orgSlug: string
@@ -70,7 +24,15 @@ const labelFor = (count: number, overflow: boolean) =>
 /** Compact bell that sits beside Search: icon only, count badge on the corner. */
 export function NotificationBellIconButton({ orgSlug, workspaceSlug, initialCount, initialOverflow }: BellProps) {
   const pathname = usePathname()
-  const { count, overflow } = useUnread(orgSlug, workspaceSlug, { count: initialCount, overflow: initialOverflow })
+  const router = useRouter()
+  const navigate = useCallback((href: string) => router.push(href), [router])
+  const { count, overflow } = useLiveUnread(
+    orgSlug,
+    workspaceSlug,
+    { count: initialCount, overflow: initialOverflow },
+    pathname,
+    navigate,
+  )
   const href = `/${orgSlug}/${workspaceSlug}/notifications`
   const isActive = pathname.startsWith(href)
 
@@ -110,7 +72,15 @@ export function NotificationBellIconButton({ orgSlug, workspaceSlug, initialCoun
 /** Mobile header button, styled like its Docs and Account neighbours. */
 export function NotificationBellHeaderLink({ orgSlug, workspaceSlug, initialCount, initialOverflow }: BellProps) {
   const pathname = usePathname()
-  const { count, overflow } = useUnread(orgSlug, workspaceSlug, { count: initialCount, overflow: initialOverflow })
+  const router = useRouter()
+  const navigate = useCallback((href: string) => router.push(href), [router])
+  const { count, overflow } = useLiveUnread(
+    orgSlug,
+    workspaceSlug,
+    { count: initialCount, overflow: initialOverflow },
+    pathname,
+    navigate,
+  )
   const href = `/${orgSlug}/${workspaceSlug}/notifications`
 
   return (
