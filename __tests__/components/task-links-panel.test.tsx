@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, cleanup, fireEvent } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent, within } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
 const { openPanelMock, unlinkTaskMock, linkTaskMock } = vi.hoisted(() => ({
@@ -105,5 +105,72 @@ describe("TaskLinksPanel", () => {
 
     expect(unlinkTaskMock).toHaveBeenCalledWith("link-1", "/rbcodelabs/compass/tasks/task-1");
     expect(openPanelMock).not.toHaveBeenCalled();
+  });
+
+  it("renders COMMENT and AGENT_CONVERSATION origins in a non-removable 'Created from' section with clickable deep-links", () => {
+    const commentLabel = 'Comment on OPP-7: "there is still a solution space…"';
+    const docCommentLabel = "Comment on “REVIEW the rollout checklist”";
+    renderPanel([
+      {
+        id: "origin-disc",
+        linkedType: "COMMENT",
+        linkedId: "cmt-disc",
+        linkedTitle: commentLabel,
+        isOrigin: true,
+        linkedHref: "discovery/OPP-7?comment=cmt-disc",
+      },
+      {
+        id: "origin-doc",
+        linkedType: "COMMENT",
+        linkedId: "cmt-doc",
+        linkedTitle: docCommentLabel,
+        isOrigin: true,
+        linkedHref: "docs/DOC-3?comment=cmt-doc",
+      },
+      {
+        id: "origin-conv",
+        linkedType: "AGENT_CONVERSATION",
+        linkedId: "conv-1",
+        linkedTitle: "Triage sprint backlog",
+        isOrigin: true,
+      },
+      ...baseLinks,
+    ]);
+
+    const originGroup = screen.getByTestId("task-origin-links");
+    expect(within(originGroup).getByText("Created from")).toBeInTheDocument();
+
+    const discAnchor = within(originGroup).getByRole("link", { name: commentLabel });
+    expect(discAnchor).toHaveAttribute("href", "/rbcodelabs/compass/discovery/OPP-7?comment=cmt-disc");
+
+    const docAnchor = within(originGroup).getByRole("link", { name: docCommentLabel });
+    expect(docAnchor).toHaveAttribute("href", "/rbcodelabs/compass/docs/DOC-3?comment=cmt-doc");
+
+    const convAnchor = within(originGroup).getByRole("link", { name: "Triage sprint backlog" });
+    expect(convAnchor).toHaveAttribute("href", "/rbcodelabs/compass/agent?c=conv-1");
+
+    // Origin links have no destructive 'x' unlink button, while reference links keep theirs.
+    expect(screen.queryByLabelText(`Unlink ${commentLabel}`)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(`Unlink ${docCommentLabel}`)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Unlink Triage sprint backlog")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Unlink Faster onboarding")).toBeInTheDocument();
+  });
+
+  it("degrades gracefully to non-clickable text when a COMMENT link's parent target no longer resolves", () => {
+    const label = 'Comment on task: "Orphaned comment excerpt"';
+    renderPanel([
+      {
+        id: "origin-dangling",
+        linkedType: "COMMENT",
+        linkedId: "cmt-orphan",
+        linkedTitle: label,
+        isOrigin: true,
+        linkedHref: null,
+      },
+    ]);
+
+    const originGroup = screen.getByTestId("task-origin-links");
+    expect(within(originGroup).getByText(label).tagName).toBe("SPAN");
+    expect(screen.queryByLabelText(`Unlink ${label}`)).not.toBeInTheDocument();
   });
 });

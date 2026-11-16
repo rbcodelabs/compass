@@ -25,6 +25,20 @@ const TASK_LINK_TO_PANEL_TYPE: Partial<Record<TaskLinkedType, EntityPanelType>> 
   FEEDBACK_ITEM: "feedback",
 };
 
+function isOriginLink(link: TaskLinkData): boolean {
+  return Boolean(link.isOrigin || link.linkedType === "COMMENT" || link.linkedType === "AGENT_CONVERSATION");
+}
+
+function resolveOriginHref(link: TaskLinkData, orgSlug: string, workspaceSlug: string): string | null {
+  if (link.linkedType === "AGENT_CONVERSATION") {
+    return `/${orgSlug}/${workspaceSlug}/agent?c=${encodeURIComponent(link.linkedId)}`;
+  }
+  if (link.linkedType === "COMMENT" && link.linkedHref) {
+    return link.linkedHref.startsWith("/") ? link.linkedHref : `/${orgSlug}/${workspaceSlug}/${link.linkedHref}`;
+  }
+  return null;
+}
+
 type Props = {
   taskId: string;
   initialLinks: TaskLinkData[];
@@ -41,6 +55,9 @@ export function TaskLinksPanel({ taskId, initialLinks, revalidatePathStr, linkab
   const [isPending, startTransition] = useTransition();
   const { openPanel } = usePanelContext();
 
+  const originLinks = links.filter(isOriginLink);
+  const referenceLinks = links.filter((link) => !isOriginLink(link));
+
   function handleUnlink(linkId: string) {
     setLinks((prev) => prev.filter((l) => l.id !== linkId));
     startTransition(async () => {
@@ -50,12 +67,50 @@ export function TaskLinksPanel({ taskId, initialLinks, revalidatePathStr, linkab
 
   return (
     <div className="flex flex-col gap-3">
-      {links.length === 0 ? (
+      {links.length === 0 && (
         <p className="text-sm text-muted-foreground">No links yet.</p>
-      ) : (
+      )}
+
+      {originLinks.length > 0 && (
+        <div data-testid="task-origin-links" className="rounded-xl border border-border bg-muted/30 overflow-hidden">
+          <div className="px-4 py-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground border-b border-border">
+            Created from
+          </div>
+          {originLinks.map((link, i) => {
+            const href = resolveOriginHref(link, orgSlug, workspaceSlug);
+            const badge = link.linkedType === "COMMENT" ? "Comment" : "Conversation";
+            return (
+              <div
+                key={link.id}
+                className={`flex items-center gap-2 min-w-0 px-4 py-2.5 ${i > 0 ? "border-t border-border" : ""}`}
+              >
+                <span className="text-xs bg-muted rounded px-1.5 py-0.5 text-muted-foreground shrink-0">
+                  {badge}
+                </span>
+                {href ? (
+                  <Link
+                    href={href}
+                    title={link.linkedTitle}
+                    className="text-sm truncate hover:underline underline-offset-2"
+                  >
+                    {link.linkedTitle}
+                  </Link>
+                ) : (
+                  <span title={link.linkedTitle} className="text-sm truncate text-muted-foreground">
+                    {link.linkedTitle}
+                  </span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {referenceLinks.length > 0 && (
         <div className="rounded-xl border border-border overflow-hidden">
-          {links.map((link, i) => {
-            const panelType = link.linkedType === "COMMENT" || link.linkedType === "AGENT_CONVERSATION" ? undefined : TASK_LINK_TO_PANEL_TYPE[link.linkedType];
+          {referenceLinks.map((link, i) => {
+            const linkedType = link.linkedType as TaskLinkedType;
+            const panelType = TASK_LINK_TO_PANEL_TYPE[linkedType];
             return (
               <div
                 key={link.id}
@@ -63,23 +118,16 @@ export function TaskLinksPanel({ taskId, initialLinks, revalidatePathStr, linkab
               >
                 <div className="flex items-center gap-2 min-w-0">
                   <span className="text-xs bg-muted rounded px-1.5 py-0.5 text-muted-foreground shrink-0">
-                    {link.linkedType === "COMMENT" ? "Comment" : link.linkedType === "AGENT_CONVERSATION" ? "Conversation" : typeLabels[link.linkedType]}
+                    {typeLabels[linkedType]}
                   </span>
-                  {link.linkedType === "DOC" ? (
+                  {linkedType === "DOC" ? (
                     <Link
                       href={`/${orgSlug}/${workspaceSlug}/docs/${link.linkedId}`}
                       className="text-sm truncate hover:underline underline-offset-2"
                     >
                       {link.linkedTitle}
                     </Link>
-                  ) : link.linkedType === "AGENT_CONVERSATION" ? (
-                    <Link
-                      href={`/${orgSlug}/${workspaceSlug}/agent?c=${link.linkedId}`}
-                      className="text-sm truncate hover:underline underline-offset-2"
-                    >
-                      {link.linkedTitle}
-                    </Link>
-                  ) : link.linkedType === "DECISION" ? (
+                  ) : linkedType === "DECISION" ? (
                     <Link
                       href={`/${orgSlug}/${workspaceSlug}/reviews/${link.linkedId}`}
                       className="text-sm truncate hover:underline underline-offset-2"

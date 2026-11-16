@@ -27,7 +27,8 @@ export default async function ArtifactPage({ params, searchParams }: { params: P
   const access = await resolveWorkspaceAccess(orgSlug, workspaceSlug, session.user.id)
   if (!access) notFound()
   const workspace = { id: access.workspaceId }
-  const resolvedArtifact = await resolveWorkItemPage({ type: "artifact", param: artifactParam, workspaceId: workspace.id, basePath: `/${orgSlug}/${workspaceSlug}/docs/artifacts`, searchParams: await searchParams })
+  const query = await searchParams
+  const resolvedArtifact = await resolveWorkItemPage({ type: "artifact", param: artifactParam, workspaceId: workspace.id, basePath: `/${orgSlug}/${workspaceSlug}/docs/artifacts`, searchParams: query })
   const artifactId = resolvedArtifact.id
   const artifact = await prisma.artifact.findFirst({ where: { id: artifactId, workspaceId: workspace.id }, include: { currentRevision: true, revisions: { orderBy: { revisionNumber: "desc" } } } })
   if (!artifact) notFound()
@@ -37,7 +38,8 @@ export default async function ArtifactPage({ params, searchParams }: { params: P
     const bytes = await getArtifactStorage().get(artifact.currentRevision.blobPathname)
     if (bytes) ({ html, slides } = buildArtifactPresentation(new TextDecoder().decode(bytes), artifact.kind))
   }
-  const initialSlideIndex = initialSlideFromParam((await searchParams).slide)
+  const initialSlideIndex = initialSlideFromParam(query.slide)
+  const initialFocusedCommentId = typeof query.comment === "string" ? query.comment : null
   const rawSolutions = await prisma.solution.findMany({ where: { workspaceId: workspace.id }, select: { id: true, title: true }, orderBy: { title: "asc" } })
   const linkedIds = new Set(await getArtifactSolutionIds(prisma, workspace.id, artifactId))
   const decisions = await getArtifactDecisions(workspace.id, artifactId)
@@ -46,5 +48,5 @@ export default async function ArtifactPage({ params, searchParams }: { params: P
   // (the preview token is short-lived, so it is never stored). Null falls back to the link card.
   const livePreviewSrc = artifact.sourceType === "V0_CHAT" && artifact.status === "ACTIVE" && artifact.v0ChatId ? await livePreviewSrcFor(session.user.id, artifact.v0ChatId) : null
   const shareState = artifact.sourceType === "HTML_UPLOAD" ? await getOwnerShareState({ workspaceId: workspace.id, artifactId }) : undefined
-  return <ArtifactDetail shareState={shareState} artifact={toArtifactDetailDto(artifact)} livePreviewSrc={livePreviewSrc} html={html} slides={slides} initialSlideIndex={initialSlideIndex} initialCommentsPin={initialCommentsPin} workspaceId={workspace.id} basePath={`/${orgSlug}/${workspaceSlug}/docs`} decisions={decisions} solutions={rawSolutions.map((solution) => ({ ...solution, linked: linkedIds.has(solution.id) }))} />
+  return <ArtifactDetail shareState={shareState} artifact={toArtifactDetailDto(artifact)} livePreviewSrc={livePreviewSrc} html={html} slides={slides} initialSlideIndex={initialSlideIndex} initialCommentsPin={initialCommentsPin} initialFocusedCommentId={initialFocusedCommentId} workspaceId={workspace.id} basePath={`/${orgSlug}/${workspaceSlug}/docs`} decisions={decisions} solutions={rawSolutions.map((solution) => ({ ...solution, linked: linkedIds.has(solution.id) }))} />
 }

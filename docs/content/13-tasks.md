@@ -122,7 +122,7 @@ A task can link to any number of other Compass objects — Opportunities, Soluti
 
 Linking works from either side:
 
-- **From the task** — the **Links** section of its detail panel links to (or unlinks from) any of those object types.
+- **From the task** — the **Links** section of its detail panel links to (or unlinks from) any of those object types. When a task was created from a Doc comment, a Discussion comment, or an agent conversation, its origin appears above the editable links in a separate **Created from** block (for example, `Comment on OPP-7: "there is still a solution space…"` or `Comment on “REVIEW the rollout checklist”`). Clicking a comment origin opens the parent item and jumps straight to that comment thread — expanding resolved threads automatically — and origin links have no **×** unlink button so task-to-thread provenance can't be removed by accident.
 - **From the object** — an Opportunity, Solution, Experiment, Objective, Key Result, Feedback Item, or Doc's own detail panel has a **Delivery tasks** section where you can create a new task inline (title, optional assignee) or link an existing unlinked task, without leaving the panel or navigating to the Tasks board first. A Roadmap Item's sidebar had this first; it now works identically everywhere else a task can point.
 
 When you add a link from a task, one search field looks across every supported

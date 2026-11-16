@@ -10,7 +10,7 @@ import { assignmentUpdate, resolveTaskAssignees, validateTaskLink, validateTaskR
 import type { TaskStatus, TaskPriority, TaskLinkedType } from "@/lib/types";
 import { allocateOneSeq } from "@/lib/work-item-sequence"
 import { createWorkspaceTask } from "@/lib/task-create"
-import { createTaskLink, createTaskLinks, deleteTaskLink, getTaskLinkById } from "@/lib/task-link-writes"
+import { createTaskLink, createTaskLinks, deleteTaskLink, getTaskLinkById, taskOriginTargetType } from "@/lib/task-link-writes"
 import { startRunForAssignedTask, type AgentRunOutcome } from "@/lib/agent-task-trigger"
 
 /** Only an outcome worth telling the person about; "skipped" (not an agent, nothing changed) is dropped. */
@@ -214,6 +214,9 @@ export async function unlinkTask(linkId: string, revalidatePathStr: string) {
   if (!session?.user?.id) throw new Error("Unauthorized");
   const link = await getTaskLinkById(prisma, linkId);
   if (!link) throw new Error("Not found");
+  if (taskOriginTargetType(link.linkedType)) {
+    throw new Error("Origin provenance links cannot be removed");
+  }
   const task = await requireTask(link.taskId);
   await deleteTaskLink(prisma, { link, workspaceId: task.workspaceId });
 

@@ -1,5 +1,6 @@
 import type { TaskCardData } from "@/components/tasks/task-card";
-import type { TaskLinkedType, TaskPriority, TaskStatus } from "@/lib/types";
+import { isTaskOriginLink } from "@/lib/task-links-read";
+import type { TaskLinkRecordType, TaskPriority, TaskStatus } from "@/lib/types";
 
 type TaskCardRow = Omit<TaskCardData, "status" | "priority" | "squad" | "dueDate" | "subtaskCount" | "links"> & {
   status: string;
@@ -7,7 +8,7 @@ type TaskCardRow = Omit<TaskCardData, "status" | "priority" | "squad" | "dueDate
   dueDate: Date | null;
 };
 type SquadRow = { id: string; name: string; color: string };
-type TaskLinkRow = { id: string; taskId: string; linkedType: string; linkedId: string };
+type TaskLinkRow = { id: string; taskId: string; linkedType: string; linkedId: string; isOrigin?: boolean };
 type SubtaskCountRow = { parentTaskId: string | null; _count: { _all: number } };
 
 export function buildTaskCards(input: {
@@ -16,6 +17,7 @@ export function buildTaskCards(input: {
   links: TaskLinkRow[];
   subtaskCounts: SubtaskCountRow[];
   linkedTitles: Map<string, string>;
+  linkedHrefs?: Map<string, string | null>;
 }): TaskCardData[] {
   const squadById = new Map(input.squads.map((squad) => [squad.id, squad]));
   const linksByTaskId = new Map<string, TaskLinkRow[]>();
@@ -35,11 +37,16 @@ export function buildTaskCards(input: {
     squad: task.squadId ? squadById.get(task.squadId) ?? null : null,
     dueDate: task.dueDate?.toISOString() ?? null,
     subtaskCount: subtaskCountByParentId.get(task.id) ?? 0,
-    links: (linksByTaskId.get(task.id) ?? []).map((link) => ({
-      id: link.id,
-      linkedType: link.linkedType as TaskLinkedType,
-      linkedId: link.linkedId,
-      linkedTitle: input.linkedTitles.get(`${link.linkedType}:${link.linkedId}`) ?? "(deleted)",
-    })),
+    links: (linksByTaskId.get(task.id) ?? []).map((link) => {
+      const key = `${link.linkedType}:${link.linkedId}`;
+      return {
+        id: link.id,
+        linkedType: link.linkedType as TaskLinkRecordType,
+        linkedId: link.linkedId,
+        linkedTitle: input.linkedTitles.get(key) ?? "(deleted)",
+        isOrigin: link.isOrigin ?? isTaskOriginLink(link.linkedType),
+        ...(input.linkedHrefs?.has(key) ? { linkedHref: input.linkedHrefs.get(key) ?? null } : {}),
+      };
+    }),
   }));
 }

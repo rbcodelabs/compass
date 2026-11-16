@@ -74,6 +74,7 @@ import { RemoteUpdateBanner, UpdatedJustNow } from "@/components/docs/remote-upd
 interface DocEditorProps {
   initialCommentsPin?: PanelPin;
   initialHistoryPin?: PanelPin;
+  initialFocusedCommentId?: string | null;
   doc: {
     id: string;
     title: string;
@@ -182,7 +183,7 @@ function captureAnchor(editor: Editor): PendingAnchor | null {
   };
 }
 
-export function DocEditor({ doc, versions, comments: initialComments, revalidatePathStr, orgSlug, workspaceSlug, workspaceId, linkedTasks, decisionAction, followAction, publishAction, specHeader, specScopes, readOnly = false, recordCreators, patchRecordField, initialCommentsPin, initialHistoryPin, mentionOptions = NO_MENTION_OPTIONS, confirmedAgentIds: initialConfirmedAgentIds = [], taskCards: initialTaskCards = {}, lastWriter }: DocEditorProps) {
+export function DocEditor({ doc, versions, comments: initialComments, revalidatePathStr, orgSlug, workspaceSlug, workspaceId, linkedTasks, decisionAction, followAction, publishAction, specHeader, specScopes, readOnly = false, recordCreators, patchRecordField, initialCommentsPin, initialHistoryPin, initialFocusedCommentId = null, mentionOptions = NO_MENTION_OPTIONS, confirmedAgentIds: initialConfirmedAgentIds = [], taskCards: initialTaskCards = {}, lastWriter }: DocEditorProps) {
   const [title, setTitle] = useState(doc.title);
   const titleRef = useRef<HTMLTextAreaElement>(null);
   // Grow the one-row title textarea to its content (a long title wraps; it must never clip or scroll sideways).
@@ -210,7 +211,7 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
   const [restoredMetadata, setRestoredMetadata] = useState<DocMetadata | null | undefined>(undefined);
   const [propertiesVersion, setPropertiesVersion] = useState(0);
   const [currentContent, setCurrentContent] = useState(doc.content);
-  const [activeDocPanel, setActiveDocPanel] = useState<"comments" | "history" | null>(null);
+  const [activeDocPanel, setActiveDocPanel] = useState<"comments" | "history" | null>(initialFocusedCommentId ? "comments" : null);
   const [showSaveVersionInput, setShowSaveVersionInput] = useState(false);
   const [isSavingVersion, setIsSavingVersion] = useState(false);
 
@@ -228,7 +229,12 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
 
   // ── Inline comments state ──────────────────────────────────────────────────
   const [comments, setComments] = useState<DocCommentItem[]>(initialComments);
-  const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
+  const [activeCommentId, setActiveCommentId] = useState<string | null>(() => {
+    if (!initialFocusedCommentId) return null;
+    const hit = initialComments.find((c) => c.id === initialFocusedCommentId);
+    return hit ? (hit.parentId ?? hit.id) : null;
+  });
+  const didScrollInitialCommentRef = useRef(false);
   const [pendingAnchor, setPendingAnchor] = useState<PendingAnchor | null>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
   // Where the comment popover opens: the rect of whichever control started the comment (bubble or toolbar button), captured at click
@@ -744,6 +750,27 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
     setActiveCommentId(commentId);
   }
 
+  useEffect(() => {
+    if (!editor || !initialFocusedCommentId || didScrollInitialCommentRef.current) return;
+    didScrollInitialCommentRef.current = true;
+    const hit = comments.find((c) => c.id === initialFocusedCommentId);
+    const rootId = hit ? (hit.parentId ?? hit.id) : null;
+    const root = rootId ? comments.find((c) => c.id === rootId) : null;
+    if (!root?.anchorText) return;
+    const { text, posAt } = projectDocText(editor.state.doc);
+    const range = resolveCommentAnchor(text, root);
+    if (!range) return;
+    const from = posAt[range.from];
+    const lastIndex = range.to - 1;
+    const to =
+      lastIndex >= 0 && lastIndex < posAt.length
+        ? posAt[lastIndex] + 1
+        : (posAt[posAt.length - 1] ?? 0) + 1;
+    if (from != null && to != null) {
+      editor.chain().setTextSelection({ from, to }).scrollIntoView().run();
+    }
+  }, [editor, initialFocusedCommentId, comments]);
+
 
   if (!editor) return null;
 
@@ -1080,6 +1107,7 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
         docTitle={title}
         taskCards={taskCards}
         taskHrefBase={`/${orgSlug}/${workspaceSlug}/tasks`}
+        focusedCommentId={initialFocusedCommentId}
         onResolve={handleResolve}
         onDelete={handleDeleteComment}
         onFocusComment={handleFocusComment}

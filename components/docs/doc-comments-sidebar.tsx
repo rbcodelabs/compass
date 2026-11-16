@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { Check, RotateCcw, Trash2, MessageSquare, CornerDownRight } from "lucide-react"
 import { DocPanelShell } from "@/components/docs/doc-panel-shell"
 import type { PanelPin } from "@/lib/panel-pin"
@@ -59,6 +59,8 @@ interface DocCommentsSidebarProps {
   taskCards?: Record<string, CommentTaskCardData>
   /** e.g. /org/workspace/tasks; the card links to taskHrefBase/taskId. */
   taskHrefBase?: string
+  /** Comment ID from `?comment=<id>` deep-link to reveal, highlight, and scroll into view. */
+  focusedCommentId?: string | null
 }
 
 export function DocCommentsSidebar({
@@ -76,8 +78,10 @@ export function DocCommentsSidebar({
   docTitle = "",
   taskCards = {},
   taskHrefBase = "/tasks",
+  focusedCommentId = null,
 }: DocCommentsSidebarProps) {
   const [showResolved, setShowResolved] = useState(false)
+  const scrolledFocusRef = useRef<string | null>(null)
   const mention: MentionContext = { options: mentionOptions, confirmedAgentIds, docTitle, taskCards, taskHrefBase }
 
   const { roots, repliesByParent } = useMemo(() => {
@@ -98,8 +102,25 @@ export function DocCommentsSidebar({
     return { roots, repliesByParent }
   }, [comments])
 
-  const visibleRoots = showResolved ? roots : roots.filter((r) => r.status === "OPEN")
+  const focusedRootResolved = useMemo(() => {
+    if (!focusedCommentId) return false
+    const hit = comments.find((c) => c.id === focusedCommentId)
+    if (!hit) return false
+    const rootId = hit.parentId ?? hit.id
+    return roots.some((r) => r.id === rootId && r.status === "RESOLVED")
+  }, [comments, focusedCommentId, roots])
+
+  const effectiveShowResolved = showResolved || focusedRootResolved
+  const visibleRoots = effectiveShowResolved ? roots : roots.filter((r) => r.status === "OPEN")
   const resolvedCount = roots.filter((r) => r.status === "RESOLVED").length
+
+  useEffect(() => {
+    if (!open || !focusedCommentId || scrolledFocusRef.current === focusedCommentId) return
+    const el = typeof document !== "undefined" ? document.getElementById(`comment-${focusedCommentId}`) : null
+    if (!el) return
+    scrolledFocusRef.current = focusedCommentId
+    el.scrollIntoView?.({ behavior: "smooth", block: "center" })
+  }, [open, focusedCommentId, visibleRoots.length])
 
   return (
     <DocPanelShell panelId="docsComments" title="Comments" icon={<MessageSquare className="w-4 h-4" />} open={open} onOpenChange={onOpenChange} initialPin={initialPin}>
@@ -119,6 +140,7 @@ export function DocCommentsSidebar({
                   replies={repliesByParent.get(root.id) ?? []}
                   orphaned={orphanedIds.has(root.id)}
                   mention={mention}
+                  focusedCommentId={focusedCommentId}
                   onAddReply={onAddReply}
                   onResolve={onResolve}
                   onDelete={onDelete}
@@ -136,7 +158,7 @@ export function DocCommentsSidebar({
               onClick={() => setShowResolved((v) => !v)}
               className="text-xs text-text-subtle hover:text-text-primary"
             >
-              {showResolved
+              {effectiveShowResolved
                 ? "Hide resolved"
                 : `Show resolved (${resolvedCount})`}
             </button>
@@ -151,6 +173,7 @@ function CommentThread({
   replies,
   orphaned,
   mention,
+  focusedCommentId,
   onAddReply,
   onResolve,
   onDelete,
@@ -160,6 +183,7 @@ function CommentThread({
   replies: DocCommentItem[]
   orphaned: boolean
   mention: MentionContext
+  focusedCommentId?: string | null
   onAddReply: (parentId: string, payload: ComposerPayload) => Promise<ComposerResult | void>
   onResolve: (commentId: string, resolved: boolean) => Promise<void>
   onDelete: (commentId: string) => Promise<void>
@@ -168,6 +192,7 @@ function CommentThread({
   const [busy, setBusy] = useState(false)
   const isResolved = root.status === "RESOLVED"
   const hasAnchor = Boolean(root.anchorText)
+  const isRootFocused = focusedCommentId === root.id
 
   async function run(fn: () => Promise<void>) {
     if (busy) return
@@ -181,9 +206,13 @@ function CommentThread({
 
   return (
     <li
+      id={`comment-${root.id}`}
+      data-comment-id={root.id}
+      data-comment-focused={isRootFocused ? "true" : undefined}
       className={cn(
-        "rounded-lg border border-border-default bg-surface-card p-3",
-        isResolved && "opacity-70"
+        "scroll-mt-4 rounded-lg border border-border-default bg-surface-card p-3",
+        isResolved && "opacity-70",
+        isRootFocused && "ring-2 ring-primary/40 opacity-100"
       )}
       data-testid="doc-comment-thread"
       data-status={root.status}
@@ -226,14 +255,23 @@ function CommentThread({
       {/* Replies */}
       {replies.length > 0 && (
         <ul className="mt-2 space-y-2 pl-3 border-l border-border-default">
-          {replies.map((reply) => (
-            <li key={reply.id} className="flex gap-1.5">
-              <CornerDownRight className="w-3 h-3 mt-1 text-text-subtle shrink-0" />
-              <div className="flex-1">
-                <CommentBody comment={reply} mention={mention} />
-              </div>
-            </li>
-          ))}
+          {replies.map((reply) => {
+            const isReplyFocused = focusedCommentId === reply.id
+            return (
+              <li
+                key={reply.id}
+                id={`comment-${reply.id}`}
+                data-comment-id={reply.id}
+                data-comment-focused={isReplyFocused ? "true" : undefined}
+                className={cn("flex gap-1.5 scroll-mt-4 rounded", isReplyFocused && "ring-2 ring-primary/40 p-1")}
+              >
+                <CornerDownRight className="w-3 h-3 mt-1 text-text-subtle shrink-0" />
+                <div className="flex-1">
+                  <CommentBody comment={reply} mention={mention} />
+                </div>
+              </li>
+            )
+          })}
         </ul>
       )}
 
