@@ -776,6 +776,11 @@ const MIGRATIONS: readonly MigrationEntry[] = [
     filePath: path.join(process.cwd(), "prisma/migrations/110_artifact_external_share/migration.sql"),
   },
   {
+    // Per-agent git author: agents.git_author_name and agents.git_author_email (both nullable, no backfill, no index).
+    name: "111_agent_git_author",
+    filePath: path.join(process.cwd(), "prisma/migrations/111_agent_git_author/migration.sql"),
+  },
+  {
     // agent_conversations.archived_at (nullable, no backfill, no index). NULL = active, so code may ship before this applies.
     name: "112_agent_conversation_archive",
     filePath: path.join(process.cwd(), "prisma/migrations/112_agent_conversation_archive/migration.sql"),
