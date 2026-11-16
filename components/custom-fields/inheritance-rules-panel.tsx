@@ -41,9 +41,9 @@ interface Props {
 }
 
 const STATUS_STYLE: Record<InheritanceRuleRow["status"], string> = {
-  active: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
-  disabled: "bg-muted text-muted-foreground",
-  inactive: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
+  active: "bg-status-success-surface text-status-success",
+  disabled: "bg-status-neutral-surface text-status-neutral",
+  inactive: "bg-status-warning-surface text-status-warning",
 };
 
 function statusLabel(rule: InheritanceRuleRow) {

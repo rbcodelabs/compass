@@ -3,6 +3,7 @@ import { Pool } from "pg"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { assertCustomFieldInheritanceRulesMigration } from "@/lib/migrations/custom-field-inheritance-rules"
 import { applyMigrations } from "@/lib/migrations/runner"
+import { integrationDatabaseUrl } from "@/__tests__/helpers/integration-database"
 import { replayAllMigrations } from "./helpers/replay-migrations"
 
 /**
@@ -11,10 +12,9 @@ import { replayAllMigrations } from "./helpers/replay-migrations"
  * INDEX ASYNC to INDEX); it cannot prove Aurora DSQL, which is covered by the SQL-shape assertions in
  * custom-field-inheritance-migration.test.ts.
  *
- * Set CUSTOM_FIELD_INHERITANCE_DATABASE_URL to the local compass_e2e database to enable. The guard keeps it from ever
- * pointing anywhere else: this suite creates and drops schemas, which must never happen against DSQL or a shared database.
+ * Set INTEGRATION_TEST_DATABASE_URL to the local compass_e2e database to enable (see __tests__/helpers/integration-database.ts).
  */
-const databaseUrl = process.env.CUSTOM_FIELD_INHERITANCE_DATABASE_URL
+const databaseUrl = integrationDatabaseUrl
 const NAME = "113_custom_field_inheritance_rules"
 
 describe.skipIf(!databaseUrl)("custom field inheritance rules migration on plain Postgres", () => {
@@ -24,10 +24,6 @@ describe.skipIf(!databaseUrl)("custom field inheritance rules migration on plain
   let owned = false
 
   beforeAll(async () => {
-    const url = new URL(databaseUrl!)
-    if (!["postgresql:", "postgres:"].includes(url.protocol) || !["localhost", "127.0.0.1"].includes(url.hostname) || url.pathname !== "/compass_e2e" || url.searchParams.has("schema")) {
-      throw new Error("Only isolated local compass_e2e is allowed")
-    }
     process.env.DATABASE_URL = databaseUrl
     await pool.query(`CREATE SCHEMA "${schema}"`)
     owned = true

@@ -20,6 +20,7 @@ const mockPrisma = {
   opportunity: { findFirst: vi.fn() },
   keyResult: { findFirst: vi.fn() },
   squad: { findMany: vi.fn(), findFirst: vi.fn() },
+  entityLink: { findMany: vi.fn() },
   portfolioCapacityReservation: { findUnique: vi.fn(), update: vi.fn() },
   portfolioCapacityPlan: { updateMany: vi.fn() },
   $transaction: vi.fn(),
@@ -64,11 +65,12 @@ describe("add_to_roadmap without a solution", () => {
 })
 
 describe("add_to_roadmap / promote_to_roadmap with a solution", () => {
-  const solution = { id: "sol-1", title: "Ship", opportunityId: "opp-1", opportunity: { id: "opp-1", title: "Opp", squadId: null, linkedKeyResultId: null } }
+  const solution = { id: "sol-1", title: "Ship", opportunityId: "opp-1", opportunity: { id: "opp-1", title: "Opp", squadId: null } }
   beforeEach(() => {
     mockPrisma.solution.findMany.mockResolvedValue([solution])
     mockPrisma.solution.findFirst.mockResolvedValue(solution)
     mockPrisma.squad.findMany.mockResolvedValue([])
+    mockPrisma.entityLink.findMany.mockResolvedValue([])
     mockRoadmapItem.findMany.mockResolvedValue([])
     mockRoadmapItem.findFirst.mockResolvedValue(null)
     mockRoadmapItem.create.mockImplementation(({ data }) => Promise.resolve({ id: "item-sol", ...data }))

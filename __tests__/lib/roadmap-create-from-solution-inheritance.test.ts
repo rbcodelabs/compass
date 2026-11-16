@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createFakePrisma, solutionRow, type FakeState } from "./roadmap-fake-prisma";
 
 const m = vi.hoisted(() => ({ apply: vi.fn() }));
+vi.mock("@/lib/typed-links", async (importOriginal) => (await import("./roadmap-fake-prisma")).typedLinksWithPointerFixtures(await importOriginal<object>()));
 vi.mock("@/lib/custom-field-inheritance", () => ({ applyInheritanceRules: m.apply, applyInheritanceForSourceValue: vi.fn() }));
 vi.mock("@/lib/workspace-update-mutations", () => ({
   captureWorkspaceMutation: async (_prisma: unknown, _model: string, _op: string, _source: unknown, _id: unknown, mutate: (tx: unknown) => Promise<unknown>) => mutate(_prisma),
