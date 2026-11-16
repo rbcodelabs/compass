@@ -21,6 +21,15 @@ describe("isPublicPath", () => {
     expect(isPublicPath("/terms/")).toBe(false);
   });
 
+  it("allows exactly the liveness probe", () => {
+    expect(isPublicPath("/api/health")).toBe(true);
+    // Exact path only: nothing nested or look-alike becomes public with it.
+    expect(isPublicPath("/api/health/")).toBe(false);
+    expect(isPublicPath("/api/health/db")).toBe(false);
+    expect(isPublicPath("/api/healthz")).toBe(false);
+    expect(isPublicPath("/api/healthcheck")).toBe(false);
+  });
+
   it("allows auth-related routes", () => {
     expect(isPublicPath("/login")).toBe(true);
     expect(isPublicPath("/api/auth/callback/google")).toBe(true);

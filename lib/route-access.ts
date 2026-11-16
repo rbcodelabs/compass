@@ -18,6 +18,8 @@ export function isPublicPath(pathname: string): boolean {
   return (
     // Fixed-path signed relay authenticates HMAC in its handler.
     pathname === "/api/analytics/activity" ||
+    // Liveness probe: no session, no database, no secrets (app/api/health/route.ts). Exact path so nothing under it is public.
+    pathname === "/api/health" ||
     pathname.startsWith("/_vercel/insights/") ||
     ["/api/preview-automation/bootstrap", "/api/preview-automation/session", "/api/preview-automation/teardown"].includes(pathname) ||
     // ADR-0009 preview-login page + its start route. Both fail closed
