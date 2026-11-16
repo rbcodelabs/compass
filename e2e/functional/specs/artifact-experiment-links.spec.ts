@@ -56,7 +56,7 @@ const attachedArtifacts = async (prisma: ReturnType<typeof getPrisma>, workspace
 
 /**
  * Artifacts <-> Experiments (native ARTIFACT_ATTACHED_TO_EXPERIMENT link). The whole flow goes through the real UI: link from the artifact
- * page, see it on the experiment page, unlink from the experiment side, relink, then delete the artifact and confirm the link is gone.
+ * page's inspector Links tab, see it on the experiment page, unlink from the experiment side, relink, then delete the artifact and confirm the link is gone.
  */
 async function chooseExisting(page: Page, noun: "experiment" | "artifact", title: string, onPickerOpen?: () => Promise<void>) {
   await page.getByRole("button", { name: `Link existing ${noun}`, exact: true }).click()
@@ -97,7 +97,7 @@ test("an artifact links to an experiment, shows on both pages, unlinks, and its 
   const artifactUrl = page.url()
   const artifactId = artifactUrl.split("/").at(-1)!
 
-  // Empty and loading states at 390px: the experiment panel (opened over the board) and the artifact page.
+  // Empty and loading states at 390px: the experiment panel (opened over the board) and the artifact inspector's Links tab.
   await page.setViewportSize({ width: 390, height: 844 })
   const panelUrl = `${base}/experiments?detail=${encodeURIComponent(`experiment:${experiment.id}`)}`
   await captureLoading(page, testInfo, "experiment-panel-linked-artifacts-loading-mobile", "Linked artifacts", () => page.goto(panelUrl).then(() => undefined))
@@ -105,13 +105,17 @@ test("an artifact links to an experiment, shows on both pages, unlinks, and its 
   await expect(panelSection.getByText("No artifacts linked yet.")).toBeVisible({ timeout: 60_000 })
   await panelSection.scrollIntoViewIfNeeded()
   await shoot(page, testInfo, "experiment-panel-linked-artifacts-empty-mobile")
-  await captureLoading(page, testInfo, "artifact-linked-experiments-loading-mobile", "Linked experiments", () => page.goto(artifactUrl).then(() => undefined))
+  await captureLoading(page, testInfo, "artifact-linked-experiments-loading-mobile", "Linked experiments", async () => {
+    await page.goto(artifactUrl)
+    await page.getByRole("button", { name: "Details", exact: true }).click()
+    await page.getByRole("tab", { name: "Links", exact: true }).click()
+  })
   await expect(page.getByRole("region", { name: "Linked experiments" }).getByText("No experiments linked yet.")).toBeVisible()
   await page.getByRole("region", { name: "Linked experiments" }).scrollIntoViewIfNeeded()
   await shoot(page, testInfo, "artifact-linked-experiments-empty-mobile")
   await page.setViewportSize({ width: 1280, height: 800 })
 
-  // Link from the artifact page.
+  // Link from the artifact page's Links tab.
   const experimentsSection = page.getByRole("region", { name: "Linked experiments" })
   await expect(experimentsSection.getByText("No experiments linked yet.")).toBeVisible()
   await chooseExisting(page, "experiment", experimentTitle)
@@ -157,11 +161,15 @@ test("an artifact links to an experiment, shows on both pages, unlinks, and its 
   await page.setViewportSize({ width: 1280, height: 800 })
   await expect(artifactsSection.getByRole("link", { name: artifactTitle, exact: true })).toBeVisible()
   await page.goto(artifactUrl)
+  await page.getByRole("button", { name: "Details", exact: true }).click()
+  await page.getByRole("tab", { name: "Links", exact: true }).click()
   await expect(page.getByRole("region", { name: "Linked experiments" }).getByRole("link", { name: experimentTitle, exact: true })).toBeVisible({ timeout: 30_000 })
 
   // An archived artifact keeps its link visible and removable but cannot take a new one.
+  await page.getByRole("tab", { name: "Details", exact: true }).click()
   await page.getByRole("button", { name: "Archive", exact: true }).click()
   await expect(page.getByText("This artifact is archived.")).toBeVisible()
+  await page.getByRole("tab", { name: "Links", exact: true }).click()
   const archivedSection = page.getByRole("region", { name: "Linked experiments" })
   await expect(archivedSection.getByRole("link", { name: experimentTitle, exact: true })).toBeVisible()
   await expect(archivedSection.getByRole("button", { name: `Unlink ${experimentTitle}`, exact: true })).toBeEnabled()

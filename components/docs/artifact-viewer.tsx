@@ -167,6 +167,7 @@ export function ArtifactViewer({
   backHref,
   onFeedbackPosted,
   fill = false,
+  bleed = false,
   slides,
   initialSlideIndex = 0,
   toolbarSlot,
@@ -185,6 +186,8 @@ export function ArtifactViewer({
   onFeedbackPosted?: () => void
   /** Full-screen route: stretch the preview to fill the viewport instead of the docked min-height floor. */
   fill?: boolean
+  /** Edge-to-edge stage mode on the artifact detail page (fills available stage height and width). */
+  bleed?: boolean
   /** Present only for a SLIDE_DECK Artifact; each slide is already sandboxed. */
   slides?: ArtifactSlideDto[]
   /** Zero-based slide to open on (clamped). */
@@ -340,6 +343,7 @@ export function ArtifactViewer({
       thumbnail={thumbnail}
       livePreviewSrc={livePreviewSrc}
       fill={fill}
+      bleed={bleed}
       holdPrevious
       settleOnReady={!isDeck}
       pickMode={picking}
@@ -385,7 +389,7 @@ export function ArtifactViewer({
     <div
       role="dialog"
       aria-label={`Feedback from ${selectedComment.authorName}`}
-      className={`absolute z-20 rounded-xl border border-border-default bg-surface-panel p-3 text-sm shadow-xl ${fill ? "bottom-20 left-1/2 w-[min(32rem,calc(100%-2rem))] -translate-x-1/2" : "inset-x-3 bottom-3"}`}
+      className={`absolute z-20 rounded-xl border border-border-default bg-surface-panel p-3 text-sm shadow-xl ${fill ? "bottom-20 left-1/2 w-[min(32rem,calc(100%-2rem))] -translate-x-1/2" : bleed ? "bottom-4 left-1/2 w-[min(32rem,calc(100%-2rem))] -translate-x-1/2" : "inset-x-3 bottom-3"}`}
     >
       <div className="flex items-start justify-between gap-2">
         <p className="font-medium text-text-primary">
@@ -443,7 +447,7 @@ export function ArtifactViewer({
   )
 
   const commentsList = slideWideComments.length > 0 && (
-    <div className={fill ? "max-h-32 overflow-y-auto border-b border-border-default pb-2 text-xs" : "rounded-lg border border-border-default p-3 text-xs"}>
+    <div className={fill || (bleed && slideWideDraft) ? "max-h-32 overflow-y-auto border-b border-border-default pb-2 text-xs" : bleed ? "max-h-28 overflow-y-auto text-xs" : "rounded-lg border border-border-default p-3 text-xs"}>
       <p className="font-medium text-text-primary">
         {slideWideComments.length} comment{slideWideComments.length === 1 ? "" : "s"} on this slide
       </p>
@@ -457,7 +461,7 @@ export function ArtifactViewer({
 
   const formEl = (picked || slideWideDraft) && (
     <form
-      className={fill ? "space-y-2" : "space-y-2 rounded-lg border border-border-default p-3"}
+      className={fill || bleed ? "space-y-2" : "space-y-2 rounded-lg border border-border-default p-3"}
       onSubmit={(event) => {
         event.preventDefault()
         void submit()
@@ -606,6 +610,49 @@ export function ArtifactViewer({
       )}
     </>
   )
+
+  if (bleed) {
+    const hasStatus = picking || staleCount > 0
+    return (
+      <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
+        {toolbarSlot === undefined ? <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border-default bg-surface-panel px-3 py-1.5">{toolbarButtons}</div> : toolbarSlot && createPortal(toolbarButtons, toolbarSlot)}
+        {isDeck && currentSlide && (
+          <nav aria-label="Slides" className="flex shrink-0 items-center gap-2 border-b border-border-default bg-surface-panel px-3 py-1.5">
+            <Button type="button" variant="outline" size="sm" aria-label="Previous slide" disabled={slideIndex === 0} onClick={() => goToSlide(slideIndex - 1)}>
+              <ChevronLeft aria-hidden />
+            </Button>
+            <p aria-live="polite" className="min-w-0 truncate text-sm text-text-secondary">
+              <span className="font-medium text-text-primary">Slide {slideIndex + 1} of {slideCount}</span>
+              {currentSlide.title ? ` · ${currentSlide.title}` : ""}
+            </p>
+            <Button type="button" variant="outline" size="sm" aria-label="Next slide" disabled={slideIndex >= slideCount - 1} onClick={() => goToSlide(slideIndex + 1)}>
+              <ChevronRight aria-hidden />
+            </Button>
+          </nav>
+        )}
+        {hasStatus && (
+          <div className="shrink-0 space-y-1 border-b border-border-default bg-surface-inset px-3 py-1.5">
+            {statusEl}
+          </div>
+        )}
+        <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+          {previewEl}
+          {selectedCard}
+          {(picked || slideWideDraft) && (
+            <div className="absolute bottom-4 left-1/2 z-20 max-h-[70%] w-[min(32rem,calc(100%-2rem))] -translate-x-1/2 space-y-2 overflow-y-auto rounded-xl border border-border-default bg-surface-panel p-3 shadow-xl">
+              {slideWideDraft && commentsList}
+              {formEl}
+            </div>
+          )}
+        </div>
+        {!picked && !slideWideDraft && slideWideComments.length > 0 && (
+          <div className="shrink-0 border-t border-border-default bg-surface-panel px-4 py-2">
+            {commentsList}
+          </div>
+        )}
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-3">

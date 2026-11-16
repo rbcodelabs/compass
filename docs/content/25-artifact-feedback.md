@@ -16,12 +16,17 @@ it uses your existing Compass sign-in.
 
 ## Leaving feedback
 
-Open an HTML Artifact and press **Leave feedback** in the top bar of the page, next to **Comments**
-(on a narrow page the buttons show as icons — hover for the name). Click
-the element you want to comment on, then write your comment and post it. The
-comment is an ordinary comment on the artifact — it also shows up in the
-**Comments** panel, and can be replied to, edited, resolved, or deleted there
-like any other thread.
+An artifact opens edge to edge under a slim top bar, with its metadata, links,
+sharing, revision history, and discussion tucked into a collapsible right-hand
+inspector drawer (or a bottom sheet on mobile) opened from **Comments** or
+**Details**.
+
+Open an HTML Artifact and press **Leave feedback** in the top bar, next to
+**Comments** and **Details** (on a narrow page the buttons show as icons — hover
+for the name). Click the element you want to comment on, then write your comment
+and post it. The comment is an ordinary comment on the artifact — it also shows
+up in the **Comments** tab of the inspector drawer, and can be replied to,
+edited, resolved, or deleted there like any other thread.
 
 Picking an element never activates it: a click while picking is captured and
 never reaches the prototype's own buttons or links, so you cannot
@@ -59,8 +64,8 @@ docked view.
 ## Slide decks
 
 An uploaded HTML Artifact can be shown as a **slide deck**. To do that, tick
-**This is a slide deck** when you upload it, or **Show as a slide deck** in
-the artifact's Details later. MCP clients can pass `kind: "SLIDE_DECK"` to
+**This is a slide deck** when you upload it, or open **Details** in the top bar
+and tick **Show as a slide deck** later. MCP clients can pass `kind: "SLIDE_DECK"` to
 `create_artifact` or `update_artifact`. The file itself is unchanged, and
 switching back to a plain document is just as reversible.
 
@@ -101,7 +106,8 @@ and **Back to artifact** keep you on the current slide, as does a link with
 ## Sharing an artifact with people outside Compass
 
 Owners can share an HTML artifact with people who have no Compass login. Open
-the artifact and use the **Share externally** panel:
+**Details** in the top bar and switch to the **Share** tab of the inspector
+drawer:
 
 - **Turn on sharing** creates a secret link and one shared password. Leave the
   password blank to have one generated; it is shown once, along with the link.

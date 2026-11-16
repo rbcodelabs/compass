@@ -25,7 +25,7 @@ afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); docume
 it("eagerly loads anchors for pins, independently of the Discussion panel", async () => {
   render(<ArtifactDetail {...props} />)
   // The pin overlay needs existing anchored comments whether or not the
-  // Comments panel has ever been opened, so ArtifactViewer fetches on mount —
+  // Comments tab has ever been opened, so ArtifactViewer fetches on mount —
   // unlike Discussion (components/comments/discussion.tsx), which stays lazy.
   await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
   expect(fetchMock.mock.calls[0][0]).toBe("/api/comments?targetType=ARTIFACT&targetId=artifact")
@@ -34,15 +34,20 @@ it("eagerly loads anchors for pins, independently of the Discussion panel", asyn
   await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
 })
 
-it("preserves a draft and preview across pinning, closing, reopening and refresh", async () => {
+it("preserves a draft and preview across resizing, tab switching, closing, reopening and refresh", async () => {
   const { rerender } = render(<ArtifactDetail {...props} />)
   const preview = screen.getByRole("textbox", { name: "Preview control" })
   fireEvent.click(screen.getByRole("button", { name: "Comments" }))
   await screen.findByText("No comments yet.")
   typeInto(screen.getByRole("textbox", { name: "Add comment" }), "Keep this draft")
-  fireEvent.click(screen.getByRole("button", { name: "Pin panel" }))
-  expect(screen.getByRole("complementary", { name: "Comments" })).toBeVisible()
-  expect(document.cookie).toContain("compass_panel_artifactComments=1:448")
+  const inspector = screen.getByRole("complementary", { name: "Artifact inspector" })
+  expect(inspector).toBeVisible()
+  const handle = screen.getByRole("separator", { name: "Resize panel" })
+  expect(handle).toHaveAttribute("aria-valuenow", "360")
+  fireEvent.keyDown(handle, { key: "ArrowLeft" })
+  expect(document.cookie).toContain("compass_panel_artifactComments=1:376")
+  fireEvent.click(screen.getByRole("tab", { name: "Details" }))
+  fireEvent.click(screen.getByRole("tab", { name: "Comments" }))
   expect(screen.getByRole("textbox", { name: "Add comment" })).toHaveTextContent("Keep this draft")
   fireEvent.click(screen.getByRole("button", { name: "Close panel" }))
   fireEvent.click(screen.getByRole("button", { name: "Comments" }))

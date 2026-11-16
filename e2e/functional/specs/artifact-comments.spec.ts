@@ -1,60 +1,145 @@
 import { test, expect } from "../fixtures/index"
 import type { Page } from "@playwright/test"
 
+const PROTOTYPE_HTML = `<!doctype html>
+<html>
+<head>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.5 system-ui, -apple-system, sans-serif; padding: 32px 40px; background: #fbfaff; color: #18162c; }
+  .hd { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 24px; }
+  h1 { margin: 4px 0 0; font-size: 26px; letter-spacing: -0.02em; }
+  .pill { background: #ece9ff; color: #4b3fd8; border-radius: 99px; padding: 5px 12px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px; margin-bottom: 20px; }
+  .kpi { background: #fff; border: 1px solid #e7e4f8; border-radius: 12px; padding: 14px 16px; }
+  .kpi small { color: #6e6b8f; font-size: 12px; display: block; }
+  .kpi strong { font-size: 24px; display: block; margin: 4px 0; }
+  .kpi em { font-style: normal; color: #12936b; font-size: 12px; font-weight: 600; }
+  .card { background: #fff; border: 1px solid #e7e4f8; border-radius: 12px; padding: 18px 20px; }
+  label { display: block; font-weight: 500; margin-top: 10px; }
+  input { display: block; width: 100%; max-width: 420px; margin-top: 8px; padding: 10px 12px; border: 1px solid #cbc7e6; border-radius: 8px; font: inherit; }
+</style>
+</head>
+<body>
+  <div class="hd">
+    <div><small style="color:#6e6b8f;font-weight:600;text-transform:uppercase;font-size:11px;letter-spacing:.05em">Prototype · Q4</small><h1>Checkout preview</h1></div>
+    <span class="pill">Last 28 days</span>
+  </div>
+  <div class="kpis">
+    <div class="kpi"><small>Signups</small><strong>12,480</strong><em>+8.2%</em></div>
+    <div class="kpi"><small>Activated</small><strong>7,912</strong><em>+14.1%</em></div>
+    <div class="kpi"><small>Median time to value</small><strong>3.4 min</strong><em>-22%</em></div>
+    <div class="kpi"><small>Week-1 retention</small><strong>61%</strong><em>+4 pts</em></div>
+  </div>
+  <div class="card">
+    <p style="margin:0 0 8px">Review your order before continuing.</p>
+    <label>Delivery note <input aria-label="Delivery note" placeholder="Leave gate code or instructions…"></label>
+  </div>
+</body>
+</html>`
+
 async function createArtifact(page: Page, base: string, title = "Checkout prototype") {
   await page.goto(`${base}/docs/artifacts/new`)
   await page.getByLabel("Title").fill(title)
+  await page.getByLabel("Description").fill("Interactive checkout and fulfillment funnel prototype for Q4 stakeholder review.")
   await page.getByLabel("Self-contained HTML file").setInputFiles({
-    name: "checkout.html", mimeType: "text/html",
-    buffer: Buffer.from('<!doctype html><html><head><style>body{font:16px system-ui;padding:24px;background:#fff;color:#171717}h1{font-size:28px}input{display:block;margin-top:12px;padding:10px;border:1px solid #bbb;border-radius:8px}</style></head><body><h1>Checkout preview</h1><p>Review your order before continuing.</p><label>Delivery note <input aria-label="Delivery note"></label></body></html>'),
+    name: "checkout.html",
+    mimeType: "text/html",
+    buffer: Buffer.from(PROTOTYPE_HTML),
   })
   await page.getByRole("button", { name: "Create artifact" }).click()
   await page.waitForURL(/\/docs\/artifacts\/[0-9a-f-]+$/)
   await expect(page.frameLocator("iframe").getByRole("heading", { name: "Checkout preview" })).toBeVisible()
 }
 
-const pinned = (page: Page) => page.getByRole("complementary", { name: "Comments" })
+const inspector = (page: Page) => page.getByRole("complementary", { name: "Artifact inspector" })
 
-test("Artifact comments support the discussion lifecycle across revisions and archive", async ({ page, base }) => {
+test("Artifact comments support the discussion lifecycle across tabs, revisions and archive", async ({ page, base }, testInfo) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await createArtifact(page, base)
+
+  // 1. Starts closed, full-bleed across the content column.
+  await expect(inspector(page)).toHaveCount(0)
+  const closedColWidth = (await page.locator('[data-slot="artifact-content-column"]').boundingBox())!.width
+  expect(closedColWidth).toBeGreaterThan(1100)
+  await page.screenshot({ path: testInfo.outputPath("sol-101-01-desktop-closed-full-bleed.png"), animations: "disabled" })
+
+  // 2. Comments button opens the 360px right inspector drawer directly on Comments.
   await page.getByRole("button", { name: "Comments", exact: true }).click()
-  await page.getByRole("button", { name: "Pin panel", exact: true }).click()
+  await expect(inspector(page)).toBeVisible()
+  expect(Math.abs((await inspector(page).boundingBox())!.width - 360)).toBeLessThanOrEqual(2)
+  const openColWidth = (await page.locator('[data-slot="artifact-content-column"]').boundingBox())!.width
+  expect(Math.abs(closedColWidth - openColWidth - 360)).toBeLessThanOrEqual(2)
+
   await page.getByRole("textbox", { name: "Add comment" }).fill("Review the **delivery note**.")
   await page.getByRole("button", { name: "Post comment", exact: true }).click()
-  await expect(pinned(page).locator("strong").filter({ hasText: "delivery note" })).toBeVisible()
-  await pinned(page).getByRole("button", { name: /^Reply to/ }).click()
-  await pinned(page).getByRole("textbox", { name: /^Reply to/ }).fill("Reply draft")
-  await pinned(page).getByRole("textbox", { name: /^Reply to/ }).press("Escape")
-  await expect(pinned(page)).toBeVisible()
-  await pinned(page).getByRole("button", { name: /^Reply to/ }).click()
-  await pinned(page).getByRole("textbox", { name: /^Reply to/ }).fill("Looks good.")
-  await pinned(page).getByRole("button", { name: "Post reply" }).click()
-  await expect(pinned(page).getByText("Looks good.", { exact: true })).toBeVisible()
-  await pinned(page).getByRole("button", { name: /^Edit comment by/ }).first().click()
-  await pinned(page).getByRole("textbox", { name: /^Edit comment by/ }).fill("Reviewed delivery note.")
-  await pinned(page).getByRole("button", { name: "Save edit" }).click()
-  await expect(pinned(page).getByText("Reviewed delivery note.", { exact: true })).toBeVisible()
-  await pinned(page).getByRole("button", { name: /^Resolve thread/ }).click()
-  await pinned(page).getByRole("button", { name: /^Expand resolved thread/ }).click()
-  await expect(pinned(page).getByText("Looks good.", { exact: true })).toBeVisible()
-  await pinned(page).getByRole("button", { name: /^Reopen thread/ }).click()
+  await expect(inspector(page).locator("strong").filter({ hasText: "delivery note" })).toBeVisible()
+  await inspector(page).getByRole("button", { name: /^Reply to/ }).click()
+  await inspector(page).getByRole("textbox", { name: /^Reply to/ }).fill("Reply draft")
+  await inspector(page).getByRole("textbox", { name: /^Reply to/ }).press("Escape")
+  await expect(inspector(page)).toBeVisible()
+  await inspector(page).getByRole("button", { name: /^Reply to/ }).click()
+  await inspector(page).getByRole("textbox", { name: /^Reply to/ }).fill("Looks good.")
+  await inspector(page).getByRole("button", { name: "Post reply" }).click()
+  await expect(inspector(page).getByText("Looks good.", { exact: true })).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath("sol-101-06-desktop-open-comments-light.png"), animations: "disabled" })
+
+  await inspector(page).getByRole("button", { name: /^Edit comment by/ }).first().click()
+  await inspector(page).getByRole("textbox", { name: /^Edit comment by/ }).fill("Reviewed delivery note.")
+  await inspector(page).getByRole("button", { name: "Save edit" }).click()
+  await expect(inspector(page).getByText("Reviewed delivery note.", { exact: true })).toBeVisible()
+  await inspector(page).getByRole("button", { name: /^Resolve thread/ }).click()
+  await inspector(page).getByRole("button", { name: /^Expand resolved thread/ }).click()
+  await expect(inspector(page).getByText("Looks good.", { exact: true })).toBeVisible()
+  await inspector(page).getByRole("button", { name: /^Reopen thread/ }).click()
+
+  // 3. Draft survives switching across Details, Links, Share, History, and uploading Revision 2.
   await page.getByRole("textbox", { name: "Add comment" }).fill("Draft survives revision refresh")
-  await page.locator('input[name="file"]').setInputFiles({ name: "v2.html", mimeType: "text/html", buffer: Buffer.from("<html><body><h1>Revision two</h1></body></html>") })
-  await page.getByRole("button", { name: "Replace current revision" }).click()
+
+  await inspector(page).getByRole("tab", { name: "Details", exact: true }).click()
+  await expect(inspector(page).getByRole("button", { name: "Save details" })).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath("sol-101-02-desktop-open-details.png"), animations: "disabled" })
+
+  await inspector(page).getByRole("tab", { name: "Links", exact: true }).click()
+  await expect(inspector(page).getByRole("heading", { name: "Linked decisions" })).toBeVisible()
+  await expect(inspector(page).getByRole("region", { name: "Linked experiments" }).getByText("No experiments linked yet.")).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath("sol-101-03-desktop-open-links.png"), animations: "disabled" })
+
+  await inspector(page).getByRole("tab", { name: "Share", exact: true }).click()
+  await expect(inspector(page).getByRole("heading", { name: "Share with people outside Compass" })).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath("sol-101-04-desktop-open-share.png"), animations: "disabled" })
+
+  await inspector(page).getByRole("tab", { name: "Details", exact: true }).click()
+  await inspector(page).locator('input[name="file"]').setInputFiles({
+    name: "v2.html",
+    mimeType: "text/html",
+    buffer: Buffer.from(`<!doctype html><html><body style="margin:0;padding:36px;font:16px system-ui;background:#fbfaff;color:#18162c"><h1>Revision two</h1><p>Updated checkout step with clearer shipping estimate.</p></body></html>`),
+  })
+  await inspector(page).getByRole("button", { name: "Replace current revision" }).click()
   // While the new revision loads, the previous frame stays mounted underneath it (holdPrevious); the newest frame is last.
   await expect(page.frameLocator("iframe").last().getByRole("heading", { name: "Revision two" })).toBeVisible()
+
+  await inspector(page).getByRole("tab", { name: "History", exact: true }).click()
+  await expect(inspector(page).getByText("Revision 2")).toBeVisible()
+  await expect(inspector(page).getByText("Revision 1")).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath("sol-101-05-desktop-open-history.png"), animations: "disabled" })
+
+  await inspector(page).getByRole("tab", { name: "Comments", exact: true }).click()
   await expect(page.getByRole("textbox", { name: "Add comment" })).toHaveText("Draft survives revision refresh")
-  await expect(pinned(page).getByText("Reviewed delivery note.", { exact: true })).toBeVisible()
-  await page.getByRole("button", { name: "Archive", exact: true }).click()
+  await expect(inspector(page).getByText("Reviewed delivery note.", { exact: true })).toBeVisible()
+
+  await inspector(page).getByRole("tab", { name: "Details", exact: true }).click()
+  await inspector(page).getByRole("button", { name: "Archive", exact: true }).click()
   await expect(page.getByText("This artifact is archived.")).toBeVisible()
-  await expect(pinned(page).getByText("Reviewed delivery note.", { exact: true })).toBeVisible()
+
+  await inspector(page).getByRole("tab", { name: "Comments", exact: true }).click()
+  await expect(inspector(page).getByText("Reviewed delivery note.", { exact: true })).toBeVisible()
   page.once("dialog", (dialog) => dialog.accept())
-  await pinned(page).getByRole("button", { name: /^Delete thread by/ }).click()
-  await expect(pinned(page).getByText("No comments yet.")).toBeVisible()
+  await inspector(page).getByRole("button", { name: /^Delete thread by/ }).click()
+  await expect(inspector(page).getByText("No comments yet.")).toBeVisible()
 })
 
-test("Artifact pinning preserves preview and drafts, isolates cookies, and adapts to small screens", async ({ page, base }, testInfo) => {
+test("Artifact inspector preserves preview and drafts, isolates cookies, and adapts to small screens", async ({ page, base }, testInfo) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   const longTitle = "Checkout prototype for reviewing delivery details with the fulfillment team"
   await createArtifact(page, base, longTitle)
@@ -70,31 +155,44 @@ test("Artifact pinning preserves preview and drafts, isolates cookies, and adapt
   await expect(page.getByRole("textbox", { name: "Add comment" })).toHaveText("")
   await expect(page.getByText("The delivery note is easy to find. Could we clarify when it will be shared?", { exact: true })).toBeVisible()
   await page.getByRole("textbox", { name: "Add comment" }).fill("Keep this draft")
-  await page.getByRole("button", { name: "Pin panel", exact: true }).click()
   await page.frameLocator("iframe").getByRole("textbox", { name: "Delivery note" }).press("Escape")
-  await expect(pinned(page)).toBeVisible()
-  const handle = pinned(page).getByRole("separator", { name: "Resize panel" })
+  await expect(inspector(page)).toBeVisible()
+  const handle = inspector(page).getByRole("separator", { name: "Resize panel" })
   await handle.press("Home")
   await handle.press("ArrowLeft")
   await expect(handle).toHaveAttribute("aria-valuenow", "336")
-  await pinned(page).getByRole("button", { name: "Close panel" }).click()
+  await inspector(page).getByRole("button", { name: "Close panel" }).click()
   await expect(page.getByRole("button", { name: "Comments", exact: true })).toBeFocused()
   await page.getByRole("button", { name: "Comments", exact: true }).click()
   await expect(page.getByRole("textbox", { name: "Add comment" })).toHaveText("Keep this draft")
   await expect(page.frameLocator("iframe").getByRole("textbox", { name: "Delivery note" })).toHaveValue("Preview stays mounted")
+
   for (const theme of ["light", "dark"]) {
     await page.evaluate((value) => document.documentElement.classList.toggle("dark", value === "dark"), theme)
     for (const width of [1440, 1280, 900, 390]) {
-      await page.setViewportSize({ width, height: 900 })
-      const surface = width >= 1440 ? pinned(page) : page.getByRole("dialog", { name: "Comments" })
-      // The Docs tree consumes width too; even a desktop viewport can suspend pinning.
-      const visibleSurface = await pinned(page).count() ? pinned(page) : surface
+      const height = width === 390 ? 844 : 900
+      await page.setViewportSize({ width, height })
+      const sheetDialog = page.getByRole("dialog", { name: "Artifact inspector" })
+      const visibleSurface = (await inspector(page).count()) ? inspector(page) : sheetDialog
       await expect(visibleSurface).toBeVisible()
       await expect(visibleSurface).toHaveCSS("opacity", "1")
       await expect(page.getByRole("textbox", { name: "Add comment" })).toHaveText("Keep this draft")
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
-      if (await pinned(page).count()) expect((await page.locator('[data-slot="artifact-content-column"]').boundingBox())!.width).toBeGreaterThanOrEqual(479)
+      if (await inspector(page).count()) {
+        expect((await page.locator('[data-slot="artifact-content-column"]').boundingBox())!.width).toBeGreaterThanOrEqual(479)
+      }
       await page.screenshot({ path: testInfo.outputPath(`artifact-comments-${theme}-${width}.png`), animations: "disabled" })
+      if (theme === "dark" && width === 1440) {
+        await page.screenshot({ path: testInfo.outputPath("sol-101-06b-desktop-open-comments-dark.png"), animations: "disabled" })
+      }
+      if (theme === "light" && width === 390) {
+        await page.screenshot({ path: testInfo.outputPath("sol-101-08b-mobile-sheet-comments.png"), animations: "disabled" })
+        await visibleSurface.getByRole("tab", { name: "Details", exact: true }).click()
+        await expect(visibleSurface.getByRole("button", { name: "Save details" })).toBeVisible()
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+        await page.screenshot({ path: testInfo.outputPath("sol-101-08a-mobile-sheet-details.png"), animations: "disabled" })
+        await visibleSurface.getByRole("tab", { name: "Comments", exact: true }).click()
+      }
       if (width === 390) {
         await visibleSurface.getByRole("button", { name: /^Reply to/ }).click()
         await visibleSurface.getByRole("textbox", { name: /^Reply to/ }).press("Escape")
@@ -103,30 +201,37 @@ test("Artifact pinning preserves preview and drafts, isolates cookies, and adapt
       }
     }
   }
-  await page.getByRole("dialog", { name: "Comments" }).getByRole("button", { name: "Close" }).click()
+
+  await page.evaluate(() => document.documentElement.classList.remove("dark"))
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.getByRole("dialog", { name: "Artifact inspector" }).getByRole("button", { name: "Close panel" }).click()
   await expect(page.getByRole("heading", { name: longTitle })).toBeVisible()
   await expect(page.getByRole("button", { name: "Comments", exact: true })).toBeVisible()
-  await expect(page.getByRole("button", { name: "Archive", exact: true })).toBeVisible()
-  expect((await page.getByRole("heading", { name: longTitle }).boundingBox())!.width).toBeGreaterThan(300)
-  for (const control of [page.getByRole("heading", { name: longTitle }), page.getByRole("button", { name: "Comments", exact: true }), page.getByRole("button", { name: "Archive", exact: true })]) {
+  await expect(page.getByRole("button", { name: "Details", exact: true })).toBeVisible()
+  for (const control of [
+    page.getByRole("heading", { name: longTitle }),
+    page.getByRole("button", { name: "Comments", exact: true }),
+    page.getByRole("button", { name: "Details", exact: true }),
+  ]) {
     const bounds = (await control.boundingBox())!
     expect(bounds.x).toBeGreaterThanOrEqual(0)
     expect(bounds.x + bounds.width).toBeLessThanOrEqual(390)
   }
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
-  await page.screenshot({ path: testInfo.outputPath("artifact-comments-closed-mobile.png"), animations: "disabled" })
+  await page.screenshot({ path: testInfo.outputPath("sol-101-07-mobile-closed-full-bleed.png"), animations: "disabled" })
+
   await page.setViewportSize({ width: 1440, height: 900 })
   await page.getByRole("button", { name: "Comments", exact: true }).click()
-  await expect(pinned(page)).toBeVisible()
+  await expect(inspector(page)).toBeVisible()
   await expect(page.frameLocator("iframe").getByRole("textbox", { name: "Delivery note" })).toHaveValue("Preview stays mounted")
   const cookies = await page.context().cookies()
   expect(cookies.find((cookie) => cookie.name === "compass_panel_docsComments")?.value).toBe("1:336")
   expect(cookies.find((cookie) => cookie.name === "compass_panel_docsHistory")?.value).toBe("0:512")
   expect(cookies.find((cookie) => cookie.name === "compass_panel_artifactComments")?.value).toBe("1:336")
   await page.reload()
-  await expect(pinned(page)).toHaveCount(0)
+  await expect(inspector(page)).toHaveCount(0)
   await page.getByRole("button", { name: "Comments", exact: true }).click()
-  await expect(pinned(page).getByRole("separator")).toHaveAttribute("aria-valuenow", "336")
+  await expect(inspector(page).getByRole("separator")).toHaveAttribute("aria-valuenow", "336")
   await expect(page.getByRole("textbox", { name: "Add comment" })).toHaveText("")
 })
 

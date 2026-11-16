@@ -46,6 +46,9 @@ test.describe("Decision supporting artifacts", () => {
       await expect(page).toHaveURL(ARTIFACT_PAGE)
       await page.frameLocator(`iframe[title="${title} preview"]`).getByRole("button", { name: "Try direction A" }).click()
       await expect(page.frameLocator(`iframe[title="${title} preview"]`).getByRole("button", { name: "Selected" })).toBeVisible()
+
+      await page.getByRole("button", { name: "Details", exact: true }).click()
+      await page.getByRole("tab", { name: "Links", exact: true }).click()
       await expect(page.getByRole("heading", { name: "Linked decisions" })).toBeVisible()
       if (decided) {
         for (const viewport of [{ width: 1280, height: 800, label: "desktop" }, { width: 390, height: 844, label: "mobile" }]) {
@@ -56,6 +59,7 @@ test.describe("Decision supporting artifacts", () => {
           await page.screenshot({ path: testInfo.outputPath(`artifact-decisions-${viewport.label}.png`), ...capture })
           if (process.env.UPDATE_DECISION_ARTIFACT_SCREENSHOTS === "1") await page.screenshot({ path: `public/screenshots/docs/artifact-decisions-${viewport.label}.png`, ...capture })
         }
+        await page.setViewportSize({ width: 1280, height: 800 })
       }
       await page.getByRole("link", { name: question, exact: true }).click()
       await expect(page).toHaveURL(DECISION_PAGE)
@@ -67,11 +71,13 @@ test.describe("Decision supporting artifacts", () => {
       // so wait for the destination URL before asserting on or acting in it.
       await artifactLink.click()
       await expect(page).toHaveURL(ARTIFACT_PAGE)
+      await page.getByRole("button", { name: "Details", exact: true }).click()
       await page.locator('input[type="file"][name="file"]').setInputFiles({ name: "checkout-v2.html", mimeType: "text/html", buffer: Buffer.from("<!doctype html><html><body><h1>Checkout exploration: direction B</h1><p>Distinct second revision content</p></body></html>") })
       await page.getByRole("button", { name: "Replace current revision", exact: true }).click()
       const activePreview = page.locator(`iframe[title="${title} preview"]`).last().contentFrame()
       await expect(activePreview.getByRole("heading", { name: "Checkout exploration: direction B", exact: true })).toBeVisible({ timeout: 15_000 })
       await expect(activePreview.getByRole("button", { name: "Try direction A" })).toHaveCount(0)
+      await page.getByRole("tab", { name: "Links", exact: true }).click()
       await page.getByRole("link", { name: question, exact: true }).click()
       await expect(page).toHaveURL(DECISION_PAGE)
       await page.getByRole("tab", { name: /Sources & Artifacts/ }).click()
@@ -87,11 +93,14 @@ test.describe("Decision supporting artifacts", () => {
           await page.screenshot({ path: testInfo.outputPath(`decision-artifacts-${viewport.label}.png`), ...capture })
           if (process.env.UPDATE_DECISION_ARTIFACT_SCREENSHOTS === "1") await page.screenshot({ path: `public/screenshots/docs/decision-artifacts-${viewport.label}.png`, ...capture })
         }
+        await page.setViewportSize({ width: 1280, height: 800 })
       }
       await artifactLink.click()
       await expect(page).toHaveURL(ARTIFACT_PAGE)
+      await page.getByRole("button", { name: "Details", exact: true }).click()
       await page.getByRole("button", { name: "Archive", exact: true }).click()
       await expect(page.getByText("This artifact is archived.")).toBeVisible()
+      await page.getByRole("tab", { name: "Links", exact: true }).click()
       await page.getByRole("link", { name: question, exact: true }).click()
       await expect(page).toHaveURL(DECISION_PAGE)
       await page.getByRole("tab", { name: /Sources & Artifacts/ }).click()
@@ -102,6 +111,8 @@ test.describe("Decision supporting artifacts", () => {
       expect(await prisma.entityLink.count({ where: { linkType: "ARTIFACT_SUPPORTS_DECISION", fromId: artifactId, toId: revision.requestId } })).toBe(0)
       expect(await snapshot()).toEqual(before)
       await page.goto(artifactUrl)
+      await page.getByRole("button", { name: "Details", exact: true }).click()
+      await page.getByRole("tab", { name: "Links", exact: true }).click()
       await expect(page.getByRole("link", { name: question, exact: true })).toHaveCount(0)
     })
   }

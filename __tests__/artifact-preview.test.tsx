@@ -341,4 +341,17 @@ describe("ArtifactPreview — live external preview", () => {
     expect(screen.queryByTitle("Live preview of Demo")).toBeNull()
     expect(screen.getByText("Open external artifact")).toBeInTheDocument()
   })
+
+  it("stretches HTML, Google Drive, and v0 frames edge-to-edge in bleed mode without rounded borders", () => {
+    const htmlView = render(<ArtifactPreview title="Edge" html="<html><body>Hi</body></html>" bleed />)
+    const htmlFrame = htmlView.getByTitle("Edge preview") as HTMLIFrameElement
+    expect(htmlFrame.className).toContain("h-full border-0")
+    expect(htmlFrame.className).not.toContain("rounded-lg")
+    cleanup()
+
+    const v0View = render(<ArtifactPreview title="Demo" externalUrl="https://v0.app/chat/abc" livePreviewSrc="https://demo.v0.build/?__v0_token=t" bleed />)
+    const v0Frame = v0View.getByTitle("Live preview of Demo") as HTMLIFrameElement
+    expect(v0Frame.className).toContain("flex-1 border-0")
+    expect(screen.getByRole("link", { name: /open external artifact/i })).toBeInTheDocument()
+  })
 })

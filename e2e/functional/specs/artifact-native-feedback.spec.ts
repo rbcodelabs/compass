@@ -106,6 +106,7 @@ test.fixme("A stale anchor is flagged rather than positioned at the wrong elemen
 
   // Replace the revision with markup that no longer contains anything the
   // stored selector or fingerprint can confidently match.
+  await page.getByRole("button", { name: "Details", exact: true }).click()
   await page.locator('input[name="file"]').setInputFiles({
     name: "v2.html",
     mimeType: "text/html",

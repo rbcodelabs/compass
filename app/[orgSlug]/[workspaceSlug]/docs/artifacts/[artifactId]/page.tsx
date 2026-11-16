@@ -43,7 +43,8 @@ export default async function ArtifactPage({ params, searchParams }: { params: P
   const rawSolutions = await prisma.solution.findMany({ where: { workspaceId: workspace.id }, select: { id: true, title: true }, orderBy: { title: "asc" } })
   const linkedIds = new Set(await getArtifactSolutionIds(prisma, workspace.id, artifactId))
   const decisions = await getArtifactDecisions(workspace.id, artifactId)
-  const initialCommentsPin = parsePanelPin((await cookies()).get(panelPinCookieName("artifactComments"))?.value)
+  const rawInspectorCookie = (await cookies()).get(panelPinCookieName("artifactComments"))?.value
+  const initialCommentsPin = rawInspectorCookie ? parsePanelPin(rawInspectorCookie) : undefined
   // A v0 chat shows v0's running app, fetched with the viewer's own grant on every view
   // (the preview token is short-lived, so it is never stored). Null falls back to the link card.
   const livePreviewSrc = artifact.sourceType === "V0_CHAT" && artifact.status === "ACTIVE" && artifact.v0ChatId ? await livePreviewSrcFor(session.user.id, artifact.v0ChatId) : null

@@ -424,5 +424,9 @@ describe("CLASSIC text is identical to main (Phase 4C-2 surfaces)", () => {
       solutions={[{ id: "s1", title: "Fix", linked: true }, { id: "s2", title: "Other", linked: false }]}
       decisions={[]}
     />,
+    () => {
+      fireEvent.click(screen.getByRole("button", { name: "Details" }))
+      fireEvent.click(screen.getByRole("tab", { name: "Links" }))
+    },
   )
 })

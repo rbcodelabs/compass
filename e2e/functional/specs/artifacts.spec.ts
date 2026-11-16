@@ -34,7 +34,8 @@ test.describe("Artifacts", () => {
     await expect(page.getByText("Attacker page")).toHaveCount(0)
   })
 
-  test("upload HTML → sandbox preview → link/open/unlink/archive", async ({ page, base }) => {
+  test("upload HTML → full-bleed sandbox preview → inspector link/open/unlink/archive", async ({ page, base }) => {
+    await page.setViewportSize({ width: 1440, height: 900 })
     const stamp = Date.now()
     const solutionTitle = `E2E Artifact Solution ${stamp}`
     const artifactTitle = `E2E Checkout Prototype ${stamp}`
@@ -59,12 +60,22 @@ test.describe("Artifacts", () => {
     await page.getByRole("button", { name: "Create artifact" }).click()
     await page.waitForURL(/\/docs\/artifacts\/[0-9a-f-]+$/)
 
+    // Inspector drawer starts closed; stage fills the entire content column edge to edge.
+    await expect(page.getByRole("complementary", { name: "Artifact inspector" })).toHaveCount(0)
     const frame = page.locator(`iframe[title="${artifactTitle} preview"]`)
     await expect(frame).toHaveAttribute("sandbox", "allow-scripts")
     await expect(frame).not.toHaveAttribute("allow")
     await expect(page.frameLocator(`iframe[title="${artifactTitle} preview"]`).getByText("Prototype script ran")).toBeVisible()
+    const colBox = (await page.locator('[data-slot="artifact-content-column"]').boundingBox())!
+    const frameBox = (await frame.boundingBox())!
+    expect(Math.abs(frameBox.width - colBox.width)).toBeLessThanOrEqual(2)
+    expect(frameBox.height).toBeGreaterThan(750)
     expect(outbound).toEqual([])
     await expect(page.locator("body")).not.toHaveAttribute("data-escaped", "yes")
+
+    // Open the inspector drawer and link a solution in the Links tab.
+    await page.getByRole("button", { name: "Details", exact: true }).click()
+    await page.getByRole("tab", { name: "Links", exact: true }).click()
     await page.getByLabel("Solution to link").selectOption({ label: solutionTitle })
     await page.getByRole("button", { name: "Link", exact: true }).click()
     await expect(page.getByText(solutionTitle)).toBeVisible()
@@ -76,9 +87,15 @@ test.describe("Artifacts", () => {
     await page.getByRole("button", { name: "Artifacts (1)", exact: true }).click()
     await expect(page.getByRole("link", { name: artifactTitle })).toBeVisible()
     await page.getByRole("link", { name: artifactTitle }).click()
+    await page.waitForURL(/\/docs\/artifacts\/[^/?#]+$/)
+
+    await page.getByRole("button", { name: "Details", exact: true }).click()
+    await page.getByRole("tab", { name: "Links", exact: true }).click()
     await page.getByRole("button", { name: "Unlink", exact: true }).click()
     await expect(page.getByText("Not linked to a solution.")).toBeVisible()
-    await page.getByRole("button", { name: "Archive" }).click()
+
+    await page.getByRole("tab", { name: "Details", exact: true }).click()
+    await page.getByRole("button", { name: "Archive", exact: true }).click()
     await expect(page.getByText("This artifact is archived.")).toBeVisible()
     await page.goto(`${base}/docs`)
     await expect(page.getByRole("link", { name: artifactTitle })).toHaveCount(0)
