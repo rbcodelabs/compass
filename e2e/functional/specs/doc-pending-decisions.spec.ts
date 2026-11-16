@@ -3,8 +3,7 @@ import getPrisma from "../../../lib/db"
 import { createTrackedDecisionRequest } from "../../../lib/tracked-decisions"
 
 test.describe("Docs pending decision toolbar", () => {
-  // QUARANTINE(prod-e2e): known baseline failure on dev and prod - review href uses UUID instead of display ID (job 01M7C5MDZS5DWAS1BS9YAH2KA1; fix in #572). See e2e/functional/QUARANTINE.md.
-  test.fixme("request → pending toolbar → request changes → revised pending → approve", async ({ page, base, workspaceSlug }) => {
+  test("request → pending toolbar → request changes → revised pending → approve", async ({ page, base, workspaceSlug }) => {
     const prisma = getPrisma()
     const workspace = await prisma.workspace.findFirstOrThrow({ where: { slug: workspaceSlug } })
     const doc = await prisma.doc.create({ data: { workspaceId: workspace.id, title: "Launch readiness", content: "Review the launch plan before release." } })
@@ -50,8 +49,11 @@ test.describe("Docs pending decision toolbar", () => {
     await expect(page.getByRole("link", { name: "Request decision", exact: true })).toBeHidden()
     await outcome.click()
     const outcomeMenu = page.getByRole("menu")
-    // `reviewUrl` is absolute (page.url()); the href is workspace-relative.
-    await expect(outcomeMenu.getByRole("menuitem", { name: question })).toHaveAttribute("href", new URL(reviewUrl).pathname)
+    // The menu links by the request's uuid (like the single-request toolbar link and the
+    // second test below); /reviews/<uuid> 308s to the canonical DEC-n URL, which is the
+    // `reviewUrl` the click below must land on.
+    const request = await prisma.reviewRequest.findFirstOrThrow({ where: { workspaceId: workspace.id, currentRevision: { title: question } }, select: { id: true } })
+    await expect(outcomeMenu.getByRole("menuitem", { name: question })).toHaveAttribute("href", `${new URL(reviewUrl).pathname.replace(/\/reviews\/.*$/, "")}/reviews/${request.id}`)
     await expect(outcomeMenu.getByRole("menuitem", { name: "Request another decision" })).toHaveAttribute("href", new RegExp(`subjectId=${doc.id}`))
     await outcomeMenu.getByRole("menuitem", { name: question }).click()
     await expect(page).toHaveURL(reviewUrl)
