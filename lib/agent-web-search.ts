@@ -12,7 +12,7 @@
  *
  * Two bounds are enforced server-side, by the credential the sandbox holds, because
  * nothing the sandbox says can be trusted to enforce them for itself:
- *  - a per-turn search budget (MAX_SEARCHES_PER_TURN), claimed by inserting the next
+ *  - a per-turn search budget (MAX_SEARCHES_PER_TURN, failed searches excluded), claimed by inserting the next
  *    `(credential_id, seq)` primary key so racing searches cannot both take one slot;
  *  - a bounded result count, snippet length and query length.
  */
@@ -21,6 +21,8 @@ import type { AppPrismaClient } from "@/lib/db"
 
 /** Searches one agent turn may make. A turn is one AGENT_TURN credential. */
 export const MAX_SEARCHES_PER_TURN = 5
+/** Ceiling on attempts, failed ones included, so a failing backend cannot be hammered. */
+export const MAX_SEARCH_ATTEMPTS_PER_TURN = MAX_SEARCHES_PER_TURN * 3
 export const DEFAULT_MAX_RESULTS = 5
 export const MAX_RESULTS_CEILING = 8
 export const MAX_QUERY_LENGTH = 400
@@ -96,14 +98,21 @@ export async function claimSearchSlot(
   scope: { credentialId: string; userId: string; workspaceId: string; conversationId: string | null },
   query: string,
 ): Promise<SearchSlot | null> {
-  for (let attempt = 0; attempt < MAX_SEARCHES_PER_TURN + 2; attempt++) {
+  for (let attempt = 0; attempt < MAX_SEARCH_ATTEMPTS_PER_TURN + 2; attempt++) {
     const last = await prisma.agentWebSearch.findFirst({
       where: { credentialId: scope.credentialId },
       orderBy: { seq: "desc" },
       select: { seq: true },
     })
     const seq = (last?.seq ?? 0) + 1
-    if (seq > MAX_SEARCHES_PER_TURN) return null
+    // Failed searches are audited but do not spend the turn budget: an outage must not
+    // leave the agent with a "budget exhausted" error on top of the real one. The hard
+    // ceiling on seq still bounds a turn whose backend keeps failing.
+    if (seq > MAX_SEARCH_ATTEMPTS_PER_TURN) return null
+    const spent = await prisma.agentWebSearch.count({
+      where: { credentialId: scope.credentialId, status: { not: "FAILED" } },
+    })
+    if (spent >= MAX_SEARCHES_PER_TURN) return null
     try {
       await prisma.agentWebSearch.create({
         data: {
@@ -229,7 +238,7 @@ export type WebSearchOutcome =
 
 /**
  * One audited search. The slot is claimed *before* the backend is called so a crashed
- * or timed-out search still counts against the budget and shows in the audit.
+ * or timed-out search shows in the audit. Only searches that did not fail spend the budget.
  */
 export async function runWebSearch(
   prisma: AppPrismaClient,

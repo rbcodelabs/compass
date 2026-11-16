@@ -4,6 +4,7 @@ vi.mock("ai", () => ({ gateway: { tools: { perplexitySearch: vi.fn() } }, genera
 
 import {
   MAX_SEARCHES_PER_TURN,
+  MAX_SEARCH_ATTEMPTS_PER_TURN,
   MAX_SNIPPET_CHARS,
   claimSearchSlot,
   clampMaxResults,
@@ -26,6 +27,7 @@ function fakePrisma(options: { missingTable?: boolean } = {}) {
       const seqs = [...rows.values()].map(r => r.seq)
       return seqs.length ? { seq: Math.max(...seqs) } : null
     }),
+    count: vi.fn(async () => [...rows.values()].filter(r => r.status !== "FAILED").length),
     create: vi.fn(async ({ data }: { data: { credentialId: string; seq: number; query: string } }) => {
       const key = `${data.credentialId}:${data.seq}`
       if (rows.has(key)) throw Object.assign(new Error("dup"), { code: "P2002" })
@@ -122,11 +124,21 @@ describe("runWebSearch", () => {
     expect(backend).toHaveBeenCalledTimes(MAX_SEARCHES_PER_TURN)
   })
 
-  it("still charges the budget and records FAILED when the backend fails", async () => {
+  it("records FAILED but does not spend the budget when the backend fails", async () => {
     const { prisma, rows } = fakePrisma()
     const outcome = await runWebSearch(prisma, scope, { query: "q" }, async () => ({ ok: false, reason: "rate_limit" }))
     expect(outcome).toEqual({ status: "failed", reason: "rate_limit" })
     expect([...rows.values()][0].status).toBe("FAILED")
+    for (let i = 0; i < MAX_SEARCHES_PER_TURN; i++)
+      expect(await runWebSearch(prisma, scope, { query: "q" }, ok(1))).toMatchObject({ status: "ok" })
+    expect(await runWebSearch(prisma, scope, { query: "q" }, ok(1))).toEqual({ status: "budget_exhausted" })
+  })
+
+  it("stops retrying a backend that keeps failing", async () => {
+    const { prisma } = fakePrisma()
+    const failing = vi.fn(async () => ({ ok: false as const, reason: "upstream" as const }))
+    for (let i = 0; i < MAX_SEARCH_ATTEMPTS_PER_TURN + 3; i++) await runWebSearch(prisma, scope, { query: "q" }, failing)
+    expect(failing).toHaveBeenCalledTimes(MAX_SEARCH_ATTEMPTS_PER_TURN)
   })
 
   it("fails closed, without calling the backend, when the table is missing", async () => {
