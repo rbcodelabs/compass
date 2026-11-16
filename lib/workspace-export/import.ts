@@ -5,7 +5,7 @@ import { WORK_ITEM_REGISTRY, WORK_ITEM_TYPES } from "@/lib/work-item-ids"
 import { BundleReader, blobEntry, type BundleManifest } from "@/lib/workspace-export/bundle"
 import { type BlobAdapters } from "@/lib/workspace-export/blobs"
 import { decodeRow, fieldInfo } from "@/lib/workspace-export/codec"
-import { OPTIONAL_FIELDS, OPTIONAL_STRING_FIELDS } from "@/lib/workspace-export/schema-meta.generated"
+import { OPTIONAL_FIELDS, OPTIONAL_STRING_FIELDS, UNIQUE_KEYS } from "@/lib/workspace-export/schema-meta.generated"
 import { deleteIdsLeafFirst, withRetry } from "@/lib/workspace-export/leaf-first"
 import { IMPORT_OVERRIDES, SECRET_COLUMNS } from "@/lib/workspace-export/model-registry"
 import {
@@ -100,6 +100,21 @@ function chunks<T>(list: T[], size: number): T[][] {
   const out: T[][] = []
   for (let i = 0; i < list.length; i += size) out.push(list.slice(i, i + size))
   return out
+}
+
+/** Serializes a unique-key tuple when all columns are non-null, or null when any part is NULL/omitted (NULLs are distinct in Postgres). */
+function uniqueTupleKey(row: Row, cols: readonly string[]): string | null {
+  const parts: unknown[] = []
+  for (const col of cols) {
+    const v = row[col]
+    if (v === null || v === undefined) return null
+    if (typeof v === "string") parts.push(UUID_EXACT.test(v) ? v.toLowerCase() : v)
+    else if (v instanceof Date) parts.push({ $d: v.toISOString() })
+    else if (typeof v === "bigint") parts.push({ $b: v.toString() })
+    else if (v instanceof Uint8Array) parts.push({ $y: Buffer.from(v).toString("base64") })
+    else parts.push(v)
+  }
+  return JSON.stringify(parts)
 }
 
 const BUNDLE_DATA_ENTRY = /^data\/([A-Za-z]+)\.\d{4}\.ndjson$/
@@ -229,6 +244,9 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
   const uploaded: { store: "artifact" | "research" | "feedback"; key: string }[] = []
 
   const dropped: Record<string, number> = {}
+  const deduped: Record<string, number> = {}
+  const droppedIds = new Set<string>()
+  const dedupedIds = new Set<string>()
   /** Returns null when a required reference cannot be resolved (it would point outside the workspace or into another org). */
   const transform = (model: string, raw: Row): Row | null => {
     const row = decodeRow(model, raw)
@@ -268,6 +286,7 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
     }
     if (unresolvable) {
       dropped[model] = (dropped[model] ?? 0) + 1
+      if (typeof row.id === "string") droppedIds.add(row.id.toLowerCase())
       return null
     }
     for (const col of SECRET_COLUMNS[model] ?? []) if (col in row) row[col] = null
@@ -300,6 +319,9 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
     const counts: Record<string, number> = {}
     for (const model of exportOrder()) {
       const delegate = delegateFor(client, model)
+      const uniqueConstraints = UNIQUE_KEYS[model] ?? []
+      const seenUnique = uniqueConstraints.map(() => new Set<string>())
+      const parent = PARENT[model]
       let buffer: Row[] = []
       const insertedIds: string[] = []
       let total = 0
@@ -312,6 +334,30 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
       for (const raw of reader.rows(model)) {
         const row = transform(model, raw)
         if (!row) continue
+        if (parent && typeof row[parent.fk] === "string") {
+          const parentId = (row[parent.fk] as string).toLowerCase()
+          if (droppedIds.has(parentId)) {
+            dropped[model] = (dropped[model] ?? 0) + 1
+            if (typeof row.id === "string") droppedIds.add(row.id.toLowerCase())
+            continue
+          }
+          if (dedupedIds.has(parentId)) {
+            deduped[model] = (deduped[model] ?? 0) + 1
+            if (typeof row.id === "string") dedupedIds.add(row.id.toLowerCase())
+            continue
+          }
+        }
+        if (uniqueConstraints.length > 0) {
+          const tupleKeys = uniqueConstraints.map((cols) => uniqueTupleKey(row, cols))
+          if (tupleKeys.some((k, i) => k !== null && seenUnique[i].has(k))) {
+            deduped[model] = (deduped[model] ?? 0) + 1
+            if (typeof row.id === "string") dedupedIds.add(row.id.toLowerCase())
+            continue
+          }
+          for (let i = 0; i < tupleKeys.length; i++) {
+            if (tupleKeys[i] !== null) seenUnique[i].add(tupleKeys[i]!)
+          }
+        }
         if (model === "FeedbackAttachment" && typeof raw.id === "string") {
           const data = reader.read(blobEntry("feedback", raw.id))
           if (data) {
@@ -365,7 +411,7 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
     // ---- validate before the workspace becomes visible ---------------------------------------------------------------------
     for (const model of exportOrder()) {
       if (!modelHasWorkspaceId(model) || model === "Agent" || !modelHasId(model)) continue
-      const expected = (manifest.counts[model] ?? 0) - (dropped[model] ?? 0)
+      const expected = (manifest.counts[model] ?? 0) - (dropped[model] ?? 0) - (deduped[model] ?? 0)
       const actual = await delegateFor(client, model).count({ where: { workspaceId: newWorkspaceId } })
       if (actual !== expected) throw new WorkspaceImportError(`Validation failed for ${model}: expected ${expected} rows, found ${actual}`)
     }
@@ -390,6 +436,9 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
 
     for (const [m, n] of Object.entries(dropped)) {
       warnings.push(`Skipped ${n} ${m} row(s) whose required reference does not exist in the target organization`)
+    }
+    for (const [m, n] of Object.entries(deduped)) {
+      warnings.push(`Skipped ${n} ${m} row(s) that would duplicate another row once people without an account in this organization were attributed to you`)
     }
     return {
       workspaceId: newWorkspaceId,

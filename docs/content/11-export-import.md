@@ -36,7 +36,7 @@ What to expect in the new workspace:
 - **Numbers are kept.** Work-item numbers such as `OPP-42` stay the same, so references in docs still make sense, and new items continue after the highest imported number.
 - **People are matched by email.** Anyone in the bundle who is also a member of the target organization keeps their attribution. Everyone else is attributed to the person who ran the import.
 - **Secrets are not carried over.** SSO is switched off, analytics connections arrive disabled, and share links, feedback keys and research links must be created again.
-- **Some items are skipped and reported.** A link pointing at something outside the bundle, or a score that uses a scoring model from another organization, is left out. The result panel lists what was skipped.
+- **Some items are skipped and reported.** A link pointing at something outside the bundle, a score that uses a scoring model from another organization, or an entry that would duplicate another once unmatched people are attributed to you is left out. The result panel lists what was skipped.
 - **Everyone in the organization is added** to the new workspace, and you become its Admin.
 
 Importing the same file again creates a second, separate copy.
