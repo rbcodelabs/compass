@@ -121,7 +121,7 @@ describe.skipIf(!databaseUrl)("workspace export/import round trip", () => {
       data: { workspaceId: wsId, title: "Faster onboarding", squadId: squad.id, createdById: aliceId, seqPrefix: "OPP", seqNumber: 42 },
     })
     oppId = opp.id
-    const sol = await prisma.solution.create({ data: { workspaceId: ws.id, opportunityId: opp.id, title: "Wizard", createdById: bobId } })
+    await prisma.solution.create({ data: { workspaceId: ws.id, opportunityId: opp.id, title: "Wizard", createdById: bobId } })
     await prisma.opportunityScore.create({ data: { opportunityId: opp.id, scoringModelId, scoredByUserId: bobId, modelVersion: 1, formulaSnapshot: {}, rawValues: {}, rawScore: 1, normalizedScore: 1 } })
     const task = await prisma.task.create({ data: { workspaceId: wsId, title: "Build wizard", createdById: aliceId, seqPrefix: "TASK", seqNumber: 7 } })
     await prisma.entityLink.create({
@@ -308,6 +308,109 @@ describe.skipIf(!databaseUrl)("workspace export/import round trip", () => {
     expect(opp.createdById).toBe(importerId)
         expect(report.warnings.join(" ")).toMatch(/Skipped 1 OpportunityScore/)
     expect(await prisma.opportunityScore.count({ where: { opportunityId: opp.id } })).toBe(0)
+  }, 120_000)
+
+  it("deduplicates user-keyed rows (CardSortProposal, Follow) when multiple unmatched source users collapse onto the importer", async () => {
+    const targetOrg = await prisma.organization.create({ data: { slug: "collapsed-target-org", name: "Collapsed Target Org" } })
+    await prisma.organizationMember.create({ data: { organizationId: targetOrg.id, userId: importerId, role: "ADMIN" } })
+
+    const extras = await Promise.all(
+      ["carol@example.com", "dave@example.com", "erin@example.com"].map((email) =>
+        prisma.user.create({ data: { email, name: email.split("@")[0] } }),
+      ),
+    )
+    const fiveSourceUsers = [aliceId, bobId, ...extras.map((u) => u.id)]
+
+    const sortWs = await prisma.workspace.create({
+      data: { organizationId: orgId, slug: "card-sort-src", name: "Card Sort Source" },
+    })
+    const oppA = await prisma.opportunity.create({ data: { workspaceId: sortWs.id, title: "Opp A", createdById: aliceId } })
+    const oppB = await prisma.opportunity.create({ data: { workspaceId: sortWs.id, title: "Opp B", createdById: bobId } })
+    const field = await prisma.customFieldDefinition.create({
+      data: {
+        workspaceId: sortWs.id,
+        objectType: "OPPORTUNITY",
+        name: "Horizon",
+        fieldType: "SELECT",
+        options: [
+          { label: "Now", value: "now" },
+          { label: "Later", value: "later" },
+        ],
+        order: 0,
+      },
+    })
+    const round = await prisma.cardSortRound.create({
+      data: {
+        workspaceId: sortWs.id,
+        name: "Team Sort",
+        objectType: "OPPORTUNITY",
+        fieldDefinitionId: field.id,
+        createdById: aliceId,
+      },
+    })
+
+    // 5 distinct source users propose on oppA and 3 on oppB (8 unique rows in source Postgres).
+    await prisma.cardSortProposal.createMany({
+      data: [
+        ...fiveSourceUsers.map((uid, idx) => ({
+          roundId: round.id,
+          userId: uid,
+          objectId: oppA.id,
+          proposedValue: idx % 2 === 0 ? "now" : "later",
+        })),
+        ...fiveSourceUsers.slice(0, 3).map((uid) => ({
+          roundId: round.id,
+          userId: uid,
+          objectId: oppB.id,
+          proposedValue: "now",
+        })),
+      ],
+    })
+    // 3 distinct source users follow oppA (Follow also carries workspaceId, exercising manifest-count validation).
+    await prisma.follow.createMany({
+      data: fiveSourceUsers.slice(0, 3).map((uid) => ({
+        workspaceId: sortWs.id,
+        userId: uid,
+        subjectType: "OPPORTUNITY",
+        subjectId: oppA.id,
+        state: "FOLLOWING",
+        source: "MANUAL",
+      })),
+    })
+
+    const sortBundle = await exportWorkspaceToBuffer(prisma, sortWs.id, blobs)
+    const exportedManifest = new BundleReader(sortBundle).manifest()
+    expect(exportedManifest.counts.CardSortProposal).toBe(8)
+    expect(exportedManifest.counts.Follow).toBe(3)
+    expect(exportedManifest.users).toHaveLength(5)
+
+    const report = await importWorkspaceBundle(prisma, sortBundle, {
+      organizationId: targetOrg.id,
+      importerUserId: importerId,
+      blobs,
+      nonce: "collapsed-users-552",
+    })
+
+    expect(report.alreadyImported).toBe(false)
+    expect(report.usersMatched).toBe(0)
+    expect(report.usersFallbackToImporter).toBe(5)
+    expect(report.counts.CardSortProposal).toBe(2)
+    expect(report.counts.Follow).toBe(1)
+    expect(report.warnings).toContain(
+      "Skipped 6 CardSortProposal row(s) that would duplicate another row once people without an account in this organization were attributed to you",
+    )
+    expect(report.warnings).toContain(
+      "Skipped 2 Follow row(s) that would duplicate another row once people without an account in this organization were attributed to you",
+    )
+
+    const importedRound = await prisma.cardSortRound.findFirstOrThrow({ where: { workspaceId: report.workspaceId } })
+    const importedProposals = await prisma.cardSortProposal.findMany({ where: { roundId: importedRound.id } })
+    expect(importedProposals).toHaveLength(2)
+    expect(importedProposals.every((p: { userId: string }) => p.userId === importerId)).toBe(true)
+
+    const importedFollows = await prisma.follow.findMany({ where: { workspaceId: report.workspaceId } })
+    expect(importedFollows).toHaveLength(1)
+    expect(importedFollows[0].userId).toBe(importerId)
   }, 120_000)
 
   it("rolls back completely when validation fails", async () => {
