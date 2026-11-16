@@ -707,6 +707,7 @@ export function AgentRail({ workspaceId, basePath, userInitials, userId }: Agent
       >
         <AgentChat
           variant="rail"
+          railActive={open && view === "agent"}
           workspaceId={workspaceId}
           basePath={basePath}
           conversations={threads}
