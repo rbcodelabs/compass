@@ -237,16 +237,16 @@ test("live 20s poll surfaces top-right Hybrid A+C cards, opens Task panel in pla
     await expect(detailPanel).toBeVisible({ timeout: 15_000 });
     await expect(detailPanel).toContainText(singleTitle, { timeout: 15_000 });
     await expect(card).toHaveCount(0);
-    await expect(bPage.getByRole("link", { name: "Notifications" })).toBeVisible({ timeout: 15_000 });
+    await expect(bPage.getByTestId("notification-count")).toHaveCount(0);
     await expect.poll(async () => (await unread(bClient)).body?.count).toBe(0);
 
     // Screenshot 4: Task Detail Panel slid open in place over /okrs (1280x800)
     await bPage.screenshot({ path: path.join(qaDir, "04-open-in-panel-desktop-light.png") });
 
-    // Close panel cleanly by navigating back to clean /okrs
-    await bPage.goto(`${base}/okrs`);
-    await bPage.bringToFront();
-    await expect(bPage.getByRole("link", { name: "Notifications" })).toBeVisible({ timeout: 30_000 });
+    // Close panel via its Close panel button — User B never left /okrs!
+    await detailPanel.getByRole("button", { name: "Close panel" }).click();
+    await expect(detailPanel).toHaveCount(0);
+    await expect(bPage.getByRole("link", { name: "Notifications" })).toBeVisible({ timeout: 15_000 });
 
     // ── 2. Burst of 2 personal alerts (ASSIGNED + @MENTIONED) -> 3D Deck + Dark Mode + Mark Read
     const assignBurst = await page.request.patch(`/api/panels/entity/task/${burstTask.id}?${query}`, {

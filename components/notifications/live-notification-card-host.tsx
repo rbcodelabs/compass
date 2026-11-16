@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { useRouter } from "next/navigation"
-import { X } from "lucide-react"
+import { ArrowUpRight, X } from "lucide-react"
 import { usePanelContext, type PanelType } from "@/components/panels/panel-context"
 import { Button } from "@/components/ui/button"
 import { humanizeValue } from "@/lib/notification-text"
@@ -332,7 +332,7 @@ function LiveNotificationCardItem({
             size="icon-xs"
             tabIndex={ariaHidden ? -1 : undefined}
             aria-label="Dismiss notification"
-            className="text-text-subtle hover:text-text-primary"
+            className="border-0 text-text-subtle hover:bg-surface-inset hover:text-text-primary"
             onClick={handleDismiss}
           >
             <X className="size-3.5" aria-hidden="true" />
@@ -396,14 +396,14 @@ function LiveNotificationCardItem({
                   ? "Open in panel"
                   : `Open ${card.subjectLabel.toLowerCase()}`}
               </span>
-              <span aria-hidden="true">↗</span>
+              <ArrowUpRight className="size-3.5" aria-hidden="true" />
             </Button>
             <Button
               variant="ghost"
               size="xs"
               tabIndex={ariaHidden ? -1 : undefined}
               data-testid="live-notification-mark-read"
-              className="h-7 rounded-md px-2 text-xs font-medium text-text-secondary hover:bg-surface-inset hover:text-text-primary"
+              className="h-7 rounded-md border-0 px-2 text-xs font-medium text-text-secondary hover:bg-surface-inset hover:text-text-primary"
               onClick={handleMarkRead}
             >
               Mark read

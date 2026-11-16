@@ -235,7 +235,7 @@ describe("LiveNotificationCardHost (Hybrid Option A + Option C)", () => {
     const toggle = screen.getByTestId("live-notification-deck-toggle")
     expect(toggle).toHaveTextContent("+2 more in stack · Expand")
 
-    const renderedCollapsed = screen.getAllByTestId("live-notification-card", { hidden: true })
+    const renderedCollapsed = screen.getAllByTestId("live-notification-card")
     expect(renderedCollapsed).toHaveLength(3)
     expect(renderedCollapsed[0]).toHaveTextContent("Newest top alert")
     expect(renderedCollapsed[0]).not.toHaveAttribute("aria-hidden")
@@ -243,7 +243,7 @@ describe("LiveNotificationCardHost (Hybrid Option A + Option C)", () => {
     expect(renderedCollapsed[2]).toHaveAttribute("aria-hidden", "true")
 
     // Top card timer runs; stacked background cards are paused so they never silently vanish behind card 0
-    const countdowns = screen.getAllByTestId("live-notification-countdown", { hidden: true })
+    const countdowns = screen.getAllByTestId("live-notification-countdown")
     expect(countdowns[0]).toHaveAttribute("data-paused", "false")
     expect(countdowns[1]).toHaveAttribute("data-paused", "true")
     expect(countdowns[2]).toHaveAttribute("data-paused", "true")
