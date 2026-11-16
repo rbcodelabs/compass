@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const GOOD: Record<string, string> = {
+  COMPASS_ENV: "development",
   E2E_MOCK_AUTH: "1",
   E2E_ISOLATED_DATABASE: "1",
   DATABASE_URL: "postgres://postgres:postgres@localhost:5432/compass_e2e",
@@ -29,6 +30,7 @@ describe("e2eMockAuthEnabled", () => {
   const saved = { ...process.env }
   beforeEach(() => {
     delete process.env.VERCEL_ENV
+    delete process.env.COMPASS_ENV
     delete process.env.PGSCHEMA
     delete process.env.PREVIEW_AUTOMATION_ENABLED
   })
@@ -38,6 +40,7 @@ describe("e2eMockAuthEnabled", () => {
 
   it("is on only when every condition holds", async () => {
     expect(await mockEnabled(GOOD)).toBe(true)
+    expect(await mockEnabled({ ...GOOD, NODE_ENV: "production" })).toBe(true)
   })
 
   it("is off for the empty environment", async () => {
@@ -83,24 +86,43 @@ describe("e2eMockAuthEnabled", () => {
     expect(await mockEnabled({ ...GOOD, DATABASE_URL: url })).toBe(true)
   })
 
-  it.each([["VERCEL", "1"], ["VERCEL_ENV", "production"], ["VERCEL_ENV", "preview"], ["PGHOST", "x.dsql.example"], ["AWS_ROLE_ARN", "arn:aws:iam::1:role/x"]])(
+  it.each([
+    ["VERCEL", "1"],
+    ["VERCEL_ENV", "production"],
+    ["VERCEL_ENV", "preview"],
+    ["PGHOST", "x.dsql.example"],
+    ["AWS_ROLE_ARN", "arn:aws:iam::1:role/x"],
+    ["COMPASS_ENV", "production"],
+    ["COMPASS_ENV", "preview"],
+    ["COMPASS_ENV", " production "],
+    ["COMPASS_ENV", "staging"],
+  ])(
     "throws (loud, not silent) when %s=%s is present on a flagged build",
     async (name, value) => {
-      await expect(mockEnabled({ ...GOOD, [name]: value })).rejects.toThrow(/refusing to boot/)
+      await expect(mockEnabled({ ...GOOD, [name]: value })).rejects.toThrow(
+        new RegExp(`compass-e2e-mock-auth-v1: refusing to boot.*\\b${name}\\b`),
+      )
     },
   )
 
   it("does not throw for a deployed variable on an unflagged build, it is simply off", async () => {
     expect(await mockEnabled({ ...GOOD, VERCEL_ENV: "production" }, UNSET)).toBe(false)
+    expect(await mockEnabled({ ...GOOD, COMPASS_ENV: "production" }, UNSET)).toBe(false)
+    expect(await mockEnabled({ ...GOOD, COMPASS_ENV: "preview" }, "")).toBe(false)
     expect(await mockEnabled({ ...GOOD, VERCEL: "1" }, "")).toBe(false)
   })
 
+  it("fails closed when COMPASS_ENV is missing under NODE_ENV=production", async () => {
+    const withoutCompassEnv: Record<string, string | undefined> = { ...GOOD, NODE_ENV: "production" }
+    delete withoutCompassEnv.COMPASS_ENV
+    expect(await mockEnabled(withoutCompassEnv)).toBe(false)
+    expect(await mockEnabled({ ...withoutCompassEnv, COMPASS_ENV: "" })).toBe(false)
+    expect(await mockEnabled({ ...withoutCompassEnv, COMPASS_ENV: "   " })).toBe(false)
+    expect(await mockEnabled({ ...withoutCompassEnv, NEXT_PHASE: "phase-production-build" })).toBe(false)
+  })
+
   it("is off when the active schema is not compass_dev", async () => {
-    process.env.VERCEL_ENV = "preview"
-    expect(await mockEnabled(GOOD)).toBe(false)
-    delete process.env.VERCEL_ENV
-    process.env.PGSCHEMA = "other"
-    expect(await mockEnabled(GOOD)).toBe(false)
+    expect(await mockEnabled({ ...GOOD, PGSCHEMA: "other" })).toBe(false)
   })
 })
 
@@ -108,6 +130,7 @@ describe("e2eHarnessEnabled", () => {
   const saved = { ...process.env }
   beforeEach(() => {
     delete process.env.VERCEL_ENV
+    delete process.env.COMPASS_ENV
     delete process.env.PGSCHEMA
     delete process.env.PREVIEW_AUTOMATION_ENABLED
   })
@@ -131,6 +154,12 @@ describe("e2eHarnessEnabled", () => {
     expect(await harnessEnabled({ ...GOOD, NODE_ENV: "production", E2E_FUNCTIONAL: "1" }, "1")).toBe(true)
   })
 
+  it("fails closed on a flagged production build when COMPASS_ENV is missing", async () => {
+    const withoutCompassEnv: Record<string, string | undefined> = { ...GOOD, NODE_ENV: "production", E2E_FUNCTIONAL: "1" }
+    delete withoutCompassEnv.COMPASS_ENV
+    expect(await harnessEnabled(withoutCompassEnv, "1")).toBe(false)
+  })
+
   it("is false on a production build without the build flag, whatever the runtime env says", async () => {
     expect(await harnessEnabled({ ...GOOD, NODE_ENV: "production", E2E_FUNCTIONAL: "1" }, UNSET)).toBe(false)
     expect(await harnessEnabled({ ...GOOD, NODE_ENV: "production", E2E_FUNCTIONAL: "1" }, "")).toBe(false)
@@ -143,5 +172,11 @@ describe("e2eHarnessEnabled", () => {
 
   it("throws on a flagged production build that sees a deployed variable", async () => {
     await expect(harnessEnabled({ ...GOOD, NODE_ENV: "production", VERCEL_ENV: "production" }, "1")).rejects.toThrow(/refusing to boot/)
+    await expect(harnessEnabled({ ...GOOD, NODE_ENV: "production", COMPASS_ENV: "production" }, "1")).rejects.toThrow(
+      /compass-e2e-mock-auth-v1: refusing to boot.*\bCOMPASS_ENV\b/,
+    )
+    await expect(harnessEnabled({ ...GOOD, NODE_ENV: "production", COMPASS_ENV: "preview" }, "1")).rejects.toThrow(
+      /compass-e2e-mock-auth-v1: refusing to boot.*\bCOMPASS_ENV\b/,
+    )
   })
 })

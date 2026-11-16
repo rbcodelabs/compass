@@ -13,24 +13,24 @@
 import { compassEnv } from "@/lib/runtime-env";
 import { getManagedPilotContext } from "./preview-automation/managed-context";
 
-export function getActiveSchema(): string {
-  const managed = getManagedPilotContext();
+export function getActiveSchema(env: NodeJS.ProcessEnv = process.env): string {
+  const managed = getManagedPilotContext(env);
   if (managed) return managed.schema;
-  if (process.env.PREVIEW_AUTOMATION_ENABLED === "1") {
-    const pr = process.env.VERCEL_GIT_PULL_REQUEST_ID ?? "";
-    const sha = process.env.VERCEL_GIT_COMMIT_SHA ?? "";
-    if (compassEnv() !== "preview" || !/^[1-9]\d{0,9}$/.test(pr) || !/^[a-f0-9]{40}$/.test(sha)) {
+  if (env.PREVIEW_AUTOMATION_ENABLED === "1") {
+    const pr = env.VERCEL_GIT_PULL_REQUEST_ID ?? "";
+    const sha = env.VERCEL_GIT_COMMIT_SHA ?? "";
+    if (compassEnv(env) !== "preview" || !/^[1-9]\d{0,9}$/.test(pr) || !/^[a-f0-9]{40}$/.test(sha)) {
       throw new Error("Invalid preview automation deployment metadata");
     }
     return `compass_pr_${pr}_${sha.slice(0, 12)}`;
   }
-  const prefix = process.env.PGSCHEMA ?? "compass";
+  const prefix = env.PGSCHEMA ?? "compass";
 
-  if (process.env.NODE_ENV === "development") return `${prefix}_dev`;
+  if (env.NODE_ENV === "development") return `${prefix}_dev`;
 
-  const env = compassEnv();
-  if (env === "preview") return `${prefix}_preview`;
-  if (env === "production") return `${prefix}_prod`;
+  const resolvedEnv = compassEnv(env);
+  if (resolvedEnv === "preview") return `${prefix}_preview`;
+  if (resolvedEnv === "production") return `${prefix}_prod`;
 
   return `${prefix}_dev`;
 }

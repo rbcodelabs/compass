@@ -38,3 +38,13 @@ variable, instead of failing on the first request that happens to need it.
 Set `COMPASS_ENV` explicitly in the process environment. Other checks that only
 ask "is this a Vercel deployment at all" (for example the local-fixture guards)
 still read `VERCEL_ENV` on purpose; they are not environment selection.
+
+## Local production builds (`next start`, `E2E_SERVER=prod`)
+
+Running `next start` locally sets `NODE_ENV=production` without `VERCEL_ENV`, so
+pass `COMPASS_ENV=development` to select the `compass_dev` schema and satisfy
+the startup check. The functional E2E suite's `E2E_SERVER=prod` launchers
+(`playwright.config.ts`, `scripts/run-functional-e2e.mjs`, and
+`scripts/tq-e2e-prod-spec.mjs`) set `COMPASS_ENV=development` automatically, and
+`lib/e2e-harness.ts` refuses to boot a mock-auth build whenever `COMPASS_ENV` is
+set to anything other than `development`.

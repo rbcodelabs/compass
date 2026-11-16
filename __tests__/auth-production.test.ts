@@ -151,6 +151,7 @@ describe("dev auth initialization", () => {
 
 describe("e2e mock-auth build selection", () => {
   const MOCK_RUNTIME = {
+    COMPASS_ENV: "development",
     E2E_MOCK_AUTH: "1",
     E2E_ISOLATED_DATABASE: "1",
     DATABASE_URL: "postgres://postgres:postgres@localhost:5432/compass_e2e",
@@ -159,7 +160,7 @@ describe("e2e mock-auth build selection", () => {
   beforeEach(() => {
     vi.resetModules();
     vi.stubEnv("NODE_ENV", "production");
-    for (const name of ["VERCEL", "VERCEL_ENV", "PGHOST", "AWS_ROLE_ARN", "PGSCHEMA", "PREVIEW_AUTOMATION_ENABLED"]) vi.stubEnv(name, undefined);
+    for (const name of ["VERCEL", "VERCEL_ENV", "COMPASS_ENV", "PGHOST", "AWS_ROLE_ARN", "PGSCHEMA", "PREVIEW_AUTOMATION_ENABLED"]) vi.stubEnv(name, undefined);
     mocks.getPrisma.mockReset();
     mocks.nextAuth.mockReset();
     mocks.nextAuth.mockReturnValue({ handlers: {}, auth: vi.fn(), signIn: vi.fn(), signOut: vi.fn() });
@@ -178,8 +179,9 @@ describe("e2e mock-auth build selection", () => {
     expect(config.providers).not.toContainEqual({ id: "credentials" });
   });
 
-  it("keeps the production config in a flagged build when the runtime mock flag is missing", async () => {
+  it("keeps the production config in a flagged build when the runtime mock flag or COMPASS_ENV is missing", async () => {
     vi.stubEnv("COMPASS_E2E_MOCK_AUTH_BUILD", "1");
+    vi.stubEnv("COMPASS_ENV", "development");
     vi.stubEnv("E2E_ISOLATED_DATABASE", "1");
     vi.stubEnv("DATABASE_URL", MOCK_RUNTIME.DATABASE_URL);
     await import("@/auth");
@@ -197,10 +199,14 @@ describe("e2e mock-auth build selection", () => {
     expect(config.session).toEqual({ strategy: "jwt" });
   });
 
-  it("refuses to boot a flagged build that sees a deployed variable", async () => {
+  it.each([
+    ["VERCEL_ENV", "production"],
+    ["COMPASS_ENV", "production"],
+    ["COMPASS_ENV", "preview"],
+  ])("refuses to boot a flagged build that sees %s=%s", async (name, value) => {
     vi.stubEnv("COMPASS_E2E_MOCK_AUTH_BUILD", "1");
-    for (const [name, value] of Object.entries(MOCK_RUNTIME)) vi.stubEnv(name, value);
-    vi.stubEnv("VERCEL_ENV", "production");
-    await expect(import("@/auth")).rejects.toThrow(/refusing to boot/);
+    for (const [key, val] of Object.entries(MOCK_RUNTIME)) vi.stubEnv(key, val);
+    vi.stubEnv(name, value);
+    await expect(import("@/auth")).rejects.toThrow(/compass-e2e-mock-auth-v1: refusing to boot/);
   });
 });

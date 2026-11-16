@@ -69,6 +69,7 @@ jobs:
           --health-retries 5
     env:
       AUTH_SECRET: compass-ci-auth-secret-not-for-production
+      COMPASS_ENV: development
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/compass_e2e?sslmode=disable
       E2E_ISOLATED_DATABASE: "1"
     steps:
@@ -105,6 +106,7 @@ jobs:
           --health-retries 5
     env:
       AUTH_SECRET: compass-ci-auth-secret-not-for-production
+      COMPASS_ENV: development
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/compass_e2e?sslmode=disable
       E2E_ISOLATED_DATABASE: "1"
     steps:

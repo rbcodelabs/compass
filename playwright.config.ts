@@ -102,6 +102,8 @@ export default defineConfig({
         ...(PROD_SERVER
           ? {
               // Everything a `next dev` server gets for free and `next start` does not.
+              // Outside Vercel, a production server requires COMPASS_ENV (lib/runtime-env.ts); E2E uses compass_dev.
+              COMPASS_ENV: process.env.COMPASS_ENV || "development",
               // Mock login (second half of the guard; the first half is compiled in by `pnpm build:e2e`).
               E2E_MOCK_AUTH: "1",
               // Auth.js refuses a host it was not told to trust under next start (UntrustedHost).

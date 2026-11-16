@@ -43,11 +43,13 @@ describe("buildTqSpec", () => {
     expect(step("assert").run).toContain("compass-e2e-mock-auth-v1")
   })
 
-  it("runs the suite against the compass_e2e database on the prod server with the requested specs", () => {
+  it("runs the suite against the compass_e2e database on the prod server with COMPASS_ENV=development and the requested specs", () => {
     const run = step("e2e").run
     expect(run).toContain("compass_e2e")
+    expect(run).toContain('export COMPASS_ENV="${COMPASS_ENV:-development}"')
     expect(run).toContain("E2E_SERVER=prod")
     expect(run).toContain("e2e/functional/specs/analytics.spec.ts")
+    expect(step("build").run).not.toContain("COMPASS_ENV")
     expect(spec.database).toBe(true)
     expect(spec.reserve_mb).toBe(8192)
   })

@@ -4,6 +4,7 @@ const upsert = vi.fn(async ({ where }: { where: { email: string } }) => ({ id: "
 vi.mock("@/lib/db", () => ({ default: () => ({ user: { upsert } }) }))
 
 const MOCK_ENV = {
+  COMPASS_ENV: "development",
   E2E_MOCK_AUTH: "1",
   E2E_ISOLATED_DATABASE: "1",
   DATABASE_URL: "postgres://postgres:postgres@localhost:5432/compass_e2e",
@@ -18,7 +19,7 @@ async function authorize(credentials: Record<string, unknown> | undefined) {
 describe("authorizeMockUser re-checks the guard on every call", () => {
   beforeEach(() => {
     upsert.mockClear()
-    for (const name of ["VERCEL", "VERCEL_ENV", "PGHOST", "AWS_ROLE_ARN", "PGSCHEMA", "PREVIEW_AUTOMATION_ENABLED"]) vi.stubEnv(name, undefined)
+    for (const name of ["VERCEL", "VERCEL_ENV", "COMPASS_ENV", "PGHOST", "AWS_ROLE_ARN", "PGSCHEMA", "PREVIEW_AUTOMATION_ENABLED"]) vi.stubEnv(name, undefined)
   })
   afterEach(() => vi.unstubAllEnvs())
 
@@ -30,21 +31,30 @@ describe("authorizeMockUser re-checks the guard on every call", () => {
     expect(upsert).not.toHaveBeenCalled()
   })
 
-  it("signs in nobody on a flagged build when the runtime flag is missing", async () => {
+  it("signs in nobody on a flagged build when the runtime flag or COMPASS_ENV is missing", async () => {
     vi.stubEnv("NODE_ENV", "production")
     vi.stubEnv("COMPASS_E2E_MOCK_AUTH_BUILD", "1")
+    vi.stubEnv("COMPASS_ENV", "development")
     vi.stubEnv("E2E_ISOLATED_DATABASE", "1")
     vi.stubEnv("DATABASE_URL", MOCK_ENV.DATABASE_URL)
+    expect(await authorize({ email: "x@example.com" })).toBeNull()
+
+    vi.stubEnv("E2E_MOCK_AUTH", "1")
+    vi.stubEnv("COMPASS_ENV", undefined)
     expect(await authorize({ email: "x@example.com" })).toBeNull()
     expect(upsert).not.toHaveBeenCalled()
   })
 
-  it("throws (never signs in) on a flagged build when a deployed variable appears after boot", async () => {
+  it.each([
+    ["VERCEL_ENV", "production"],
+    ["COMPASS_ENV", "production"],
+    ["COMPASS_ENV", "preview"],
+  ])("throws (never signs in) on a flagged build when %s=%s appears after boot", async (name, value) => {
     vi.stubEnv("NODE_ENV", "production")
     vi.stubEnv("COMPASS_E2E_MOCK_AUTH_BUILD", "1")
     for (const [k, v] of Object.entries(MOCK_ENV)) vi.stubEnv(k, v)
-    vi.stubEnv("VERCEL_ENV", "production")
-    await expect(authorize({ email: "x@example.com" })).rejects.toThrow(/refusing to boot/)
+    vi.stubEnv(name, value)
+    await expect(authorize({ email: "x@example.com" })).rejects.toThrow(/compass-e2e-mock-auth-v1: refusing to boot/)
     expect(upsert).not.toHaveBeenCalled()
   })
 

@@ -7,8 +7,9 @@ import { getActiveSchema } from "@/lib/schema"
  *   1. the artifact was built with COMPASS_E2E_MOCK_AUTH_BUILD=1 (next.config.ts inlines the literal, so in any other build
  *      the gated branch is removed by the minifier; scripts/assert-no-mock-auth.mjs proves it on the artifact),
  *   2. E2E_MOCK_AUTH=1 and E2E_ISOLATED_DATABASE=1 at runtime,
- *   3. no deployed-environment variable is present (VERCEL, VERCEL_ENV, PGHOST, AWS_ROLE_ARN),
- *   4. DATABASE_URL is a local host, the database is compass_e2e, and the active schema is compass_dev.
+ *   3. no deployed-environment variable is present (VERCEL, VERCEL_ENV, PGHOST, AWS_ROLE_ARN, or COMPASS_ENV !== "development"),
+ *   4. under NODE_ENV=production, COMPASS_ENV is explicitly "development",
+ *   5. DATABASE_URL is a local host, the database is compass_e2e, and the active schema is compass_dev.
  * A flagged build that sees a deployed-environment variable throws instead of silently turning off.
  *
  * IMPORTANT for callers: write the build literal INLINE at the call site, `process.env.COMPASS_E2E_MOCK_AUTH_BUILD === "1" && ...`.
@@ -23,11 +24,16 @@ export function e2eMockAuthEnabled(env: NodeJS.ProcessEnv = process.env): boolea
   if (process.env.COMPASS_E2E_MOCK_AUTH_BUILD !== "1") return false
   // Marker string proving this guard is in an artifact: compass-e2e-mock-auth-v1
   const marker = "compass-e2e-mock-auth-v1"
-  const deployed = DEPLOYED_ENV.filter((name) => env[name])
+  const deployed: string[] = DEPLOYED_ENV.filter((name) => env[name])
+  const explicitCompassEnv = env.COMPASS_ENV?.trim()
+  if (explicitCompassEnv && explicitCompassEnv !== "development") {
+    deployed.push("COMPASS_ENV")
+  }
   if (deployed.length > 0) {
     throw new Error(`${marker}: refusing to boot an e2e mock-auth build with ${deployed.join(", ")} set`)
   }
   if (env.E2E_MOCK_AUTH !== "1" || env.E2E_ISOLATED_DATABASE !== "1") return false
+  if (env.NODE_ENV === "production" && explicitCompassEnv !== "development") return false
   try {
     const url = new URL(env.DATABASE_URL ?? "")
     if (!LOCAL_HOSTS.has(url.hostname)) return false
@@ -37,7 +43,11 @@ export function e2eMockAuthEnabled(env: NodeJS.ProcessEnv = process.env): boolea
   } catch {
     return false
   }
-  return getActiveSchema() === "compass_dev"
+  try {
+    return getActiveSchema(env) === "compass_dev"
+  } catch {
+    return false
+  }
 }
 
 /**

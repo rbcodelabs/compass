@@ -87,7 +87,7 @@ test "$n" -gt 0`,
     name: "e2e",
     run: `export DATABASE_URL="\${DATABASE_URL%/*}/compass_e2e"
 mkdir -p diag
-${e2eEnv ? `export ${e2eEnv}\n` : ""}${e2eServer}corepack pnpm run test:e2e:functional${specArgs}`,
+${control ? "" : 'export COMPASS_ENV="${COMPASS_ENV:-development}"\n'}${e2eEnv ? `export ${e2eEnv}\n` : ""}${e2eServer}corepack pnpm run test:e2e:functional${specArgs}`,
   })
   return { reserve_mb: 8192, timeout_s: 2700, database: true, node: "22", env: ENV, steps, artifacts: ["test-results", "playwright-report"] }
 }
