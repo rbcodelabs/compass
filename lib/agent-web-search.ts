@@ -12,7 +12,7 @@
  *
  * Two bounds are enforced server-side, by the credential the sandbox holds, because
  * nothing the sandbox says can be trusted to enforce them for itself:
- *  - a per-turn search budget (MAX_SEARCHES_PER_TURN), claimed by inserting the next
+ *  - a per-turn search budget (MAX_SEARCHES_PER_TURN, failed searches excluded), claimed by inserting the next
  *    `(credential_id, seq)` primary key so racing searches cannot both take one slot;
  *  - a bounded result count, snippet length and query length.
  */
@@ -21,6 +21,8 @@ import type { AppPrismaClient } from "@/lib/db"
 
 /** Searches one agent turn may make. A turn is one AGENT_TURN credential. */
 export const MAX_SEARCHES_PER_TURN = 5
+/** Ceiling on attempts, failed ones included, so a failing backend cannot be hammered. */
+export const MAX_SEARCH_ATTEMPTS_PER_TURN = MAX_SEARCHES_PER_TURN * 3
 export const DEFAULT_MAX_RESULTS = 5
 export const MAX_RESULTS_CEILING = 8
 export const MAX_QUERY_LENGTH = 400
@@ -96,14 +98,21 @@ export async function claimSearchSlot(
   scope: { credentialId: string; userId: string; workspaceId: string; conversationId: string | null },
   query: string,
 ): Promise<SearchSlot | null> {
-  for (let attempt = 0; attempt < MAX_SEARCHES_PER_TURN + 2; attempt++) {
+  for (let attempt = 0; attempt < MAX_SEARCH_ATTEMPTS_PER_TURN + 2; attempt++) {
     const last = await prisma.agentWebSearch.findFirst({
       where: { credentialId: scope.credentialId },
       orderBy: { seq: "desc" },
       select: { seq: true },
     })
     const seq = (last?.seq ?? 0) + 1
-    if (seq > MAX_SEARCHES_PER_TURN) return null
+    // Failed searches are audited but do not spend the turn budget: an outage must not
+    // leave the agent with a "budget exhausted" error on top of the real one. The hard
+    // ceiling on seq still bounds a turn whose backend keeps failing.
+    if (seq > MAX_SEARCH_ATTEMPTS_PER_TURN) return null
+    const spent = await prisma.agentWebSearch.count({
+      where: { credentialId: scope.credentialId, status: { not: "FAILED" } },
+    })
+    if (spent >= MAX_SEARCHES_PER_TURN) return null
     try {
       await prisma.agentWebSearch.create({
         data: {
@@ -221,6 +230,104 @@ export const gatewayPerplexitySearch: SearchBackend = async (query, maxResults, 
   }
 }
 
+type Env = Record<string, string | undefined>
+
+/**
+ * Amazon Bedrock Web Search, for deployments that run the agent on Bedrock and do not use
+ * the Vercel AI Gateway. It is a server-side tool of the OpenAI Responses API on the
+ * bedrock-mantle endpoint (OpenAI GPT-5.4+ models, US regions only), authenticated with
+ * the same Bedrock API key as the agent. `external_web_access: false` keeps retrieval
+ * inside the AWS boundary. Results are the model's url_citation annotations.
+ * https://docs.aws.amazon.com/bedrock/latest/userguide/web-search.html
+ */
+export const DEFAULT_BEDROCK_SEARCH_MODEL = "openai.gpt-5.6-terra"
+
+export function bedrockSearchConfig(env: Env = process.env) {
+  const apiKey = env.BEDROCK_API_KEY?.trim()
+  if (!apiKey) return null
+  const region = env.BEDROCK_WEB_SEARCH_REGION?.trim() || env.AWS_REGION?.trim() || "us-east-1"
+  return {
+    apiKey,
+    model: env.BEDROCK_WEB_SEARCH_MODEL?.trim() || DEFAULT_BEDROCK_SEARCH_MODEL,
+    baseUrl: env.BEDROCK_WEB_SEARCH_BASE_URL?.trim() || `https://bedrock-mantle.${region}.api.aws/openai/v1`,
+  }
+}
+
+/** Title/URL/cited-span records from a Responses API body. Exported for tests. */
+export function extractBedrockCitations(body: unknown, maxResults: number): WebSearchResult[] {
+  const output = (body as { output?: unknown } | null)?.output
+  if (!Array.isArray(output)) return []
+  const raw: { title: unknown; url: string; snippet: string }[] = []
+  const seen = new Set<string>()
+  for (const item of output) {
+    if ((item as { type?: string })?.type !== "message") continue
+    const content = (item as { content?: unknown }).content
+    if (!Array.isArray(content)) continue
+    for (const block of content as Record<string, unknown>[]) {
+      if (block?.type !== "output_text" || !Array.isArray(block.annotations)) continue
+      const text = typeof block.text === "string" ? block.text : ""
+      for (const ann of block.annotations as Record<string, unknown>[]) {
+        if (ann?.type !== "url_citation" || typeof ann.url !== "string" || seen.has(ann.url)) continue
+        seen.add(ann.url)
+        const start = typeof ann.start_index === "number" ? ann.start_index : 0
+        const end = typeof ann.end_index === "number" ? ann.end_index : 0
+        const cited = end > start ? text.slice(start, end) : ""
+        // Drop the inline "([host](url))" markdown the model appends after each claim.
+        raw.push({ title: ann.title, url: ann.url, snippet: cited.replace(/\(\[[^\]]*\]\([^)]*\)\)/g, "").trim() })
+      }
+    }
+  }
+  return shapeResults(raw, maxResults)
+}
+
+export const bedrockWebSearch: SearchBackend = async (query, maxResults, signal) => {
+  const config = bedrockSearchConfig()
+  if (!config) {
+    console.error("agent web search: BEDROCK_API_KEY is not set")
+    return { ok: false, reason: "upstream" }
+  }
+  try {
+    const response = await fetch(`${config.baseUrl}/responses`, {
+      method: "POST",
+      signal,
+      headers: { authorization: `Bearer ${config.apiKey}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        model: config.model,
+        input: `Search the web for the following and cite your sources. Answer in a few sentences.\n\n${query}`,
+        tools: [
+          {
+            type: "web_search",
+            external_web_access: false,
+            search_context_size: maxResults <= 5 ? "low" : "medium",
+          },
+        ],
+        store: false,
+        max_output_tokens: 1_500,
+      }),
+    })
+    if (response.status === 429) return { ok: false, reason: "rate_limit" }
+    if (!response.ok) {
+      // Status and a body excerpt are the whole diagnosis (IAM, model access, region).
+      console.error("agent web search bedrock error", response.status, (await response.text()).slice(0, 500))
+      return { ok: false, reason: response.status === 400 ? "invalid_input" : "upstream" }
+    }
+    return { ok: true, results: extractBedrockCitations(await response.json(), maxResults) }
+  } catch (error) {
+    if (error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError"))
+      return { ok: false, reason: "timeout" }
+    console.error("agent web search bedrock failed", error instanceof Error ? error.message : error)
+    return { ok: false, reason: "upstream" }
+  }
+}
+
+/**
+ * AGENT_WEB_SEARCH_BACKEND = "bedrock" opts in to Bedrock Web Search. Anything else, or
+ * unset, keeps the Vercel AI Gateway backend, so existing deployments are unchanged.
+ */
+export function selectSearchBackend(env: Env = process.env): SearchBackend {
+  return env.AGENT_WEB_SEARCH_BACKEND?.trim().toLowerCase() === "bedrock" ? bedrockWebSearch : gatewayPerplexitySearch
+}
+
 export type WebSearchOutcome =
   | { status: "ok"; results: WebSearchResult[]; remaining: number }
   | { status: "budget_exhausted" }
@@ -229,13 +336,13 @@ export type WebSearchOutcome =
 
 /**
  * One audited search. The slot is claimed *before* the backend is called so a crashed
- * or timed-out search still counts against the budget and shows in the audit.
+ * or timed-out search shows in the audit. Only searches that did not fail spend the budget.
  */
 export async function runWebSearch(
   prisma: AppPrismaClient,
   scope: { credentialId: string; userId: string; workspaceId: string; conversationId: string | null },
   input: { query: string; maxResults?: number },
-  backend: SearchBackend = gatewayPerplexitySearch,
+  backend: SearchBackend = selectSearchBackend(),
 ): Promise<WebSearchOutcome> {
   if (!(await agentWebSearchesAvailable(prisma))) return { status: "unavailable" }
   const query = input.query.trim().slice(0, MAX_QUERY_LENGTH)

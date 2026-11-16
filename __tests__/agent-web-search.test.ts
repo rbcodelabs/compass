@@ -1,10 +1,16 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 vi.mock("ai", () => ({ gateway: { tools: { perplexitySearch: vi.fn() } }, generateText: vi.fn(), stepCountIs: vi.fn() }))
 
 import {
   MAX_SEARCHES_PER_TURN,
+  MAX_SEARCH_ATTEMPTS_PER_TURN,
   MAX_SNIPPET_CHARS,
+  bedrockSearchConfig,
+  bedrockWebSearch,
+  extractBedrockCitations,
+  gatewayPerplexitySearch,
+  selectSearchBackend,
   claimSearchSlot,
   clampMaxResults,
   formatSearchOutcome,
@@ -26,6 +32,7 @@ function fakePrisma(options: { missingTable?: boolean } = {}) {
       const seqs = [...rows.values()].map(r => r.seq)
       return seqs.length ? { seq: Math.max(...seqs) } : null
     }),
+    count: vi.fn(async () => [...rows.values()].filter(r => r.status !== "FAILED").length),
     create: vi.fn(async ({ data }: { data: { credentialId: string; seq: number; query: string } }) => {
       const key = `${data.credentialId}:${data.seq}`
       if (rows.has(key)) throw Object.assign(new Error("dup"), { code: "P2002" })
@@ -122,11 +129,21 @@ describe("runWebSearch", () => {
     expect(backend).toHaveBeenCalledTimes(MAX_SEARCHES_PER_TURN)
   })
 
-  it("still charges the budget and records FAILED when the backend fails", async () => {
+  it("records FAILED but does not spend the budget when the backend fails", async () => {
     const { prisma, rows } = fakePrisma()
     const outcome = await runWebSearch(prisma, scope, { query: "q" }, async () => ({ ok: false, reason: "rate_limit" }))
     expect(outcome).toEqual({ status: "failed", reason: "rate_limit" })
     expect([...rows.values()][0].status).toBe("FAILED")
+    for (let i = 0; i < MAX_SEARCHES_PER_TURN; i++)
+      expect(await runWebSearch(prisma, scope, { query: "q" }, ok(1))).toMatchObject({ status: "ok" })
+    expect(await runWebSearch(prisma, scope, { query: "q" }, ok(1))).toEqual({ status: "budget_exhausted" })
+  })
+
+  it("stops retrying a backend that keeps failing", async () => {
+    const { prisma } = fakePrisma()
+    const failing = vi.fn(async () => ({ ok: false as const, reason: "upstream" as const }))
+    for (let i = 0; i < MAX_SEARCH_ATTEMPTS_PER_TURN + 3; i++) await runWebSearch(prisma, scope, { query: "q" }, failing)
+    expect(failing).toHaveBeenCalledTimes(MAX_SEARCH_ATTEMPTS_PER_TURN)
   })
 
   it("fails closed, without calling the backend, when the table is missing", async () => {
@@ -164,5 +181,77 @@ describe("formatSearchOutcome", () => {
       { status: "failed" as const, reason: "timeout" as const },
     ])
       expect(formatSearchOutcome(outcome).isError).toBe(true)
+  })
+})
+
+describe("Bedrock Web Search backend", () => {
+  const body = {
+    output: [
+      { type: "web_search_call" },
+      {
+        type: "message",
+        content: [
+          {
+            type: "output_text",
+            text: "Productboard starts at $19 per maker. ([productboard.com](https://www.productboard.com/pricing/)) Aha! is $59. ([aha.io](https://www.aha.io/pricing))",
+            annotations: [
+              { type: "url_citation", title: "Pricing | Productboard", url: "https://www.productboard.com/pricing/", start_index: 0, end_index: 100 },
+              { type: "url_citation", title: "Dup", url: "https://www.productboard.com/pricing/", start_index: 0, end_index: 5 },
+              { type: "url_citation", title: "Bad", url: "javascript:alert(1)", start_index: 0, end_index: 5 },
+            ],
+          },
+        ],
+      },
+    ],
+  }
+
+  afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks() })
+
+  it("maps url_citation annotations to deduplicated, http(s)-only results", () => {
+    const results = extractBedrockCitations(body, 5)
+    expect(results).toHaveLength(1)
+    expect(results[0]).toMatchObject({ title: "Pricing | Productboard", url: "https://www.productboard.com/pricing/" })
+    expect(results[0].snippet).toContain("Productboard starts at $19")
+    expect(results[0].snippet).not.toContain("](")
+    expect(extractBedrockCitations(null, 5)).toEqual([])
+  })
+
+  it("uses the Gateway unless Bedrock is explicitly selected", () => {
+    expect(selectSearchBackend({})).toBe(gatewayPerplexitySearch)
+    expect(selectSearchBackend({ AGENT_MODEL_PROVIDER: "bedrock" })).toBe(gatewayPerplexitySearch)
+    expect(selectSearchBackend({ AGENT_WEB_SEARCH_BACKEND: "gateway" })).toBe(gatewayPerplexitySearch)
+    expect(selectSearchBackend({ AGENT_WEB_SEARCH_BACKEND: " Bedrock " })).toBe(bedrockWebSearch)
+  })
+
+  it("builds the mantle URL from the region and needs the Bedrock key", () => {
+    expect(bedrockSearchConfig({})).toBeNull()
+    expect(bedrockSearchConfig({ BEDROCK_API_KEY: "k", AWS_REGION: "us-west-2" })?.baseUrl).toBe(
+      "https://bedrock-mantle.us-west-2.api.aws/openai/v1",
+    )
+  })
+
+  it("posts a web_search tool with external access off and returns the citations", async () => {
+    vi.stubEnv("BEDROCK_API_KEY", "bedrock-key")
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(body), { status: 200 }))
+    vi.stubGlobal("fetch", fetchMock)
+    const outcome = await bedrockWebSearch("productboard pricing", 5, new AbortController().signal)
+    expect(outcome).toMatchObject({ ok: true })
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
+    expect(url).toMatch(/^https:\/\/bedrock-mantle\..+\.api\.aws\/openai\/v1\/responses$/)
+    expect((init.headers as Record<string, string>).authorization).toBe("Bearer bedrock-key")
+    const sent = JSON.parse(init.body as string)
+    expect(sent.tools[0]).toMatchObject({ type: "web_search", external_web_access: false })
+    expect(sent.store).toBe(false)
+    vi.unstubAllGlobals()
+  })
+
+  it("maps HTTP failures to outcomes", async () => {
+    vi.stubEnv("BEDROCK_API_KEY", "bedrock-key")
+    vi.spyOn(console, "error").mockImplementation(() => {})
+    for (const [status, reason] of [[429, "rate_limit"], [403, "upstream"], [400, "invalid_input"]] as const) {
+      vi.stubGlobal("fetch", vi.fn(async () => new Response("denied", { status })))
+      expect(await bedrockWebSearch("q", 5, new AbortController().signal)).toEqual({ ok: false, reason })
+    }
+    vi.unstubAllGlobals()
   })
 })
