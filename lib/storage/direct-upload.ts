@@ -23,7 +23,7 @@ export function privateDirectUploadConfigured(): boolean {
   return privateStoreToken() !== null
 }
 
-export type DirectUploadTokenRequest = {
+export type DirectUploadRequest = {
   /** `private` uses the artifact store's token; `public` uses the ambient Blob token. */
   store: DirectUploadStore
   pathname: string
@@ -31,14 +31,30 @@ export type DirectUploadTokenRequest = {
   maxBytes: number
   /** Epoch ms after which the credential stops working. */
   validUntil: number
+  /**
+   * The same window as a duration, for stores whose credential is signed with a lifetime rather than an expiry
+   * instant. Vercel Blob uses `validUntil` and ignores this.
+   */
+  ttlSeconds: number
   /** Refuse to replace an existing object at `pathname`. */
   allowOverwrite?: boolean
   /** Error message when the private store has no token. */
   notConfiguredMessage?: string
 }
 
-/** Mint the credential the uploader presents to the store. Throws when the store is not configured. */
-export async function createDirectUploadToken(request: DirectUploadTokenRequest): Promise<string> {
+/**
+ * The fields a prepare-upload response carries for the credential. Spread them into the response
+ * (`{ ..., ...credential }`) instead of naming `clientToken`, so a store with a different credential shape
+ * adds fields without every caller changing.
+ */
+export type DirectUploadFields = { clientToken: string }
+
+export async function createDirectUpload(request: DirectUploadRequest): Promise<DirectUploadFields> {
+  return { clientToken: await createDirectUploadToken(request) }
+}
+
+/** Mint a Vercel Blob client token. Throws when the store is not configured. */
+export async function createDirectUploadToken(request: DirectUploadRequest): Promise<string> {
   const token = request.store === "private" ? privateStoreToken() : undefined
   if (request.store === "private" && !token) throw new Error(request.notConfiguredMessage ?? PRIVATE_NOT_CONFIGURED)
   return generateClientTokenFromReadWriteToken({
