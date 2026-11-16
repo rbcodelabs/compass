@@ -73,6 +73,7 @@ export function ArtifactSandboxedFrame({
   resolutions,
   renderPin,
   fill = false,
+  bleed = false,
   transparent = false,
   onSettled,
   onReady,
@@ -92,6 +93,8 @@ export function ArtifactSandboxedFrame({
   renderPin?: (commentId: string, resolution: AnchoredResolution) => ReactNode
   /** Stretch to fill an already-sized ancestor (the full-screen route) instead of the docked view's fixed min-height floor. */
   fill?: boolean
+  /** Edge-to-edge stage mode on the artifact detail page (fills stage width and height with no card border). */
+  bleed?: boolean
   /** No loading cover or panel background, so a frame stacked underneath shows through while this one loads and fits. */
   transparent?: boolean
   /** The slide's fit has settled (or bailed): it is on screen in its final position. */
@@ -217,7 +220,7 @@ export function ArtifactSandboxedFrame({
   }, [anchorsToResolve, state, token])
 
   if (state === "navigating" || state === "timeout") {
-    return <div role="alert" className="rounded-lg border border-status-warning bg-status-warning-surface p-4 text-sm text-status-warning">
+    return <div role="alert" className={`rounded-lg border border-status-warning bg-status-warning-surface p-4 text-sm text-status-warning ${bleed ? "m-4 @2xl:m-6" : ""}`}>
       <p>{state === "navigating"
         ? "Preview navigation attempt blocked. The uploaded HTML was removed from the frame."
         : "Preview could not start safely because its trusted readiness check did not complete."}</p>
@@ -232,20 +235,22 @@ export function ArtifactSandboxedFrame({
     (entry): entry is [string, AnchoredResolution] => entry[1].status === "anchored",
   )
 
-  return <div className={fill ? "relative h-full" : "relative min-h-[520px]"}>
-    {state === "loading" && !transparent && <div role="status" className={`absolute inset-0 grid place-items-center bg-surface-inset text-sm text-text-subtle ${fill ? "" : "rounded-lg border border-border-default"}`}>Loading preview…</div>}
+  const edgeToEdge = fill || bleed
+
+  return <div className={bleed ? "relative h-full w-full min-h-0 flex-1" : fill ? "relative h-full" : "relative min-h-[520px]"}>
+    {state === "loading" && !transparent && <div role="status" className={`absolute inset-0 grid place-items-center bg-surface-inset text-sm text-text-subtle ${edgeToEdge ? "" : "rounded-lg border border-border-default"}`}>Loading preview…</div>}
     <iframe
       ref={frameRef}
       title={`${title} preview`}
       sandbox={ARTIFACT_IFRAME_SANDBOX}
       referrerPolicy="no-referrer"
-      className={`w-full ${transparent ? "bg-transparent" : "bg-surface-panel"} transition-opacity ${fill ? "h-full border-0" : "min-h-[520px] rounded-lg border border-border-default"} ${state === "ready" ? "opacity-100" : "pointer-events-none opacity-0"}`}
+      className={`w-full ${transparent ? "bg-transparent" : "bg-surface-panel"} transition-opacity ${edgeToEdge ? "h-full border-0" : "min-h-[520px] rounded-lg border border-border-default"} ${state === "ready" ? "opacity-100" : "pointer-events-none opacity-0"}`}
     />
     {/* The document scrolls inside the iframe, so a pin whose element has
         scrolled out of view lands outside the frame's box. This layer is the
         frame's exact size and clips it; it passes pointer events through to the
         iframe everywhere except the pins themselves. */}
-    {state === "ready" && renderPin && anchoredPins.length > 0 && <div className="pointer-events-none absolute inset-0 z-10 overflow-hidden rounded-lg">
+    {state === "ready" && renderPin && anchoredPins.length > 0 && <div className={`pointer-events-none absolute inset-0 z-10 overflow-hidden ${edgeToEdge ? "" : "rounded-lg"}`}>
       {anchoredPins.map(([commentId, resolution]) => (
         <div
           key={commentId}

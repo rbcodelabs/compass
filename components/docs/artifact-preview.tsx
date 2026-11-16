@@ -45,6 +45,7 @@ export function ArtifactPreview({
   resolutions,
   renderPin,
   fill,
+  bleed = false,
   holdPrevious = false,
   settleOnReady = false,
 }: {
@@ -63,6 +64,8 @@ export function ArtifactPreview({
   resolutions?: AnchorResolutionMap
   renderPin?: (commentId: string, resolution: AnchoredResolution) => ReactNode
   fill?: boolean
+  /** Edge-to-edge stage mode on the artifact detail page. */
+  bleed?: boolean
   /** Keep the previous HTML on screen until the new one has loaded and fitted (slide decks), instead of blanking between. */
   holdPrevious?: boolean
   /** Plain documents never report a slide fit, so release the held frame when the new one is ready instead. */
@@ -70,7 +73,27 @@ export function ArtifactPreview({
 }) {
   const drive = externalUrl ? parseGoogleDriveLink(externalUrl) : null
   if (externalUrl && drive) {
-    return <GoogleDrivePreview title={title} externalUrl={externalUrl} drive={drive} fill={fill} />
+    return <GoogleDrivePreview title={title} externalUrl={externalUrl} drive={drive} fill={fill} bleed={bleed} />
+  }
+  if (externalUrl && bleed && livePreviewSrc) {
+    return (
+      <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
+        <iframe
+          src={livePreviewSrc}
+          title={`Live preview of ${title}`}
+          loading="lazy"
+          sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox"
+          referrerPolicy="no-referrer"
+          className="block min-h-0 w-full flex-1 border-0 bg-surface-base"
+        />
+        <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-border-default bg-surface-panel px-4 py-2 text-xs text-text-subtle">
+          <p>Live preview of the latest v0 version. It expires after a while — reload this page for a fresh one, or open the chat in v0.</p>
+          <a href={externalUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 font-medium text-primary hover:text-primary/80">
+            Open external artifact <ExternalLink className="size-3.5" />
+          </a>
+        </div>
+      </div>
+    )
   }
   if (externalUrl) {
     return <div className="space-y-3">
@@ -111,7 +134,7 @@ export function ArtifactPreview({
     </div>
     </div>
   }
-  if (!html) return <p className="text-sm text-text-subtle">Preview content is unavailable.</p>
+  if (!html) return <div className={bleed ? "grid min-h-0 flex-1 place-items-center p-6" : undefined}><p className="text-sm text-text-subtle">Preview content is unavailable.</p></div>
   return <ArtifactFrameStack
     title={title}
     html={html}
@@ -125,6 +148,7 @@ export function ArtifactPreview({
     resolutions={resolutions}
     renderPin={renderPin}
     fill={fill}
+    bleed={bleed}
   />
 }
 
@@ -139,12 +163,44 @@ export function ArtifactPreview({
  * therefore always shown, not just on failure — the frame gives no load signal
  * that would let us show it only when needed.
  */
-function GoogleDrivePreview({ title, externalUrl, drive, fill }: {
+function GoogleDrivePreview({ title, externalUrl, drive, fill, bleed = false }: {
   title: string
   externalUrl: string
   drive: NonNullable<ReturnType<typeof parseGoogleDriveLink>>
   fill?: boolean
+  bleed?: boolean
 }) {
+  if (bleed) {
+    return (
+      <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
+        <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border-default bg-surface-panel px-4 py-1.5">
+          <span className="rounded-full border border-border-default bg-surface-inset px-2.5 py-0.5 text-xs font-medium text-text-subtle">{drive.label}</span>
+          <a href={externalUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:text-primary/80">
+            Open in Google <ExternalLink className="size-3.5" aria-hidden />
+          </a>
+        </div>
+        {drive.embedUrl
+          ? <iframe
+              src={drive.embedUrl}
+              title={`${title} — ${drive.label} preview`}
+              sandbox={GOOGLE_DRIVE_IFRAME_SANDBOX}
+              referrerPolicy="no-referrer"
+              loading="lazy"
+              allow=""
+              className="min-h-0 w-full flex-1 border-0 bg-surface-base"
+            />
+          : <div className="grid min-h-0 flex-1 place-items-center overflow-y-auto p-6">
+              <div className="max-w-lg rounded-lg border border-border-default bg-surface-panel p-6 text-center text-sm text-text-subtle">
+                {drive.label}s are interactive, so Compass does not embed them. Use “Open in Google” to view this one.
+              </div>
+            </div>}
+        <div className="shrink-0 border-t border-border-default bg-surface-panel px-4 py-2 text-xs text-text-subtle">
+          <p>Compass saves only this link, not the file. The preview is Google’s viewer running as you, so you see it only if your Google account has access. If it shows a sign-in page, use “Open in Google”.</p>
+          <p className="mt-0.5 truncate text-text-disabled" title={externalUrl}>{externalUrl}</p>
+        </div>
+      </div>
+    )
+  }
   return <div className={fill ? "flex h-full flex-col gap-3" : "flex flex-col gap-3"}>
     <div className="flex flex-wrap items-center justify-between gap-2">
       <span className="rounded-full border border-border-default bg-surface-panel px-2 py-0.5 text-xs font-medium text-text-subtle">{drive.label}</span>
@@ -197,6 +253,7 @@ function ArtifactFrameStack({ html, holdPrevious, settleOnReady, ...frameProps }
   resolutions?: AnchorResolutionMap
   renderPin?: (commentId: string, resolution: AnchoredResolution) => ReactNode
   fill?: boolean
+  bleed?: boolean
 }) {
   const [frames, setFrames] = useState<StackedFrame[]>(() => [{ id: 0, html }])
   const latest = frames[frames.length - 1]
@@ -215,15 +272,17 @@ function ArtifactFrameStack({ html, holdPrevious, settleOnReady, ...frameProps }
 
   const settle = (id: number) => setFrames((current) => (current.some((frame) => frame.id < id) ? current.filter((frame) => frame.id >= id) : current))
 
+  const containerClass = frameProps.bleed ? "relative flex h-full w-full min-h-0 min-w-0 flex-1 flex-col" : frameProps.fill ? "relative h-full" : "relative"
+
   // One uniform list, so a frame keeps its place (and its loaded document)
   // when it stops being the newest; moving an iframe in the tree would reload it.
-  return <div className={frameProps.fill ? "relative h-full" : "relative"}>
+  return <div className={containerClass}>
     {frames.map((frame, index) => {
       const current = index === frames.length - 1
-      return <div key={frame.id} aria-hidden={current ? undefined : true} className={current ? (frameProps.fill ? "relative h-full" : "relative") : "pointer-events-none absolute inset-0"}>
+      return <div key={frame.id} aria-hidden={current ? undefined : true} className={current ? containerClass : "pointer-events-none absolute inset-0"}>
         {current
           ? <ArtifactSandboxedFrame {...frameProps} html={frame.html} transparent={stacked} onSettled={() => settle(frame.id)} onReady={settleOnReady ? () => settle(frame.id) : undefined} />
-          : <ArtifactSandboxedFrame title={frameProps.title} html={frame.html} fill={frameProps.fill} />}
+          : <ArtifactSandboxedFrame title={frameProps.title} html={frame.html} fill={frameProps.fill} bleed={frameProps.bleed} />}
       </div>
     })}
   </div>
