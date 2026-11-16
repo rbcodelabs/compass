@@ -116,15 +116,15 @@ test.describe("GitHub PR smart chips", () => {
       await expect(customChip).toBeVisible({ timeout: 10_000 });
       await expect(customChip).toHaveText("Custom PR label");
 
-      // 3. Paste an unapproved PR URL on a third line: stays a plain anchor with raw URL text.
-      await editor.locator("p").nth(1).click({ position: { x: 4, y: 10 } });
-      await page.keyboard.press("End");
+      // 3. Collapse the selection after `Custom PR label` with ArrowRight, then paste an unapproved PR URL on a third line.
+      await page.keyboard.press("ArrowRight");
       await page.keyboard.press("Enter");
       await page.keyboard.type("Unapproved: ");
       await pastePlainText(page, ".ProseMirror", UNAPPROVED_PR_URL);
       const unapprovedLink = editor.locator(`a[href="${UNAPPROVED_PR_URL}"]`);
       await expect(unapprovedLink).toHaveText(UNAPPROVED_PR_URL);
       await expect(unapprovedLink).not.toHaveAttribute("data-github-pr-link", "ready");
+      await expect(customChip).toHaveText("Custom PR label");
 
       // Hover preview card displays branch & author metadata, then closes cleanly when moving away.
       fs.mkdirSync(SHOT_DIR, { recursive: true });
