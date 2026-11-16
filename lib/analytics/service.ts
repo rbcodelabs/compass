@@ -1,3 +1,4 @@
+import { compassEnv } from "@/lib/runtime-env"
 import { createHash, randomUUID } from "node:crypto"
 import { z } from "zod"
 import type { AnalyticsConnection, MetricBinding, MetricDefinition, MetricRevision, MetricObservation } from "@prisma/client"
@@ -294,7 +295,7 @@ export async function refreshBinding(actor: McpActor, workspaceId: string, bindi
       context.credentials = credentials
     } else {
       operatorOnly(workspaceId, metric.provider)
-      if (process.env.VERCEL_ENV !== "production") throw new AnalyticsError("PRODUCTION_ONLY")
+      if (compassEnv() !== "production") throw new AnalyticsError("PRODUCTION_ONLY")
       const excluded = (process.env.COMPASS_ANALYTICS_EXCLUDED_WORKSPACE_IDS ?? "").split(",").map(id => id.trim()).filter(Boolean)
       context.activation = { now: attemptStartedAt, count: async (cutoff, now) => {
         const bounds = { gte: cutoff, lte: now }

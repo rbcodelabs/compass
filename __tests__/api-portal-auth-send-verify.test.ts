@@ -150,13 +150,14 @@ describe("POST /api/portal/auth/send", () => {
 
   describe("production build without AUTH_RESEND_KEY", () => {
     const MOCK_RUNTIME = {
+      COMPASS_ENV: "development",
       E2E_MOCK_AUTH: "1",
       E2E_ISOLATED_DATABASE: "1",
       DATABASE_URL: "postgres://postgres:postgres@localhost:5432/compass_e2e",
     };
     beforeEach(() => {
       vi.stubEnv("NODE_ENV", "production");
-      for (const name of ["VERCEL", "VERCEL_ENV", "PGHOST", "AWS_ROLE_ARN", "PGSCHEMA", "PREVIEW_AUTOMATION_ENABLED"]) vi.stubEnv(name, undefined);
+      for (const name of ["VERCEL", "VERCEL_ENV", "COMPASS_ENV", "PGHOST", "AWS_ROLE_ARN", "PGSCHEMA", "PREVIEW_AUTOMATION_ENABLED"]) vi.stubEnv(name, undefined);
     });
     afterEach(() => vi.unstubAllEnvs());
 
@@ -170,7 +171,11 @@ describe("POST /api/portal/auth/send", () => {
       expect(fetch).not.toHaveBeenCalled();
     });
 
-    it.each([["unflagged build", { COMPASS_E2E_MOCK_AUTH_BUILD: "" }], ["flagged build without the runtime flag", { COMPASS_E2E_MOCK_AUTH_BUILD: "1", E2E_MOCK_AUTH: "" }]])(
+    it.each([
+      ["unflagged build", { COMPASS_E2E_MOCK_AUTH_BUILD: "" }],
+      ["flagged build without the runtime flag", { COMPASS_E2E_MOCK_AUTH_BUILD: "1", E2E_MOCK_AUTH: "" }],
+      ["flagged build without COMPASS_ENV", { COMPASS_E2E_MOCK_AUTH_BUILD: "1", COMPASS_ENV: "" }],
+    ])(
       "still fails closed with 503 and no token on an %s",
       async (_label, overrides) => {
         for (const [name, value] of Object.entries({ ...MOCK_RUNTIME, ...overrides })) vi.stubEnv(name, value);

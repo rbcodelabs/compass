@@ -36,7 +36,14 @@ test.describe("mock login is off without E2E_MOCK_AUTH", () => {
     test.setTimeout(90_000);
     const port = await freePort();
     baseUrl = `http://127.0.0.1:${port}`;
-    const env: NodeJS.ProcessEnv = { ...process.env, PORT: String(port), AUTH_TRUST_HOST: "true", AUTH_URL: baseUrl, NODE_ENV: "production" };
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      PORT: String(port),
+      AUTH_TRUST_HOST: "true",
+      AUTH_URL: baseUrl,
+      NODE_ENV: "production",
+      COMPASS_ENV: process.env.COMPASS_ENV || "development",
+    };
     delete env.E2E_MOCK_AUTH;
     server = spawn(process.execPath, ["node_modules/next/dist/bin/next", "start", "-H", "127.0.0.1", "-p", String(port)], { env, stdio: ["ignore", "pipe", "pipe"] });
     server.stdout?.on("data", (chunk) => (serverLog += chunk));

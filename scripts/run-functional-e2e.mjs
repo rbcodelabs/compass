@@ -218,6 +218,7 @@ const env = {
   CI: "1",
   E2E_FUNCTIONAL: "1",
   E2E_ISOLATED_DATABASE: "1",
+  ...(serverMode === "prod" ? { COMPASS_ENV: process.env.COMPASS_ENV || "development" } : {}),
 };
 
 function run(args) {

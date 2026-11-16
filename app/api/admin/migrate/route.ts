@@ -1,3 +1,4 @@
+import { compassEnv } from "@/lib/runtime-env";
 import { NextRequest, NextResponse } from "next/server";
 import { secretMatches } from "@/lib/secret-compare";
 import { Pool } from "pg";
@@ -66,14 +67,14 @@ function checkAuth(req: NextRequest): boolean {
 
 export async function GET(req: NextRequest) {
   if (process.env.PREVIEW_DATABASE_MODE === "vercel-managed") return managedRequest(req, false);
-  if (process.env.VERCEL_ENV === "preview" && process.env.PREVIEW_AUTOMATION_ENABLED === "1") return NextResponse.json({ error: "Not found" }, { status: 404 });
+  if (compassEnv() === "preview" && process.env.PREVIEW_AUTOMATION_ENABLED === "1") return NextResponse.json({ error: "Not found" }, { status: 404 });
   if (!checkAuth(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const pool = await getPool();
   try { return await getMigrationStatus(pool, getActiveSchema()); } finally { await pool.end(); }
 }
 export async function POST(req: NextRequest) {
   if (process.env.PREVIEW_DATABASE_MODE === "vercel-managed") return managedRequest(req, true);
-  if (process.env.VERCEL_ENV === "preview" && process.env.PREVIEW_AUTOMATION_ENABLED === "1") return NextResponse.json({ error: "Not found" }, { status: 404 });
+  if (compassEnv() === "preview" && process.env.PREVIEW_AUTOMATION_ENABLED === "1") return NextResponse.json({ error: "Not found" }, { status: 404 });
   if (!checkAuth(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   // Only a truly empty body ({} or none) is the untargeted apply-pending flow. Anything malformed, non-object, carrying an
   // unknown key, a bad/empty/non-string script, or an unknown/ambiguous action is a 400 and never reaches the runner,

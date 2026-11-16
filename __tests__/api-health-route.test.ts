@@ -32,6 +32,7 @@ describe("GET /api/health", () => {
   it("does not depend on any environment configuration", async () => {
     vi.stubEnv("NODE_ENV", "production")
     vi.stubEnv("VERCEL_ENV", "")
+    vi.stubEnv("COMPASS_ENV", "")
     vi.stubEnv("DATABASE_URL", "")
     vi.stubEnv("PGHOST", "")
     const res = GET()
