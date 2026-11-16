@@ -91,11 +91,12 @@ describe("GitHub PR smart chips in TipTap Docs & rich editors", () => {
     let editor!: Editor
     const { container } = render(
       <WorkItemLinkScopeProvider orgSlug="rbcodelabs" workspaceSlug="compass">
-        <DocHarness initialContent="Review " onReady={(e) => { editor = e }} />
+        <DocHarness initialContent="" onReady={(e) => { editor = e }} />
       </WorkItemLinkScopeProvider>,
     )
 
     editor.commands.focus("end")
+    editor.commands.insertContent("Review ")
     editor.commands.insertContent({
       type: "text",
       text: PR_URL,
