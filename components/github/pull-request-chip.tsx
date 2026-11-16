@@ -130,9 +130,7 @@ export function PullRequestPill({
         data-entity-card="pullRequest"
         {...dataAttrs}
       >
-        <span className="inline-flex shrink-0 items-center" contentEditable={nonEditableChrome ? false : undefined}>
-          <PullRequestStateIcon state={summary.state} className="size-3.5 shrink-0" />
-        </span>
+        <PullRequestStateIcon state={summary.state} className="size-3.5 shrink-0" />
         <span className="min-w-0 truncate">{children}</span>
         <span
           className={cn("size-1.5 shrink-0 rounded-full", PR_CHECKS_DOT[summary.checks])}

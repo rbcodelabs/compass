@@ -8,7 +8,6 @@ import { clickNewDoc } from "../fixtures/docs";
 import getPrisma from "../../../lib/db";
 
 const SHOT_DIR = "test-results/visual-verification";
-
 const APPROVED_PR_URL = "https://github.com/rbcodelabs/compass/pull/209";
 const UNAPPROVED_PR_URL = "https://github.com/unapproved/repo/pull/99";
 
@@ -88,8 +87,9 @@ test.describe("GitHub PR smart chips", () => {
       await titleInput.fill(`E2E PR Smart Chips ${ts}`);
       await titleInput.blur();
 
-      // 1. Paste a bare GitHub PR URL: rewrites to `#209 Support smart PR chips` and keeps MarkViewContent mounted.
+      // 1. Paste a bare GitHub PR URL in prose: rewrites to `#209 Support smart PR chips` and keeps MarkViewContent mounted.
       await editor.click();
+      await page.keyboard.type("Shipped in ");
       await pastePlainText(page, ".ProseMirror", APPROVED_PR_URL);
 
       const readyChip = editor.locator('a[data-github-pr-link="ready"]').first();
@@ -97,22 +97,14 @@ test.describe("GitHub PR smart chips", () => {
       await expect(readyChip).toContainText("#209 Support smart PR chips");
       await expect(readyChip.locator("[data-mark-view-content]")).toHaveCount(1);
 
-      // Hover preview card displays branch & author metadata.
-      fs.mkdirSync(SHOT_DIR, { recursive: true });
-      await readyChip.hover();
-      await expect(page.getByText("feat/pr-chips → main")).toBeVisible({ timeout: 5_000 });
-      await page.screenshot({ path: `${SHOT_DIR}/01-doc-pr-hover-card.png` });
-      await page.mouse.move(10, 10);
-
       // 2. Add a custom [label](url) PR link on a second line; custom text must remain untouched.
-      await editor.click();
-      await page.keyboard.press("End");
       await page.keyboard.press("Enter");
-      await page.keyboard.type("Custom PR label");
+      await page.keyboard.type("See Custom PR label");
+      await page.waitForTimeout(1500);
       await expect(page.getByTestId("doc-save-status")).toHaveAttribute("data-state", "saved", { timeout: 15_000 });
-      await page.keyboard.press("Home");
+
       for (let i = 0; i < "Custom PR label".length; i++) {
-        await page.keyboard.press("Shift+ArrowRight");
+        await page.keyboard.press("Shift+ArrowLeft");
       }
       const bubble = page.getByTestId("doc-bubble-menu");
       await expect(bubble).toBeVisible({ timeout: 5_000 });
@@ -120,22 +112,36 @@ test.describe("GitHub PR smart chips", () => {
       await page.getByLabel("Link address").fill(APPROVED_PR_URL);
       await page.keyboard.press("Enter");
 
-      const customChip = editor.locator('a[data-github-pr-link="ready"]').nth(1);
+      const customChip = editor.locator('a[data-github-pr-link="ready"]').filter({ hasText: "Custom PR label" });
       await expect(customChip).toBeVisible({ timeout: 10_000 });
       await expect(customChip).toHaveText("Custom PR label");
 
       // 3. Paste an unapproved PR URL on a third line: stays a plain anchor with raw URL text.
+      await editor.locator("p").nth(1).click({ position: { x: 4, y: 10 } });
       await page.keyboard.press("End");
       await page.keyboard.press("Enter");
+      await page.keyboard.type("Unapproved: ");
       await pastePlainText(page, ".ProseMirror", UNAPPROVED_PR_URL);
       const unapprovedLink = editor.locator(`a[href="${UNAPPROVED_PR_URL}"]`);
       await expect(unapprovedLink).toHaveText(UNAPPROVED_PR_URL);
       await expect(unapprovedLink).not.toHaveAttribute("data-github-pr-link", "ready");
 
-      // 4. Wait for autosave, then anchor an inline comment onto `Custom` inside the custom PR chip's MarkViewContent.
+      // Hover preview card displays branch & author metadata, then closes cleanly when moving away.
+      fs.mkdirSync(SHOT_DIR, { recursive: true });
+      await readyChip.hover();
+      await expect(page.getByText("feat/pr-chips → main")).toBeVisible({ timeout: 5_000 });
+      await page.screenshot({ path: `${SHOT_DIR}/01-doc-pr-hover-card.png` });
+      await page.mouse.move(10, 10);
+      await expect(page.getByText("feat/pr-chips → main")).toBeHidden({ timeout: 5_000 });
+
+      // 4. Wait for autosave, then step cursor via ArrowRight into customChip's MarkViewContent and anchor an inline comment onto `Custom`.
+      await page.waitForTimeout(1500);
       await expect(page.getByTestId("doc-save-status")).toHaveAttribute("data-state", "saved", { timeout: 15_000 });
-      await customChip.locator("[data-mark-view-content]").click();
+      await editor.locator("p").nth(1).click({ position: { x: 4, y: 10 } });
       await page.keyboard.press("Home");
+      for (let i = 0; i < "See ".length; i++) {
+        await page.keyboard.press("ArrowRight");
+      }
       for (let i = 0; i < "Custom".length; i++) {
         await page.keyboard.press("Shift+ArrowRight");
       }
@@ -149,8 +155,8 @@ test.describe("GitHub PR smart chips", () => {
       // 5. Reload and confirm Markdown round-trip preserves both chips and the inline comment highlight.
       await page.reload();
       await page.waitForLoadState("networkidle");
-      await expect(editor.locator('a[data-github-pr-link="ready"]').first()).toContainText("#209 Support smart PR chips", { timeout: 10_000 });
-      await expect(editor.locator('a[data-github-pr-link="ready"]').nth(1)).toHaveText("Custom PR label");
+      await expect(editor.locator('a[data-github-pr-link="ready"]').filter({ hasText: "#209 Support smart PR chips" })).toBeVisible({ timeout: 10_000 });
+      await expect(editor.locator('a[data-github-pr-link="ready"]').filter({ hasText: "Custom PR label" })).toBeVisible({ timeout: 10_000 });
       await expect(editor.locator(".doc-comment-highlight")).toContainText("Custom", { timeout: 10_000 });
 
       // 6. Click the PR smart chip -> opens the pullRequest detail sidebar in place.
@@ -170,7 +176,7 @@ test.describe("GitHub PR smart chips", () => {
       await page.getByRole("switch", { name: "Publish to portal" }).click();
       const publishRes = await savedPublish;
       expect(publishRes.status()).toBe(200);
-      const publishUrlMatch = /\/api\/docs\/([^/]+)\/publish/.exec(publishRes.url());
+      const publishUrlMatch = /\/api\/docs\/([^/]+)\/publish/.exec(publishUrlMatchOf(publishRes.url()));
       if (publishUrlMatch?.[1]) createdDocId = publishUrlMatch[1];
 
       const anonPage = await anon.newPage();
@@ -182,6 +188,7 @@ test.describe("GitHub PR smart chips", () => {
       expect(portalRes?.status()).toBe(200);
       await expect(anonPage.locator('[data-entity-card="pullRequest"]')).toHaveCount(0);
       await expect(anonPage.getByRole("link", { name: "#209 Support smart PR chips" })).toHaveAttribute("href", APPROVED_PR_URL);
+      await expect(anonPage.getByRole("link", { name: "Custom PR label" })).toHaveAttribute("href", APPROVED_PR_URL);
       expect(anonPrFetches).toBe(0);
       await anonPage.screenshot({ path: `${SHOT_DIR}/04-portal-doc-plain-fallback.png` });
     } finally {
@@ -244,7 +251,7 @@ test.describe("GitHub PR smart chips", () => {
       const commentBox = page.getByRole("textbox", { name: "Add comment", exact: true });
       await commentBox.click();
       await page.keyboard.type(`Shipped ${APPROVED_PR_URL} ([review link](${APPROVED_PR_URL})) vs ${UNAPPROVED_PR_URL}`);
-      await page.getByRole("button", { name: "Comment", exact: true }).click();
+      await page.getByRole("button", { name: "Post comment", exact: true }).click();
 
       const commentArticle = page.getByRole("article").filter({ hasText: "Shipped" });
       await expect(commentArticle).toBeVisible({ timeout: 10_000 });
@@ -270,3 +277,11 @@ test.describe("GitHub PR smart chips", () => {
     }
   });
 });
+
+function publishUrlMatchOf(rawUrl: string): string {
+  try {
+    return new URL(rawUrl).pathname;
+  } catch {
+    return rawUrl;
+  }
+}
