@@ -35,6 +35,11 @@ function load(orgSlug: string, workspaceSlug: string, ref: PullRequestRef): Prom
   return request
 }
 
+export function clearPullRequestCache(): void {
+  cache.clear()
+  inflight.clear()
+}
+
 export function usePullRequest(orgSlug: string, workspaceSlug: string, ref: PullRequestRef | null): { summary: PullRequestSummary | null; settled: boolean } {
   const id = ref ? pullRequestPanelId(ref) : null
   const key = id ? [orgSlug, workspaceSlug, id].join("/") : null

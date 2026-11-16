@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest"
 
-import { parsePullRequestPanelId, parsePullRequestUrl, pullRequestPanelId } from "@/lib/github-pull-request-links"
+import {
+  formatPullRequestLabel,
+  isBarePullRequestLabel,
+  parsePullRequestPanelId,
+  parsePullRequestUrl,
+  pullRequestPanelId,
+  samePullRequest,
+} from "@/lib/github-pull-request-links"
 import { prState, summarizeChecks } from "@/lib/github-pull-request-summary"
 
 describe("parsePullRequestUrl", () => {
@@ -22,6 +29,35 @@ describe("panel id", () => {
   })
   it("rejects malformed ids", () => {
     for (const id of ["", "o/r", "o/r/1/2", "o/../1x", "o/r/-1"]) expect(parsePullRequestPanelId(id)).toBeNull()
+  })
+})
+
+describe("bare PR label detection and formatting", () => {
+  const pr = { owner: "acme", repo: "widgets", number: 209 }
+  const href = "https://github.com/acme/widgets/pull/209"
+
+  it("recognizes bare PR URLs and matching sub-page URLs", () => {
+    expect(samePullRequest(pr, { owner: "ACME", repo: "Widgets", number: 209 })).toBe(true)
+    expect(samePullRequest(pr, { owner: "acme", repo: "widgets", number: 210 })).toBe(false)
+    expect(isBarePullRequestLabel(href, pr, href)).toBe(true)
+    expect(isBarePullRequestLabel(`  ${href}/files  `, pr, `${href}/files`)).toBe(true)
+    expect(isBarePullRequestLabel("https://github.com/ACME/widgets/pull/209", pr, href)).toBe(true)
+    expect(isBarePullRequestLabel("", pr, href)).toBe(true)
+  })
+
+  it("preserves custom link text and rejects different PR URLs", () => {
+    expect(isBarePullRequestLabel("PR #209", pr, href)).toBe(false)
+    expect(isBarePullRequestLabel("#209 Fix auth redirect", pr, href)).toBe(false)
+    expect(isBarePullRequestLabel("auth fix", pr, href)).toBe(false)
+    expect(isBarePullRequestLabel("https://github.com/acme/widgets/pull/210", pr, href)).toBe(false)
+    expect(isBarePullRequestLabel("https://github.com/other/widgets/pull/209", pr, href)).toBe(false)
+  })
+
+  it("formats #<number> <Title> without duplicating #<number>", () => {
+    expect(formatPullRequestLabel({ number: 209, title: "Fix auth redirect" })).toBe("#209 Fix auth redirect")
+    expect(formatPullRequestLabel({ number: 209, title: "  Trimmed title  " })).toBe("#209 Trimmed title")
+    expect(formatPullRequestLabel({ number: 209, title: "#209" })).toBe("#209")
+    expect(formatPullRequestLabel({ number: 209, title: "" })).toBe("#209")
   })
 })
 

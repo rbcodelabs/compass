@@ -1,6 +1,10 @@
+"use client"
+
 import type { ReactNode } from "react"
 import { bodySegments, parseMentionHref } from "@/lib/comment-mentions"
 import type { MentionOption, MentionOptions } from "@/components/docs/mention-editor"
+import { PullRequestChip } from "@/components/github/pull-request-chip"
+import { parsePullRequestUrl } from "@/lib/github-pull-request-links"
 import { cn } from "@/lib/utils"
 
 const kindKey = (kind: string, id: string) => kind + ":" + id
@@ -36,8 +40,8 @@ export function MentionChips({ body, options }: { body: string; options: Mention
 }
 
 /**
- * Link renderer for MarkdownContent: a `mention:` href (from mentionsAsMarkdownLinks) becomes a chip, anything else
- * a normal link. Module-level so MarkdownContent keeps a stable component identity.
+ * Link renderer for MarkdownContent: a `mention:` href (from mentionsAsMarkdownLinks) becomes a mention chip, a GitHub PR link
+ * becomes a PR smart chip, and anything else stays a normal link. Module-level so MarkdownContent keeps a stable component identity.
  */
 export function MentionAwareLink({ href, children }: { href?: string; children?: ReactNode }) {
   const mention = parseMentionHref(href)
@@ -45,6 +49,8 @@ export function MentionAwareLink({ href, children }: { href?: string; children?:
     return <span data-testid="comment-mention" data-mention-id={mention.id} className={chipClass(mention.kind, mention.outside)}>{children}</span>
   }
   if (!href) return <span>{children}</span>
+  const pr = parsePullRequestUrl(href)
+  if (pr) return <PullRequestChip href={href} pr={pr}>{children}</PullRequestChip>
   const external = /^(?:https?:)?\/\//i.test(href)
   return <a href={href} {...(external ? { target: "_blank", rel: "noopener noreferrer" } : {})}>{children}</a>
 }

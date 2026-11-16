@@ -7,7 +7,9 @@ import { cn } from "@/lib/utils";
 import { parseMentionHref } from "@/lib/comment-mentions";
 import { remarkWorkItemRefs } from "@/lib/work-item-linkify";
 import { MermaidDiagram } from "@/components/mermaid-diagram";
+import { PullRequestChip } from "@/components/github/pull-request-chip";
 import { useWorkItemLinkScope } from "@/components/work-item-link-scope";
+import { parsePullRequestUrl } from "@/lib/github-pull-request-links";
 
 const PROSE = [
   "min-w-0 text-sm leading-relaxed break-words",
@@ -57,6 +59,8 @@ type LinkRenderer = (props: { href?: string; children?: ReactNode }) => ReactNod
 
 function DefaultLink({ href, children }: { href?: string; children?: ReactNode }) {
   if (!href) return <span>{children}</span>;
+  const pr = parsePullRequestUrl(href);
+  if (pr) return <PullRequestChip href={href} pr={pr}>{children}</PullRequestChip>;
   const external = Boolean(href && /^(?:https?:)?\/\//i.test(href));
   return <a href={href} {...(external ? { target: "_blank", rel: "noopener noreferrer" } : {})}>{children}</a>;
 }
