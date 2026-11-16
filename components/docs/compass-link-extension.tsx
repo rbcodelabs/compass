@@ -272,19 +272,7 @@ function PullRequestDocChip({
     };
   }, [editor, href, pr, summary]);
 
-  if (!scope || !summary) {
-    return (
-      <a
-        href={href}
-        target={(mark.attrs.target as string | null) ?? undefined}
-        rel={(mark.attrs.rel as string | null) ?? undefined}
-        className={(mark.attrs.class as string | null) ?? undefined}
-        data-github-pr-link={scope && !settled ? "loading" : undefined}
-      >
-        <MarkViewContent as="span" />
-      </a>
-    );
-  }
+  const activeSummary = scope ? summary : null;
 
   const onClick = (event: MouseEvent<HTMLAnchorElement>) => {
     if (event.defaultPrevented || event.button !== 0 || event.altKey) return;
@@ -301,11 +289,16 @@ function PullRequestDocChip({
 
   return (
     <PullRequestPill
-      summary={summary}
+      summary={activeSummary}
       href={href}
+      target={(mark.attrs.target as string | null) ?? undefined}
+      rel={(mark.attrs.rel as string | null) ?? undefined}
+      plainClassName={(mark.attrs.class as string | null) ?? undefined}
       onClick={onClick}
       nonEditableChrome
-      dataAttrs={{ "data-github-pr-link": "ready" }}
+      dataAttrs={{
+        "data-github-pr-link": activeSummary ? "ready" : scope && !settled ? "loading" : undefined,
+      }}
     >
       <MarkViewContent as="span" />
     </PullRequestPill>

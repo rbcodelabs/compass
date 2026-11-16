@@ -103,8 +103,9 @@ describe("GitHub PR smart chips in TipTap Docs & rich editors", () => {
       marks: [{ type: "link", attrs: { href: PR_URL } }],
     })
 
-    // MarkViewContent stays mounted from insertion through async resolution.
-    expect(container.querySelector("[data-mark-view-content]")).not.toBeNull()
+    // MarkViewContent stays on the exact same DOM node from insertion through async resolution (never unmounts/detaches).
+    const initialMarkViewEl = container.querySelector("[data-mark-view-content]")
+    expect(initialMarkViewEl).not.toBeNull()
 
     const chip = await waitFor(() => {
       const el = container.querySelector<HTMLAnchorElement>('a[data-github-pr-link="ready"]')
@@ -113,7 +114,7 @@ describe("GitHub PR smart chips in TipTap Docs & rich editors", () => {
       return el!
     })
 
-    expect(chip.querySelector("[data-mark-view-content]")).not.toBeNull()
+    expect(chip.querySelector("[data-mark-view-content]")).toBe(initialMarkViewEl)
     expect(screen.getByRole("img", { name: "Open" })).toBeInTheDocument()
     expect(screen.getByRole("img", { name: "Checks passing" })).toBeInTheDocument()
 

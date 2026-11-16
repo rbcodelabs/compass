@@ -96,56 +96,70 @@ function PullRequestHoverCard({
 }
 
 /**
- * Shared presentational pill + hover preview card for a resolved GitHub PR.
- * Used by both rendered Markdown (`PullRequestChip`) and TipTap editors (`PullRequestDocChip`), where `children` wraps `<MarkViewContent />`.
+ * Shared presentational pill + hover preview card for a GitHub PR link.
+ * Accepts `summary = null` so TipTap's `PullRequestDocChip` can keep the exact same `<PreviewCard.Trigger>` (`<a>`) and
+ * `<MarkViewContent />` React fiber mounted across loading, resolved, and plain-link fallback states without detaching ProseMirror's
+ * `contentDOM` (which would otherwise cause Chromium to collapse the native DOM selection to the start of the mark).
  */
 export function PullRequestPill({
   summary,
   href,
+  target = "_blank",
+  rel = "noopener noreferrer",
   onClick,
   children,
   className,
+  plainClassName,
   dataAttrs,
   nonEditableChrome = false,
 }: {
-  summary: PullRequestSummary
+  summary: PullRequestSummary | null
   href: string
+  target?: string
+  rel?: string
   onClick?: (event: MouseEvent<HTMLAnchorElement>) => void
   children: ReactNode
   className?: string
+  plainClassName?: string
   dataAttrs?: Record<string, string | undefined>
-  /** Set true inside TipTap contentEditable so ProseMirror treats the icon and status dot as non-editable chrome. */
+  /** Set true inside TipTap contentEditable so ProseMirror treats the status dot as non-editable chrome. */
   nonEditableChrome?: boolean
 }) {
   return (
     <PreviewCard.Root>
       <PreviewCard.Trigger
         href={href}
-        onClick={onClick}
-        target="_blank"
-        rel="noopener noreferrer"
+        onClick={summary ? onClick : undefined}
+        target={target}
+        rel={rel}
         delay={120}
         closeDelay={150}
-        className={cn(PILL, "text-text-primary!", className)}
-        data-entity-card="pullRequest"
+        className={summary ? cn(PILL, "text-text-primary!", className) : plainClassName}
+        data-entity-card={summary ? "pullRequest" : undefined}
         {...dataAttrs}
       >
-        <PullRequestStateIcon state={summary.state} className="size-3.5 shrink-0" />
-        <span className="min-w-0 truncate">{children}</span>
-        <span
-          className={cn("size-1.5 shrink-0 rounded-full", PR_CHECKS_DOT[summary.checks])}
-          role="img"
-          aria-label={PR_CHECKS_LABEL[summary.checks]}
-          contentEditable={nonEditableChrome ? false : undefined}
-        />
+        {summary ? <PullRequestStateIcon state={summary.state} className="size-3.5 shrink-0" /> : null}
+        <span key="pr-pill-label" className={summary ? "min-w-0 truncate" : undefined}>
+          {children}
+        </span>
+        {summary ? (
+          <span
+            className={cn("size-1.5 shrink-0 rounded-full", PR_CHECKS_DOT[summary.checks])}
+            role="img"
+            aria-label={PR_CHECKS_LABEL[summary.checks]}
+            contentEditable={nonEditableChrome ? false : undefined}
+          />
+        ) : null}
       </PreviewCard.Trigger>
-      <PreviewCard.Portal>
-        <PreviewCard.Positioner side="bottom" align="start" sideOffset={8} className="isolate z-[80]">
-          <PreviewCard.Popup className="w-[21rem] max-w-[calc(100vw-2rem)] origin-(--transform-origin) rounded-2xl border border-border-default bg-surface-card p-4 text-left text-text-primary shadow-lg outline-none duration-100 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0">
-            <PullRequestHoverCard summary={summary} href={href} onClick={onClick} />
-          </PreviewCard.Popup>
-        </PreviewCard.Positioner>
-      </PreviewCard.Portal>
+      {summary ? (
+        <PreviewCard.Portal>
+          <PreviewCard.Positioner side="bottom" align="start" sideOffset={8} className="isolate z-[80]">
+            <PreviewCard.Popup className="w-[21rem] max-w-[calc(100vw-2rem)] origin-(--transform-origin) rounded-2xl border border-border-default bg-surface-card p-4 text-left text-text-primary shadow-lg outline-none duration-100 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0">
+              <PullRequestHoverCard summary={summary} href={href} onClick={onClick} />
+            </PreviewCard.Popup>
+          </PreviewCard.Positioner>
+        </PreviewCard.Portal>
+      ) : null}
     </PreviewCard.Root>
   )
 }
