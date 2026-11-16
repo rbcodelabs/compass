@@ -12,6 +12,9 @@
  */
 
 import getPrisma from "@/lib/db"
+import { writeCustomFieldValue } from "@/lib/custom-field-value-write"
+import { listInheritanceRules } from "@/lib/custom-field-inheritance-admin"
+import { customFieldInheritanceTableExists } from "@/lib/feature-tables"
 import { ok, fail } from "@/lib/mcp-output"
 import { resolveEntityWorkspaceId, type WorkspaceEntityType } from "@/lib/mcp-authz"
 import {
@@ -22,9 +25,7 @@ import {
 import type {
   CustomFieldDefinitionData,
   CustomFieldObjectType,
-  CustomFieldType,
   CustomFieldValue,
-  SelectOption,
 } from "@/lib/types"
 
 /** Every CustomFieldObjectType maps onto exactly one already-gated WorkspaceEntityType. */
@@ -109,78 +110,8 @@ function formatValueForDisplay(value: CustomFieldValue): string {
 
 // ── set_custom_field_value ──────────────────────────────────────────────────
 
-/**
- * Validates `value` against a field's declared type (and, for picklists, its
- * currently defined options). Returns a specific, actionable error message on
- * failure, or null when the value is acceptable. There is no server-side
- * equivalent of this validation anywhere else in the codebase — the Settings
- * UI only constrains input by rendering a type-appropriate widget, so an MCP
- * caller (which sends raw JSON, not a widget) needs its own check.
- */
-export function validateValueForFieldType(
-  fieldType: CustomFieldType,
-  options: SelectOption[] | null,
-  value: unknown
-): string | null {
-  if (value === null) return null
-
-  switch (fieldType) {
-    case "TEXT":
-    case "URL":
-      if (typeof value !== "string") {
-        return `Expected a string value for a ${fieldType} field, got ${typeof value}.`
-      }
-      return null
-
-    case "NUMBER":
-      if (typeof value !== "number" || !Number.isFinite(value)) {
-        return `Expected a finite number for a NUMBER field, got ${JSON.stringify(value)}.`
-      }
-      return null
-
-    case "BOOLEAN":
-      if (typeof value !== "boolean") {
-        return `Expected a boolean value for a BOOLEAN field, got ${typeof value}.`
-      }
-      return null
-
-    case "DATE":
-      if (typeof value !== "string" || Number.isNaN(Date.parse(value))) {
-        return `Expected a date string for a DATE field, got ${JSON.stringify(value)}.`
-      }
-      return null
-
-    case "SELECT": {
-      if (typeof value !== "string") {
-        return `Expected a string option value for a SELECT field, got ${typeof value}.`
-      }
-      const allowed = (options ?? []).map((o) => o.value)
-      if (!allowed.includes(value)) {
-        return `"${value}" is not one of this field's defined options: ${allowed.join(", ") || "(none defined)"}.`
-      }
-      return null
-    }
-
-    case "MULTI_SELECT": {
-      if (!Array.isArray(value)) {
-        return `Expected an array of option values for a MULTI_SELECT field, got ${typeof value}.`
-      }
-      const allowed = (options ?? []).map((o) => o.value)
-      const invalid = value.filter((entry) => typeof entry !== "string" || !allowed.includes(entry))
-      if (invalid.length > 0) {
-        return `${JSON.stringify(invalid)} are not among this field's defined options: ${allowed.join(", ") || "(none defined)"}.`
-      }
-      return null
-    }
-
-    default:
-      return `Unknown field type: ${fieldType}.`
-  }
-}
-
-export function isClearingValue(value: CustomFieldValue): boolean {
-  return value === null || value === "" || (Array.isArray(value) && value.length === 0)
-}
+export { validateValueForFieldType, isClearingValue } from "@/lib/custom-field-validation"
+import { isClearingValue, validateValueForFieldType } from "@/lib/custom-field-validation"
 
 type FieldWritePreparation =
   | { ok: true; field: CustomFieldDefinitionData; clearing: boolean }
@@ -264,15 +195,8 @@ export async function setCustomFieldValue({
   if (!prepared.ok) return fail(prepared.error)
   const { field, clearing } = prepared
 
-  if (clearing) {
-    await prisma.customFieldValue.deleteMany({ where: { fieldId, objectId } })
-  } else {
-    await prisma.customFieldValue.upsert({
-      where: { fieldId_objectId: { fieldId, objectId } },
-      create: { fieldId, objectId, value: value as object },
-      update: { value: value as object, updatedAt: new Date() },
-    })
-  }
+  // The single value-write funnel (also fills inheritance targets when an opportunity or solution value is set).
+  await writeCustomFieldValue(prisma, { workspaceId, objectType, objectId, fieldId, value })
 
   const resultValue = clearing ? null : value
   return ok(
@@ -282,4 +206,36 @@ export async function setCustomFieldValue({
       `\nID: ${fieldId}`,
     { fieldId, objectId, objectType, fieldType: field.fieldType, value: resultValue }
   )
+}
+
+// ── list_custom_field_inheritance_rules ─────────────────────────────────────
+
+/**
+ * Read-only: inheritance rules are created, reordered and deleted only in Settings → Custom Fields (ADR 0013). A
+ * missing table (migration 113 not applied yet) reads as "no rules", never an error.
+ */
+export async function listCustomFieldInheritanceRules({ workspaceId }: { workspaceId: string }) {
+  const prisma = getPrisma()
+  if (!(await customFieldInheritanceTableExists(prisma))) {
+    return ok("No custom field inheritance rules are defined for this workspace.", { items: [], count: 0 })
+  }
+  const rules = await listInheritanceRules(prisma, workspaceId)
+  const items = rules.map((rule) => ({
+    id: rule.id,
+    priority: rule.priority,
+    enabled: rule.enabled,
+    status: rule.status,
+    inactiveReason: rule.inactiveReason,
+    sourceObjectType: rule.sourceObjectType,
+    sourceField: { id: rule.sourceFieldId, name: rule.sourceFieldName },
+    targetObjectType: rule.targetObjectType,
+    targetField: { id: rule.targetFieldId, name: rule.targetFieldName },
+  }))
+  if (items.length === 0) return ok("No custom field inheritance rules are defined for this workspace.", { items, count: 0 })
+  const lines = items.map(
+    (item, index) =>
+      `${index + 1}. ${item.targetField.name ?? "(missing field)"} on roadmap item <- ${item.sourceField.name ?? "(missing field)"} on ${item.sourceObjectType.toLowerCase()} ` +
+      `(priority ${item.priority}, ${item.status}${item.inactiveReason ? `: ${item.inactiveReason}` : ""})\nID: ${item.id}`,
+  )
+  return ok(`**${items.length} custom field inheritance rule${items.length === 1 ? "" : "s"}** (lower priority runs first; a rule only fills an empty target and never overwrites)\n${lines.join("\n")}`, { items, count: items.length })
 }

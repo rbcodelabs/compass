@@ -22,6 +22,8 @@ export const CONVERTED_FILES = [
   "components/docs/canvas/canvas-tree-dialog.tsx",
   // Following (slice 2): label-driven from the start, no CLASSIC baseline.
   "components/notifications/notification-inbox.tsx",
+  // Custom field inheritance rules (TASK-101): label-driven from the start, no CLASSIC baseline.
+  "components/custom-fields/inheritance-rules-panel.tsx",
   "components/bottom-nav.tsx",
   "app/[orgSlug]/[workspaceSlug]/okrs/page.tsx",
   "app/[orgSlug]/[workspaceSlug]/okrs/[cycleId]/page.tsx",
