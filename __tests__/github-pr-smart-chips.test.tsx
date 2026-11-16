@@ -116,9 +116,11 @@ describe("GitHub PR smart chips in TipTap Docs & rich editors", () => {
     expect(screen.getByRole("img", { name: "Open" })).toBeInTheDocument()
     expect(screen.getByRole("img", { name: "Checks passing" })).toBeInTheDocument()
 
-    // Serialized Markdown contains the rewritten label (with brackets escaped) and round-trips cleanly across 5 cycles.
+    // Cursor lands AFTER the rewritten smart chip with stored link mark cleared so typing/Enter appends after the chip, not before/inside it.
+    editor.commands.insertContent(" today")
+    expect(editor.state.doc.textContent).toBe("Review #209 [WIP] Support smart PR chips today")
     const serialized = editorMarkdown(editor)
-    expect(serialized).toContain(PR_URL)
+    expect(serialized).toContain(`](${PR_URL}) today`)
     expect(serialized).toContain("#209")
     const baselineJson = editor.getJSON()
     for (let i = 0; i < 5; i++) {

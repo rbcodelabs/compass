@@ -16,7 +16,7 @@ import Link from "@tiptap/extension-link";
 import { MarkViewContent, ReactMarkViewRenderer, type Editor, type MarkViewProps } from "@tiptap/react";
 import { closeHistory } from "@tiptap/pm/history";
 import type { Mark, Node as PMNode } from "@tiptap/pm/model";
-import { Plugin, PluginKey } from "@tiptap/pm/state";
+import { Plugin, PluginKey, TextSelection } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { isDocEmbedKind, type DocEmbedKind } from "@/lib/doc-embeds";
 import { isUuid } from "@/lib/canvas-cards";
@@ -167,6 +167,8 @@ function rewritePendingBarePrLinks(editor: Editor, href: string, pr: PullRequest
   if (pending.length === 0) return;
 
   const sorted = [...pending].sort((a, b) => b.from - a.from);
+  const wasEmptySelection = state.selection.empty;
+  let nextCursor = state.selection.from;
   let tr = closeHistory(state.tr);
   let replacedAny = false;
 
@@ -178,6 +180,11 @@ function rewritePendingBarePrLinks(editor: Editor, href: string, pr: PullRequest
     const marks = marksAtRange(state.doc, from, to, href);
     if (!marks) continue;
     tr = tr.replaceWith(from, to, state.schema.text(nextLabel, marks));
+    if (wasEmptySelection && nextCursor >= to) {
+      nextCursor += nextLabel.length - (to - from);
+    } else if (wasEmptySelection && nextCursor > from) {
+      nextCursor = from + nextLabel.length;
+    }
     replacedAny = true;
   }
 
@@ -186,8 +193,12 @@ function rewritePendingBarePrLinks(editor: Editor, href: string, pr: PullRequest
   tr.setMeta("preventAutolink", true);
 
   const linkMarkType = state.schema.marks.link;
-  if (replacedAny && linkMarkType && tr.selection.empty) {
-    tr.removeStoredMark(linkMarkType);
+  if (replacedAny && wasEmptySelection) {
+    const clamped = Math.max(0, Math.min(nextCursor, tr.doc.content.size));
+    tr.setSelection(TextSelection.create(tr.doc, clamped));
+    if (linkMarkType) {
+      tr.removeStoredMark(linkMarkType);
+    }
   }
 
   editor.view.dispatch(tr);
