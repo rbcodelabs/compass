@@ -28,6 +28,18 @@ export async function clickNewDoc(page: Page): Promise<void> {
 }
 
 /**
+ * Wait for a just-created document's editor to settle before typing into it. The editor can remount just after the URL changes, and
+ * text typed right away lands in an editor that is then replaced (a typed mermaid fence or sentence silently disappears). Call this
+ * after clickNewDoc in a spec that types immediately. It is separate from clickNewDoc because several specs re-wait for the URL after
+ * clickNewDoc returns and must not be slowed past that navigation.
+ */
+export async function waitForNewDocEditor(page: Page): Promise<void> {
+  await page.waitForLoadState("networkidle");
+  await page.locator(".ProseMirror p.is-editor-empty").first().waitFor({ timeout: 10_000 });
+  await page.waitForTimeout(500);
+}
+
+/**
  * Open the Library in the agent rail (idempotent). The Library, with its New menu and the hidden .canvas import input, is the rail's
  * "Library" view, not part of the Docs route, and the rail starts closed, so those controls do not exist in the DOM until it is opened.
  * Waits for the pane's contents (the create menu) rather than the pane shell, since the tree loads after the rail opens.
