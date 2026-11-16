@@ -39,6 +39,7 @@ import { workspaceFraming } from "@/lib/agent-run-sandbox"
 import { trustedCompassBaseUrl } from "@/lib/compass-url"
 import { readWorkspaceAgentRepos } from "@/lib/agent-github-repos"
 import { mintAgentGithubEnv } from "@/lib/github-app-token"
+import { gitAuthorEnv, readAgentGitAuthor } from "@/lib/agent-git-author"
 import { developerNpmToken } from "@/lib/agent-github-access"
 
 const MAX_HISTORY_MESSAGES = 20
@@ -313,7 +314,8 @@ export async function startConversationContinuationRun(
     throw error
   }
 
-  const githubEnv = await mintAgentGithubEnv(await readWorkspaceAgentRepos(prisma, input.workspaceId)).catch(() => null)
+  const mintedGithubEnv = await mintAgentGithubEnv(await readWorkspaceAgentRepos(prisma, input.workspaceId)).catch(() => null)
+  const githubEnv = mintedGithubEnv ? { ...mintedGithubEnv, ...(runAgent ? gitAuthorEnv(await readAgentGitAuthor(prisma, runAgent.id)) : {}) } : null
   const developer = { enabled: sandboxClass === "DEVELOPER", npmToken: developerNpmToken() }
 
   const launchCtx: LaunchContext = {
