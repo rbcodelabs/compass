@@ -287,6 +287,10 @@ export interface TaskLinkData {
   linkedId: string
   /** Resolved at read time from the target table — not stored on TaskLink. */
   linkedTitle: string
+  /** True for TASK_CREATED_FROM provenance links (COMMENT, AGENT_CONVERSATION), which are not user-removable associations. */
+  isOrigin?: boolean
+  /** Workspace-relative or root-relative href resolved at read time when navigation depends on parent context (e.g. COMMENT links). */
+  linkedHref?: string | null
 }
 
 export interface TaskData {

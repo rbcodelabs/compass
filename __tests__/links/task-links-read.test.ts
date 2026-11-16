@@ -115,7 +115,11 @@ describe("getTaskLinks", () => {
     link("task-a", "COMMENT", "cmt-a", { createdAt: tie, id: "id-a" });
     link("task-a", "DECISION", "rr-a", { createdAt: new Date(4_000), id: "id-z" });
     const map = await getTaskLinks(db(), [{ id: "task-a", workspaceId: WS_A.id }, { id: "task-a2", workspaceId: WS_A.id }]);
-    expect(map.get("task-a")!.map((l) => [l.id, l.linkedType, l.linkedId])).toEqual([["id-z", "DECISION", "rr-a"], ["id-a", "COMMENT", "cmt-a"], ["id-b", "DOC", "doc-a"]]);
+    expect(map.get("task-a")!.map((l) => [l.id, l.linkedType, l.linkedId, l.isOrigin])).toEqual([
+      ["id-z", "DECISION", "rr-a", false],
+      ["id-a", "COMMENT", "cmt-a", true],
+      ["id-b", "DOC", "doc-a", false],
+    ]);
     expect(map.get("task-a2")).toEqual([]);
   });
 

@@ -1,6 +1,6 @@
 import { Suspense } from "react";
 import { agentConversationLinkTitles } from "@/lib/agent-conversation-link-titles";
-import { commentLinkTitles } from "@/lib/comment-link-titles";
+import { resolveCommentLinks } from "@/lib/comment-link-titles";
 import { notFound } from "next/navigation";
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
@@ -186,6 +186,7 @@ export default async function TasksPage({ params, searchParams }: TasksPageProps
     FEEDBACK_ITEM: prisma.feedbackItem,
   } as const;
   const titleById = new Map<string, string>();
+  const hrefById = new Map<string, string | null>();
   await Promise.all(
     Array.from(linksByType.entries()).map(async ([linkedType, ids]) => {
       if (linkedType === "AGENT_CONVERSATION") {
@@ -193,7 +194,10 @@ export default async function TasksPage({ params, searchParams }: TasksPageProps
         return;
       }
       if (linkedType === "COMMENT") {
-        for (const [key, title] of await commentLinkTitles(workspace.id, ids)) titleById.set(key, title);
+        for (const [key, info] of await resolveCommentLinks(workspace.id, ids)) {
+          titleById.set(key, info.title);
+          hrefById.set(key, info.workspaceRelativePath);
+        }
         return;
       }
       const delegate = LINK_MODEL[linkedType as keyof typeof LINK_MODEL];
@@ -208,7 +212,12 @@ export default async function TasksPage({ params, searchParams }: TasksPageProps
   );
 
   const tasks: TaskCardData[] = buildTaskCards({
-    tasks: await resolveTaskAssignees(workspace.id, rawTasks), squads, links: taskLinks, subtaskCounts, linkedTitles: titleById,
+    tasks: await resolveTaskAssignees(workspace.id, rawTasks),
+    squads,
+    links: taskLinks,
+    subtaskCounts,
+    linkedTitles: titleById,
+    linkedHrefs: hrefById,
   });
 
   return (

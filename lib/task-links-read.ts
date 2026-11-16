@@ -18,9 +18,14 @@ export type TaskLinkView = {
   taskId: string
   linkedType: string
   linkedId: string
+  isOrigin: boolean
   source: string
   createdById: string | null
   createdAt: Date
+}
+
+export function isTaskOriginLink(linkedType: string): boolean {
+  return taskOriginTargetType(linkedType) !== null
 }
 
 const byCreatedThenId = (a: { createdAt: Date; id: string }, b: { createdAt: Date; id: string }) =>
@@ -28,7 +33,7 @@ const byCreatedThenId = (a: { createdAt: Date; id: string }, b: { createdAt: Dat
 
 const pairKey = (taskId: string, linkedType: string, linkedId: string) => `${taskId}:${linkedType}:${linkedId}`
 
-type OriginLink = { id: string; taskId: string; linkedType: string; linkedId: string; source: string; createdById: string | null; createdAt: Date }
+type OriginLink = TaskLinkView
 
 /** Origin links (TASK_CREATED_FROM) of one workspace's tasks or of one origin target. */
 async function originLinks(
@@ -44,7 +49,7 @@ async function originLinks(
   const out = new Map<string, OriginLink>()
   for (const link of stored) {
     out.set(pairKey(link.fromId, link.toType, link.toId), {
-      id: link.id ?? "", taskId: link.fromId, linkedType: link.toType, linkedId: link.toId,
+      id: link.id ?? "", taskId: link.fromId, linkedType: link.toType, linkedId: link.toId, isOrigin: true,
       source: link.source ?? "UI", createdById: link.createdById ?? null, createdAt: link.createdAt ?? new Date(0),
     })
   }
@@ -63,7 +68,7 @@ export async function getTaskLinks(db: Db, tasks: readonly { id: string; workspa
   for (const [workspaceId, taskIds] of byWorkspace) {
     for (const link of await readEntityLinksTaskReferences(db as AppTransactionClient, workspaceId, { taskIds })) {
       result.get(link.fromId)?.push({
-        id: link.id ?? "", taskId: link.fromId, linkedType: taskLinkedTypeOf(link.toType), linkedId: link.toId,
+        id: link.id ?? "", taskId: link.fromId, linkedType: taskLinkedTypeOf(link.toType), linkedId: link.toId, isOrigin: false,
         source: link.source ?? "UI", createdById: link.createdById ?? null, createdAt: link.createdAt ?? new Date(0),
       })
     }

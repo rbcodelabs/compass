@@ -29,7 +29,7 @@
  */
 import getPrisma from "@/lib/db";
 import { agentConversationLinkTitles } from "@/lib/agent-conversation-link-titles";
-import { commentLinkTitles } from "@/lib/comment-link-titles";
+import { resolveCommentLinks } from "@/lib/comment-link-titles";
 import { isPmInterviewEnabled, isResearchCaptureEnabled } from "@/lib/research-feature";
 import { isModuleEnabled } from "@/lib/modules/server";
 import { getLinkedKeyResultsBySolution, getLinkedObjectivesByOpportunity, getLinkedSolutionsByKeyResult, getOpportunityKeyResultPointers } from "@/lib/typed-links";
@@ -569,6 +569,7 @@ async function fetchTask(id: string, workspaceId: string) {
     linksByType.set(link.linkedType, ids);
   }
   const titleById = new Map<string, string>();
+  const hrefById = new Map<string, string | null>();
   await Promise.all(
     Array.from(linksByType.entries()).map(async ([linkedType, ids]) => {
       // DECISION (ReviewRequest) has no flat `title` column — its title lives
@@ -587,7 +588,10 @@ async function fetchTask(id: string, workspaceId: string) {
         return;
       }
       if (linkedType === "COMMENT") {
-        for (const [key, title] of await commentLinkTitles(workspaceId, ids)) titleById.set(key, title);
+        for (const [key, info] of await resolveCommentLinks(workspaceId, ids)) {
+          titleById.set(key, info.title);
+          hrefById.set(key, info.workspaceRelativePath);
+        }
         return;
       }
       const modelName = LINK_TARGET_MODEL[linkedType as keyof typeof LINK_TARGET_MODEL];
@@ -601,12 +605,17 @@ async function fetchTask(id: string, workspaceId: string) {
     })
   );
   const resolveLinks = (links: TaskLinkView[]) =>
-    links.map((l) => ({
-      id: l.id,
-      linkedType: l.linkedType,
-      linkedId: l.linkedId,
-      linkedTitle: titleById.get(`${l.linkedType}:${l.linkedId}`) ?? "(deleted)",
-    }));
+    links.map((l) => {
+      const key = `${l.linkedType}:${l.linkedId}`;
+      return {
+        id: l.id,
+        linkedType: l.linkedType,
+        linkedId: l.linkedId,
+        linkedTitle: titleById.get(key) ?? "(deleted)",
+        isOrigin: l.isOrigin,
+        ...(hrefById.has(key) ? { linkedHref: hrefById.get(key) ?? null } : {}),
+      };
+    });
 
   // Candidate pools for the "link to another item" dialog — same shape used
   // by LinkTaskDialog's `linkableTargets` prop.

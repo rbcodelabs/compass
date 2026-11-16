@@ -1,6 +1,7 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
+import { Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from "react"
+import * as NextNavigation from "next/navigation"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { MarkdownContent } from "@/components/markdown-content"
@@ -53,13 +54,48 @@ function timestamp(iso: string) {
   return new Date(iso).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
 }
 
-export function Discussion({ targetType, targetId, refreshKey, render }: {
+type SearchParamsLike = { get(name: string): string | null }
+
+function readSearchParamsFallback(): SearchParamsLike {
+  return new URLSearchParams(typeof window !== "undefined" ? window.location.search : "")
+}
+
+function getSearchParamsHook(): () => SearchParamsLike | null {
+  try {
+    if (typeof NextNavigation.useSearchParams === "function") {
+      return NextNavigation.useSearchParams
+    }
+  } catch {
+    // Partial mocks of next/navigation in unit tests may omit useSearchParams.
+  }
+  return readSearchParamsFallback
+}
+
+export type DiscussionProps = {
   targetType: CommentTargetType
   targetId: string
   refreshKey?: number
+  focusedCommentId?: string | null
   /** Keep the controller mounted above a shell whose portal/docked body can remount. */
   render?: (content: ReactNode) => ReactNode
-}) {
+}
+
+function DiscussionWithSearchParams(props: DiscussionProps) {
+  const useSearchParamsHook = getSearchParamsHook()
+  const searchParams = useSearchParamsHook()
+  const urlCommentId = searchParams?.get("comment") ?? null
+  return <DiscussionCore {...props} focusedCommentId={props.focusedCommentId ?? urlCommentId} />
+}
+
+export function Discussion(props: DiscussionProps) {
+  return (
+    <Suspense fallback={<DiscussionCore {...props} focusedCommentId={props.focusedCommentId ?? null} />}>
+      <DiscussionWithSearchParams {...props} />
+    </Suspense>
+  )
+}
+
+function DiscussionCore({ targetType, targetId, refreshKey, focusedCommentId = null, render }: DiscussionProps) {
   const [items, setItems] = useState<BrowserCommentDto[] | null>(null)
   const [loadError, setLoadError] = useState("")
   const [actionError, setActionError] = useState("")
@@ -72,6 +108,8 @@ export function Discussion({ targetType, targetId, refreshKey, render }: {
   const [editorBody, setEditorBody] = useState("")
   const [busy, setBusy] = useState("")
   const [expandedResolved, setExpandedResolved] = useState<Set<string>>(new Set())
+  const [collapsedFocused, setCollapsedFocused] = useState<Set<string>>(new Set())
+  const scrolledFocusKey = useRef("")
   const returnFocusLabel = useRef("")
   const requestGeneration = useRef(0)
   const activeLoad = useRef<AbortController | null>(null)
@@ -259,13 +297,34 @@ export function Discussion({ targetType, targetId, refreshKey, render }: {
   })
 
   const draftKey = `${targetType}:${targetId}`
+  const focusedRootId = focusedCommentId
+    ? items?.find((root) => root.id === focusedCommentId || root.replies.some((reply) => reply.id === focusedCommentId))?.id ?? null
+    : null
+
+  useEffect(() => {
+    if (!focusedCommentId || !items) return
+    const key = `${targetType}:${targetId}:${focusedCommentId}`
+    if (scrolledFocusKey.current === key) return
+    const el = typeof document !== "undefined" ? document.getElementById(`comment-${focusedCommentId}`) : null
+    if (!el) return
+    scrolledFocusKey.current = key
+    el.scrollIntoView?.({ behavior: "smooth", block: "center" })
+  }, [focusedCommentId, items, targetId, targetType])
 
   const renderComment = (comment: BrowserCommentDto, isRoot: boolean) => {
     const resolved = comment.status === "RESOLVED"
-    const collapsed = isRoot && resolved && !expandedResolved.has(comment.id)
+    const isFocused = focusedCommentId === comment.id
+    const autoExpanded = isRoot && comment.id === focusedRootId && !collapsedFocused.has(comment.id)
+    const collapsed = isRoot && resolved && !expandedResolved.has(comment.id) && !autoExpanded
     const editing = editor?.kind === "edit" && editor.commentId === comment.id
     return (
-      <article key={comment.id} className={`min-w-0 rounded-lg border p-3 ${resolved ? "border-border bg-muted/50" : "border-border bg-background"}`}>
+      <article
+        key={comment.id}
+        id={`comment-${comment.id}`}
+        data-comment-id={comment.id}
+        data-comment-focused={isFocused ? "true" : undefined}
+        className={`min-w-0 scroll-mt-4 rounded-lg border p-3 ${resolved ? "border-border bg-muted/50" : "border-border bg-background"} ${isFocused ? "ring-2 ring-primary/40" : ""}`}
+      >
         <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs">
           <strong className="truncate text-foreground">{comment.authorName}</strong>
           {comment.authorType === "AGENT" && <Badge variant="outline" className="h-5 px-1.5 text-[10px]">Agent</Badge>}
@@ -276,12 +335,12 @@ export function Discussion({ targetType, targetId, refreshKey, render }: {
 
         {collapsed ? (
           <div className="mt-2 flex flex-wrap gap-1">
-            <Button type="button" variant="ghost" size="xs" aria-label={`Expand resolved thread by ${comment.authorName}`} onClick={() => setExpandedResolved((current) => new Set(current).add(comment.id))}>Show resolved thread ({comment.replies.length} {comment.replies.length === 1 ? "reply" : "replies"})</Button>
+            <Button type="button" variant="ghost" size="xs" aria-label={`Expand resolved thread by ${comment.authorName}`} onClick={() => { setCollapsedFocused((current) => { const next = new Set(current); next.delete(comment.id); return next }); setExpandedResolved((current) => new Set(current).add(comment.id)) }}>Show resolved thread ({comment.replies.length} {comment.replies.length === 1 ? "reply" : "replies"})</Button>
             {comment.canModerate && <Button type="button" variant="ghost" size="xs" aria-label={`Reopen thread by ${comment.authorName}`} disabled={busy === `reopen:${comment.id}`} onClick={() => void changeStatus(comment)}>Reopen</Button>}
           </div>
         ) : (
           <>
-            {resolved && isRoot && <Button type="button" variant="ghost" size="xs" className="mt-2" aria-label={`Collapse resolved thread by ${comment.authorName}`} onClick={() => setExpandedResolved((current) => { const next = new Set(current); next.delete(comment.id); return next })}>Collapse thread</Button>}
+            {resolved && isRoot && <Button type="button" variant="ghost" size="xs" className="mt-2" aria-label={`Collapse resolved thread by ${comment.authorName}`} onClick={() => { if (comment.id === focusedRootId) setCollapsedFocused((current) => new Set(current).add(comment.id)); setExpandedResolved((current) => { const next = new Set(current); next.delete(comment.id); return next }) }}>Collapse thread</Button>}
             {editing ? (
               <form className="mt-2 space-y-2" onSubmit={(event) => { event.preventDefault(); void edit(comment.id) }}>
                 <div onKeyDown={swallowEscape}>

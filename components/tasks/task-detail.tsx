@@ -52,14 +52,14 @@ import type { ResolvedTaskAssignee } from "@/lib/task-assignment";
 import type {
   TaskStatus,
   TaskPriority,
-  TaskLinkedType,
+  TaskLinkData,
   SquadData,
   MemberData,
   CustomFieldDefinitionData,
   CustomFieldValue,
 } from "@/lib/types";
 
-type TaskLink = { id: string; linkedType: TaskLinkedType; linkedId: string; linkedTitle: string };
+type TaskLink = TaskLinkData;
 
 type SubtaskData = {
   id: string;

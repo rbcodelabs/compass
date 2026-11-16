@@ -21,7 +21,13 @@ const mockPrisma = {
   task: mockTask,
 };
 
-vi.mock("@/lib/task-link-writes", () => ({ createTaskLink: mockCreateTaskLink, createTaskLinks: vi.fn(), deleteTaskLink: mockDeleteTaskLink, getTaskLinkById: mockGetTaskLinkById }));
+vi.mock("@/lib/task-link-writes", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/task-link-writes")>()),
+  createTaskLink: mockCreateTaskLink,
+  createTaskLinks: vi.fn(),
+  deleteTaskLink: mockDeleteTaskLink,
+  getTaskLinkById: mockGetTaskLinkById,
+}));
 vi.mock("@/lib/db", () => ({
   default: vi.fn(() => mockPrisma),
 }));
@@ -276,6 +282,26 @@ describe("unlinkTask", () => {
   it("throws Not found for an unknown link id", async () => {
     mockGetTaskLinkById.mockResolvedValue(null);
     await expect(unlinkTask("gone", "/path")).rejects.toThrow("Not found");
+    expect(mockDeleteTaskLink).not.toHaveBeenCalled();
+  });
+
+  it("refuses to delete TASK_CREATED_FROM origin provenance links (COMMENT and AGENT_CONVERSATION)", async () => {
+    mockGetTaskLinkById.mockResolvedValue({
+      id: "origin-1",
+      taskId: "task-1",
+      linkedType: "COMMENT",
+      linkedId: "cmt-1",
+    });
+    await expect(unlinkTask("origin-1", "/path")).rejects.toThrow(/origin|provenance/i);
+    expect(mockDeleteTaskLink).not.toHaveBeenCalled();
+
+    mockGetTaskLinkById.mockResolvedValue({
+      id: "origin-2",
+      taskId: "task-1",
+      linkedType: "AGENT_CONVERSATION",
+      linkedId: "conv-1",
+    });
+    await expect(unlinkTask("origin-2", "/path")).rejects.toThrow(/origin|provenance/i);
     expect(mockDeleteTaskLink).not.toHaveBeenCalled();
   });
 });

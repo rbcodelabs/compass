@@ -32,6 +32,7 @@ type ArtifactDetailProps = {
   /** Zero-based slide to open on, from `?slide=`. */
   initialSlideIndex?: number
   initialCommentsPin?: PanelPin
+  initialFocusedCommentId?: string | null
   /** V0_CHAT only: v0's running preview, fetched per view with the viewer's own grant. */
   livePreviewSrc?: string | null
   /** HTML_UPLOAD only: the owner's external-share state. Absent for other sources. */
@@ -42,7 +43,7 @@ type ArtifactDetailProps = {
   decisions: Array<{ id: string; title: string; state: string }>
 }
 
-export function ArtifactDetail({ artifact, html, slides, initialSlideIndex, workspaceId, basePath, solutions, decisions, initialCommentsPin, livePreviewSrc, shareState }: ArtifactDetailProps) {
+export function ArtifactDetail({ artifact, html, slides, initialSlideIndex, workspaceId, basePath, solutions, decisions, initialCommentsPin, initialFocusedCommentId = null, livePreviewSrc, shareState }: ArtifactDetailProps) {
   const labels = useLabels()
   const router = useRouter()
   const [pending, startTransition] = useTransition()
@@ -57,8 +58,8 @@ export function ArtifactDetail({ artifact, html, slides, initialSlideIndex, work
   useLiveRefresh({ orgSlug, workspaceSlug, scope: `artifact:${artifact.id}`, paused: pending, enabled: Boolean(orgSlug && workspaceSlug) })
   const latestRevisionNumber = artifact.revisions.reduce((max, revision) => Math.max(max, revision.revisionNumber), 0)
   const newRevisionNotice = useNewRevisionNotice(latestRevisionNumber)
-  const [commentsOpen, setCommentsOpen] = useState(false)
-  const [commentsVisits, setCommentsVisits] = useState(0)
+  const [commentsOpen, setCommentsOpen] = useState(Boolean(initialFocusedCommentId))
+  const [commentsVisits, setCommentsVisits] = useState(initialFocusedCommentId ? 1 : 0)
   const commentsTrigger = useRef<HTMLButtonElement>(null)
   // Where ArtifactViewer portals its actions (Leave feedback, View full screen) so they sit in the top bar.
   const [toolbarSlot, setToolbarSlot] = useState<HTMLElement | null>(null)
@@ -131,7 +132,7 @@ export function ArtifactDetail({ artifact, html, slides, initialSlideIndex, work
     <Link href={basePath} className="text-sm text-primary">Back to Docs</Link>
     </div>
     </div>
-    {commentsVisits > 0 && <Discussion key={artifact.id} targetType="ARTIFACT" targetId={artifact.id} refreshKey={commentsVisits} render={(content) => (
+    {commentsVisits > 0 && <Discussion key={artifact.id} targetType="ARTIFACT" targetId={artifact.id} refreshKey={commentsVisits} focusedCommentId={initialFocusedCommentId} render={(content) => (
       <DocPanelShell panelId="artifactComments" title="Comments" icon={<MessageSquare aria-hidden className="size-4" />} open={commentsOpen} onOpenChange={changeCommentsOpen} initialPin={initialCommentsPin} contentColumnSelector='[data-slot="artifact-content-column"]' returnFocusRef={commentsTrigger}>
         <div className="min-h-0 flex-1 overflow-y-auto p-4">
           <p className="mb-3 text-xs text-muted-foreground">Whole-artifact discussion · continues across revisions.</p>

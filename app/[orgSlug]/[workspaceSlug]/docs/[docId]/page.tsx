@@ -53,7 +53,9 @@ export default async function DocPage({ params, searchParams }: Props) {
   const access = await resolveWorkspaceAccess(orgSlug, workspaceSlug, session.user.id);
   if (!access) notFound();
   const workspace = { id: access.workspaceId };
-  const resolvedDoc = await resolveWorkItemPage({ type: "doc", param: docParam, workspaceId: workspace.id, basePath: `/${orgSlug}/${workspaceSlug}/docs`, searchParams: await searchParams });
+  const query = (await searchParams) ?? {};
+  const resolvedDoc = await resolveWorkItemPage({ type: "doc", param: docParam, workspaceId: workspace.id, basePath: `/${orgSlug}/${workspaceSlug}/docs`, searchParams: query });
+  const initialFocusedCommentId = typeof query.comment === "string" ? query.comment : null;
   const docId = resolvedDoc.id;
 
   const storedDoc = await prisma.doc.findFirst({
@@ -147,6 +149,7 @@ export default async function DocPage({ params, searchParams }: Props) {
       lastWriter={lastWriter}
       initialCommentsPin={parsePanelPin(cookieStore.get(panelPinCookieName("docsComments"))?.value)}
       initialHistoryPin={parsePanelPin(cookieStore.get(panelPinCookieName("docsHistory"))?.value)}
+      initialFocusedCommentId={initialFocusedCommentId}
       versions={versions}
       comments={comments}
       revalidatePathStr={revalidatePathStr}
