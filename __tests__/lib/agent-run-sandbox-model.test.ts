@@ -34,6 +34,24 @@ describe("buildAgentEnv model selection", () => {
   })
 })
 
+describe("buildAgentEnv web capability text per harness", () => {
+  const claudeModel = resolved({ ANTHROPIC_API_KEY: "k" })
+
+  it("tells the Claude harness it has web_fetch, with and without docs", () => {
+    expect(buildAgentEnv({ ...base, harness: "claude", model: claudeModel }).AGENT_SYSTEM_PROMPT).toContain("web_fetch")
+    expect(buildAgentEnv({ ...base, harness: "claude", model: claudeModel, docs: true }).AGENT_SYSTEM_PROMPT).toContain("web_fetch")
+  })
+
+  it("does not tell the opencode harness it has web_fetch or WebFetch", () => {
+    for (const docs of [false, true]) {
+      const prompt = buildAgentEnv({ ...base, harness: "opencode", gatewayApiKey: "g", docs }).AGENT_SYSTEM_PROMPT
+      expect(prompt).toContain("web_search")
+      expect(prompt).not.toContain("web_fetch")
+      expect(prompt).not.toContain("WebFetch")
+    }
+  })
+})
+
 describe("developer turn cap", () => {
   const shellOn = { model: resolved({ ANTHROPIC_API_KEY: "sk-ant-test" }), connectors: [], mcpBaseUrl: "https://compass.test", mcpToken: "t", prompt: "hi", workspaceId: "ws-1", systemPromptAppendices: [], pluginPaths: [], skillIds: [], harness: "claude" as const, docs: true, githubEnv: { GH_TOKEN: "t", AGENT_GITHUB_REPOS: "acme/app" } }
 

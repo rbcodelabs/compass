@@ -468,7 +468,7 @@ path, so `Read /proc/self/environ` exposes the run token, MCP token, API key and
 symlink-resolved location is outside the docs directory (and Glob patterns that anchor outside
 it); verified live against Agent SDK 0.3.224 under `bypassPermissions`. The CLI process also no
 longer inherits `AGENT_RUN_TOKEN`, `MCP_TOKEN` or `MCP_BYPASS_SECRET`. `ANTHROPIC_API_KEY` must
-stay in its environment, and `WebFetch` remains an outbound channel, so the guard, not secrecy,
+stay in its environment, and the Compass-hosted `web_fetch` tool (URL-allowlisted, fetched server-side) is the only outbound channel left, so the guard, not secrecy,
 is what protects the key.
 
 **The callback validates everything it is sent.** Every `files[].path` and `deletedPaths[]`

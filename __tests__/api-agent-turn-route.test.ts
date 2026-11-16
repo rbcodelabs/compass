@@ -790,11 +790,15 @@ describe("agent turn route — detached runs", () => {
   describe("agent shell + GitHub access", () => {
     const githubEnv = { GH_TOKEN: "ghs_tok", GITHUB_TOKEN: "ghs_tok", AGENT_GITHUB_REPOS: "rbcodelabs/compass" }
 
-    it("no approved repos / no token: open egress, no token, the old 'unavailable' prompt", async () => {
+    it("no approved repos / no token: still a deny-by-default egress (Compass + model only, no GitHub), no token, the old 'unavailable' prompt", async () => {
       mockMintGithubEnv.mockResolvedValue({})
       const { runCommand } = sandbox()
       await POST(req({ workspaceId: "ws-1", message: "hi" }))
-      expect(mockBootSandbox.mock.calls[0][1]).not.toHaveProperty("networkPolicy")
+      const policy = mockBootSandbox.mock.calls[0][1].networkPolicy as { allow: string[]; denySubnets: string[] }
+      expect(policy.allow).toContain("api.anthropic.com")
+      expect(policy.allow).not.toContain("github.com")
+      expect(policy.allow).not.toContain("*")
+      expect(policy.denySubnets).toEqual(expect.arrayContaining(["169.254.0.0/16", "10.0.0.0/8"]))
       const env = runCommand.mock.calls[0][0].env
       expect(env).not.toHaveProperty("GH_TOKEN")
       expect(env).not.toHaveProperty("AGENT_GITHUB_SHELL")

@@ -30,7 +30,7 @@ import {
 } from "@/lib/agent-runs"
 import { effectiveTurnModel } from "@/lib/agent-turn-model"
 import { buildAgentEnv, readEntryModules, readEntryScript, RUN_INFRA_GRACE_MS } from "@/lib/agent-run-sandbox"
-import { agentEgressPolicy, githubShellEnabled } from "@/lib/agent-github-access"
+import { githubShellEnabled, turnEgressPolicy } from "@/lib/agent-github-access"
 import * as docFs from "@/lib/doc-fs"
 import type { DocBaselineEntry } from "@/lib/agent-doc-reconciliation"
 import { selectMaterializable } from "@/lib/agent-doc-materialize"
@@ -162,13 +162,14 @@ export async function launchQueuedAgentRun(ctx: LaunchContext): Promise<{ starte
       harness: ctx.harness,
       docs: materializeDocs,
     })
-    const networkPolicy = githubShell
-      ? agentEgressPolicy({
-          mcpBaseUrl: ctx.mcpBaseUrl,
-          model: ctx.model,
-          developer: Boolean(ctx.developer?.enabled),
-        })
-      : undefined
+    // Always a policy, shell or not: queued runs (assignments, mentions, continuations) must not boot with the platform default of open egress.
+    const networkPolicy = turnEgressPolicy({
+      mcpBaseUrl: ctx.mcpBaseUrl,
+      model: ctx.model,
+      githubShell,
+      developer: Boolean(ctx.developer?.enabled),
+      opencode: ctx.harness === "opencode",
+    })
 
     const reuseTarget =
       ctx.reuseConversationSandbox && ctx.harness === "claude" && agentSandboxReuseEnabled()
@@ -184,7 +185,7 @@ export async function launchQueuedAgentRun(ctx: LaunchContext): Promise<{ starte
         timeoutMs: ctx.budgetMs + 2 * RUN_INFRA_GRACE_MS,
         name: runSandboxName,
         tags: { runId: run.id, workspaceId: ctx.workspace.id },
-        ...(networkPolicy ? { networkPolicy } : {}),
+        networkPolicy,
       })
     } else {
       await prisma.agentRun.updateMany({
@@ -204,7 +205,7 @@ export async function launchQueuedAgentRun(ctx: LaunchContext): Promise<{ starte
         boot: {
           timeoutMs: requiredMs + AGENT_SANDBOX_IDLE_MS,
           tags: { runId: run.id, workspaceId: ctx.workspace.id, snapshotId: ctx.snapshotId, profile },
-          ...(networkPolicy ? { networkPolicy } : {}),
+          networkPolicy,
         },
       })
       sandbox = acquired.sandbox

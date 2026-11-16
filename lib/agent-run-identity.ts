@@ -189,3 +189,35 @@ export async function agentRunMayUseOwnerConnectors(prisma: AppPrismaClient, inp
     return false
   }
 }
+
+/**
+ * Whether the agent a run acts as may WRITE in the run's workspace. The built-in assistant (no agentId) acts as the invoking
+ * user and is unaffected: it returns true. A named agent must be ACTIVE and hold a live WRITE grant on the run's workspace,
+ * the same bar the MCP gate applies to document writes; a READ grant is enough to run and to read, never to write.
+ *
+ * Every host-side path that persists sandbox-supplied data into the workspace outside MCP (the doc tree reconciliation, the
+ * image upload) must ask this, because MCP's per-tool gate does not see them. Fails closed: a missing or inactive agent
+ * answers false, and any lookup error other than "the agent column does not exist yet" (no named agent can exist then) throws.
+ *
+ * A caller that already read the run row may pass its `agentId`: `null` answers true with no query (the built-in assistant), a string skips
+ * the lookup, and `undefined` (not read) falls back to reading it here.
+ */
+export async function runAgentMayWrite(prisma: AppPrismaClient, run: { id: string; workspaceId: string; agentId?: string | null }): Promise<boolean> {
+  if (run.agentId === null) return true
+  let agentId: string | null
+  if (typeof run.agentId === "string") {
+    agentId = run.agentId
+  } else {
+    try {
+      const row = await prisma.agentRun.findFirst({ where: { id: run.id }, select: { agentId: true } })
+      agentId = row?.agentId ?? null
+    } catch (error) {
+      if (typeof error === "object" && error !== null && "code" in error && (error.code === "P2022" || error.code === "P2021")) return true
+      throw error
+    }
+  }
+  if (!agentId) return true
+  const agent = await findAgentById(prisma, agentId)
+  if (!agent || agent.status !== "ACTIVE") return false
+  return (await liveGrantedWorkspaceIds(agent, "WRITE")).includes(run.workspaceId)
+}

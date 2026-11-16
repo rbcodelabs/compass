@@ -14,9 +14,16 @@ const m = vi.hoisted(() => ({
   runUpdate: vi.fn(),
   packRows: vi.fn(),
   stop: vi.fn(),
+  acquire: vi.fn(),
+  previous: vi.fn(),
 }))
 
-vi.mock("@/lib/agent-sandbox", () => ({ bootSandboxFromSnapshot: (...a: unknown[]) => m.boot(...a), stopSandboxByName: (...a: unknown[]) => m.stop(...a) }))
+vi.mock("@/lib/agent-sandbox", () => ({
+  bootSandboxFromSnapshot: (...a: unknown[]) => m.boot(...a),
+  stopSandboxByName: (...a: unknown[]) => m.stop(...a),
+  acquireConversationSandbox: (...a: unknown[]) => m.acquire(...a),
+}))
+vi.mock("@/lib/doc-fs", () => ({ listPaths: async () => [], readDocById: async () => null }))
 vi.mock("@/lib/agent-mcp-key", () => ({ mintAgentMcpKey: (...a: unknown[]) => m.mint(...a), revokeAgentMcpKey: (...a: unknown[]) => m.revoke(...a) }))
 vi.mock("@/lib/capability-pack-runtime", () => ({ prepareCapabilityPacksForTurn: (...a: unknown[]) => m.packs(...a) }))
 vi.mock("@/lib/artifact-storage", () => ({ getCapabilityPackArtifactStorage: () => ({ get: vi.fn() }) }))
@@ -25,6 +32,7 @@ vi.mock("@/lib/agent-runs", async (original) => ({
   attachAgentRunKey: (...a: unknown[]) => m.attach(...a),
   markAgentRunStarted: (...a: unknown[]) => m.started(...a),
   finalizeAgentRun: (...a: unknown[]) => m.finalize(...a),
+  findPreviousRunForSandboxReuse: (...a: unknown[]) => m.previous(...a),
 }))
 vi.mock("@/lib/agent-run-sandbox", async (original) => ({
   ...(await original<object>()),
@@ -33,8 +41,10 @@ vi.mock("@/lib/agent-run-sandbox", async (original) => ({
 }))
 
 import { launchQueuedAgentRun, type LaunchContext } from "@/lib/agent-run-launch"
+import { sandboxNetworkProfile } from "@/lib/agent-sandbox-reuse"
+import { GITHUB_EGRESS_DOMAINS, PRIVATE_SUBNETS_DENY } from "@/lib/agent-github-access"
 
-const prisma = { agentRun: { update: (...a: unknown[]) => m.runUpdate(...a) }, workspaceCapabilityPack: { findMany: (...a: unknown[]) => m.packRows(...a) } }
+const prisma = { agentRun: { update: (...a: unknown[]) => m.runUpdate(...a), updateMany: async () => ({ count: 1 }) }, workspaceCapabilityPack: { findMany: (...a: unknown[]) => m.packRows(...a) } }
 const deadlineAt = new Date("2026-10-21T13:20:00.000Z")
 
 function context(over: Partial<LaunchContext> = {}): LaunchContext {
@@ -71,6 +81,60 @@ beforeEach(() => {
   m.runCommand.mockResolvedValue(undefined)
   m.boot.mockResolvedValue({ writeFiles: m.writeFiles, runCommand: m.runCommand })
   m.stop.mockResolvedValue(undefined)
+  m.previous.mockResolvedValue(null)
+  m.acquire.mockResolvedValue({ sandbox: { writeFiles: m.writeFiles, runCommand: m.runCommand }, reused: false, reason: "not-found" })
+})
+
+const GITHUB_ENV = { GH_TOKEN: "ghs_x", AGENT_GITHUB_REPOS: "acme/app" }
+
+describe("launchQueuedAgentRun egress policy", () => {
+  it("boots a shell-off queued run with a deny-by-default policy: Compass + model host only, no GitHub, private ranges denied", async () => {
+    await launchQueuedAgentRun(context())
+    const opts = m.boot.mock.calls[0][1]
+    expect(opts.networkPolicy).toBeDefined()
+    expect(opts.networkPolicy.allow).toEqual(["compass.test", "api.anthropic.com"])
+    for (const host of GITHUB_EGRESS_DOMAINS) expect(opts.networkPolicy.allow).not.toContain(host)
+    expect(opts.networkPolicy.denySubnets).toEqual([...PRIVATE_SUBNETS_DENY])
+  })
+
+  it("a shell-on queued run still gets the GitHub hosts", async () => {
+    await launchQueuedAgentRun(context({ docs: true, githubEnv: GITHUB_ENV }))
+    const { allow } = m.boot.mock.calls[0][1].networkPolicy
+    for (const host of GITHUB_EGRESS_DOMAINS) expect(allow).toContain(host)
+    expect(allow).toContain("compass.test")
+    expect(allow).not.toContain("registry.npmjs.org")
+  })
+
+  it("a developer-class shell-on run also gets package hosts; a developer-class shell-off run does not", async () => {
+    await launchQueuedAgentRun(context({ docs: true, githubEnv: GITHUB_ENV, developer: { enabled: true } }))
+    expect(m.boot.mock.calls[0][1].networkPolicy.allow).toContain("registry.npmjs.org")
+    m.boot.mockClear()
+    await launchQueuedAgentRun(context({ developer: { enabled: true } }))
+    expect(m.boot.mock.calls[0][1].networkPolicy.allow).not.toContain("registry.npmjs.org")
+  })
+
+  it("the opencode harness is allowed the AI Gateway instead of a Claude provider", async () => {
+    await launchQueuedAgentRun(context({ harness: "opencode", gatewayApiKey: "gw", agent: { id: "agent-1", name: "T", instructions: null, model: "anthropic/claude-sonnet-5.5" } }))
+    const { allow } = m.boot.mock.calls[0][1].networkPolicy
+    expect(allow).toContain("ai-gateway.vercel.sh")
+    expect(allow).not.toContain("api.anthropic.com")
+  })
+
+  it("a shell-off run that reuses a conversation sandbox acquires it WITH a policy and a matching profile tag", async () => {
+    await launchQueuedAgentRun(context({ reuseConversationSandbox: { conversationId: "conv-1", developer: false } }))
+    expect(m.boot).not.toHaveBeenCalled()
+    const arg = m.acquire.mock.calls[0][0]
+    expect(arg.boot.networkPolicy.allow).toEqual(["compass.test", "api.anthropic.com"])
+    expect(arg.profile).toBe(sandboxNetworkProfile(arg.boot.networkPolicy))
+    expect(arg.profile).not.toBe("open")
+    expect(arg.boot.tags.profile).toBe(arg.profile)
+  })
+
+  it("the shell state changes the acquired profile (so a shell-on turn never reuses a shell-off sandbox unchecked)", async () => {
+    await launchQueuedAgentRun(context({ reuseConversationSandbox: { conversationId: "conv-1", developer: false } }))
+    await launchQueuedAgentRun(context({ docs: true, githubEnv: GITHUB_ENV, reuseConversationSandbox: { conversationId: "conv-1", developer: false } }))
+    expect(m.acquire.mock.calls[0][0].profile).not.toBe(m.acquire.mock.calls[1][0].profile)
+  })
 })
 
 describe("launchQueuedAgentRun", () => {
@@ -92,7 +156,12 @@ describe("launchQueuedAgentRun", () => {
 
   it("boots the golden snapshot with the run's name, tags and a timeout wider than its deadline", async () => {
     await launchQueuedAgentRun(context())
-    expect(m.boot).toHaveBeenCalledWith("snap-1", { timeoutMs: 20 * 60_000 + 120_000, name: "compass-agent-run-run-1", tags: { runId: "run-1", workspaceId: "ws-1" } })
+    expect(m.boot).toHaveBeenCalledWith("snap-1", {
+      timeoutMs: 20 * 60_000 + 120_000,
+      name: "compass-agent-run-run-1",
+      tags: { runId: "run-1", workspaceId: "ws-1" },
+      networkPolicy: { allow: ["compass.test", "api.anthropic.com"], denySubnets: [...PRIVATE_SUBNETS_DENY] },
+    })
     const files = (m.writeFiles.mock.calls[0][0] as { path: string }[]).map((f) => f.path)
     expect(files).toEqual(["entry.ts", "run-reporter.ts", "pack.txt"])
   })

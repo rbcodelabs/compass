@@ -514,7 +514,7 @@ describe("importWorkspaceBundle unique-key deduplication on collapsed users", ()
     })
 
     expect(report.counts.Follow).toBe(1)
-    expect(report.warnings).toContain("Skipped 1 Follow row(s) whose required reference does not exist in the target organization")
+    expect(report.warnings).toContain("Skipped 1 Follow row(s) whose required reference or storage path does not resolve inside the bundle")
     expect(report.warnings).toContain(
       "Skipped 1 Follow row(s) that would duplicate another row once people without an account in this organization were attributed to you",
     )

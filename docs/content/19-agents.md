@@ -296,7 +296,15 @@ When a workspace has at least one approved repository and the deployment has `CO
 - **What it cannot reach:** the shell runs as an unprivileged user that cannot read the agent's own credentials, and the sandbox's network is limited to GitHub, Compass and the model provider. A prompt-injected instruction in a repository cannot send data to an arbitrary website.
 - **What you should still treat as untrusted:** everything in a repository (code, READMEs, issues, pull-request text) is content the agent reads. Review the pull requests it opens like any other contribution.
 
-Workspaces with no approved repositories, and runs started from an assignment or mention, behave as before: no shell and no GitHub access. The agent runtime snapshot must be rebuilt after this feature is deployed so that `gh` is installed (without it the agent can still clone and push, and gives you a link to open the pull request yourself).
+Workspaces with no approved repositories, and runs started from an assignment or mention, behave as before: no shell and no GitHub access. Every agent sandbox, including those queued runs and a conversation sandbox reused for a later turn, starts from a deny-by-default network policy: only Compass and the model provider are reachable (plus GitHub when the shell is on), and private, link-local and carrier-grade-NAT address ranges are blocked. The agent runtime snapshot must be rebuilt after this feature is deployed so that `gh` is installed (without it the agent can still clone and push, and gives you a link to open the pull request yourself).
+
+### Package token for developer sandboxes
+
+A developer-class agent that has the shell can install dependencies from npm. To let it install private packages, set `COMPASS_NPM_TOKEN` on the deployment to a read-only package token (npmjs, or a GitHub Packages token with `read:packages`). It is handed to that sandbox as `NPM_TOKEN` and only when the shell is on. The generic `NPM_TOKEN` variable is no longer read by Compass, so an existing deployment that relied on it must rename it. Without the token, public packages still install.
+
+### Reading web pages
+
+The agent reads a web page with the Compass-hosted `web_fetch` tool, which fetches from Compass rather than from inside the sandbox and refuses private addresses. It only opens URLs you wrote in the conversation or that `web_search` returned in the same turn. It requires database migration `124_agent_web_fetches`; until that is applied the tool reports that it is not available.
 
 ## Deployment
 

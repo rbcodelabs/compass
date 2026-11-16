@@ -106,3 +106,52 @@ export async function collectFinalDocState(session: WikiSession, log: (message: 
   }
   return { files, incomplete, refreshFailed, skippedNames }
 }
+
+// ── Handing the final state to Compass ──────────────────────────────────────
+
+export type DocsReconcileOutcome =
+  | { kind: "ok"; notice: string | null }
+  /** 403 AGENT_READ_ONLY: a named agent with only a READ grant ran, so nothing it edited was applied. Retrying cannot help. */
+  | { kind: "read-only" }
+  | { kind: "failed"; detail: string }
+
+export type DocsReconcilePost = { url: string; init: { method: "POST"; headers: Record<string, string>; body: string } }
+
+const RECONCILE_ATTEMPTS = 3
+const RECONCILE_RETRY_DELAYS_MS = [500, 1500]
+
+/**
+ * POSTs the final doc state. A network error or a 5xx is retried (up to three attempts), because the reconcile is idempotent: every doc
+ * action carries an operation id derived from the run and the doc, so a replay of a pass that already landed reports no conflict
+ * (__tests__/agent-docs-callback-replay.test.ts). Any 4xx is final: the request itself was refused and a retry would be refused again.
+ * Never throws.
+ */
+export async function postDocsReconcile(
+  post: DocsReconcilePost,
+  deps: { fetcher?: typeof fetch; sleep?: (ms: number) => Promise<void>; delaysMs?: number[] } = {},
+): Promise<DocsReconcileOutcome> {
+  const fetcher = deps.fetcher ?? fetch
+  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)))
+  const delays = deps.delaysMs ?? RECONCILE_RETRY_DELAYS_MS
+  let detail = "no attempt was made"
+  for (let attempt = 0; attempt < RECONCILE_ATTEMPTS; attempt++) {
+    if (attempt > 0) await sleep(delays[Math.min(attempt - 1, delays.length - 1)] ?? 0)
+    try {
+      const response = await fetcher(post.url, post.init)
+      if (response.ok) {
+        const result = (await response.json().catch(() => ({}))) as { notice?: string | null }
+        return { kind: "ok", notice: result.notice ?? null }
+      }
+      if (response.status >= 500) {
+        detail = `docs reconciliation returned ${response.status}`
+        continue
+      }
+      const body = (await response.json().catch(() => ({}))) as { code?: string }
+      if (response.status === 403 && body.code === "AGENT_READ_ONLY") return { kind: "read-only" }
+      return { kind: "failed", detail: `docs reconciliation returned ${response.status}${body.code ? ` (${body.code})` : ""}` }
+    } catch (error) {
+      detail = error instanceof Error ? error.message : String(error)
+    }
+  }
+  return { kind: "failed", detail: `${detail} (after ${RECONCILE_ATTEMPTS} attempts)` }
+}

@@ -21,6 +21,10 @@ const docFs = vi.hoisted(() => ({
 }))
 vi.mock("@/lib/doc-fs", () => docFs)
 
+const agents = vi.hoisted(() => ({ findAgentById: vi.fn(), liveGrantedWorkspaceIds: vi.fn() }))
+vi.mock("@/lib/agent-ownership", async () => ({ ...(await vi.importActual<object>("@/lib/agent-ownership")), findAgentById: agents.findAgentById }))
+vi.mock("@/lib/agent-access", async () => ({ ...(await vi.importActual<object>("@/lib/agent-access")), liveGrantedWorkspaceIds: agents.liveGrantedWorkspaceIds }))
+
 import { handleAgentDocsReconcile } from "@/lib/agent-docs-callback"
 import { signDocManifest } from "@/lib/agent-doc-manifest"
 import { agentRunSandboxName, hashAgentRunWorkerToken } from "@/lib/agent-runs"
@@ -57,9 +61,9 @@ function runRow(overrides: Record<string, unknown> = {}) {
   }
 }
 
-function harness(row = runRow(), member: { id: string } | null = { id: WS }) {
+function harness(row = runRow(), member: { id: string } | null = { id: WS }, runAgentId: string | null = null) {
   const prisma: Any = {
-    agentRun: { findUnique: vi.fn().mockResolvedValue(row) },
+    agentRun: { findUnique: vi.fn().mockResolvedValue(row), findFirst: vi.fn().mockResolvedValue({ agentId: runAgentId }) },
     workspace: { findFirst: vi.fn().mockResolvedValue(member) },
   }
   return prisma
@@ -126,6 +130,43 @@ describe("agent run docs callback — authentication", () => {
       harness(runRow(), null)
     )
     expect(response.status).toBe(403)
+    expect(docFs.writeDocById).not.toHaveBeenCalled()
+  })
+})
+
+describe("agent run docs callback — named agent write grant", () => {
+  const edit = () => post(validBody([{ path: "Product", frontmatterDocId: "doc-1", content: "changed" }]))
+  const agent = { id: "agent-1", status: "ACTIVE" }
+
+  it("rejects a named agent that holds only a READ grant, applying nothing", async () => {
+    agents.findAgentById.mockResolvedValue(agent)
+    agents.liveGrantedWorkspaceIds.mockImplementation(async (_a: unknown, access: string) => (access === "WRITE" ? [] : [WS]))
+    const response = await handleAgentDocsReconcile(edit(), RUN_ID, harness(runRow(), { id: WS }, "agent-1"))
+    expect(response.status).toBe(403)
+    expect((await response.json()).code).toBe("AGENT_READ_ONLY")
+    expect(docFs.writeDocById).not.toHaveBeenCalled()
+  })
+
+  it("allows a named agent with a live WRITE grant", async () => {
+    agents.findAgentById.mockResolvedValue(agent)
+    agents.liveGrantedWorkspaceIds.mockResolvedValue([WS])
+    const response = await handleAgentDocsReconcile(edit(), RUN_ID, harness(runRow(), { id: WS }, "agent-1"))
+    expect(response.status).toBe(200)
+    expect(docFs.writeDocById).toHaveBeenCalled()
+  })
+
+  it("leaves the built-in assistant (no agentId) unaffected", async () => {
+    const response = await handleAgentDocsReconcile(edit(), RUN_ID, harness())
+    expect(response.status).toBe(200)
+    expect(agents.findAgentById).not.toHaveBeenCalled()
+  })
+
+  it("fails closed when the agent lookup errors", async () => {
+    agents.findAgentById.mockRejectedValue(new Error("db down"))
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {})
+    const response = await handleAgentDocsReconcile(edit(), RUN_ID, harness(runRow(), { id: WS }, "agent-1"))
+    spy.mockRestore()
+    expect(response.status).toBe(500)
     expect(docFs.writeDocById).not.toHaveBeenCalled()
   })
 })

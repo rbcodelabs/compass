@@ -277,6 +277,9 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   // Durable two-stage wakeup state machine for an AgentOrchestrator: one additive CREATE TABLE IF NOT EXISTS (agent_orchestrator_wakeups) plus four ASYNC indexes; no existing table altered, no backfill, no FK.
   // Postcondition pinned in REVIEWED_MIGRATION_CODE_SHA256. Digest recorded from the shipped SQL after reading it.
   "123_agent_orchestrator_wakeups": "f12e35032531b7866494511ceb935d2db17f6d715de85a335be7eaca71cc3170",
+  // Audit + per-turn budget for web_fetch: one additive CREATE TABLE IF NOT EXISTS (agent_web_fetches) keyed by (credential_id, seq); no index, no ALTER, no backfill, no FK.
+  // Postcondition pinned in REVIEWED_MIGRATION_CODE_SHA256. Digest recorded from the shipped SQL after reading it.
+  "124_agent_web_fetches": "21b066340191c00b6953436ff6f77b6fa6b7faa9bf07146eb4f3b3d068470cf4",
 };
 
 /**
@@ -483,6 +486,10 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
   // The 123 postcondition (all columns + types + nullability on agent_orchestrator_wakeups, plus all four indexes valid, ready, and unpredicated); editing it re-reviews the migration.
   "123_agent_orchestrator_wakeups": {
     "lib/migrations/agent-orchestrator-wakeups.ts": "b20dde3d4ef9a62f91fe843633d3ec7f84f3203e6b4a214dd8e3b1df07861426",
+  },
+  // The 124 postcondition (column shape plus the composite (credential_id, seq) primary key before the receipt); editing it re-reviews the migration.
+  "124_agent_web_fetches": {
+    "lib/migrations/agent-web-fetches.ts": "14aeaf113aeb27aabe2dd92914c353a3316c4a6c9f884d2036c9fa1453afc0c4",
   },
 };
 

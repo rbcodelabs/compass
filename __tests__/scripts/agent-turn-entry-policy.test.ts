@@ -16,7 +16,7 @@ describe("agent entry capability-pack policy", () => {
     expect(source).toMatch(/settingSources:\s*\[\]/)
   })
 
-  it("exposes WebFetch as the only built-in tool unless the host materialized docs", () => {
+  it("exposes no web built-in tool, and no built-in at all unless the host materialized docs", () => {
     // The list comes from agentTools() (scripts/agent/github-access.ts), whose output is
     // pinned in github-access.test.ts: the failure mode is additive drift, one more
     // "harmless" built-in at a time, none reviewed as a boundary change.
@@ -26,7 +26,7 @@ describe("agent entry capability-pack policy", () => {
     // Bash exists only through the jail: it is added by agentTools() when githubShell is
     // true, and githubShell is set only after prepareBashJail() proved the jail user.
     // Nothing else may name it in `tools`.
-    for (const forbidden of ["Bash", "MultiEdit", "NotebookEdit", "Grep", "Task", "Skill", "WebSearch"]) {
+    for (const forbidden of ["Bash", "MultiEdit", "NotebookEdit", "Grep", "Task", "Skill", "WebSearch", "WebFetch"]) {
       expect(source).not.toMatch(new RegExp(`tools:[^\\n]*"${forbidden}"`))
     }
     expect(source).toMatch(/prepareBashJail\(\{ docsRoot, note, npmToken: [^\n]*\}\)\n\s+githubShell = true/)
@@ -44,14 +44,17 @@ describe("agent entry capability-pack policy", () => {
     expect(source).toContain("...(docsSession && docsRoot ? { cwd: docsRoot } : {})")
   })
 
-  it("admits Compass, WebFetch, docsfs plus the native doc-file tools (only with docs), and per-turn connector prefixes -- nothing wider", () => {
+  it("admits Compass, web_search, web_fetch, docsfs plus the native doc-file tools (only with docs), and per-turn connector prefixes -- nothing wider", () => {
     // The literal is pinned rather than matched loosely because the failure mode
     // is a silent widening: `allowedTools: ["mcp__*"]`, or dropping the option
     // entirely, both leave a headless agent running in bypassPermissions mode with
     // no allowlist at all. `connectorToolPrefixes` is the only sanctioned way for
     // this list to grow, and it grows per turn from the grants that user holds.
     expect(source).toContain('...(docsSession ? ["mcp__docsfs", "Read", "Write", "Edit", "Glob"] : []),\n      ...(githubShell ? ["Bash"] : []),')
-    expect(source).toContain('"mcp__compass",\n      "WebFetch",\n      ...PLANNING_TOOLS,\n      "mcp__web_search",')
+    expect(source).toContain('"mcp__compass",\n      ...PLANNING_TOOLS,\n      "mcp__web_search",\n      "mcp__web_fetch",')
+    // The SDK's built-in WebFetch is neither admitted nor allowed: it would run inside the sandbox, whose egress is deny-by-default.
+    const allowedBlock = source.slice(source.indexOf("allowedTools: ["), source.indexOf("disallowedTools: ["))
+    expect(allowedBlock).not.toContain('"WebFetch"')
     expect(source).toContain("...connectorToolPrefixes,")
     expect(source).not.toMatch(/allowedTools:\s*\[[^\]]*\*/)
   })
@@ -88,19 +91,56 @@ describe("agent entry capability-pack policy", () => {
     // plus the sibling uploads dir the host drops attached files into). Never a writable root.
     expect(source).toContain("{ matcher: DOCS_GUARDED_TOOLS_MATCHER, hooks: [createDocsPreToolUseHook(docsRoot, { readOnlyRoots: [...(githubShell ? [REPOS_DIR] : []), resolvePath(docsRoot, \"..\", \"uploads\")] })] }")
     expect(source).toContain("env: scrubbedAgentEnv(process.env, { github: githubShell, npm: githubShell && process.env.AGENT_SANDBOX_CLASS === \"DEVELOPER\" }),")
-    // The guard must be registered exactly when the file tools are.
-    expect(source).toMatch(/docsSession && docsRoot\s*\?\s*\{\s*hooks:/)
+    // The path guard and the Bash hook are registered exactly when the file tools are.
+    expect(source).toMatch(/\.\.\.\(docsSession && docsRoot\s*\?\s*\[\s*(\/\/[^\n]*\n\s*)*\{ matcher: DOCS_GUARDED_TOOLS_MATCHER/)
   })
 
-  it("ADR 0019: WebFetch is limited to user-supplied and web_search-returned URLs whenever docs are materialized", () => {
-    expect(source).toContain("{ matcher: WEB_FETCH_MATCHER, hooks: [createWebFetchPreToolUseHook(allowedFetchUrls)] }")
+  it("installs the web_fetch URL guard on every run, including one with no materialized docs tree", () => {
+    // `hooks` is a plain property, not behind the docs condition, and the web_fetch matcher sits outside the docs-only spread.
+    expect(source).not.toMatch(/\.\.\.\(docsSession && docsRoot\s*\?\s*\{\s*hooks:/)
+    expect(source).toMatch(/\n    hooks: \{\n      PreToolUse: \[/)
+    const docsOnly = source.slice(source.indexOf("...(docsSession && docsRoot\n          ? ["), source.indexOf("{ matcher: WEB_FETCH_TOOL_MATCHER"))
+    expect(docsOnly).toContain(": []),")
+    expect(docsOnly).not.toContain("WEB_FETCH_TOOL_MATCHER")
+    // Seeded from the prompt, so a run with no URL in it gets an empty allowlist: every fetch denied.
+    expect(source).toMatch(/createAllowedUrls\(\s*`\$\{prompt\}/)
+  })
+
+  it("ADR 0019: URL fetching is limited to user-supplied and web_search-returned URLs, for web_fetch", () => {
+    // The Compass-hosted tool is gated by the allowlist hook, in the unconditional PreToolUse list. No matcher exists for the built-in WebFetch: it is never offered.
+    expect(source).not.toMatch(/matcher: WEB_FETCH_MATCHER|matcher: "WebFetch"/)
+    expect(source).toContain("{ matcher: WEB_FETCH_TOOL_MATCHER, hooks: [createWebFetchPreToolUseHook(allowedFetchUrls)] }")
+    const preToolUse = source.slice(source.indexOf("PreToolUse: ["), source.indexOf("PostToolUse: ["))
+    expect(preToolUse.indexOf("{ matcher: WEB_FETCH_TOOL_MATCHER")).toBeGreaterThan(preToolUse.indexOf("...(docsSession && docsRoot"))
+    expect(source.match(/createWebFetchPreToolUseHook\(allowedFetchUrls\)/g)).toHaveLength(1)
+    // Only web_search results extend the allowlist; a web_fetch result (attacker-controllable page text) never does.
+    expect(source.match(/createSearchResultCollector\(/g)).toHaveLength(1)
+    expect(source).not.toMatch(/matcher: WEB_FETCH_TOOL_MATCHER, hooks: \[createSearchResultCollector/)
     expect(source).toContain("PostToolUse: [{ matcher: WEB_SEARCH_MATCHER, hooks: [createSearchResultCollector(allowedFetchUrls)] }]")
     // The matcher itself is behaviour-tested in docs-path-guard.test.ts; here, make sure the entry registers the
     // real server and tool the matcher is written for (mcp__web_search__web_search).
     expect(source).toContain("mcpServers.web_search = {")
+    // ...and the real server for the Compass-hosted fetch tool (mcp__web_fetch__web_fetch), reached over the Compass origin only.
+    expect(source).toContain("mcpServers.web_fetch = {")
+    expect(source).toContain('url: new URL("/api/agent/web-fetch/mcp", baseUrl).toString(),')
+    expect(readFileSync("app/api/agent/web-fetch/[transport]/route.ts", "utf8")).toContain('"web_fetch",')
     expect(readFileSync("app/api/agent/web-search/[transport]/route.ts", "utf8")).toContain('"web_search",')
     // seeded from the prompt (and the replayed history on a resumed turn), never from agent output
     expect(source).toMatch(/createAllowedUrls\(\s*`\$\{prompt\}/)
+  })
+
+  it("hands the final doc state over through the retrying, read-only-aware poster, never a bare fetch", () => {
+    const report = source.slice(source.indexOf("async function reportDocState"), source.indexOf("async function main"))
+    expect(report).toContain("postDocsReconcile(")
+    expect(report).not.toContain("await fetch(")
+    expect(report).toContain("DOCS_READ_ONLY_NOTICE")
+  })
+
+  it("disallows the SDK's built-in WebFetch in favour of the Compass-hosted web_fetch", () => {
+    const disallowed = source.slice(source.indexOf("disallowedTools: ["), source.indexOf("promptSuggestions: true"))
+    expect(disallowed).toContain('"WebFetch",')
+    // No env switch is relied on: CLAUDE_CODE_DISABLE_WEB_FETCH is not recognised by the pinned CLI (0.3.224).
+    expect(source).not.toContain("CLAUDE_CODE_DISABLE_WEB_FETCH")
   })
 
   it("ADR 0019: reports whether the sandbox's view was complete and which docs the agent deleted on purpose", () => {

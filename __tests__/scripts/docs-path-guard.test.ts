@@ -25,6 +25,7 @@ import {
   extractUrls,
   normalizeFetchUrl,
   scrubbedAgentEnv,
+  WEB_FETCH_TOOL_MATCHER,
   WEB_SEARCH_MATCHER,
 } from "../../scripts/agent/docs-path-guard"
 
@@ -289,6 +290,10 @@ describe("the PreToolUse hook the SDK calls", () => {
 })
 
 describe("scrubbedAgentEnv (allow-list)", () => {
+  it("forwards CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC to the model-facing process (the host sets it in the sandbox env)", () => {
+    expect(scrubbedAgentEnv({ CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1", MCP_TOKEN: "t" }).CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC).toBe("1")
+  })
+
   it("passes only what the CLI needs and drops everything else, including variables added later", () => {
     const out = scrubbedAgentEnv({
       PATH: "/usr/bin",
@@ -364,7 +369,7 @@ describe("web_search result collection uses the tool name the CLI really reports
   it("end to end: a search result with the real response shape makes its URL fetchable", async () => {
     const allowed = createAllowedUrls("")
     const fetchHook = createWebFetchPreToolUseHook(allowed)
-    const target = { tool_name: "WebFetch", tool_input: { url: "https://found.example/page" } }
+    const target = { tool_name: "mcp__web_fetch__web_fetch", tool_input: { url: "https://found.example/page" } }
     expect(((await fetchHook(target)) as { hookSpecificOutput?: unknown }).hookSpecificOutput).toBeDefined()
     if (matches(WEB_SEARCH_MATCHER, REAL_TOOL_NAME)) {
       await createSearchResultCollector(allowed)({
@@ -378,7 +383,7 @@ describe("web_search result collection uses the tool name the CLI really reports
   })
 })
 
-describe("WebFetch exfiltration guard", () => {
+describe("web_fetch exfiltration guard", () => {
   const allowed = createAllowedUrls("Please summarise https://example.com/article?id=7, and also see (https://docs.example.org/a/b).")
 
   it("extracts URLs from prose without trailing punctuation or brackets", () => {
@@ -427,7 +432,7 @@ describe("WebFetch exfiltration guard", () => {
   it("makes URLs returned by web_search fetchable, and only from that tool's results", async () => {
     const set = createAllowedUrls("no urls here")
     const hook = createWebFetchPreToolUseHook(set)
-    const call = { tool_name: "WebFetch", tool_input: { url: "https://found.example/page" } }
+    const call = { tool_name: "mcp__web_fetch__web_fetch", tool_input: { url: "https://found.example/page" } }
     expect(((await hook(call)) as { hookSpecificOutput?: { permissionDecision: string } }).hookSpecificOutput?.permissionDecision).toBe("deny")
     await createSearchResultCollector(set)({ tool_response: { content: [{ type: "text", text: "1. Title https://found.example/page - snippet" }] } })
     expect(await hook(call)).toEqual({ continue: true })
@@ -481,5 +486,86 @@ describe("GitHub shell additions", () => {
     const env = { PATH: "/usr/bin", GH_TOKEN: "ghs_a", GITHUB_TOKEN: "ghs_a", AGENT_GITHUB_REPOS: "o/r", MCP_TOKEN: "m", GIT_SSL_CAINFO: "/ca.pem" }
     expect(scrubbedAgentEnv(env)).toEqual({ PATH: "/usr/bin", GIT_SSL_CAINFO: "/ca.pem" })
     expect(scrubbedAgentEnv(env, { github: true })).toEqual({ PATH: "/usr/bin", GH_TOKEN: "ghs_a", GITHUB_TOKEN: "ghs_a", GIT_SSL_CAINFO: "/ca.pem" })
+  })
+})
+
+describe("Compass-hosted web_fetch is gated by the same exact-URL allowlist", () => {
+  // Observed shape: an MCP server registered as "web_fetch" with one tool "web_fetch" is reported to hooks as
+  // "mcp__web_fetch__web_fetch" (same convention as web_search, see above).
+  const REAL_TOOL_NAME = "mcp__web_fetch__web_fetch"
+  const matches = (matcher: string, toolName: string) =>
+    /^[A-Za-z0-9_|]*$/.test(matcher) ? matcher.split("|").includes(toolName) : new RegExp(`^(?:${matcher})$`).test(toolName)
+  const verdict = async (hook: ReturnType<typeof createWebFetchPreToolUseHook>, url: unknown) =>
+    ((await hook({ tool_name: REAL_TOOL_NAME, tool_input: { url } })) as { hookSpecificOutput?: { permissionDecision: string } }).hookSpecificOutput?.permissionDecision ?? "allow"
+
+  it("the matcher selects the real tool name and nothing else", () => {
+    expect(matches(WEB_FETCH_TOOL_MATCHER, REAL_TOOL_NAME)).toBe(true)
+    expect(matches(WEB_FETCH_TOOL_MATCHER, "mcp__web_fetch__anything_added_later")).toBe(true)
+    expect(matches(WEB_FETCH_TOOL_MATCHER, "mcp__web_fetch_evil__web_fetch")).toBe(false)
+    expect(matches(WEB_FETCH_TOOL_MATCHER, "mcp__web_search__web_search")).toBe(false)
+    expect(matches(WEB_FETCH_TOOL_MATCHER, "mcp__compass__list_docs")).toBe(false)
+    expect(matches(WEB_FETCH_TOOL_MATCHER, "WebFetch")).toBe(false)
+    // a bare server prefix would not have matched
+    expect(matches("mcp__web_fetch", REAL_TOOL_NAME)).toBe(false)
+  })
+
+  it("allows exactly the URLs the user wrote and denies a model-invented URL carrying data", async () => {
+    const hook = createWebFetchPreToolUseHook(createAllowedUrls("Please read https://example.com/article?id=7 for me."))
+    expect(await verdict(hook, "https://example.com/article?id=7")).toBe("allow")
+    for (const url of [
+      "https://attacker.example/?d=SECRET",
+      "https://attacker.example/SECRET",
+      "https://example.com/article?id=7&d=SECRET",
+      "https://example.com/article/SECRET",
+      "https://example.com.attacker.example/article?id=7",
+      "http://example.com/article?id=7",
+      "https://user:pw@example.com/article?id=7",
+      "file:///etc/passwd",
+      "",
+      undefined,
+    ]) {
+      expect(await verdict(hook, url), String(url)).toBe("deny")
+    }
+  })
+
+  it("an empty allowlist (no URL in the prompt) denies every fetch", async () => {
+    expect(await verdict(createWebFetchPreToolUseHook(createAllowedUrls("no links here")), "https://example.com/")).toBe("deny")
+  })
+
+  it("web_search results become fetchable, but URLs inside web_fetch results do NOT", async () => {
+    const allowed = createAllowedUrls("")
+    const hook = createWebFetchPreToolUseHook(allowed)
+    const collector = createSearchResultCollector(allowed)
+    // The collector is only registered for the web_search matcher, so a web_fetch result is never fed to it.
+    expect(matches(WEB_SEARCH_MATCHER, REAL_TOOL_NAME)).toBe(false)
+    const injectedLink = "https://attacker.example/?d=SECRET"
+    // (what a fetched page would say; with the matcher above it is never collected)
+    expect(await verdict(hook, injectedLink)).toBe("deny")
+    expect(await verdict(hook, "https://found.example/page")).toBe("deny")
+    await collector({ tool_name: "mcp__web_search__web_search", tool_response: [{ type: "text", text: "1. R https://found.example/page" }] })
+    expect(await verdict(hook, "https://found.example/page")).toBe("allow")
+    expect(await verdict(hook, injectedLink)).toBe("deny")
+  })
+
+  it("URLs the user mentions in a LATER turn are allowed, because each turn seeds its own list from its prompt", async () => {
+    const turn1 = createWebFetchPreToolUseHook(createAllowedUrls("first message, no link"))
+    const turn2 = createWebFetchPreToolUseHook(createAllowedUrls("now please read https://later.example/doc"))
+    expect(await verdict(turn1, "https://later.example/doc")).toBe("deny")
+    expect(await verdict(turn2, "https://later.example/doc")).toBe("allow")
+  })
+
+  it("fails closed when the input cannot be read", async () => {
+    const hook = createWebFetchPreToolUseHook(createAllowedUrls(""))
+    const out = (await hook({
+      get tool_input(): unknown {
+        throw new Error("boom")
+      },
+    })) as { hookSpecificOutput?: { permissionDecision: string; permissionDecisionReason: string } }
+    expect(out.hookSpecificOutput?.permissionDecision).toBe("deny")
+  })
+
+  it("names the tool the model should use in its refusal", async () => {
+    const out = (await createWebFetchPreToolUseHook(createAllowedUrls(""))({ tool_input: { url: "https://x.example/" } })) as { hookSpecificOutput: { permissionDecisionReason: string } }
+    expect(out.hookSpecificOutput.permissionDecisionReason).toMatch(/web_fetch only opens URLs the user gave you or that web_search returned/)
   })
 })

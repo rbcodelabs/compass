@@ -72,6 +72,7 @@ import { AGENT_CHILD_RUNS_MIGRATION, assertAgentChildRunsMigration } from "@/lib
 import { AGENT_INTERACTIVE_CONTROLS_MIGRATION, assertAgentInteractiveControlsMigration } from "@/lib/migrations/agent-interactive-controls";
 import { AGENT_ORCHESTRATOR_SUPERVISION_MIGRATION, assertAgentOrchestratorSupervisionMigration } from "@/lib/migrations/agent-orchestrator-supervision";
 import { AGENT_ORCHESTRATOR_WAKEUPS_MIGRATION, assertAgentOrchestratorWakeupsMigration } from "@/lib/migrations/agent-orchestrator-wakeups";
+import { AGENT_WEB_FETCHES_MIGRATION, assertAgentWebFetchesMigration } from "@/lib/migrations/agent-web-fetches";
 
 
 
@@ -855,6 +856,13 @@ const MIGRATIONS: readonly MigrationEntry[] = [
     // Additive: no existing table touched, no backfill, no FK. The 123 postcondition proves all columns and indexes.
     name: "123_agent_orchestrator_wakeups",
     filePath: path.join(process.cwd(), "prisma/migrations/123_agent_orchestrator_wakeups/migration.sql"),
+  },
+  {
+    // Audit + per-turn budget for the agent-only web_fetch tool: one new table keyed by (credential_id, seq),
+    // no secondary index, so no async-wait. Additive, no backfill, no FK. The 124 postcondition verifies the
+    // columns and the composite primary key.
+    name: "124_agent_web_fetches",
+    filePath: path.join(process.cwd(), "prisma/migrations/124_agent_web_fetches/migration.sql"),
   },
 ];
 
@@ -2425,6 +2433,7 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
       if (migration.name === AGENT_INTERACTIVE_CONTROLS_MIGRATION) await assertAgentInteractiveControlsMigration(client, schema)
       if (migration.name === AGENT_ORCHESTRATOR_SUPERVISION_MIGRATION) await assertAgentOrchestratorSupervisionMigration(client, schema)
       if (migration.name === AGENT_ORCHESTRATOR_WAKEUPS_MIGRATION) await assertAgentOrchestratorWakeupsMigration(client, schema)
+      if (migration.name === AGENT_WEB_FETCHES_MIGRATION) await assertAgentWebFetchesMigration(client, schema)
       if (migration.name === "110_artifact_external_share") await assertArtifactExternalShareMigration(client, schema)
       if (migration.name === AGENT_SANDBOX_CLASS_MIGRATION) await assertAgentSandboxClassMigration(client, schema)
       if (migration.name === WORKSPACE_ID_MIGRATION || migration.name === WORKSPACE_ID_RESIDUAL_MIGRATION) {

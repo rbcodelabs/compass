@@ -9,6 +9,12 @@ import { OPTIONAL_FIELDS, OPTIONAL_STRING_FIELDS, UNIQUE_KEYS } from "@/lib/work
 import { deleteIdsLeafFirst, withRetry } from "@/lib/workspace-export/leaf-first"
 import { IMPORT_OVERRIDES, SECRET_COLUMNS } from "@/lib/workspace-export/model-registry"
 import {
+  capabilityPackArtifactPath,
+  confineStoragePath,
+  isOwnFeedbackAttachmentUrl,
+  type PrivateBlobStore,
+} from "@/lib/workspace-export/path-confinement"
+import {
   PARENT,
   delegateFor,
   dmmfModels,
@@ -26,23 +32,30 @@ const UUID_EXACT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
 /** Exact-UUID columns that point at systems outside the export and are kept verbatim. */
 const KEEP_COLUMNS = new Set(["authorityRecordId", "v0VersionId", "applicationReceiptId"])
 /**
- * Required columns that reference an org-level row outside the export. If it cannot be resolved in the target
- * organization the row is skipped rather than left pointing at another organization's data.
+ * Required id columns are an ALLOW-LIST: a value that does not resolve to a row in the bundle (or to a user / a verified
+ * target-org scoring model) drops the whole row. Nothing unresolved is ever left pointing at another workspace or org.
+ * Author-style user columns are the one exception: they fall back to the importer, like every other unmatched user.
  */
-const DROP_ON_UNRESOLVED = new Set([
-  "OpportunityScore.scoringModelId",
-  "SolutionScore.scoringModelId",
-  // Link and polymorphic endpoints: a row whose target is not part of the import would point into another workspace.
-  "EntityLink.fromId",
-  "EntityLink.toId",
-  "Comment.targetId",
-  "CanvasNodePosition.entityId",
-  "CustomFieldValue.objectId",
-  "CardSortProposal.objectId",
-  "DecisionApplication.targetId",
-  "MetricBinding.targetId",
-  "Follow.subjectId",
-])
+const AUTHOR_FALLBACK_COLUMNS = new Set(["createdById", "updatedById", "actorUserId", "initiatingUserId", "ownerId", "ownerUserId"])
+/** Id-named columns that hold free text (not UUIDs), so a 32-hex value in them is left alone. */
+const TEXT_ID_COLUMNS = new Set(["CapabilityPack.packId", "AnalyticsConnection.projectId", "WorkspaceCapabilityPack.enabledSkillIds"])
+/** Overwritten with the target after the row is built, so the bundle's value is irrelevant (never a reason to drop). */
+const FORCED_COLUMNS = new Set(["organizationId", "workspaceId"])
+/**
+ * Columns holding a private-store path. The value must be confined to the source workspace's own prefix and is
+ * rewritten into the new workspace's prefix. `drop` removes the row when invalid, `null` clears the column.
+ */
+const PATH_COLUMNS: Readonly<Record<string, { store: PrivateBlobStore | "pack"; invalid: "drop" | "null" }>> = {
+  "ArtifactRevision.blobPathname": { store: "artifact", invalid: "drop" },
+  "ArtifactRevision.thumbnailPathname": { store: "artifact", invalid: "null" },
+  "ResearchAttachment.blobPathname": { store: "research", invalid: "drop" },
+  "CapabilityPackVersion.artifactPathname": { store: "pack", invalid: "drop" },
+}
+/** Geode-hosted documents are refused on export; a bundle claiming one must not point at someone else's Geode object. */
+const CLEARED_COLUMNS: Readonly<Record<string, readonly string[]>> = {
+  Doc: ["contentRef", "storageProvider"],
+  DocVersion: ["contentRef", "storageProvider"],
+}
 /**
  * Content columns that are unique across the WHOLE database (not per workspace) and so would collide with the
  * source rows. They are rewritten to a per-import hash; the value is only ever compared for equality.
@@ -90,8 +103,20 @@ function alreadyImportedReport(workspace: Row, manifest: BundleManifest): Import
   }
 }
 
+/**
+ * Canonical lower-case hyphenated form of a UUID written in any spelling Postgres accepts (braces, `urn:uuid:`,
+ * no hyphens, upper case), or null when the value is not a UUID. Every id comparison goes through this so a
+ * non-canonical spelling cannot slip past the allow-list and still be read by the database as a foreign id.
+ */
+export function canonUuid(value: string): string | null {
+  const hex = value.trim().replace(/^urn:uuid:/i, "").replace(/^\{(.*)\}$/, "$1").replace(/-/g, "")
+  if (!/^[0-9a-f]{32}$/i.test(hex)) return null
+  const h = hex.toLowerCase()
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`
+}
+
 function deriveId(importKey: string, oldId: string): string {
-  const h = createHash("sha256").update(`${importKey}:${oldId.toLowerCase()}`).digest("hex")
+  const h = createHash("sha256").update(`${importKey}:${(canonUuid(oldId) ?? oldId).toLowerCase()}`).digest("hex")
   const variant = ((parseInt(h.slice(16, 18), 16) & 0x3f) | 0x80).toString(16).padStart(2, "0")
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-${variant}${h.slice(18, 20)}-${h.slice(20, 32)}`
 }
@@ -172,7 +197,7 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
     let n = 0
     for (const row of reader.rows(model)) {
       if (++n > MAX_ROWS_PER_MODEL) throw new WorkspaceImportError(`Too many ${model} rows`)
-      if (typeof row.id === "string") idSet.add(row.id.toLowerCase())
+      if (typeof row.id === "string") idSet.add((canonUuid(row.id) ?? row.id).toLowerCase())
     }
   }
   const newWorkspaceId = deriveId(importKey, manifest.source.workspaceId)
@@ -199,7 +224,15 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
     else usersFallback++
     userMap.set(u.id.toLowerCase(), target ?? opts.importerUserId)
   }
-  const keep = new Set(manifest.scoringModels.filter((s) => s.organizationId === opts.organizationId).map((s) => s.id.toLowerCase()))
+  // The manifest is attacker-written, so a scoring model is only kept when it really belongs to the target organization.
+  const claimedModels = manifest.scoringModels.filter((s) => s.organizationId === opts.organizationId).map((s) => s.id)
+  const verifiedModels = claimedModels.length
+    ? ((await delegateFor(client, "ScoringModel").findMany({
+        where: { id: { in: claimedModels }, organizationId: opts.organizationId },
+        select: { id: true },
+      })) as { id: string }[])
+    : []
+  const keep = new Set(verifiedModels.map((m) => m.id.toLowerCase()))
 
   const mapUuid = (value: string): string | undefined => {
     const k = value.toLowerCase()
@@ -241,7 +274,9 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
   let referencesCleared = 0
   const warnings = [...manifest.warnings, ...slugWarnings]
   if (retiredSeen.size > 0) warnings.push(`Ignored retired legacy link data in the bundle (${[...retiredSeen].sort().join(", ")}); links are restored from the bundle's EntityLink rows.`)
+  /** Only objects THIS import created. Rollback deletes exactly these, never a pre-existing object. */
   const uploaded: { store: "artifact" | "research" | "feedback"; key: string }[] = []
+  const sourceWorkspaceId = manifest.source.workspaceId
 
   const dropped: Record<string, number> = {}
   const deduped: Record<string, number> = {}
@@ -255,28 +290,55 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
     for (const [name, value] of Object.entries(row)) {
       const info = fieldInfo(model, name)
       if (!info) continue
+      if (FORCED_COLUMNS.has(name)) continue
       // Real databases hold legacy NULLs in columns the schema now declares required (they have a default).
       // Prisma rejects an explicit null there, so leave the key out and let the column default apply.
       if (value === null && !OPTIONAL_FIELDS[model]?.includes(name)) {
         delete row[name]
         continue
       }
+      const pathRule = PATH_COLUMNS[`${model}.${name}`]
+      if (pathRule && typeof value === "string") {
+        const confined =
+          pathRule.store === "pack"
+            ? capabilityPackArtifactPath(value, row.artifactSha256)
+            : confineStoragePath(pathRule.store, value, sourceWorkspaceId, newWorkspaceId, rewriteText)
+        if (confined) row[name] = confined
+        else if (pathRule.invalid === "null") {
+          row[name] = null
+          referencesCleared++
+        } else unresolvable = true
+        continue
+      }
       if (info.type === "Json") {
         row[name] = value === null ? undefined : rewriteDeep(value)
       } else if (info.type === "String" && typeof value === "string") {
-        if (name !== "id" && UUID_EXACT.test(value)) {
-          const mapped = mapUuid(value)
+        // Id columns accept any UUID spelling Postgres does; canonicalise so the allow-list sees what the database will.
+        const asUuid = UUID_EXACT.test(value)
+          ? value
+          : (name === "id" || /Id$/.test(name)) && !TEXT_ID_COLUMNS.has(`${model}.${name}`)
+            ? canonUuid(value)
+            : null
+        if (name !== "id" && asUuid) {
+          const mapped = mapUuid(asUuid)
           if (mapped !== undefined) row[name] = mapped
-          else if (!KEEP_COLUMNS.has(name)) {
+          else if (model === "ReviewRequest" && name === "subjectId" && row.subjectType === "TRACKED_DECISION") {
+            // A tracked decision's subjectId is an identity/idempotency key (lib/tracked-decisions.ts), not a row id, so it
+            // never resolves inside the bundle. Re-derive it per import: it points at nothing, and stays unique.
+            row[name] = deriveId(importKey, asUuid)
+          } else if (!KEEP_COLUMNS.has(name)) {
             if (OPTIONAL_STRING_FIELDS[model]?.includes(name)) {
               row[name] = null
               referencesCleared++
-            } else if (DROP_ON_UNRESOLVED.has(`${model}.${name}`)) {
+            } else if (AUTHOR_FALLBACK_COLUMNS.has(name)) {
+              row[name] = opts.importerUserId
+              referencesCleared++
+            } else {
               unresolvable = true
             }
           }
-        } else if (name === "id" && UUID_EXACT.test(value)) {
-          row[name] = mapUuid(value) ?? value
+        } else if (name === "id" && asUuid) {
+          row[name] = mapUuid(asUuid) ?? asUuid
         } else if (REKEY_COLUMNS.has(`${model}.${name}`)) {
           row[name] = createHash("sha256").update(`${importKey}:${model}.${name}:${value}`).digest("hex")
         } else {
@@ -293,6 +355,10 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
     Object.assign(row, IMPORT_OVERRIDES[model] ?? {})
     // Org-scoped columns (Workspace, SavedView) always belong to the target organization, never the source.
     if ("organizationId" in row) row.organizationId = opts.organizationId
+    // Tenant isolation: every row of a workspace-scoped model belongs to the NEW workspace, whatever the bundle says.
+    if (modelHasWorkspaceId(model)) row.workspaceId = newWorkspaceId
+    if (model === "Agent" && row.ownerWorkspaceId) row.ownerWorkspaceId = newWorkspaceId
+    for (const col of CLEARED_COLUMNS[model] ?? []) if (col in row) row[col] = null
     return row
   }
 
@@ -303,15 +369,24 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
     let blobsCopied = 0
     for (const b of manifest.blobs) {
       if (b.store === "feedback") continue // uploaded per attachment row below
+      if (b.store !== "artifact" && b.store !== "research") {
+        warnings.push(`Skipped blob with unknown store ${String(b.store)}`)
+        continue
+      }
       const data = reader.read(blobEntry(b.store, b.key))
       if (!data) {
         warnings.push(`Bundle is missing blob ${b.store}/${b.key}`)
         continue
       }
-      const target = rewritePath(b.key)
+      const target = confineStoragePath(b.store, b.key, sourceWorkspaceId, newWorkspaceId, rewritePath)
+      if (!target) {
+        warnings.push(`Skipped blob ${b.store}/${b.key}: it is not under the source workspace's own storage prefix`)
+        continue
+      }
       const storage = b.store === "research" ? opts.blobs.research : opts.blobs.artifact
-      await storage.put(target, data, b.contentType)
-      uploaded.push({ store: b.store, key: target })
+      // Never overwrite: the target prefix is brand new, so an existing object is not ours to replace (or to delete later).
+      const put = await storage.put(target, data, b.contentType, { overwrite: false })
+      if (put.created !== false) uploaded.push({ store: b.store, key: target })
       blobsCopied++
     }
 
@@ -358,16 +433,22 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
             if (tupleKeys[i] !== null) seenUnique[i].add(tupleKeys[i]!)
           }
         }
-        if (model === "FeedbackAttachment" && typeof raw.id === "string") {
-          const data = reader.read(blobEntry("feedback", raw.id))
-          if (data) {
+        if (model === "FeedbackAttachment") {
+          const data = typeof raw.id === "string" ? reader.read(blobEntry("feedback", raw.id)) : null
+          if (data && typeof raw.id === "string") {
             const filename = String(raw.filename ?? "attachment").replace(/[^A-Za-z0-9._-]/g, "_")
             const key = `feedback/${newWorkspaceId}/${deriveId(importKey, `fb:${raw.id}`)}-${filename}`
             row.url = await opts.blobs.putPublic(key, data, String(raw.fileType ?? "application/octet-stream"))
             uploaded.push({ store: "feedback", key: row.url as string })
             blobsCopied++
-          } else {
+          } else if (isOwnFeedbackAttachmentUrl(raw.url, sourceWorkspaceId)) {
+            // Only this deployment's own public-store URLs survive, and verbatim (not run through the id rewrite).
+            row.url = raw.url
             warnings.push(`Feedback attachment ${raw.id} bytes were not in the bundle; its original URL was kept`)
+          } else {
+            dropped.FeedbackAttachment = (dropped.FeedbackAttachment ?? 0) + 1
+            warnings.push(`Feedback attachment ${raw.id} had no bytes in the bundle and an external URL; it was skipped`)
+            continue
           }
         }
         buffer.push(row)
@@ -411,15 +492,20 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
     // ---- validate before the workspace becomes visible ---------------------------------------------------------------------
     for (const model of exportOrder()) {
       if (!modelHasWorkspaceId(model) || model === "Agent" || !modelHasId(model)) continue
-      const expected = (manifest.counts[model] ?? 0) - (dropped[model] ?? 0) - (deduped[model] ?? 0)
       const actual = await delegateFor(client, model).count({ where: { workspaceId: newWorkspaceId } })
+      // The authoritative check compares with what THIS import inserted. The manifest's counts are written by whoever
+      // made the bundle, so they are only a consistency check on an honest bundle, never the proof of correctness.
+      const inserted = counts[model] ?? 0
+      if (actual !== inserted) throw new WorkspaceImportError(`Validation failed for ${model}: expected ${inserted} rows, found ${actual}`)
+      const expected = (manifest.counts[model] ?? 0) - (dropped[model] ?? 0) - (deduped[model] ?? 0)
       if (actual !== expected) throw new WorkspaceImportError(`Validation failed for ${model}: expected ${expected} rows, found ${actual}`)
     }
 
     // ---- commit point: the Workspace row (and its members) --------------------------------------------------------------------
     const wsRaw = reader.rows("Workspace").next().value as Row | undefined
     if (!wsRaw) throw new WorkspaceImportError("Bundle has no Workspace row")
-    const wsRow = transform("Workspace", wsRaw)!
+    const wsRow = transform("Workspace", wsRaw)
+    if (!wsRow) throw new WorkspaceImportError("Bundle Workspace row is invalid")
     Object.assign(wsRow, { id: newWorkspaceId, organizationId: opts.organizationId, name: baseName, slug })
     const memberRows = members.map((m) => ({ workspaceId: newWorkspaceId, userId: m.userId, role: normalizeWorkspaceRole(m.role) }))
     if (!memberRows.some((m) => m.userId === opts.importerUserId)) {
@@ -435,7 +521,7 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
     )
 
     for (const [m, n] of Object.entries(dropped)) {
-      warnings.push(`Skipped ${n} ${m} row(s) whose required reference does not exist in the target organization`)
+      warnings.push(`Skipped ${n} ${m} row(s) whose required reference or storage path does not resolve inside the bundle`)
     }
     for (const [m, n] of Object.entries(deduped)) {
       warnings.push(`Skipped ${n} ${m} row(s) that would duplicate another row once people without an account in this organization were attributed to you`)

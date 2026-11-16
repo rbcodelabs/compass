@@ -457,6 +457,23 @@ describe.skipIf(!databaseUrl)("workspace export/import round trip", () => {
     expect(links.every((l: { toId: string }) => l.toId !== foreign.toId)).toBe(true)
   }, 120_000)
 
+  it("skips a row that would repeat a unique key instead of failing the whole import", async () => {
+    // Stand-in for several unmatched users all collapsing onto the importer: a second row with the same unique key.
+    const reader = new BundleReader(bundle)
+    const files: Record<string, Uint8Array> = {}
+    for (const n of reader.list("")) files[n] = reader.read(n)!
+    const name = reader.list("data/EntityLink.")[0]
+    const twin = JSON.parse(reader.readText(name)!.split("\n")[0])
+    twin.id = randomUUID()
+    files[name] = new TextEncoder().encode(reader.readText(name)! + JSON.stringify(twin) + "\n")
+    const manifest = reader.manifest()
+    manifest.counts.EntityLink += 1
+    files["manifest.json"] = new TextEncoder().encode(JSON.stringify(manifest))
+    const report = await importWorkspaceBundle(prisma, zipSync(files), { organizationId: orgId, importerUserId: importerId, blobs, nonce: "n-dup", slug: "dup-key" })
+    expect(report.warnings.join(" ")).toMatch(/Skipped 1 EntityLink row\(s\) that would duplicate/)
+    expect(await prisma.entityLink.count({ where: { workspaceId: report.workspaceId } })).toBe(1)
+  }, 120_000)
+
   it("rejects bundles that try to write outside the content models", async () => {
     const reader = new BundleReader(bundle)
     const files: Record<string, Uint8Array> = {}

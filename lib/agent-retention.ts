@@ -14,7 +14,7 @@
  *
  * NOT covered, and not claimed: workspace content the agent wrote (docs, tasks, comments), run summary rows of
  * conversations that are still alive (status, token counts, cost: no conversation or file content), and
- * the web-search audit table.
+ * the web-search and web-fetch audit tables.
  *
  * Properties the cron relies on:
  *   - Idempotent and resumable. Every deleted row leaves the matched set, so a run that hits its time budget is

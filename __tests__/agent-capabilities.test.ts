@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { describeCapabilities, formatList, WEB_CAPABILITY_SENTENCE } from "@/lib/agent-capabilities"
+import { describeCapabilities, formatList, OPENCODE_WEB_CAPABILITY_SENTENCE, WEB_CAPABILITY_SENTENCE, webCapabilitySentence } from "@/lib/agent-capabilities"
 
 describe("describeCapabilities", () => {
   it("is the baseline sentence when nothing is connected", () => {
@@ -12,13 +12,13 @@ describe("describeCapabilities", () => {
     )
   })
 
-  it("does not tell the model the web is unavailable, since WebFetch is enabled", () => {
+  it("does not tell the model the web is unavailable, since web_fetch is enabled", () => {
     // Regression: the prompt listed "web" as unavailable, so the model refused
-    // "fetch https://example.com" without ever calling WebFetch.
+    // "fetch https://example.com" without ever calling web_fetch.
     for (const connectors of [[], [{ slug: "v0", displayName: "v0" }]]) {
       const sentence = describeCapabilities(connectors)
       expect(sentence).not.toMatch(/Unavailable capabilities include[^.]*\bweb\b/)
-      expect(sentence).toContain("WebFetch")
+      expect(sentence).toContain("web_fetch")
       expect(sentence).toContain("web_search")
     }
   })
@@ -64,9 +64,33 @@ describe("describeCapabilities web search", () => {
   it("advertises web_search instead of saying search is impossible", () => {
     const sentence = describeCapabilities([])
     expect(sentence).toContain("web_search")
-    expect(sentence).toContain("WebFetch")
+    expect(sentence).toContain("web_fetch")
     expect(sentence).not.toContain("cannot search the web")
     expect(sentence).toContain("untrusted")
     expect(sentence).not.toMatch(/Unavailable capabilities include[^.]*\bweb\b/)
+  })
+})
+
+describe("web capability sentence per harness", () => {
+  it("defaults to the Claude wording, which names web_fetch", () => {
+    expect(webCapabilitySentence()).toBe(WEB_CAPABILITY_SENTENCE)
+    expect(webCapabilitySentence("claude")).toContain("web_fetch")
+    expect(describeCapabilities([], "claude")).toBe(describeCapabilities([]))
+  })
+
+  it("never names web_fetch or WebFetch for opencode, which has no such tool", () => {
+    const text = describeCapabilities([], "opencode")
+    expect(webCapabilitySentence("opencode")).toBe(OPENCODE_WEB_CAPABILITY_SENTENCE)
+    expect(text).toContain("web_search")
+    expect(text).not.toContain("web_fetch")
+    expect(text).not.toContain("WebFetch")
+    expect(text).toContain("cannot open or read arbitrary URLs")
+  })
+
+  it("changes only the web sentence between harnesses", () => {
+    const strip = (text: string, sentence: string) => text.replace(sentence, "")
+    expect(strip(describeCapabilities([{ slug: "v0", displayName: "v0" }], "opencode"), OPENCODE_WEB_CAPABILITY_SENTENCE)).toBe(
+      strip(describeCapabilities([{ slug: "v0", displayName: "v0" }], "claude"), WEB_CAPABILITY_SENTENCE),
+    )
   })
 })

@@ -88,7 +88,7 @@ embed earlier turns) are deleted when their messages are, or when the most recen
 agent turn is a year old, and conversations left empty are removed. Disconnecting
 Google Drive does not delete stored run content before it reaches that age. Run
 summaries without conversation content (status, token counts, cost), web-search
-records and agent audit records are not covered by the job.
+and web-fetch records and agent audit records are not covered by the job.
 
 ## The client does not matter
 

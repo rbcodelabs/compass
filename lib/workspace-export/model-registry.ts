@@ -68,7 +68,7 @@ export const MODEL_BUCKETS: Readonly<Record<string, ExportBucket>> = Object.from
      DocOperation DocStorageObject ResearchParticipantVoiceEvent ResearchVoiceEvent
      ResearchVoiceCommand AgentRuntimeConfig AgentRuntimeSnapshot AgentRun AgentRunEvent AgentChildRun
      AgentInboxItem AgentScheduledWakeup AgentOrchestrator AgentConversationSupervision AgentOrchestratorWakeup AgentSession
-     AgentWebSearch AgentToolCall AgentAuditLog AgentConversationReview NowGateEvaluation
+     AgentWebSearch AgentWebFetch AgentToolCall AgentAuditLog AgentConversationReview NowGateEvaluation
      NowPolicyApplicationEvidence PortfolioCapacityOperation ReleaseDispatch WorkspaceActivationState
      ArtifactShareEvent`
   ),

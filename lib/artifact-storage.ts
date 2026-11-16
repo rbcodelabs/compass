@@ -3,7 +3,16 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises"
 import path from "node:path"
 
 export interface ArtifactStorage {
-  put(pathname: string, bytes: Uint8Array, contentType?: string): Promise<{ pathname: string }>
+  /**
+   * With `{ overwrite: false }` an existing object is left untouched and `created: false` is returned, so a caller
+   * can tell which objects it created itself (and so may later delete). `created` is only reported in that mode.
+   */
+  put(
+    pathname: string,
+    bytes: Uint8Array,
+    contentType?: string,
+    options?: { overwrite?: boolean },
+  ): Promise<{ pathname: string; created?: boolean }>
   get(pathname: string): Promise<Uint8Array | null>
   del(pathname: string): Promise<void>
 }
@@ -17,9 +26,18 @@ function localPath(pathname: string): string {
 }
 
 const localStorage: ArtifactStorage = {
-  async put(pathname, bytes) {
+  async put(pathname, bytes, _contentType, options) {
     const target = localPath(pathname)
     await mkdir(path.dirname(target), { recursive: true })
+    if (options?.overwrite === false) {
+      try {
+        await writeFile(target, bytes, { flag: "wx" })
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "EEXIST") return { pathname, created: false }
+        throw error
+      }
+      return { pathname, created: true }
+    }
     await writeFile(target, bytes)
     return { pathname }
   },
@@ -39,14 +57,21 @@ const localStorage: ArtifactStorage = {
 function createVercelBlobStorage(token: string | (() => string)): ArtifactStorage {
   const tokenOptions = () => ({ token: typeof token === "function" ? token() : token })
   return {
-    async put(pathname, bytes, contentType = "text/html; charset=utf-8") {
-      const result = await put(pathname, Buffer.from(bytes), {
-        access: "private",
-        contentType,
-        addRandomSuffix: false,
-        ...tokenOptions(),
-      })
-      return { pathname: result.pathname }
+    async put(pathname, bytes, contentType = "text/html; charset=utf-8", options) {
+      const noOverwrite = options?.overwrite === false
+      try {
+        const result = await put(pathname, Buffer.from(bytes), {
+          access: "private",
+          contentType,
+          addRandomSuffix: false,
+          ...(noOverwrite ? { allowOverwrite: false } : {}),
+          ...tokenOptions(),
+        })
+        return noOverwrite ? { pathname: result.pathname, created: true } : { pathname: result.pathname }
+      } catch (error) {
+        if (noOverwrite && /already exists/i.test((error as Error | null)?.message ?? "")) return { pathname, created: false }
+        throw error
+      }
     },
     async get(pathname) {
       const result = await get(pathname, { access: "private", useCache: false, ...tokenOptions() })

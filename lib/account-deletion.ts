@@ -47,7 +47,7 @@
  */
 import type { AppPrismaClient } from "@/lib/db"
 import { deleteInBatches, updateInBatches } from "@/lib/batched-delete"
-import { deleteRunsWhere, deleteWebSearchesWhere, purgeConversations, tolerateMissingTable } from "@/lib/agent-conversation-purge"
+import { deleteRunsWhere, deleteWebFetchesWhere, deleteWebSearchesWhere, purgeConversations, tolerateMissingTable } from "@/lib/agent-conversation-purge"
 import { deleteWorkspaceCascade } from "@/lib/delete-workspace-cascade"
 import { revokeAllConnectorGrants } from "@/lib/mcp-connectors/revoke-all"
 import { isOrgAdminRole, normalizeOrgRole, normalizeWorkspaceRole } from "@/lib/roles"
@@ -260,6 +260,7 @@ export async function deleteAccount(prisma: AppPrismaClient, userId: string, opt
   await deleteInBatches(prisma.agentAuditLog, { userId })
   await deleteInBatches(prisma.agentToolCall, { userId })
   await deleteWebSearchesWhere(prisma, { userId })
+  await deleteWebFetchesWhere(prisma, { userId })
   const personalAgents = (await prisma.agent.findMany({ where: { ownerUserId: userId }, select: { id: true } })).map((a) => a.id)
   if (personalAgents.length) {
     await prisma.agentWorkspaceGrant.deleteMany({ where: { agentId: { in: personalAgents } } })

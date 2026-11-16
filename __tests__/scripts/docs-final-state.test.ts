@@ -7,12 +7,12 @@
  * (@rbcodelabs/geode-headless/wiki) over a REAL temp folder and change it with plain
  * fs, exactly as the file tools do, never through the session API.
  */
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { openWikiSession, type WikiSession } from "@rbcodelabs/geode-headless/wiki"
-import { MAX_DOC_PATH_LENGTH, collectFinalDocState, isValidDocName } from "../../scripts/agent/docs-final-state"
+import { MAX_DOC_PATH_LENGTH, collectFinalDocState, isValidDocName, postDocsReconcile } from "../../scripts/agent/docs-final-state"
 
 let root: string
 
@@ -168,5 +168,56 @@ describe("isValidDocName", () => {
     expect(ok.length).toBeLessThanOrEqual(MAX_DOC_PATH_LENGTH)
     expect(isValidDocName(ok)).toBe(true)
     expect(isValidDocName(`${ok}/${"b".repeat(30)}`)).toBe(false)
+  })
+})
+
+describe("postDocsReconcile", () => {
+  const post = { url: "https://compass.test/api/internal/agent/runs/r/docs", init: { method: "POST" as const, headers: { authorization: "Bearer t" }, body: "{}" } }
+  const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } })
+  const run = (responses: Array<Response | Error>) => {
+    const queue = [...responses]
+    const fetcher = vi.fn(async () => {
+      const next = queue.shift()
+      if (!next) throw new Error("unexpected extra attempt")
+      if (next instanceof Error) throw next
+      return next
+    })
+    const sleep = vi.fn(async () => {})
+    return { fetcher, sleep, result: postDocsReconcile(post, { fetcher: fetcher as unknown as typeof fetch, sleep }) }
+  }
+
+  it("returns the notice on success without retrying", async () => {
+    const t = run([json(200, { applied: 1, notice: "ok notice" })])
+    expect(await t.result).toEqual({ kind: "ok", notice: "ok notice" })
+    expect(t.fetcher).toHaveBeenCalledTimes(1)
+    expect(t.sleep).not.toHaveBeenCalled()
+  })
+
+  it("retries a 5xx and a network error, then succeeds (the reconcile is idempotent per operation id)", async () => {
+    const t = run([json(503, {}), new Error("fetch failed"), json(200, { notice: null })])
+    expect(await t.result).toEqual({ kind: "ok", notice: null })
+    expect(t.fetcher).toHaveBeenCalledTimes(3)
+    expect(t.sleep).toHaveBeenCalledTimes(2)
+  })
+
+  it("gives up after three attempts and reports the last cause", async () => {
+    const t = run([json(500, {}), json(502, {}), json(504, {})])
+    const outcome = await t.result
+    expect(outcome).toMatchObject({ kind: "failed" })
+    expect((outcome as { detail: string }).detail).toContain("504")
+    expect((outcome as { detail: string }).detail).toContain("3 attempts")
+    expect(t.fetcher).toHaveBeenCalledTimes(3)
+  })
+
+  it("does not retry a 4xx, and names the read-only refusal specifically", async () => {
+    const readOnly = run([json(403, { error: "x", code: "AGENT_READ_ONLY" })])
+    expect(await readOnly.result).toEqual({ kind: "read-only" })
+    expect(readOnly.fetcher).toHaveBeenCalledTimes(1)
+    const forbidden = run([json(403, { code: "WORKSPACE_ACCESS_REVOKED" })])
+    expect(await forbidden.result).toEqual({ kind: "failed", detail: "docs reconciliation returned 403 (WORKSPACE_ACCESS_REVOKED)" })
+    expect(forbidden.fetcher).toHaveBeenCalledTimes(1)
+    const invalid = run([json(422, {})])
+    expect(await invalid.result).toMatchObject({ kind: "failed" })
+    expect(invalid.fetcher).toHaveBeenCalledTimes(1)
   })
 })

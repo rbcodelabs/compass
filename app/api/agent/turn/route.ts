@@ -60,7 +60,7 @@ import { agentMayUseOwnerConnectors, type AgentRecord } from "@/lib/agent-owners
 import { mintAgentMcpKey, revokeAgentMcpKey } from "@/lib/agent-mcp-key"
 import { readWorkspaceAgentRepos } from "@/lib/agent-github-repos"
 import { mintAgentGithubEnv } from "@/lib/github-app-token"
-import { agentEgressPolicy, developerNpmToken, githubShellEnabled } from "@/lib/agent-github-access"
+import { turnEgressPolicy, developerNpmToken, githubShellEnabled } from "@/lib/agent-github-access"
 import { getCapabilityPackArtifactStorage } from "@/lib/artifact-storage"
 import { prepareCapabilityPacksForTurn, type ActiveCapabilityPack } from "@/lib/capability-pack-runtime"
 import { claimInterviewProcessing, DEFAULT_INTERVIEW_CLAIM_LEASE_MS, finishInterviewProcessing, failPendingInterviewProcessing, reportPmAgentFailure } from "@/lib/pm-agent-service"
@@ -599,10 +599,10 @@ export async function POST(request: NextRequest) {
       // An agent-scoped key is honoured only while a live run names it, so the run must name it before the sandbox exists.
       if (runAgent && !(await attachAgentRunKey({ prisma, runId: run.id, apiKeyId }))) throw new Error("agent run ended before its key could be attached")
       const githubEnv = await mintAgentGithubEnv(await readWorkspaceAgentRepos(prisma, workspaceId))
-      // Bash + GitHub only when the docs tree will be materialized (same condition as docMaterial below). It comes with an
-      // egress allowlist set at creation, so there is never a moment where the shell can run with open egress.
+      // Bash + GitHub only when the docs tree will be materialized (same condition as docMaterial below). Every sandbox, shell or not, is created with a deny-by-default
+      // egress allowlist, so there is never a moment where the agent can run with open egress.
       const githubShell = githubShellEnabled({ githubEnv, harness, docs: !scope && harness !== "opencode" })
-      const networkPolicy = githubShell ? agentEgressPolicy({ mcpBaseUrl, model: resolved?.ok ? resolved : undefined, developer: developer.enabled }) : undefined
+      const networkPolicy = turnEgressPolicy({ mcpBaseUrl, model: resolved?.ok ? resolved : undefined, githubShell, developer: developer.enabled, opencode: harness === "opencode" })
       // Interactive chat turns of the claude harness share one sandbox per conversation (kill switch AGENT_SANDBOX_REUSE=0).
       // Everything else keeps its own sandbox named for the run. DEVELOPER-class agents reuse too (their clones and
       // node_modules are the point), but under their own name so a persisted disk is never resumed under a different class
@@ -631,7 +631,7 @@ export async function POST(request: NextRequest) {
           previous,
           requiredMs,
           // A cold boot also has to outlive the idle window the next turn may reuse it in.
-          boot: { timeoutMs: requiredMs + AGENT_SANDBOX_IDLE_MS, tags: { runId: run.id, workspaceId, snapshotId, profile }, ...(networkPolicy ? { networkPolicy } : {}) },
+          boot: { timeoutMs: requiredMs + AGENT_SANDBOX_IDLE_MS, tags: { runId: run.id, workspaceId, snapshotId, profile }, networkPolicy },
         })
         sandbox = acquired.sandbox
       }
@@ -749,7 +749,7 @@ export async function POST(request: NextRequest) {
         packProvenance = preparedPacks.provenanceJson
         sse("status", { phase: "booting", conversationId: conversationIdResolved })
         const githubShell = githubShellEnabled({ githubEnv, harness, docs: !scope && harness !== "opencode" })
-        sandbox = await analysisStep(() => bootSandboxFromSnapshot(snapshotId, githubShell ? { networkPolicy: agentEgressPolicy({ mcpBaseUrl, model: resolved?.ok ? resolved : undefined, developer: developer.enabled }) } : undefined), deadline, abort, async late => { await analysisStep(() => late.stop(), Date.now() + 5_000, new AbortController()) })
+        sandbox = await analysisStep(() => bootSandboxFromSnapshot(snapshotId, { networkPolicy: turnEgressPolicy({ mcpBaseUrl, model: resolved?.ok ? resolved : undefined, githubShell, developer: developer.enabled, opencode: harness === "opencode" }) }), deadline, abort, async late => { await analysisStep(() => late.stop(), Date.now() + 5_000, new AbortController()) })
 
         // ADR 0019 §2.4: read the doc tree's current state BEFORE writing
         // anything into the sandbox, so the baseline this turn reconciles

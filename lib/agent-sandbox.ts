@@ -532,7 +532,7 @@ export async function acquireConversationSandbox(opts: {
   profile: string
   previous: PreviousRunState | null
   requiredMs: number
-  boot: { timeoutMs: number; tags: Record<string, string>; networkPolicy?: NetworkPolicy }
+  boot: { timeoutMs: number; tags: Record<string, string>; networkPolicy: NetworkPolicy }
 }): Promise<ConversationSandboxResult> {
   let existing: SandboxHandle | null = null
   let lookupFailed = false
@@ -565,11 +565,17 @@ export async function acquireConversationSandbox(opts: {
       if (existing.status === "running") await existing.stop().catch(() => {})
       try {
         sandbox = await provider.getByName(opts.name) // resume
-        await sandbox.updateNetworkPolicy(opts.boot.networkPolicy ?? "allow-all")
+        await sandbox.updateNetworkPolicy(opts.boot.networkPolicy)
       } catch (error) {
         if (!isSnapshotGone(error)) throw error
         snapshotGone = true
       }
+    }
+    if (decision.action === "warm") {
+      // The profile tag is written once, at creation, while a resume re-applies the policy without touching the tag. So a tag match does
+      // not prove the policy now in force is this turn's (shell-on, shell-off, shell-on within the idle window would match the creation tag
+      // on the third turn while the second turn's narrower policy is still applied). Re-apply on every reuse; a failure fails the turn.
+      await sandbox.updateNetworkPolicy(opts.boot.networkPolicy)
     }
     if (snapshotGone) {
       // Unrecoverable: free the name and fall through to a fresh boot rather than failing every future turn of this chat.
@@ -593,7 +599,7 @@ export async function acquireConversationSandbox(opts: {
     tags: opts.boot.tags,
     persistent: true,
     snapshotExpirationMs: AGENT_SANDBOX_RETENTION_MS,
-    ...(opts.boot.networkPolicy ? { networkPolicy: opts.boot.networkPolicy } : {}),
+    networkPolicy: opts.boot.networkPolicy,
   })
   return { sandbox, reused: false, reason: decision.reason }
 }

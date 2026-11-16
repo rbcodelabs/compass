@@ -145,13 +145,16 @@ function fakeSandbox(over: Record<string, unknown> = {}) {
   }
 }
 
+// Every turn carries a policy; acquire has no open-egress fallback.
+const DEFAULT_POLICY = { allow: ["compass.test", "api.anthropic.com"], denySubnets: ["10.0.0.0/8"] }
+
 const acquireOpts = () => ({
   name: NAME,
   snapshotId: SNAP,
   profile: PROFILE,
   previous: clean({ finishedAt: new Date(Date.now() - 60_000) }),
   requiredMs: 22 * 60_000,
-  boot: { timeoutMs: 27 * 60_000, tags: { runId: "r-2", workspaceId: "ws-1", snapshotId: SNAP, profile: PROFILE } },
+  boot: { timeoutMs: 27 * 60_000, tags: { runId: "r-2", workspaceId: "ws-1", snapshotId: SNAP, profile: PROFILE }, networkPolicy: DEFAULT_POLICY },
 })
 
 describe("acquireConversationSandbox", () => {
@@ -160,7 +163,7 @@ describe("acquireConversationSandbox", () => {
     vi.spyOn(console, "warn").mockImplementation(() => {})
   })
 
-  it("uses a warm sandbox as is: no create, no stop, no policy change, per-turn files wiped with sudo", async () => {
+  it("uses a warm sandbox without recreating or stopping it, re-applies this turn's policy, and wipes per-turn files with sudo", async () => {
     const existing = fakeSandbox()
     sdk.get.mockResolvedValue(existing)
     const result = await acquireConversationSandbox(acquireOpts())
@@ -169,10 +172,47 @@ describe("acquireConversationSandbox", () => {
     expect(sdk.get).toHaveBeenCalledWith({ name: NAME, resume: false })
     expect(sdk.create).not.toHaveBeenCalled()
     expect(existing.stop).not.toHaveBeenCalled()
-    expect(existing.updateNetworkPolicy).not.toHaveBeenCalled()
+    expect(existing.updateNetworkPolicy).toHaveBeenCalledTimes(1)
+    expect(existing.updateNetworkPolicy).toHaveBeenCalledWith({ allow: DEFAULT_POLICY.allow, subnets: { deny: DEFAULT_POLICY.denySubnets } })
+    expect(existing.updateNetworkPolicy.mock.invocationCallOrder[0]).toBeLessThan(existing.runCommand.mock.invocationCallOrder[0])
     const cleanup = existing.runCommand.mock.calls[0][0]
     expect(cleanup).toMatchObject({ cmd: "bash", sudo: true })
     expect(cleanup.args[1]).toContain("/vercel/sandbox/docs")
+  })
+
+  it("fails the turn (and does not touch the sandbox further) when the policy cannot be re-applied to a warm sandbox", async () => {
+    const existing = fakeSandbox()
+    existing.updateNetworkPolicy.mockRejectedValue(new Error("policy api down"))
+    sdk.get.mockResolvedValue(existing)
+    await expect(acquireConversationSandbox(acquireOpts())).rejects.toThrow("policy api down")
+    expect(existing.runCommand).not.toHaveBeenCalled()
+    expect(existing.delete).not.toHaveBeenCalled()
+  })
+
+  it("applies the turn's own policy on every reuse: shell-on, shell-off, shell-on within the idle window (the creation tag goes stale)", async () => {
+    const shellOn = { allow: ["compass.test", "api.anthropic.com", "github.com"], denySubnets: ["10.0.0.0/8"] }
+    const shellOff = { allow: ["compass.test", "api.anthropic.com"], denySubnets: ["10.0.0.0/8"] }
+    const profileOf = (policy: unknown) => sandboxNetworkProfile(policy)
+    // One persistent sandbox. Its tag is whatever it was created with and is never rewritten, as on the platform.
+    const applied: unknown[] = []
+    const box = fakeSandbox({ tags: { snapshotId: SNAP, profile: profileOf(shellOn) } })
+    box.updateNetworkPolicy.mockImplementation(async (policy: unknown) => { applied.push(policy) })
+    box.stop.mockImplementation(async () => { box.status = "stopped" })
+    sdk.get.mockImplementation(async (arg: { resume?: boolean }) => {
+      if (arg.resume !== false) box.status = "running"
+      return box
+    })
+    const turn = (policy: typeof shellOn) => acquireConversationSandbox({ ...acquireOpts(), profile: profileOf(policy), boot: { ...acquireOpts().boot, networkPolicy: policy } })
+    const wire = (policy: typeof shellOn) => ({ allow: policy.allow, subnets: { deny: policy.denySubnets } })
+
+    expect((await turn(shellOn)).reason).toBe("hit")
+    expect(applied.at(-1)).toEqual(wire(shellOn))
+    expect((await turn(shellOff)).reason).toBe("policy-mismatch")
+    expect(applied.at(-1)).toEqual(wire(shellOff))
+    // Third turn: the creation tag matches shell-on again and the last run was clean, so this is the warm path, and it must NOT keep shell-off.
+    expect((await turn(shellOn)).reason).toBe("hit")
+    expect(applied.at(-1)).toEqual(wire(shellOn))
+    expect(applied).toHaveLength(3)
   })
 
   it("extends the platform timeout when the remaining time is shorter than the turn needs", async () => {
@@ -232,11 +272,13 @@ describe("acquireConversationSandbox", () => {
     expect(resumed.extendTimeout).toHaveBeenCalledTimes(1)
   })
 
-  it("resets egress to allow-all on resume when the turn wants no restriction", async () => {
+  it("never opens egress on resume: a shell-off turn re-applies its restrictive policy, not allow-all", async () => {
     const resumed = fakeSandbox()
     sdk.get.mockResolvedValueOnce(fakeSandbox({ status: "stopped" })).mockResolvedValueOnce(resumed)
     await acquireConversationSandbox(acquireOpts())
-    expect(resumed.updateNetworkPolicy).toHaveBeenCalledWith("allow-all")
+    expect(resumed.updateNetworkPolicy).toHaveBeenCalledTimes(1)
+    expect(resumed.updateNetworkPolicy).toHaveBeenCalledWith({ allow: DEFAULT_POLICY.allow, subnets: { deny: DEFAULT_POLICY.denySubnets } })
+    expect(resumed.updateNetworkPolicy).not.toHaveBeenCalledWith("allow-all")
   })
 
   it("pauses (stop, never delete) a running sandbox it cannot trust, then resumes it with its disk", async () => {

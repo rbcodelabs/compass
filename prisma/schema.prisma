@@ -3020,6 +3020,31 @@ model AgentWebSearch {
   @@map("agent_web_searches")
 }
 
+/// One row per `web_fetch` attempt the agent made, written by the Compass-hosted tool and never by the
+/// sandbox. The composite key (credentialId = the 5-minute AGENT_TURN credential, seq) is the per-turn attempt
+/// ceiling: an attempt claims the next seq by inserting it, so two racing attempts cannot both take one slot.
+/// `status` is what the fetch budget reads: only STARTED and SUCCEEDED rows spend it; BLOCKED (refused by URL
+/// policy) and FAILED rows are audit only. Stores the URL (credentials stripped), the final URL, HTTP status,
+/// byte count and an outcome code; never page content or response headers.
+model AgentWebFetch {
+  credentialId   String    @map("credential_id") @db.Uuid
+  seq            Int
+  userId         String    @map("user_id") @db.Uuid
+  workspaceId    String    @map("workspace_id") @db.Uuid
+  conversationId String?   @map("conversation_id") @db.Uuid
+  url            String    @db.VarChar(2048)
+  finalUrl       String?   @map("final_url") @db.VarChar(2048)
+  status         String    @default("STARTED") @db.VarChar(20)
+  outcome        String?   @db.VarChar(40)
+  httpStatus     Int?      @map("http_status")
+  bytes          Int       @default(0)
+  createdAt      DateTime  @default(now()) @map("created_at")
+  finishedAt     DateTime? @map("finished_at")
+
+  @@id([credentialId, seq])
+  @@map("agent_web_fetches")
+}
+
 /// One durable, detachable agent turn. The sandbox owns execution and
 /// reports back over an authenticated callback; this row owns the *lifecycle*
 /// (status, lease, deadline, cleanup handles) so a turn survives the browser

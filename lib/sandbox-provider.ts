@@ -11,7 +11,14 @@
  * two strings are the endpoints. Providers that cannot express a policy natively enforce it
  * another way (for example a network namespace behind an allowlist proxy), or refuse to boot when asked for one they cannot enforce.
  */
-export type NetworkPolicy = "allow-all" | "deny-all" | { allow: string[] }
+export type NetworkPolicy =
+  | "allow-all"
+  | "deny-all"
+  | {
+      allow: string[]
+      /** CIDRs that stay unreachable even if an allowed hostname resolves into them (link-local metadata addresses, private ranges). */
+      denySubnets?: string[]
+    }
 
 /** One line of a command's output. */
 export type LogLine = { stream: "stdout" | "stderr"; data: string }

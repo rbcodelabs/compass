@@ -372,7 +372,7 @@ describe("deleteAccount", () => {
 
   it("tolerates tables that are not migrated on this deployment", async () => {
     const { prisma, rows } = createFakePrisma(seed(), {
-      missingTables: ["follow", "notification", "mcpConnectorGrant", "mcpConnectorAuthRequest", "agentSession", "agentRun", "agentRunEvent", "agentWebSearch", "agentConversationParticipant", "agentConversationReview", "savedView", "workspaceUpdatesReadState", "embedVisitorSession", "embedAuthHandoff", "oAuthToken", "oAuthConsent", "oAuthAuthorizationCode", "oAuthAuthorizationEvent"],
+      missingTables: ["follow", "notification", "mcpConnectorGrant", "mcpConnectorAuthRequest", "agentSession", "agentRun", "agentRunEvent", "agentWebSearch", "agentWebFetch", "agentConversationParticipant", "agentConversationReview", "savedView", "workspaceUpdatesReadState", "embedVisitorSession", "embedAuthHandoff", "oAuthToken", "oAuthConsent", "oAuthAuthorizationCode", "oAuthAuthorizationEvent"],
     })
     const result = await deleteAccount(prisma, ME, { fetchImpl: okFetch() })
     expect(result.ok).toBe(true)
@@ -415,6 +415,17 @@ describe("deleteAccount", () => {
     const messageDeletes = calls.filter((c) => c.model === "agentMessage" && c.op === "deleteMany" && (c.where as { id?: { in: string[] } })?.id)
     expect(messageDeletes.length).toBeGreaterThanOrEqual(3)
     for (const call of messageDeletes) expect((call.where as { id: { in: string[] } }).id.in.length).toBeLessThanOrEqual(500)
+  })
+
+  it("deletes web-fetch audit rows (they hold the URLs the agent read) in bounded pages too", async () => {
+    const fetches = Array.from({ length: 1_100 }, (_, i) => ({ credentialId: `cred-${i}`, seq: 1, userId: ME, conversationId: null }))
+    const others = [{ credentialId: "cred-other", seq: 1, userId: OTHER, conversationId: null }]
+    const { prisma, calls, rows } = createFakePrisma(seed({ agentWebFetch: [...fetches, ...others] }))
+    await deleteAccount(prisma, ME, { fetchImpl: okFetch() })
+    expect(rows("agentWebFetch")).toEqual(others)
+    const fetchDeletes = calls.filter((c) => c.model === "agentWebFetch" && c.op === "deleteMany" && (c.where as { OR?: unknown[] })?.OR)
+    expect(fetchDeletes.length).toBeGreaterThanOrEqual(3)
+    for (const call of fetchDeletes) expect((call.where as { OR: unknown[] }).OR.length).toBeLessThanOrEqual(500)
   })
 
   it("deletes web-search, OAuth and consent rows in bounded pages too", async () => {

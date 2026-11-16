@@ -85,7 +85,7 @@ import {
   createWebFetchPreToolUseHook,
   DOCS_GUARDED_TOOLS_MATCHER,
   scrubbedAgentEnv,
-  WEB_FETCH_MATCHER,
+  WEB_FETCH_TOOL_MATCHER,
   WEB_SEARCH_MATCHER,
 } from "./docs-path-guard.ts"
 import {
@@ -97,7 +97,7 @@ import {
   REPOS_DIR,
   SHELL_UNAVAILABLE_NOTICE,
 } from "./github-access.ts"
-import { collectFinalDocState, isValidDocName, type CollectedDocState } from "./docs-final-state.ts"
+import { collectFinalDocState, isValidDocName, postDocsReconcile, type CollectedDocState } from "./docs-final-state.ts"
 import { DEFAULT_HEARTBEAT_MS, RunReporter } from "./run-reporter.ts"
 import { askUserQuestionsInRun } from "./interactive-questions.ts"
 import { createHash, randomUUID } from "node:crypto"
@@ -536,6 +536,7 @@ function buildDocsFsServer(session: WikiSession, deletedByAgent: Set<string>) {
 
 const DOC_MANIFEST_PATH = "docs-manifest.json"
 const DOCS_REREAD_FAILED_NOTICE = "(My working copy of the docs could not be re-read at the end of this turn, so none of my doc edits were saved. Please check the affected docs and ask me to redo them.)"
+const DOCS_READ_ONLY_NOTICE = "(This agent only has read access to this workspace, so none of its doc edits were saved. Ask a workspace admin to give it write access, then ask me to redo them.)"
 const DOCS_SAVE_FAILED_NOTICE = "(Some doc changes from this turn may not have saved -- please check the affected docs.)"
 
 /**
@@ -596,14 +597,16 @@ async function reportDocState(session: WikiSession, baseUrl: string, finalText: 
         : { path: file.path, frontmatterDocId: id, content: file.content }
     })
     const url = new URL(`/api/internal/agent/runs/${AGENT_RUN_ID}/docs`, baseUrl).toString()
-    const response = await fetch(url, {
-      method: "POST",
-      headers: { ...runCallbackHeaders, "content-type": "application/json" },
-      body: JSON.stringify({ manifest, files: payloadFiles, incomplete, deletedPaths }),
+    const outcome = await postDocsReconcile({
+      url,
+      init: { method: "POST", headers: { ...runCallbackHeaders, "content-type": "application/json" }, body: JSON.stringify({ manifest, files: payloadFiles, incomplete, deletedPaths }) },
     })
-    if (!response.ok) throw new Error(`docs reconciliation returned ${response.status}`)
-    const result = (await response.json()) as { notice?: string | null }
-    return withNotice(result.notice ? `${finalText}\n\n${result.notice}` : finalText)
+    if (outcome.kind === "read-only") {
+      note("doc reconciliation refused: the agent has read-only access to the workspace")
+      return withNotice(`${finalText}\n\n${DOCS_READ_ONLY_NOTICE}`)
+    }
+    if (outcome.kind === "failed") throw new Error(outcome.detail)
+    return withNotice(outcome.notice ? `${finalText}\n\n${outcome.notice}` : finalText)
   } catch (error) {
     note(`doc reconciliation failed: ${error instanceof Error ? error.message : String(error)}`)
     return withNotice(`${finalText}\n\n${DOCS_SAVE_FAILED_NOTICE}`)
@@ -720,6 +723,14 @@ async function main(): Promise<void> {
     url: new URL("/api/agent/web-search/mcp", baseUrl).toString(),
     headers,
   }
+  // Compass-hosted page reader. It replaces the SDK's built-in WebFetch, which runs inside the sandbox and so
+  // cannot reach arbitrary hosts under the deny-by-default egress policy. The sandbox only talks to the Compass
+  // origin; the fetch (and its SSRF controls) runs server-side. Same bearer, no new credential.
+  mcpServers.web_fetch = {
+    type: "http",
+    url: new URL("/api/agent/web-fetch/mcp", baseUrl).toString(),
+    headers,
+  }
   const connectors = parseConnectors(AGENT_MCP_CONNECTORS)
   const connectorToolPrefixes: string[] = []
   const connectorGuidance: string[] = []
@@ -769,11 +780,10 @@ async function main(): Promise<void> {
     // Skill bodies and supported text assets are compiled into systemPrompt
     // by the host. SDK 0.3.224 does not provide Skill/Read with tools: [].
     //
-    // WebFetch is the one built-in admitted: it lets the agent read a URL the
-    // user names or a page it already knows about, instead of reporting that it
-    // has no web access. Search is not a built-in: it is the Compass-hosted
-    // web_search MCP tool registered above. Fetched content and search results
-    // are untrusted input: treat them as data, never instructions.
+    // No web built-in is admitted. Reading a URL and searching are the Compass-hosted web_fetch and
+    // web_search MCP tools registered above (the SDK's own WebFetch would run inside the sandbox, whose
+    // egress is deny-by-default, so it is also in disallowedTools below). Fetched content and search
+    // results are untrusted input: treat them as data, never instructions.
     //
     // ADR 0019 §2.2: with docs materialized, `tools` is also the real gate on file
     // access -- `allowedTools` does nothing under `permissionMode: "bypassPermissions"`
@@ -789,23 +799,29 @@ async function main(): Promise<void> {
     // this process). The hook denies any path that does not resolve, symlinks
     // included, to a location inside the docs directory. See docs-path-guard.ts.
     //
-    // WebFetch is the one way left to move data off the box with the file tools
+    // Fetching a URL is the one way left to move data off the box with the file tools
     // confined, so it too is restricted when docs are materialized: only URLs the
     // user wrote (or the replayed history holds) and URLs web_search returned this
-    // turn, matched exactly. See the WebFetch section of docs-path-guard.ts.
-    ...(docsSession && docsRoot
-      ? {
-          hooks: {
-            PreToolUse: [
+    // turn, matched exactly. See the web_fetch section of docs-path-guard.ts.
+    //
+    // The URL guard is installed on EVERY run, with or without a docs tree: a run with no
+    // materialized docs (claim-scoped handoffs) can still fetch, so it gets the same exact-match
+    // allowlist (empty when the user wrote no URL and no search ran). The allowlist gates the Compass-hosted
+    // web_fetch tool; the SDK built-in WebFetch is not offered at all (disallowedTools below). Only web_search
+    // results extend it, never web_fetch results.
+    hooks: {
+      PreToolUse: [
+        ...(docsSession && docsRoot
+          ? [
               // The cloned-repo workdir is readable (never writable) by the native file tools.
               { matcher: DOCS_GUARDED_TOOLS_MATCHER, hooks: [createDocsPreToolUseHook(docsRoot, { readOnlyRoots: [...(githubShell ? [REPOS_DIR] : []), resolvePath(docsRoot, "..", "uploads")] })] },
-              { matcher: WEB_FETCH_MATCHER, hooks: [createWebFetchPreToolUseHook(allowedFetchUrls)] },
               ...(githubShell ? [{ matcher: BASH_MATCHER, hooks: [createBashPreToolUseHook(process.env)] }] : []),
-            ],
-            PostToolUse: [{ matcher: WEB_SEARCH_MATCHER, hooks: [createSearchResultCollector(allowedFetchUrls)] }],
-          },
-        }
-      : {}),
+            ]
+          : []),
+        { matcher: WEB_FETCH_TOOL_MATCHER, hooks: [createWebFetchPreToolUseHook(allowedFetchUrls)] },
+      ],
+      PostToolUse: [{ matcher: WEB_SEARCH_MATCHER, hooks: [createSearchResultCollector(allowedFetchUrls)] }],
+    },
     // The model-facing CLI process does not need this script's own credentials
     // (the run callback token and the MCP bearer are used in-process only), so it
     // does not inherit them.
@@ -817,9 +833,9 @@ async function main(): Promise<void> {
     // real security boundary is the disposable sandbox + per-user MCP auth.
     allowedTools: [
       "mcp__compass",
-      "WebFetch",
       ...PLANNING_TOOLS,
       "mcp__web_search",
+      "mcp__web_fetch",
       ...(runCallbackHeaders ? [`mcp__${SHOW_IMAGE_SERVER}`] : []),
       ...(docsSession ? ["mcp__docsfs", "Read", "Write", "Edit", "Glob"] : []),
       ...(githubShell ? ["Bash"] : []),
@@ -838,6 +854,8 @@ async function main(): Promise<void> {
       // The SDK's own task, question, and wakeup tools would duplicate (and not persist like) the Compass-backed MCP tools. (Keep any glob character out of this list's comments: agent-turn-entry-policy.test.ts scans from "allowedTools: [" for one.)
       "TaskCreate", "TaskUpdate", "TaskList", "TaskGet", "TodoWrite",
       "AskUserQuestion", "ScheduleWakeup",
+      // The SDK's own page reader runs inside the sandbox, where egress is deny-by-default; web_fetch (Compass-hosted) replaces it.
+      "WebFetch",
       "mcp__compass__delete_assumption",
       "mcp__compass__delete_solution_comment",
       ...(docsSession ? ["mcp__compass__write_doc", "mcp__compass__delete_doc", "mcp__compass__move_doc"] : []),

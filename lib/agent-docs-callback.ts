@@ -20,6 +20,7 @@ import { AgentRunError, authorizeAgentRunWorker } from "@/lib/agent-runs"
 import { verifyDocManifest } from "@/lib/agent-doc-manifest"
 import { MAX_FINAL_FILES, reconcileAgentDocs, type DocFinalFile } from "@/lib/agent-doc-reconciliation"
 import { validateDocPath } from "@/lib/doc-path"
+import { runAgentMayWrite } from "@/lib/agent-run-identity"
 
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i
 const sha256Hex = /^[a-f0-9]{64}$/i
@@ -109,6 +110,12 @@ export async function handleAgentDocsReconcile(request: Request, runId: string, 
       select: { id: true },
     })
     if (!member) return respond({ error: "Workspace access was revoked", code: "WORKSPACE_ACCESS_REVOKED" }, 403)
+
+    // A named agent is bounded by its own grant, not just the invoker's membership: READ lets it run and read, but applying its
+    // file edits is a write. Refused here, before anything is applied. A lookup error propagates to the 500 handler (fail closed).
+    if (!(await runAgentMayWrite(prisma, run))) {
+      return respond({ error: "This agent only has read access to the workspace, so its document changes were not saved", code: "AGENT_READ_ONLY" }, 403)
+    }
 
     let parsed: unknown
     try {

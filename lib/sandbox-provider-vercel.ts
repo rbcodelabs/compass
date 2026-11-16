@@ -84,7 +84,7 @@ class VercelSandboxHandle implements SandboxHandle {
   }
 
   async updateNetworkPolicy(policy: NetworkPolicy): Promise<void> {
-    await this.sandbox.updateNetworkPolicy(policy)
+    await this.sandbox.updateNetworkPolicy(toVercelNetworkPolicy(policy))
   }
 
   async stop(opts?: { signal?: AbortSignal }): Promise<void> {
@@ -106,6 +106,12 @@ export function wrapVercelSandbox(sandbox: Sandbox): SandboxHandle {
   return new VercelSandboxHandle(sandbox)
 }
 
+/** Compass's policy to the SDK's: `denySubnets` becomes the platform's `subnets.deny`, which takes precedence over the host allowlist. */
+export function toVercelNetworkPolicy(policy: NetworkPolicy): Parameters<Sandbox["updateNetworkPolicy"]>[0] {
+  if (typeof policy === "string") return policy
+  return { allow: policy.allow, ...(policy.denySubnets?.length ? { subnets: { deny: policy.denySubnets } } : {}) }
+}
+
 export const vercelSandboxProvider: SandboxProvider = {
   id: "vercel",
 
@@ -113,8 +119,8 @@ export const vercelSandboxProvider: SandboxProvider = {
     const sandbox = await Sandbox.create({
       source: { type: "snapshot", snapshotId: opts.snapshotId },
       timeout: opts.timeoutMs,
-      // Omitted = the platform default (full egress). Set only for shell-enabled turns (lib/agent-github-access.ts).
-      ...(opts.networkPolicy ? { networkPolicy: opts.networkPolicy } : {}),
+      // Agent runs always pass a policy (lib/agent-github-access.ts); omitted = the platform default (full egress).
+      ...(opts.networkPolicy ? { networkPolicy: toVercelNetworkPolicy(opts.networkPolicy) } : {}),
       ...(opts.name ? { name: opts.name } : {}),
       ...(opts.tags ? { tags: opts.tags } : {}),
       ...(opts.persistent !== undefined ? { persistent: opts.persistent } : {}),

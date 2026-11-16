@@ -7,7 +7,7 @@
 import { describe, expect, it } from "vitest"
 import { buildAgentEnv } from "@/lib/agent-run-sandbox"
 import { resolveAgentModel } from "@/lib/agent-model"
-import { agentEgressPolicy, githubShellEnabled, githubShellPrompt, githubSandboxEnv } from "@/lib/agent-github-access"
+import { agentEgressPolicy, turnEgressPolicy, githubShellEnabled, githubShellPrompt, githubSandboxEnv } from "@/lib/agent-github-access"
 
 const base = { connectors: [], mcpBaseUrl: "https://compass.test", mcpToken: "t", prompt: "hi", workspaceId: "ws-1", systemPromptAppendices: [], pluginPaths: [], skillIds: [] }
 const anthropic = (() => {
@@ -103,18 +103,53 @@ describe("agentEgressPolicy", () => {
   it("is an allowlist of GitHub, the Compass origin and the model provider only", () => {
     expect(agentEgressPolicy({ mcpBaseUrl: "https://compass.rbcodelabs.com", model: anthropic })).toEqual({
       allow: ["github.com", "api.github.com", "codeload.github.com", "compass.rbcodelabs.com", "api.anthropic.com"],
+      denySubnets: ["169.254.0.0/16", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10", "0.0.0.0/8"],
     })
   })
 
   it("uses the Bedrock runtime host of the configured region instead of the Anthropic API", () => {
     const policy = agentEgressPolicy({ mcpBaseUrl: "https://x.vercel.app", model: bedrock })
-    expect(policy).toEqual({ allow: ["github.com", "api.github.com", "codeload.github.com", "x.vercel.app", "bedrock-runtime.eu-west-1.amazonaws.com"] })
+    expect(policy).toEqual({ allow: ["github.com", "api.github.com", "codeload.github.com", "x.vercel.app", "bedrock-runtime.eu-west-1.amazonaws.com"], denySubnets: expect.any(Array) })
   })
 
-  it("never allows everything: no wildcard, no subnets", () => {
+  it("never allows everything: no wildcard, and private ranges are denied", () => {
     const policy = agentEgressPolicy({ mcpBaseUrl: "https://compass.test", model: anthropic })
     expect(policy).not.toBe("allow-all")
     expect(JSON.stringify(policy)).not.toContain("*")
-    expect(JSON.stringify(policy)).not.toContain("subnets")
+    expect((policy as { denySubnets: string[] }).denySubnets).toContain("169.254.0.0/16")
+  })
+})
+
+describe("turnEgressPolicy", () => {
+  it("restricts a run with the shell off: Compass and the model only, no GitHub or package hosts", () => {
+    const policy = turnEgressPolicy({ mcpBaseUrl: "https://compass.test", model: anthropic, githubShell: false, developer: true }) as { allow: string[]; denySubnets: string[] }
+    expect(policy.allow).toEqual(["compass.test", "api.anthropic.com"])
+    expect(policy.denySubnets).toContain("10.0.0.0/8")
+  })
+
+  it("adds GitHub when the shell is on, and the AI Gateway instead of a Claude host for opencode", () => {
+    expect((turnEgressPolicy({ mcpBaseUrl: "https://compass.test", model: anthropic, githubShell: true }) as { allow: string[] }).allow).toContain("github.com")
+    const oc = turnEgressPolicy({ mcpBaseUrl: "https://compass.test", githubShell: false, opencode: true }) as { allow: string[] }
+    expect(oc.allow).toEqual(["compass.test", "ai-gateway.vercel.sh"])
+  })
+})
+
+describe("model-facing wording after the built-in WebFetch was removed", () => {
+  it("the shell prompts never tell the model it can use WebFetch", () => {
+    for (const developer of [false, true]) expect(githubShellPrompt(["rbcodelabs/compass"], developer)).not.toMatch(/WebFetch/)
+  })
+})
+
+describe("egress hardening that needs no real sandbox", () => {
+  it("denies carrier-grade NAT and this-network ranges, and lists no IPv6 range (platform acceptance is unverified)", () => {
+    const deny = (agentEgressPolicy({ mcpBaseUrl: "https://compass.test", model: anthropic }) as { denySubnets: string[] }).denySubnets
+    expect(deny).toEqual(expect.arrayContaining(["100.64.0.0/10", "0.0.0.0/8"]))
+    expect(deny.filter((cidr) => cidr.includes(":"))).toEqual([])
+  })
+
+  it("the Claude harness sandbox env turns off the CLI's non-essential traffic, and the opencode one does not carry the flag", () => {
+    const claude = buildAgentEnv({ ...base, harness: "claude", model: anthropic })
+    expect(claude.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC).toBe("1")
+    expect(buildAgentEnv({ ...base, harness: "opencode", gatewayApiKey: "gw" })).not.toHaveProperty("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC")
   })
 })

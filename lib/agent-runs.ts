@@ -444,6 +444,7 @@ const AGENT_RUN_AUTH_SELECT = {
   conversationId: true,
   workspaceId: true,
   userId: true,
+  agentId: true,
   status: true,
   kind: true,
   claimId: true,

@@ -20,7 +20,7 @@ vi.mock("@vercel/sandbox", () => ({
   Snapshot: { get: sdk.snapshotGet },
 }))
 
-import { vercelSandboxProvider, wrapVercelSandbox } from "@/lib/sandbox-provider-vercel"
+import { toVercelNetworkPolicy, vercelSandboxProvider, wrapVercelSandbox } from "@/lib/sandbox-provider-vercel"
 
 function fakeCommand(over: Record<string, unknown> = {}) {
   return {
@@ -185,5 +185,13 @@ describe("vercelSandboxProvider", () => {
     expect(vercelSandboxProvider.isNotFound(new sdk.APIError(410))).toBe(false)
     expect(vercelSandboxProvider.isSnapshotGone(new sdk.APIError(410))).toBe(true)
     expect(vercelSandboxProvider.isSnapshotGone(new Error("410"))).toBe(false)
+  })
+})
+
+describe("toVercelNetworkPolicy", () => {
+  it("passes the string policies through and maps denySubnets to subnets.deny", () => {
+    expect(toVercelNetworkPolicy("deny-all")).toBe("deny-all")
+    expect(toVercelNetworkPolicy({ allow: ["h"] })).toEqual({ allow: ["h"] })
+    expect(toVercelNetworkPolicy({ allow: ["h"], denySubnets: ["10.0.0.0/8"] })).toEqual({ allow: ["h"], subnets: { deny: ["10.0.0.0/8"] } })
   })
 })

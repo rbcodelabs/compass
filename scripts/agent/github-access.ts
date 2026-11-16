@@ -52,8 +52,9 @@ export function githubAccessFromEnv(env: Env, docsRoot: string | undefined): Git
 
 /** The SDK `tools` list: the real gate on what the agent may call (allowedTools gates nothing under bypassPermissions). */
 export function agentTools(docs: boolean, shell: boolean): string[] {
-  if (!docs) return ["WebFetch"]
-  return shell ? ["WebFetch", "Read", "Write", "Edit", "Glob", "Bash"] : ["WebFetch", "Read", "Write", "Edit", "Glob"]
+  // No web built-in: reading a URL is the Compass-hosted web_fetch MCP tool, which runs outside the sandbox.
+  if (!docs) return []
+  return shell ? ["Read", "Write", "Edit", "Glob", "Bash"] : ["Read", "Write", "Edit", "Glob"]
 }
 
 /** The Bash guard matcher: exactly the Bash tool. */

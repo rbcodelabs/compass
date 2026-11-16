@@ -39,7 +39,7 @@ describe.skipIf(!databaseUrl)("workspace export: wide model coverage", () => {
   const blobs: BlobAdapters = {
     artifact: memoryStorage(),
     research,
-    async fetchPublic() { return null },
+    async fetchPublic(url) { return url === "https://public.example/feedback/old/shot.png" ? { bytes: new Uint8Array([9, 9]), contentType: "image/png" } : null },
     async putPublic(p) { return `https://public.example/${p}` },
     async delPublic() {},
   }
@@ -164,7 +164,7 @@ describe.skipIf(!databaseUrl)("workspace export: wide model coverage", () => {
     })
     const pack = await db().capabilityPack.create({ data: { workspaceId: wsId, packId: "p", sourceKey: "s", displayName: "Pack" } })
     const packVer = await db().capabilityPackVersion.create({
-      data: { capabilityPackId: pack.id, semanticVersion: "1.0.0", sourceRepository: "r", sourceCommit: "c", sourcePath: "p", artifactSha256: "a", artifactPathname: "capability-packs/sha256/a.json", sdkCompatibility: "1", manifestJson: "{}", createdById: adminId },
+      data: { capabilityPackId: pack.id, semanticVersion: "1.0.0", sourceRepository: "r", sourceCommit: "c", sourcePath: "p", artifactSha256: "a".repeat(64), artifactPathname: `capability-packs/sha256/${"a".repeat(64)}.json`, sdkCompatibility: "1", manifestJson: "{}", createdById: adminId },
     })
     await db().workspaceCapabilityPack.create({ data: { workspaceId: wsId, capabilityPackId: pack.id, capabilityPackVersionId: packVer.id, enabledSkillIds: "[]" } })
     const parentDoc = await db().doc.create({ data: { workspaceId: wsId, title: "P", content: "" } })

@@ -45,10 +45,12 @@ describe("githubAccessFromEnv (gating)", () => {
 
 describe("agentTools", () => {
   it("never includes Bash unless the shell is on, and never without docs", () => {
-    expect(agentTools(false, false)).toEqual(["WebFetch"])
-    expect(agentTools(false, true)).toEqual(["WebFetch"])
-    expect(agentTools(true, false)).toEqual(["WebFetch", "Read", "Write", "Edit", "Glob"])
-    expect(agentTools(true, true)).toEqual(["WebFetch", "Read", "Write", "Edit", "Glob", "Bash"])
+    expect(agentTools(false, false)).toEqual([])
+    expect(agentTools(false, true)).toEqual([])
+    expect(agentTools(true, false)).toEqual(["Read", "Write", "Edit", "Glob"])
+    expect(agentTools(true, true)).toEqual(["Read", "Write", "Edit", "Glob", "Bash"])
+    // The SDK's built-in WebFetch runs inside the sandbox, whose egress is deny-by-default; reading a URL is the Compass-hosted web_fetch.
+    for (const docs of [false, true]) for (const shell of [false, true]) expect(agentTools(docs, shell)).not.toContain("WebFetch")
   })
 })
 

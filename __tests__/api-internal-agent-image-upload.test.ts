@@ -11,6 +11,10 @@ import { handleAgentImageUpload, sniffImageType } from "@/lib/agent-image-callba
 import { DOC_IMAGE_MAX_BYTES } from "@/lib/doc-images"
 import { agentRunSandboxName, hashAgentRunWorkerToken } from "@/lib/agent-runs"
 
+const agents = vi.hoisted(() => ({ findAgentById: vi.fn(), liveGrantedWorkspaceIds: vi.fn() }))
+vi.mock("@/lib/agent-ownership", async () => ({ ...(await vi.importActual<object>("@/lib/agent-ownership")), findAgentById: agents.findAgentById }))
+vi.mock("@/lib/agent-access", async () => ({ ...(await vi.importActual<object>("@/lib/agent-access")), liveGrantedWorkspaceIds: agents.liveGrantedWorkspaceIds }))
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
 
@@ -42,8 +46,8 @@ function runRow(overrides: Record<string, unknown> = {}) {
   }
 }
 
-function harness(row = runRow()) {
-  const prisma: Any = { agentRun: { findUnique: vi.fn().mockResolvedValue(row) } }
+function harness(row = runRow(), runAgentId: string | null = null) {
+  const prisma: Any = { agentRun: { findUnique: vi.fn().mockResolvedValue(row), findFirst: vi.fn().mockResolvedValue({ agentId: runAgentId }) } }
   const objects = new Map<string, { bytes: Uint8Array; contentType?: string }>()
   const storage = () => ({
     put: vi.fn(async (key: string, bytes: Uint8Array, contentType?: string) => {
@@ -73,6 +77,43 @@ describe("sniffImageType", () => {
     expect(sniffImageType(new TextEncoder().encode("<svg xmlns='http://www.w3.org/2000/svg'/>"))).toBeNull()
     expect(sniffImageType(new TextEncoder().encode("<html><script>alert(1)</script>"))).toBeNull()
     expect(sniffImageType(new Uint8Array([]))).toBeNull()
+  })
+})
+
+describe("handleAgentImageUpload — named agent write grant", () => {
+  const agent = { id: "agent-1", status: "ACTIVE" }
+
+  it("rejects a named agent that holds only a READ grant, storing nothing", async () => {
+    agents.findAgentById.mockResolvedValue(agent)
+    agents.liveGrantedWorkspaceIds.mockImplementation(async (_a: unknown, access: string) => (access === "WRITE" ? [] : [WS]))
+    const h = harness(runRow(), "agent-1")
+    const res = await handleAgentImageUpload(upload(), RUN_ID, h.prisma, h.storage)
+    expect(res.status).toBe(403)
+    expect((await res.json()).code).toBe("AGENT_READ_ONLY")
+    expect(h.objects.size).toBe(0)
+  })
+
+  it("allows a named agent with a live WRITE grant", async () => {
+    agents.findAgentById.mockResolvedValue(agent)
+    agents.liveGrantedWorkspaceIds.mockResolvedValue([WS])
+    const h = harness(runRow(), "agent-1")
+    expect((await handleAgentImageUpload(upload(), RUN_ID, h.prisma, h.storage)).status).toBe(200)
+    expect(h.objects.size).toBe(1)
+  })
+
+  it("leaves the built-in assistant (no agentId) unaffected", async () => {
+    const h = harness()
+    expect((await handleAgentImageUpload(upload(), RUN_ID, h.prisma, h.storage)).status).toBe(200)
+  })
+
+  it("fails closed when the agent lookup errors", async () => {
+    agents.findAgentById.mockRejectedValue(new Error("db down"))
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {})
+    const h = harness(runRow(), "agent-1")
+    const res = await handleAgentImageUpload(upload(), RUN_ID, h.prisma, h.storage)
+    spy.mockRestore()
+    expect(res.status).toBe(500)
+    expect(h.objects.size).toBe(0)
   })
 })
 

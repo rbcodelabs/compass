@@ -43,20 +43,34 @@ export async function deleteRunsWhere(prisma: AppPrismaClient, where: Record<str
 }
 
 /**
- * Web-search audit rows (composite key credentialId + seq, no id column), deleted in bounded pages by key so a user or
- * conversation with a very large history cannot exceed DSQL's per-statement row cap and make deletion unretryable.
+ * Web-search and web-fetch audit rows (composite key credentialId + seq, no id column), deleted in bounded pages by key so a
+ * user or conversation with a very large history cannot exceed DSQL's per-statement row cap and make deletion unretryable.
  */
-export async function deleteWebSearchesWhere(prisma: AppPrismaClient, where: Record<string, unknown>): Promise<number> {
+type KeyedAuditDelegate = {
+  findMany(args: { where: Record<string, unknown>; select: { credentialId: true; seq: true }; take: number }): Promise<{ credentialId: string; seq: number }[]>
+  deleteMany(args: { where: { OR: { credentialId: string; seq: number }[] } }): Promise<{ count: number }>
+}
+
+async function deleteKeyedAuditRowsWhere(delegate: KeyedAuditDelegate, where: Record<string, unknown>): Promise<number> {
   return tolerateMissingTable(async () => {
     let total = 0
     for (;;) {
-      const rows = await prisma.agentWebSearch.findMany({ where, select: { credentialId: true, seq: true }, take: DELETE_BATCH_SIZE })
+      const rows = await delegate.findMany({ where, select: { credentialId: true, seq: true }, take: DELETE_BATCH_SIZE })
       if (rows.length === 0) return total
-      const deleted = await prisma.agentWebSearch.deleteMany({ where: { OR: rows.map((row) => ({ credentialId: row.credentialId, seq: row.seq })) } })
+      const deleted = await delegate.deleteMany({ where: { OR: rows.map((row) => ({ credentialId: row.credentialId, seq: row.seq })) } })
       total += deleted.count
       if (rows.length < DELETE_BATCH_SIZE) return total
     }
   }, 0)
+}
+
+export async function deleteWebSearchesWhere(prisma: AppPrismaClient, where: Record<string, unknown>): Promise<number> {
+  return deleteKeyedAuditRowsWhere(prisma.agentWebSearch as unknown as KeyedAuditDelegate, where)
+}
+
+/** web_fetch audit rows hold the URLs the agent read (query strings can carry user data), so they go with the user and the conversation. */
+export async function deleteWebFetchesWhere(prisma: AppPrismaClient, where: Record<string, unknown>): Promise<number> {
+  return deleteKeyedAuditRowsWhere(prisma.agentWebFetch as unknown as KeyedAuditDelegate, where)
 }
 
 export interface TranscriptRemoval {
@@ -155,6 +169,7 @@ export async function purgeConversations(
     await tolerateMissingTable(() => deleteInBatches(prisma.agentConversationReview, { conversationId: { in: ids } }), 0)
     await deleteInBatches(prisma.agentAuditLog, { conversationId: { in: ids } })
     await deleteWebSearchesWhere(prisma, { conversationId: { in: ids } })
+    await deleteWebFetchesWhere(prisma, { conversationId: { in: ids } })
     await prisma.agentConversation.deleteMany({ where: { id: { in: ids } } })
     purged.push(...ids)
   }

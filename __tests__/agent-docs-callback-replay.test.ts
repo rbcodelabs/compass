@@ -125,6 +125,7 @@ function request(body: unknown) {
 const prisma = () =>
   ({
     agentRun: {
+      findFirst: vi.fn().mockResolvedValue({ agentId: null }),
       findUnique: vi.fn().mockResolvedValue({
         id: RUN_ID, workspaceId: WS, userId: "user-1", status: "RUNNING", kind: "CHAT", claimId: null,
         workerTokenHash: hashAgentRunWorkerToken(TOKEN), deadlineAt: new Date(Date.now() + 600_000), sandboxName: agentRunSandboxName(RUN_ID),

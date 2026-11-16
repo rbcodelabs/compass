@@ -16,6 +16,7 @@
 
 import getPrisma, { type AppPrismaClient } from "@/lib/db"
 import { AgentRunError, authorizeAgentRunWorker } from "@/lib/agent-runs"
+import { runAgentMayWrite } from "@/lib/agent-run-identity"
 import { DOC_IMAGE_MAX_BYTES, createDocImage } from "@/lib/doc-images"
 import { getArtifactStorage, type ArtifactStorage } from "@/lib/artifact-storage"
 
@@ -82,6 +83,11 @@ export async function handleAgentImageUpload(
 
     const run = await authorizeAgentRunWorker({ prisma, runId, rawToken: bearer[1] })
     if (run.kind !== "CHAT") return respond({ error: "This run does not show images", code: "IMAGES_NOT_SUPPORTED" }, 409)
+    // The image lands in the workspace's doc-image store, which is a write: a named agent with only READ access must not
+    // reach it through this callback. A lookup error propagates to the 500 handler (fail closed).
+    if (!(await runAgentMayWrite(prisma, run))) {
+      return respond({ error: "This agent only has read access to the workspace, so it cannot add images", code: "AGENT_READ_ONLY" }, 403)
+    }
 
     const bytes = await readImageBody(request)
     const fileType = sniffImageType(bytes)

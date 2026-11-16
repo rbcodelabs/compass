@@ -108,9 +108,9 @@ describe("the token inside the sandbox", () => {
 })
 
 describe("developerNpmToken", () => {
-  it("prefers COMPASS_NPM_TOKEN, falls back to NPM_TOKEN, and treats blank as unset", () => {
+  it("reads only COMPASS_NPM_TOKEN (never a generic NPM_TOKEN) and treats blank as unset", () => {
     expect(developerNpmToken({ COMPASS_NPM_TOKEN: " ghp_a ", NPM_TOKEN: "npm_b" })).toBe("ghp_a")
-    expect(developerNpmToken({ NPM_TOKEN: "npm_b" })).toBe("npm_b")
+    expect(developerNpmToken({ NPM_TOKEN: "npm_b" })).toBeUndefined()
     expect(developerNpmToken({ COMPASS_NPM_TOKEN: "  ", NPM_TOKEN: "" })).toBeUndefined()
     expect(developerNpmToken({})).toBeUndefined()
   })
