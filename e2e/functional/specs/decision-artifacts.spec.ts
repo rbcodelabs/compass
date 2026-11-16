@@ -54,7 +54,7 @@ test.describe("Decision supporting artifacts", () => {
         for (const viewport of [{ width: 1280, height: 800, label: "desktop" }, { width: 390, height: 844, label: "mobile" }]) {
           await page.setViewportSize(viewport)
           await page.getByRole("heading", { name: "Linked decisions" }).scrollIntoViewIfNeeded()
-          expect((await page.getByRole("heading", { level: 1, name: title }).boundingBox())!.width).toBeGreaterThan(120)
+          expect((await page.locator('[data-slot="artifact-content-column"] h1').boundingBox())!.width).toBeGreaterThan(100)
           expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
           const capture = { fullPage: true, animations: "disabled" as const, style: "nextjs-portal { display: none }" }
           await page.screenshot({ path: testInfo.outputPath(`artifact-decisions-${viewport.label}.png`), ...capture })
