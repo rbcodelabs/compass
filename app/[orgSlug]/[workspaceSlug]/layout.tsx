@@ -31,6 +31,7 @@ import { workspaceUpdatesAvailable } from "@/lib/workspace-updates-capture"
 import { followingAvailable } from "@/lib/following-flag"
 import { unreadCount } from "@/lib/notifications"
 import { ReadOnlyBanner } from "@/components/workspace/read-only-banner"
+import { LiveNotificationCardHost } from "@/components/notifications/live-notification-card-host"
 import { UndoToastHost } from "@/components/ui/undo-toast-host"
 import { WorkspaceVisitRecorder } from "@/components/workspace-selector/workspace-visit-recorder"
 
@@ -139,6 +140,7 @@ export default async function WorkspaceLayout({
         />
 
         <UndoToastHost />
+        {followingEnabled && <LiveNotificationCardHost orgSlug={orgSlug} workspaceSlug={workspaceSlug} />}
         <WorkspaceVisitRecorder orgSlug={orgSlug} workspaceSlug={workspaceSlug} userScope={user.email || undefined} />
 
         <TooltipProvider>

@@ -131,6 +131,17 @@ export function createFakeFollowDb() {
     user: [] as Row[],
     agent: [] as Row[],
     workspace: [] as Row[],
+    task: [] as Row[],
+    opportunity: [] as Row[],
+    solution: [] as Row[],
+    doc: [] as Row[],
+    roadmapItem: [] as Row[],
+    experiment: [] as Row[],
+    assumption: [] as Row[],
+    feedbackItem: [] as Row[],
+    reviewRequest: [] as Row[],
+    comment: [] as Row[],
+    docComment: [] as Row[],
   }
   const now = () => new Date()
   const db = {
@@ -146,6 +157,17 @@ export function createFakeFollowDb() {
     user: delegate(tables.user),
     agent: delegate(tables.agent),
     workspace: delegate(tables.workspace),
+    task: delegate(tables.task, { defaults: () => ({ id: randomUUID(), seqPrefix: null, seqNumber: null, status: "TODO", priority: "MEDIUM" }) }),
+    opportunity: delegate(tables.opportunity, { defaults: () => ({ id: randomUUID(), seqPrefix: null, seqNumber: null, status: "EXPLORING" }) }),
+    solution: delegate(tables.solution, { defaults: () => ({ id: randomUUID(), seqPrefix: null, seqNumber: null, status: "IDEA" }) }),
+    doc: delegate(tables.doc, { defaults: () => ({ id: randomUUID(), seqPrefix: null, seqNumber: null }) }),
+    roadmapItem: delegate(tables.roadmapItem, { defaults: () => ({ id: randomUUID(), seqPrefix: null, seqNumber: null, horizon: "NOW" }) }),
+    experiment: delegate(tables.experiment, { defaults: () => ({ id: randomUUID(), seqPrefix: null, seqNumber: null, status: "DESIGNING" }) }),
+    assumption: delegate(tables.assumption, { defaults: () => ({ id: randomUUID(), seqPrefix: null, seqNumber: null, status: "UNTESTED", workspaceId: null }) }),
+    feedbackItem: delegate(tables.feedbackItem, { defaults: () => ({ id: randomUUID(), seqPrefix: null, seqNumber: null, status: "OPEN" }) }),
+    reviewRequest: delegate(tables.reviewRequest, { defaults: () => ({ id: randomUUID(), seqPrefix: null, seqNumber: null, state: "PENDING" }) }),
+    comment: delegate(tables.comment, { defaults: () => ({ id: randomUUID() }) }),
+    docComment: delegate(tables.docComment, { defaults: () => ({ id: randomUUID() }) }),
   }
   return { db: db as unknown as AppPrismaClient, tables, member: (workspaceId: string, userId: string) => tables.workspaceMember.push({ id: randomUUID(), workspaceId, userId }) }
 }

@@ -6,6 +6,7 @@ import { useState, useTransition } from "react"
 import { BellOff, CheckCheck } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button, buttonVariants } from "@/components/ui/button"
+import { DesktopNotificationToggle } from "@/components/notifications/desktop-notification-toggle"
 import { NOTIFICATIONS_CHANGED_EVENT } from "@/components/notifications/notification-bell"
 import { useLabels } from "@/components/thinking-model/thinking-model-provider"
 import type { InboxGroup } from "@/lib/notification-inbox"
@@ -100,9 +101,12 @@ export function NotificationInbox({
             Unread{totalUnread > 0 ? ` (${totalUnread > 99 ? "99+" : totalUnread})` : ""}
           </Link>
         </nav>
-        <Button variant="outline" size="sm" disabled={pending || (pageUnread === 0 && totalUnread === 0)} onClick={markAllRead}>
-          <CheckCheck aria-hidden="true" /> Mark all read
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <DesktopNotificationToggle />
+          <Button variant="outline" size="sm" disabled={pending || (pageUnread === 0 && totalUnread === 0)} onClick={markAllRead}>
+            <CheckCheck aria-hidden="true" /> Mark all read
+          </Button>
+        </div>
       </div>
 
       {notice && <p role="alert" className="mb-4 text-sm text-destructive">{notice}</p>}
