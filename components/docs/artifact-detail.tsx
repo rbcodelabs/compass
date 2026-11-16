@@ -621,19 +621,19 @@ export function ArtifactDetail({
         <header className="flex min-h-12 shrink-0 items-center justify-between gap-2 border-b border-border-default bg-surface-panel/95 px-3 py-1.5 backdrop-blur-sm @2xl:px-4">
           <div className="flex min-w-0 flex-1 items-center gap-2">
             <DocsLibraryButton />
-            <h1 className="min-w-0 truncate text-sm font-semibold text-text-primary @3xl:text-base" title={artifact.title}>
+            <h1 className="min-w-0 truncate text-sm font-semibold text-text-primary @4xl:text-base" title={artifact.title}>
               {artifact.title}
             </h1>
-            <span className="hidden shrink-0 items-center rounded-full bg-surface-inset px-2.5 py-0.5 text-xs font-medium text-text-secondary @lg:inline-flex">
+            <span className="hidden shrink-0 items-center rounded-full bg-surface-inset px-2.5 py-0.5 text-xs font-medium text-text-secondary @2xl:inline-flex">
               {artifactTypeLabel}
             </span>
             {latestRevisionNumber > 0 && (
-              <span className="hidden shrink-0 text-xs text-text-subtle @xl:inline">
+              <span className="hidden shrink-0 text-xs text-text-subtle @3xl:inline">
                 Rev {latestRevisionNumber}
               </span>
             )}
           </div>
-          <div className="flex shrink-0 items-center gap-1.5 @2xl:gap-2">
+          <div className="flex shrink-0 items-center gap-1.5 @3xl:gap-2">
             <div ref={setToolbarSlot} className="contents" />
             {artifact.sourceType === "V0_CHAT" && artifact.status === "ACTIVE" && (
               <Button
@@ -652,7 +652,7 @@ export function ArtifactDetail({
                 }
               >
                 <RefreshCw className={pending ? "animate-spin" : undefined} aria-hidden />
-                <span className="hidden @2xl:inline">{pending ? "Refreshing…" : "Refresh from v0"}</span>
+                <span className="hidden @3xl:inline">{pending ? "Refreshing…" : "Refresh from v0"}</span>
               </Button>
             )}
             <Button
@@ -668,7 +668,7 @@ export function ArtifactDetail({
               onClick={handleCommentsButtonClick}
             >
               <MessageSquare aria-hidden />
-              <span className="hidden @2xl:inline">Comments</span>
+              <span className="hidden @3xl:inline">Comments</span>
             </Button>
             <Button
               ref={detailsTriggerRef}
@@ -683,7 +683,7 @@ export function ArtifactDetail({
               onClick={handleDetailsButtonClick}
             >
               <Info aria-hidden />
-              <span className="hidden @2xl:inline">Details</span>
+              <span className="hidden @3xl:inline">Details</span>
             </Button>
           </div>
         </header>

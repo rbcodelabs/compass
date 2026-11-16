@@ -567,8 +567,9 @@ export function ArtifactViewer({
   }
 
   // Slotted into the page header, labels collapse to icons when the content
-  // column is narrow (aria-label keeps the accessible name). Inline, always show.
-  const label = (text: string) => toolbarSlot === undefined ? text : <span className="hidden @2xl:inline">{text}</span>
+  // column narrows (aria-label keeps the accessible name) so the artifact title
+  // always retains readable width alongside the inspector drawer. Inline, always show.
+  const label = (text: string) => toolbarSlot === undefined ? text : <span className="hidden @4xl:inline">{text}</span>
   const toolbarButtons = (
     <>
       <Button
