@@ -26,7 +26,7 @@ import { safeMatter, stringifyFrontMatter } from "@/lib/safe-matter"
 import { normalizeCanvasContent } from "@/lib/json-canvas"
 import { followAfterCreate, mcpFollowActor } from "@/lib/following-hooks"
 import { normalizeDocType, type DocType } from "@/lib/doc-types"
-import { DOC_KINDS, isDocKind, normalizeDocKind, type DocKind } from "@/lib/doc-kinds"
+import { DOC_KINDS, isDocKind, kindFromFrontmatterClaim, normalizeDocKind, type DocKind } from "@/lib/doc-kinds"
 import { listScopeFrontmatterForDoc } from "@/lib/spec-docs/scopes"
 import { validateSpecEmbeds } from "@/lib/spec-docs/validate"
 import getPrisma from "@/lib/db"
@@ -337,6 +337,16 @@ async function assertSpecEmbeds(workspaceId: string, body: string): Promise<void
   if (problem) throw new DocFsError("invalid-embeds", problem)
 }
 
+/**
+ * On create only, a plain `kind:` frontmatter key (an agent's local file, never the reserved `compass_kind`) may select a whitelisted
+ * Library kind (lib/doc-kinds.ts kindFromFrontmatterClaim). An explicit `kind` option always wins, and an update never reads this, so
+ * editing a file can never retype an existing doc. The key itself stays in Doc.metadata like any other property.
+ */
+function createKindFromFrontmatter(data: unknown): DocKind | undefined {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return undefined
+  return kindFromFrontmatterClaim((data as Record<string, unknown>).kind) ?? undefined
+}
+
 export type WritePathResult = { docId: string; created: boolean; revision: string | null; path: string; kind: DocKind | null }
 
 /**
@@ -394,7 +404,7 @@ export async function writePath(
     )
     return { docId: updated.id, created: false, revision: documentRevision(updated), path: segments.join("/"), kind: normalizeDocKind(updated.kind) }
   }
-  return createAtPath(workspaceId, segments, body, metadata, effectiveDocType, opts, kind)
+  return createAtPath(workspaceId, segments, body, metadata, effectiveDocType, opts, kind === undefined ? createKindFromFrontmatter(parsed.data) : kind)
 }
 
 /**
@@ -430,7 +440,7 @@ export async function createPath(
     if (!canvas.ok) throw new DocFsError("invalid-canvas", canvas.error)
     body = canvas.content
   }
-  return createAtPath(workspaceId, segments, body, metadata, docType, opts, kind)
+  return createAtPath(workspaceId, segments, body, metadata, docType, opts, kind === undefined ? createKindFromFrontmatter(parsed.data) : kind)
 }
 
 async function createAtPath(
