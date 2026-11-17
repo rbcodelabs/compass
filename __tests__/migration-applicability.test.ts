@@ -18,6 +18,7 @@ import {
   satisfyingAlternative,
 } from "@/lib/migrations/runner"
 import type { MigrationAttempt } from "@/lib/migrations/runner"
+import { getLegacyDecisionReviewRepairStatus } from "@/lib/migrations/legacy-decision-review-repair"
 
 const PREVIEW_AUTOMATION = "047_preview_automation"
 const NATIVE_GATES = "039_native_decision_gates"
@@ -688,5 +689,51 @@ describe("decision-gate receipt health reads the unresolved set, not attempt his
       satisfiedBy: NATIVE_GATES,
       repairedBy: null,
     }))
+  })
+})
+
+describe("048 legacy-repair inspection never fails the status check", () => {
+  const LEGACY_REPAIR = "048_legacy_decision_review_repair"
+  const inspect = vi.mocked(getLegacyDecisionReviewRepairStatus)
+
+  it("skips the inspection entirely once 048 is applied", async () => {
+    inspect.mockClear()
+    const { pool } = statusPool([LEGACY_REPAIR])
+    const response = await getMigrationStatus(pool, "compass_prod")
+    expect(response.status).toBe(200)
+    const body = await response.json()
+    expect(inspect).not.toHaveBeenCalled()
+    expect(body.legacyDecisionReviewRepair).toEqual({ available: false, skipped: true, reason: expect.stringContaining("already applied") })
+    expect(body.appliedMigrations).toContain(LEGACY_REPAIR)
+  })
+
+  it("still returns the status when the inspection throws a connection error", async () => {
+    inspect.mockClear()
+    const connect = new AggregateError([Object.assign(new Error("connect ECONNREFUSED 10.0.0.1:5432"), { code: "ECONNREFUSED" })], "")
+    const prismaError = Object.assign(new Error("\nInvalid `prisma.workspace.findUnique()` invocation:\n\n\n", { cause: connect }), { name: "PrismaClientUnknownRequestError" })
+    inspect.mockRejectedValueOnce(prismaError)
+    const { pool } = statusPool([])
+    const response = await getMigrationStatus(pool, "compass_prod")
+    expect(response.status).toBe(200)
+    const body = await response.json()
+    expect(inspect).toHaveBeenCalledTimes(1)
+    expect(body.legacyDecisionReviewRepair).toMatchObject({
+      available: false,
+      reason: expect.stringContaining("Inspection failed"),
+      error: { name: "PrismaClientUnknownRequestError", cause: { name: "AggregateError", errors: [{ code: "ECONNREFUSED" }] } },
+    })
+    // The rest of the status is intact: the pending list still names 048.
+    expect(body.pending).toContain(LEGACY_REPAIR)
+  })
+
+  it("soft-fails any other inspection error too, but passes a successful report through unchanged", async () => {
+    inspect.mockClear()
+    inspect.mockRejectedValueOnce(Object.assign(new Error("permission denied for table workspaces"), { code: "42501" }))
+    const failed = await (await getMigrationStatus(statusPool([]).pool, "compass_prod")).json()
+    expect(failed.legacyDecisionReviewRepair).toMatchObject({ available: false, reason: expect.stringContaining("42501") })
+
+    inspect.mockResolvedValueOnce({ available: true, workspaceId: "w", workspaceStatus: "NOT_PRESENT", mode: "DRY_RUN", requests: [] } as never)
+    const ok = await (await getMigrationStatus(statusPool([]).pool, "compass_prod")).json()
+    expect(ok.legacyDecisionReviewRepair).toEqual({ available: true, workspaceId: "w", workspaceStatus: "NOT_PRESENT", mode: "DRY_RUN", requests: [] })
   })
 })
