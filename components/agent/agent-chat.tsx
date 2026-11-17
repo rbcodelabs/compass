@@ -303,13 +303,12 @@ export function AgentChat({
     ],
     outside: [],
   }))
+  const mentionLoadedWorkspaceRef = useRef<string | null>(null)
 
-  useEffect(() => {
-    if (!workspaceId) return
-    const controller = new AbortController()
-    void fetch(`/api/agent/conversations/by-target?workspaceId=${encodeURIComponent(workspaceId)}`, {
-      signal: controller.signal,
-    })
+  const loadMentionOptions = useCallback(() => {
+    if (!workspaceId || mentionLoadedWorkspaceRef.current === workspaceId) return
+    mentionLoadedWorkspaceRef.current = workspaceId
+    void fetch(`/api/agent/conversations/by-target?workspaceId=${encodeURIComponent(workspaceId)}`)
       .then(async (res) => {
         if (!res.ok) return
         const body = (await res.json()) as { mentionOptions?: MentionOptions }
@@ -318,7 +317,6 @@ export function AgentChat({
         }
       })
       .catch(() => {})
-    return () => controller.abort()
   }, [workspaceId])
 
   const handleAgentModeChange = useCallback(
@@ -1696,6 +1694,7 @@ export function AgentChat({
             value={input}
             onChange={setInput}
             mentionOptions={mentionOptions}
+            onOpenMentions={loadMentionOptions}
             onSend={() => {
               if (canQueue) queueFollowUp()
               else if (!composerDisabled && input.trim()) void send()

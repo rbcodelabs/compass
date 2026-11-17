@@ -74,10 +74,12 @@ type Props = {
   runStartedByMe?: boolean
   /** Optional workspace people + agents for `@` mention autocomplete. */
   mentionOptions?: MentionOptions
+  /** Fired the first time `@` trigger detection opens the mention picker so the host can lazily load people/agents. */
+  onOpenMentions?: () => void
 }
 
 export function ComposerCard(props: Props) {
-  const { textareaRef, value, onChange, onSend, placeholder = "Message the agent…", textareaDisabled, sendDisabled, running, onStop, stopDisabled, stopTitle, status, contextChips, chips, readOnly, onPasteText, runStartedByMe = true, mentionOptions } = props
+  const { textareaRef, value, onChange, onSend, placeholder = "Message the agent…", textareaDisabled, sendDisabled, running, onStop, stopDisabled, stopTitle, status, contextChips, chips, readOnly, onPasteText, runStartedByMe = true, mentionOptions, onOpenMentions } = props
   const hintId = useId()
   const listId = useId()
   const stopRef = useRef<HTMLButtonElement>(null)
@@ -119,8 +121,9 @@ export function ComposerCard(props: Props) {
       triggerRangeRef.current = { start, end: caret }
       setMentionQuery(match[2] ?? "")
       setActiveMentionIdx(0)
+      onOpenMentions?.()
     },
-    [mentionOptions, closeMentions],
+    [mentionOptions, closeMentions, onOpenMentions],
   )
 
   const selectMention = useCallback(
