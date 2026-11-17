@@ -72,7 +72,7 @@ describe("createPortalSession + getPortalSession", () => {
   it("round-trips: a session created via createPortalSession is readable via getPortalSession", async () => {
     mockPortalSession.create.mockResolvedValue({ id: "sess-1" });
 
-    await createPortalSession("account-1");
+    await createPortalSession("account-1", "ws-a");
 
     // The cookie should now be set with a raw token.
     expect(mockCookieStore.set).toHaveBeenCalledWith(
@@ -90,12 +90,13 @@ describe("createPortalSession + getPortalSession", () => {
 
     mockPortalSession.findUnique.mockResolvedValue({
       portalAccountId: "account-1",
+      workspaceId: "ws-a",
       expiresAt: new Date(Date.now() + 60_000),
       portalAccount: { email: "jane@example.com" },
     });
     mockPortalSession.update.mockResolvedValue({});
 
-    const session = await getPortalSession();
+    const session = await getPortalSession("ws-a");
 
     expect(mockPortalSession.findUnique).toHaveBeenCalledWith({
       where: { tokenHash: storedTokenHash },
@@ -106,7 +107,7 @@ describe("createPortalSession + getPortalSession", () => {
 
   it("never persists the raw token — only a hash", async () => {
     mockPortalSession.create.mockResolvedValue({ id: "sess-1" });
-    await createPortalSession("account-1");
+    await createPortalSession("account-1", "ws-a");
 
     const rawToken = cookieJar.get(PORTAL_SESSION_COOKIE)!;
     const createCall = mockPortalSession.create.mock.calls[0][0];
@@ -119,7 +120,7 @@ describe("createPortalSession + getPortalSession", () => {
 
 describe("getPortalSession", () => {
   it("returns null when no cookie is present", async () => {
-    const session = await getPortalSession();
+    const session = await getPortalSession("ws-a");
     expect(session).toBeNull();
     expect(mockPortalSession.findUnique).not.toHaveBeenCalled();
   });
@@ -128,7 +129,7 @@ describe("getPortalSession", () => {
     cookieJar.set(PORTAL_SESSION_COOKIE, "some-unknown-token");
     mockPortalSession.findUnique.mockResolvedValue(null);
 
-    const session = await getPortalSession();
+    const session = await getPortalSession("ws-a");
     expect(session).toBeNull();
   });
 
@@ -136,11 +137,12 @@ describe("getPortalSession", () => {
     cookieJar.set(PORTAL_SESSION_COOKIE, "expired-token");
     mockPortalSession.findUnique.mockResolvedValue({
       portalAccountId: "account-1",
+      workspaceId: "ws-a",
       expiresAt: new Date(Date.now() - 60_000), // expired 1 minute ago
       portalAccount: { email: "jane@example.com" },
     });
 
-    const session = await getPortalSession();
+    const session = await getPortalSession("ws-a");
     expect(session).toBeNull();
     // Fails closed without mutating state (no lastUsedAt bump on an expired row).
     expect(mockPortalSession.update).not.toHaveBeenCalled();
@@ -155,6 +157,7 @@ describe("getPortalSession", () => {
     cookieJar.set(PORTAL_SESSION_COOKIE, "some-token");
     mockPortalSession.findUnique.mockResolvedValue({
       portalAccountId: "account-1",
+      workspaceId: "ws-a",
       expiresAt: new Date(Date.now() + 60_000),
       portalAccount: { email: "jane@example.com" },
     });
@@ -164,10 +167,78 @@ describe("getPortalSession", () => {
       })
     );
 
-    const session = await getPortalSession();
+    const session = await getPortalSession("ws-a");
 
     expect(session).toEqual({ portalAccountId: "account-1", email: "jane@example.com" });
     expect(mockPortalSession.update).toHaveBeenCalled();
+  });
+});
+
+// ─── Tenant binding (GHSA-8734-6xx5-cwf6, finding 8) ───────────────────────────
+
+describe("portal session workspace binding", () => {
+  function storedSession(workspaceId: string | null) {
+    cookieJar.set(PORTAL_SESSION_COOKIE, "some-token");
+    mockPortalSession.findUnique.mockResolvedValue({
+      portalAccountId: "account-1",
+      workspaceId,
+      expiresAt: new Date(Date.now() + 60_000),
+      portalAccount: { email: "victim@example.com", name: null },
+    });
+    mockPortalSession.update.mockResolvedValue({});
+  }
+
+  it("persists the issuing workspace on the session row", async () => {
+    mockPortalSession.create.mockResolvedValue({ id: "sess-1" });
+    await createPortalSession("account-1", "ws-a");
+    expect(mockPortalSession.create.mock.calls[0][0].data).toMatchObject({
+      portalAccountId: "account-1",
+      workspaceId: "ws-a",
+    });
+  });
+
+  it("refuses to create a session with no workspace", async () => {
+    await expect(createPortalSession("account-1", "")).rejects.toThrow(/workspaceId/);
+    expect(mockPortalSession.create).not.toHaveBeenCalled();
+    expect(mockCookieStore.set).not.toHaveBeenCalled();
+  });
+
+  it("honors a session on the workspace that issued it", async () => {
+    storedSession("ws-a");
+    expect(await getPortalSession("ws-a")).toMatchObject({ email: "victim@example.com" });
+  });
+
+  it("rejects a session minted for workspace A when it is presented to workspace B", async () => {
+    // The attack: workspace A's admin signs their own SSO token for victim@example.com.
+    storedSession("ws-a");
+    expect(await getPortalSession("ws-b")).toBeNull();
+    // Rejection leaves the row alone (still valid on A) and does not bump it.
+    expect(mockPortalSession.update).not.toHaveBeenCalled();
+    expect(mockPortalSession.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("rejects a pre-binding session (workspaceId NULL) everywhere", async () => {
+    storedSession(null);
+    expect(await getPortalSession("ws-a")).toBeNull();
+    expect(await getPortalSession("ws-b")).toBeNull();
+  });
+
+  it("is anonymous when asked with no workspace, without touching the database", async () => {
+    storedSession("ws-a");
+    expect(await getPortalSession("")).toBeNull();
+    expect(mockPortalSession.findUnique).not.toHaveBeenCalled();
+  });
+
+  it("fails closed (anonymous, not a 500) while the workspace_id column is not yet migrated", async () => {
+    cookieJar.set(PORTAL_SESSION_COOKIE, "some-token");
+    mockPortalSession.findUnique.mockRejectedValue(Object.assign(new Error("column does not exist"), { code: "P2022" }));
+    expect(await getPortalSession("ws-a")).toBeNull();
+  });
+
+  it("still surfaces unrelated database errors", async () => {
+    cookieJar.set(PORTAL_SESSION_COOKIE, "some-token");
+    mockPortalSession.findUnique.mockRejectedValue(Object.assign(new Error("boom"), { code: "P1001" }));
+    await expect(getPortalSession("ws-a")).rejects.toThrow("boom");
   });
 });
 

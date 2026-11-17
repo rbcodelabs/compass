@@ -17,7 +17,7 @@ vi.mock("@/lib/portal-auth", () => ({
 }));
 
 import { verifySsoToken } from "@/lib/portal-sso";
-import { upsertPortalAccountFromSsoIdentity } from "@/lib/portal-auth";
+import { createPortalSession, upsertPortalAccountFromSsoIdentity } from "@/lib/portal-auth";
 import { GET } from "@/app/api/portal/[orgSlug]/[workspaceSlug]/sso/route";
 
 function request(query: string) {
@@ -63,5 +63,26 @@ describe("GET /api/portal/[orgSlug]/[workspaceSlug]/sso", () => {
     });
 
     expect(await res.text()).toContain("Signed in as jane@example.com.");
+  });
+
+  it("binds the session it mints to the workspace whose secret signed the token (GHSA-8734-6xx5-cwf6)", async () => {
+    vi.mocked(verifySsoToken).mockResolvedValue({ email: "victim@example.com" });
+    vi.mocked(upsertPortalAccountFromSsoIdentity).mockResolvedValue({ id: "a1", email: "victim@example.com", name: null });
+
+    const res = await GET(request("?token=t"), {
+      params: Promise.resolve({ orgSlug: "acme", workspaceSlug: "ws" }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(createPortalSession).toHaveBeenCalledWith("a1", "w1");
+  });
+
+  it("mints nothing when the token does not verify against this workspace's secret", async () => {
+    vi.mocked(verifySsoToken).mockResolvedValue(null);
+    const res = await GET(request("?token=t"), {
+      params: Promise.resolve({ orgSlug: "acme", workspaceSlug: "ws" }),
+    });
+    expect(res.status).toBe(400);
+    expect(createPortalSession).not.toHaveBeenCalled();
   });
 });

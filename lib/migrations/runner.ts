@@ -30,6 +30,7 @@ import { assertDocPublishingMigration } from "@/lib/migrations/doc-publishing";
 import { assertDocKindMigration } from "@/lib/migrations/doc-kind";
 import { DOC_KIND_BACKFILL_MIGRATION, assertDocKindBackfill, backfillDocKinds } from "@/lib/migrations/doc-kind-backfill";
 import { assertPortalHomeTemplateMigration } from "@/lib/migrations/portal-home-template";
+import { assertPortalSessionWorkspaceMigration } from "@/lib/migrations/portal-session-workspace";
 import { assertRoadmapViewsMigration } from "@/lib/migrations/roadmap-views";
 import { assertCustomFieldInheritanceRulesMigration } from "@/lib/migrations/custom-field-inheritance-rules";
 import { SAVED_VIEWS_SURFACE_MIGRATION, assertSavedViewsSurfaceMigration, backfillSavedViewsSurface } from "@/lib/migrations/saved-views-surface";
@@ -870,6 +871,12 @@ const MIGRATIONS: readonly MigrationEntry[] = [
     // columns and the composite primary key.
     name: "124_agent_web_fetches",
     filePath: path.join(process.cwd(), "prisma/migrations/124_agent_web_fetches/migration.sql"),
+  },
+  {
+    // portal_sessions.workspace_id + portal_verification_tokens.workspace_id (nullable UUID, no default/index/FK: DSQL). Binds a portal
+    // session to the workspace that issued it (GHSA-8734-6xx5-cwf6). Additive, no backfill; NULL (pre-binding) sessions are never honored. Hook asserts both.
+    name: "125_portal_session_workspace",
+    filePath: path.join(process.cwd(), "prisma/migrations/125_portal_session_workspace/migration.sql"),
   },
   {
     // custom_field_inheritance_rules (TASK-101): one additive table plus three ASYNC indexes (two unique), IF NOT EXISTS, no FKs, no data writes.
@@ -2429,6 +2436,7 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
       if (migration.name === "074_portal_home_layout") await assertPortalHomeLayoutMigration(client, schema)
       if (migration.name === "113_doc_publishing") await assertDocPublishingMigration(client, schema)
       if (migration.name === "114_portal_home_template") await assertPortalHomeTemplateMigration(client, schema)
+      if (migration.name === "125_portal_session_workspace") await assertPortalSessionWorkspaceMigration(client, schema)
       if (migration.name === "117_doc_kind") await assertDocKindMigration(client, schema)
       if (migration.name === "113_custom_field_inheritance_rules") await assertCustomFieldInheritanceRulesMigration(client, schema)
       if (migration.name === "075_roadmap_item_provenance") await assertRoadmapItemProvenanceMigration(client, schema)

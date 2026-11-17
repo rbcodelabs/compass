@@ -80,7 +80,7 @@ export async function GET(
 
   const portalAccount = await upsertPortalAccountFromSsoIdentity(identity);
 
-  await createPortalSession(portalAccount.id);
+  await createPortalSession(portalAccount.id, workspace.id);
 
   if (returnTo) {
     return NextResponse.redirect(new URL(returnTo, req.nextUrl.origin));

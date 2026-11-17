@@ -21,23 +21,22 @@ export default async function PortalLayout({ children, params }: Props) {
   const { orgSlug, workspaceSlug } = await params;
   const prisma = getPrisma();
 
-  const [workspace, portalSession] = await Promise.all([
-    prisma.workspace.findFirst({
-      where: { slug: workspaceSlug, organization: { slug: orgSlug } },
-      select: {
-        id: true,
-        name: true,
-        roadmapPublic: true,
-        feedbackEnabled: true,
-        brandingPaletteId: true,
-        brandingPrimaryHex: true,
-        brandingFontPresetId: true,
-        brandingFontFamily: true,
-        brandingLogoUrl: true,
-      },
-    }),
-    getPortalSession(),
-  ]);
+  const workspace = await prisma.workspace.findFirst({
+    where: { slug: workspaceSlug, organization: { slug: orgSlug } },
+    select: {
+      id: true,
+      name: true,
+      roadmapPublic: true,
+      feedbackEnabled: true,
+      brandingPaletteId: true,
+      brandingPrimaryHex: true,
+      brandingFontPresetId: true,
+      brandingFontFamily: true,
+      brandingLogoUrl: true,
+    },
+  });
+  // Bound to the workspace being rendered: a session issued by another workspace is anonymous here.
+  const portalSession = workspace ? await getPortalSession(workspace.id) : null;
 
   const workspaceName = workspace?.name ?? workspaceSlug;
   const branding = workspace ? resolveWorkspaceBranding(workspace) : null;

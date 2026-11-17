@@ -2028,6 +2028,10 @@ model PortalAccount {
 model PortalSession {
   id              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   portalAccountId String        @map("portal_account_id") @db.Uuid
+  /// The workspace whose portal issued this session; it is honored only there (lib/portal-auth.ts getPortalSession).
+  /// Nullable only because the column was added after sessions existed: NULL rows are never honored, so a
+  /// pre-binding session simply signs the visitor out once. No FK, no index (relationMode = "prisma"; lookup is by token_hash).
+  workspaceId     String?       @map("workspace_id") @db.Uuid
   tokenHash       String        @unique @map("token_hash") @db.VarChar(64)
   expiresAt       DateTime      @map("expires_at")
   createdAt       DateTime      @default(now()) @map("created_at")
@@ -2044,6 +2048,9 @@ model PortalSession {
 model PortalVerificationToken {
   id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   email     String   @db.VarChar(255)
+  /// The workspace portal (or embed source's workspace) the link was requested from; the session minted on
+  /// verify is bound to it. NULL = a link issued before the binding existed, which verify refuses (15-minute TTL).
+  workspaceId String? @map("workspace_id") @db.Uuid
   tokenHash String   @unique @map("token_hash") @db.VarChar(64)
   expiresAt DateTime @map("expires_at")
   createdAt DateTime @default(now()) @map("created_at")

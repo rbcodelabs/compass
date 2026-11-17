@@ -64,8 +64,15 @@ function hashToken(rawToken: string): string {
  * Creates a new PortalSession row for the given account, sets the
  * compass_portal_session cookie, and returns the raw (unhashed) token.
  * Only the hash is ever persisted — mirrors the ApiKey.keyHash precedent.
+ *
+ * `workspaceId` is the workspace whose portal issued this session, and it is
+ * required: a session is only ever honored by that workspace (see
+ * `getPortalSession`). PortalAccount is global by email, so without this
+ * binding a workspace that controls its own SSO secret could mint a session
+ * for any email and have it accepted by every other workspace's portal.
  */
-export async function createPortalSession(portalAccountId: string): Promise<string> {
+export async function createPortalSession(portalAccountId: string, workspaceId: string): Promise<string> {
+  if (!workspaceId) throw new Error("createPortalSession requires the issuing workspaceId");
   const rawToken = randomBytes(32).toString("base64url");
   const tokenHash = hashToken(rawToken);
   const expiresAt = new Date(Date.now() + SESSION_TTL_MS);
@@ -74,6 +81,7 @@ export async function createPortalSession(portalAccountId: string): Promise<stri
   await prisma.portalSession.create({
     data: {
       portalAccountId,
+      workspaceId,
       tokenHash,
       expiresAt,
     },
@@ -93,8 +101,12 @@ export async function createPortalSession(portalAccountId: string): Promise<stri
 
 /**
  * Reads the compass_portal_session cookie (if present), hashes it, and
- * looks up a matching, unexpired PortalSession. Fails closed: any absence,
- * mismatch, or expiry returns null rather than throwing.
+ * looks up a matching, unexpired PortalSession that was issued by
+ * `workspaceId`. Fails closed: any absence, mismatch, expiry, or a session
+ * issued by a different workspace (or issued before sessions carried a
+ * workspace, `workspaceId` NULL) returns null rather than throwing. A
+ * mismatched session is left alone, not deleted: it is still valid on the
+ * workspace that issued it.
  *
  * Memoized per-request with React's `cache()`. The portal layout and each
  * portal page (roadmap, feedback, ...) independently call this function.
@@ -105,10 +117,12 @@ export async function createPortalSession(portalAccountId: string): Promise<stri
  * (Prisma P2034) instead of one blocking on the other — this was crashing
  * the public roadmap/feedback pages with a 500 for any visitor who had an
  * active portal session cookie. Memoizing collapses layout+page into a
- * single call (and a single write) per request.
+ * single call (and a single write) per request (the memo key is the
+ * `workspaceId` argument, a string, so it dedupes per workspace).
  */
 export const getPortalSession = cache(
-  async (): Promise<PortalIdentity | null> => {
+  async (workspaceId: string): Promise<PortalIdentity | null> => {
+    if (!workspaceId) return null;
     const cookieStore = await cookies();
     const rawToken = cookieStore.get(PORTAL_SESSION_COOKIE)?.value;
     if (!rawToken) return null;
@@ -116,20 +130,33 @@ export const getPortalSession = cache(
     const tokenHash = hashToken(rawToken);
     const prisma = getPrisma();
 
-    const session = await prisma.portalSession.findUnique({
-      where: { tokenHash },
-      select: {
-        portalAccountId: true,
-        expiresAt: true,
-        // `name` joins `email` here so a caller that has to *display* an identity
-        // has one to display. The embedded feedback widget derives
-        // `Comment.authorName` from this rather than from anything the submitting
-        // page sends, which is the whole reason it is selected.
-        portalAccount: { select: { email: true, name: true } },
-      },
-    });
+    let session;
+    try {
+      session = await prisma.portalSession.findUnique({
+        where: { tokenHash },
+        select: {
+          portalAccountId: true,
+          workspaceId: true,
+          expiresAt: true,
+          // `name` joins `email` here so a caller that has to *display* an identity
+          // has one to display. The embedded feedback widget derives
+          // `Comment.authorName` from this rather than from anything the submitting
+          // page sends, which is the whole reason it is selected.
+          portalAccount: { select: { email: true, name: true } },
+        },
+      });
+    } catch (err) {
+      // 125_portal_session_workspace not applied yet (P2022, unknown column): nobody can hold a
+      // bound session, so every visitor is anonymous until it is. Fail closed, never 500 the page.
+      if (typeof err === "object" && err !== null && "code" in err && (err as { code?: unknown }).code === "P2022") {
+        return null;
+      }
+      throw err;
+    }
 
     if (!session) return null;
+    // The tenant binding. NULL (a pre-binding session) never equals a real id.
+    if (session.workspaceId !== workspaceId) return null;
     if (session.expiresAt.getTime() < Date.now()) return null;
 
     // Bump lastUsedAt on successful use (sliding expiry bookkeeping). This

@@ -13,8 +13,10 @@ const mockPortalVerificationToken = {
   delete: vi.fn(),
 };
 const mockPortalAccount = { upsert: vi.fn() };
+const mockWorkspace = { findFirst: vi.fn() };
 
 const mockPrisma = {
+  workspace: mockWorkspace,
   portalVerificationToken: mockPortalVerificationToken,
   portalAccount: mockPortalAccount,
 };
@@ -31,11 +33,18 @@ vi.mock("@/lib/portal-auth", async () => {
   };
 });
 
+vi.mock("@/lib/embed-sources", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/embed-sources")>("@/lib/embed-sources");
+  return { ...actual, resolveEmbedToken: vi.fn() };
+});
+
 import { createPortalSession } from "@/lib/portal-auth";
+import { EmbedSourceError, resolveEmbedToken } from "@/lib/embed-sources";
 import { POST as sendPOST } from "@/app/api/portal/auth/send/route";
 import { GET as verifyGET } from "@/app/api/portal/auth/verify/route";
 
 const mockCreatePortalSession = vi.mocked(createPortalSession);
+const mockResolveEmbedToken = vi.mocked(resolveEmbedToken);
 
 const ORIGINAL_ENV = { ...process.env };
 
@@ -43,6 +52,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockPortalVerificationToken.findFirst.mockResolvedValue(null);
   mockPortalVerificationToken.create.mockResolvedValue({ id: "tok-1" });
+  mockWorkspace.findFirst.mockResolvedValue({ id: "ws-1" });
   process.env.NEXT_PUBLIC_APP_URL = "http://localhost:3000";
   delete process.env.AUTH_RESEND_KEY;
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true }));
@@ -53,10 +63,11 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function sendRequest(body: unknown) {
+/** Sign-in is requested from a workspace portal page unless a test says otherwise. */
+function sendRequest(body: Record<string, unknown>) {
   return new NextRequest("http://localhost/api/portal/auth/send", {
     method: "POST",
-    body: JSON.stringify(body),
+    body: JSON.stringify("returnTo" in body || "embedToken" in body ? body : { returnTo: "/portal/acme/ws/roadmap", ...body }),
     headers: { "Content-Type": "application/json" },
   });
 }
@@ -227,12 +238,12 @@ describe("POST /api/portal/auth/send", () => {
     expect(mockPortalVerificationToken.create).not.toHaveBeenCalled();
   });
 
-  it("only accepts /portal/... returnTo values into the constructed verify URL", async () => {
+  it("only accepts /portal/... returnTo values; anything else names no workspace and is refused", async () => {
     const res = await sendPOST(
       sendRequest({ email: "dev2@example.com", returnTo: "https://evil.com/steal" })
     );
-    const data = await res.json();
-    expect(data.devVerifyUrl).not.toContain("returnTo=");
+    expect(res.status).toBe(422);
+    expect(mockPortalVerificationToken.create).not.toHaveBeenCalled();
   });
 
   it("accepts a valid /portal/... returnTo", async () => {
@@ -241,6 +252,60 @@ describe("POST /api/portal/auth/send", () => {
     );
     const data = await res.json();
     expect(data.devVerifyUrl).toContain(encodeURIComponent("/portal/acme/ws/feedback"));
+  });
+});
+
+describe("POST /api/portal/auth/send: the workspace the session will be bound to", () => {
+  it("looks the workspace up from the portal path and stores it on the token", async () => {
+    await sendPOST(sendRequest({ email: "a@example.com", returnTo: "/portal/acme/ws/feedback?x=1" }));
+    expect(mockWorkspace.findFirst).toHaveBeenCalledWith({
+      where: { slug: "ws", organization: { slug: "acme" } },
+      select: { id: true },
+    });
+    expect(mockPortalVerificationToken.create.mock.calls[0][0].data).toMatchObject({ email: "a@example.com", workspaceId: "ws-1" });
+  });
+
+  it("422s and mints nothing when no workspace can be determined", async () => {
+    const res = await sendPOST(sendRequest({ email: "a@example.com", returnTo: undefined }));
+    expect(res.status).toBe(422);
+    expect(mockPortalVerificationToken.create).not.toHaveBeenCalled();
+  });
+
+  it("422s and mints nothing when the portal path names a workspace that does not exist", async () => {
+    mockWorkspace.findFirst.mockResolvedValue(null);
+    const res = await sendPOST(sendRequest({ email: "a@example.com", returnTo: "/portal/acme/nope/roadmap" }));
+    expect(res.status).toBe(422);
+    expect(mockPortalVerificationToken.create).not.toHaveBeenCalled();
+  });
+
+  it("the embed popup names its workspace through its embed token (it has no /portal path)", async () => {
+    mockResolveEmbedToken.mockResolvedValue({ workspaceId: "ws-embed" } as Awaited<ReturnType<typeof resolveEmbedToken>>);
+    const res = await sendPOST(sendRequest({ email: "a@example.com", embedToken: "cmp_embed_x" }));
+    expect(res.status).toBe(200);
+    expect(mockResolveEmbedToken).toHaveBeenCalledWith("cmp_embed_x");
+    expect(mockPortalVerificationToken.create.mock.calls[0][0].data).toMatchObject({ workspaceId: "ws-embed" });
+  });
+
+  it("a revoked or unknown embed token is refused with 422 and mints nothing", async () => {
+    mockResolveEmbedToken.mockRejectedValue(new EmbedSourceError(401, "Invalid embed token"));
+    const res = await sendPOST(sendRequest({ email: "a@example.com", embedToken: "cmp_embed_bad" }));
+    expect(res.status).toBe(422);
+    expect(mockPortalVerificationToken.create).not.toHaveBeenCalled();
+  });
+
+  it("an embed token wins over a returnTo: a client cannot name a different workspace than its source's", async () => {
+    mockResolveEmbedToken.mockResolvedValue({ workspaceId: "ws-embed" } as Awaited<ReturnType<typeof resolveEmbedToken>>);
+    await sendPOST(sendRequest({ email: "a@example.com", embedToken: "cmp_embed_x", returnTo: "/portal/acme/other/roadmap" }));
+    expect(mockWorkspace.findFirst).not.toHaveBeenCalled();
+    expect(mockPortalVerificationToken.create.mock.calls[0][0].data.workspaceId).toBe("ws-embed");
+  });
+
+  it("throttles per email AND workspace: a live link for one workspace does not block another", async () => {
+    await sendPOST(sendRequest({ email: "a@example.com" }));
+    expect(mockPortalVerificationToken.findFirst.mock.calls[0][0].where).toMatchObject({
+      email: "a@example.com",
+      workspaceId: "ws-1",
+    });
   });
 });
 
@@ -275,6 +340,7 @@ describe("GET /api/portal/auth/verify", () => {
     const tokenHash = createHash("sha256").update(rawToken).digest("hex");
     mockPortalVerificationToken.findUnique.mockResolvedValue({
       email: "jane@example.com",
+      workspaceId: "ws-1",
       tokenHash,
       expiresAt: new Date(Date.now() + 60_000),
     });
@@ -282,12 +348,29 @@ describe("GET /api/portal/auth/verify", () => {
     await verifyGET(verifyRequest(`?token=${rawToken}`));
 
     expect(mockPortalVerificationToken.delete).toHaveBeenCalledWith({ where: { tokenHash } });
-    expect(mockCreatePortalSession).toHaveBeenCalledWith("account-1");
+    expect(mockCreatePortalSession).toHaveBeenCalledWith("account-1", "ws-1");
+  });
+
+  it("refuses a link with no workspace (issued before binding): consumed, no session", async () => {
+    mockPortalVerificationToken.findUnique.mockResolvedValue({
+      email: "jane@example.com",
+      workspaceId: null,
+      tokenHash: "hash",
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+
+    const res = await verifyGET(verifyRequest("?token=old"));
+
+    expect(res.status).toBe(400);
+    expect(mockPortalVerificationToken.delete).toHaveBeenCalled();
+    expect(mockPortalAccount.upsert).not.toHaveBeenCalled();
+    expect(mockCreatePortalSession).not.toHaveBeenCalled();
   });
 
   it("rejects an expired token (still deletes it, but does not create a session)", async () => {
     mockPortalVerificationToken.findUnique.mockResolvedValue({
       email: "jane@example.com",
+      workspaceId: "ws-1",
       tokenHash: "hash",
       expiresAt: new Date(Date.now() - 60_000),
     });
@@ -302,6 +385,7 @@ describe("GET /api/portal/auth/verify", () => {
   it("redirects to a valid /portal/... returnTo on success", async () => {
     mockPortalVerificationToken.findUnique.mockResolvedValue({
       email: "jane@example.com",
+      workspaceId: "ws-1",
       tokenHash: "hash",
       expiresAt: new Date(Date.now() + 60_000),
     });
@@ -317,6 +401,7 @@ describe("GET /api/portal/auth/verify", () => {
   it("rejects an absolute-URL returnTo (open-redirect attempt) and falls back to the confirmation page", async () => {
     mockPortalVerificationToken.findUnique.mockResolvedValue({
       email: "jane@example.com",
+      workspaceId: "ws-1",
       tokenHash: "hash",
       expiresAt: new Date(Date.now() + 60_000),
     });
@@ -334,6 +419,7 @@ describe("GET /api/portal/auth/verify", () => {
     const malicious = "<img src=x onerror=alert(1)>@example.com";
     mockPortalVerificationToken.findUnique.mockResolvedValue({
       email: malicious,
+      workspaceId: "ws-1",
       tokenHash: "hash",
       expiresAt: new Date(Date.now() + 60_000),
     });
@@ -350,6 +436,7 @@ describe("GET /api/portal/auth/verify", () => {
   it("rejects a protocol-relative returnTo (//evil.com)", async () => {
     mockPortalVerificationToken.findUnique.mockResolvedValue({
       email: "jane@example.com",
+      workspaceId: "ws-1",
       tokenHash: "hash",
       expiresAt: new Date(Date.now() + 60_000),
     });

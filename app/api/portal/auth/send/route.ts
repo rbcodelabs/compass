@@ -4,6 +4,7 @@ import getPrisma from "@/lib/db";
 import { normalizePortalEmail } from "@/lib/portal-auth";
 import { isValidPortalEmail } from "@/lib/portal-email";
 import { e2eMockAuthEnabled } from "@/lib/e2e-harness";
+import { EmbedSourceError, resolveEmbedToken } from "@/lib/embed-sources";
 
 const TOKEN_TTL_MS = 15 * 60 * 1000; // 15 minutes
 
@@ -13,6 +14,38 @@ function sanitizeReturnTo(returnTo: unknown): string | null {
   if (!returnTo.startsWith("/portal/")) return null;
   if (returnTo.startsWith("//")) return null;
   return returnTo;
+}
+
+/**
+ * The workspace this sign-in is for, or null when it cannot be told.
+ *
+ * A portal session is bound to the workspace that issued it, so a link must be
+ * requested *for* one. It comes from one of two server-checked places, never a
+ * bare id the client names: the portal path (`/portal/<org>/<workspace>/...`,
+ * the same value `returnTo` already carries), or an embed token, which
+ * resolves to its feedback source's workspace.
+ */
+async function resolveSignInWorkspaceId(
+  prisma: ReturnType<typeof getPrisma>,
+  returnTo: string | null,
+  embedToken: unknown
+): Promise<string | null> {
+  if (typeof embedToken === "string" && embedToken) {
+    try {
+      return (await resolveEmbedToken(embedToken)).workspaceId;
+    } catch (error) {
+      if (error instanceof EmbedSourceError) return null;
+      throw error;
+    }
+  }
+  if (!returnTo) return null;
+  const [, , orgSlug, workspaceSlug] = returnTo.split(/[?#]/)[0].split("/");
+  if (!orgSlug || !workspaceSlug) return null;
+  const workspace = await prisma.workspace.findFirst({
+    where: { slug: workspaceSlug, organization: { slug: orgSlug } },
+    select: { id: true },
+  });
+  return workspace?.id ?? null;
 }
 
 export async function POST(req: NextRequest) {
@@ -27,7 +60,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
   }
 
-  const { email, returnTo } = body as Record<string, unknown>;
+  const { email, returnTo, embedToken } = body as Record<string, unknown>;
 
   if (!email || typeof email !== "string" || !isValidPortalEmail(email)) {
     return NextResponse.json({ error: "A valid email address is required" }, { status: 422 });
@@ -48,11 +81,16 @@ export async function POST(req: NextRequest) {
 
   const prisma = getPrisma();
 
+  const workspaceId = await resolveSignInWorkspaceId(prisma, safeReturnTo, embedToken);
+  if (!workspaceId) {
+    return NextResponse.json({ error: "Sign-in must be started from a workspace portal" }, { status: 422 });
+  }
+
   // Per-email throttle: don't send a second link while a valid one is live.
   // Always return the same generic success response either way — no
   // account-enumeration oracle, and no inbox-bombing a real third party.
   const existing = await prisma.portalVerificationToken.findFirst({
-    where: { email: normalizedEmail, expiresAt: { gt: new Date() } },
+    where: { email: normalizedEmail, workspaceId, expiresAt: { gt: new Date() } },
     select: { id: true },
   });
 
@@ -69,7 +107,7 @@ export async function POST(req: NextRequest) {
     const expiresAt = new Date(Date.now() + TOKEN_TTL_MS);
 
     await prisma.portalVerificationToken.create({
-      data: { email: normalizedEmail, tokenHash, expiresAt },
+      data: { email: normalizedEmail, workspaceId, tokenHash, expiresAt },
     });
 
     // Delete the just-created token when the email could not be sent, so the

@@ -260,7 +260,7 @@ export async function depositEmbedSignIn(input: {
       };
     }
 
-    const identity = await getPortalSession();
+    const identity = await getPortalSession(source.workspaceId);
     if (!identity) return { status: "signin_required", mode: "PORTAL" };
 
     // See above: SUBMIT is charged on deposit only, never on a poll.

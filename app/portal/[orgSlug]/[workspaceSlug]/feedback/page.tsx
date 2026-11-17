@@ -13,13 +13,12 @@ export default async function PortalFeedbackPage({ params }: Props) {
   const { orgSlug, workspaceSlug } = await params;
   const prisma = getPrisma();
 
-  const [workspace, portalSession] = await Promise.all([
-    prisma.workspace.findFirst({
-      where: { slug: workspaceSlug, organization: { slug: orgSlug } },
-      select: { id: true, name: true, feedbackEnabled: true, portalAuthRequired: true },
-    }),
-    getPortalSession(),
-  ]);
+  const workspace = await prisma.workspace.findFirst({
+    where: { slug: workspaceSlug, organization: { slug: orgSlug } },
+    select: { id: true, name: true, feedbackEnabled: true, portalAuthRequired: true },
+  });
+  // Bound to the workspace being rendered: a session issued by another workspace is anonymous here.
+  const portalSession = workspace ? await getPortalSession(workspace.id) : null;
 
   if (!workspace || !workspace.feedbackEnabled) {
     return (
