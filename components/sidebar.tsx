@@ -111,7 +111,8 @@ const buildBaseNavItems = (okrsLabel: string, discoveryLabel: string, solutionsL
  */
 function AgentRailToggle() {
   const rail = useAgentRailOptional()
-  if (!rail?.available) return null
+  const convPanel = useConversationPanelOptional()
+  if (convPanel || !rail?.available) return null
 
   const Icon = rail.open ? PanelLeftClose : PanelLeftOpen
 

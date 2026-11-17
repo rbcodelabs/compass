@@ -29,6 +29,7 @@ import {
   PanelResizeHandle,
 } from "@/components/panels/panel-resize-handle"
 import { usePanelContext } from "@/components/panels/panel-context"
+import { useConversationPanelOptional } from "@/components/panels/conversation-panel"
 import { AgentChat } from "@/components/agent/agent-chat"
 import { DocsPanel } from "@/components/agent/docs-panel"
 import { RailLibraryPane } from "@/components/agent/rail-library-pane"
@@ -243,11 +244,24 @@ export function AgentRail({ workspaceId, basePath, userInitials, userId }: Agent
   // in-flow column; the rail never reads or changes its contents. See
   // DetailPanelDock's doc comment in panel-context.tsx.
   const { detailPanelDock } = usePanelContext()
+  const convPanel = useConversationPanelOptional()
   const router = useRouter()
   const railRef = useRef<HTMLElement | null>(null)
   const viewTriggerId = useId()
-  const activeView = VIEWS.find((v) => v.id === view) ?? VIEWS[0]
+  const availableViews = convPanel ? VIEWS.filter((v) => v.id !== "agent") : VIEWS
+  const activeView = availableViews.find((v) => v.id === view) ?? VIEWS.find((v) => v.id === view) ?? VIEWS[0]
   const [orgSlug = "", workspaceSlug = ""] = basePath.split("/").filter(Boolean)
+
+  useEffect(() => {
+    if (!convPanel || !agentSeed) return
+    convPanel.startNewConversationInPanel({
+      suggestedInstruction: agentSeed.text,
+      agentMode: "AUTO",
+      visibility: "PRIVATE",
+    })
+    clearAgentSeed()
+    closeRail()
+  }, [convPanel, agentSeed, clearAgentSeed, closeRail])
 
   const [threads, setThreads] = useState<RailThread[]>([])
   const [searchText, setSearchText] = useState("")
@@ -495,7 +509,7 @@ export function AgentRail({ workspaceId, basePath, userInitials, userId }: Agent
   // that is acceptable: it is what the user just asked for, explicitly. Every
   // *implicit* unmount — navigating, resizing past the dock threshold, opening a
   // detail panel — is avoided by design.
-  if (!open) return null
+  if (!open || (convPanel && view === "agent")) return null
 
   return (
     <aside
@@ -553,7 +567,7 @@ export function AgentRail({ workspaceId, basePath, userInitials, userId }: Agent
             <ChevronDown className="size-3 shrink-0 text-text-subtle" aria-hidden="true" />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="w-60">
-            {VIEWS.map(({ id, label, description, Icon }) => (
+            {availableViews.map(({ id, label, description, Icon }) => (
               <DropdownMenuItem key={id} onClick={() => setView(id)} className="items-start gap-2">
                 <Icon className="mt-0.5 size-4 shrink-0 text-text-subtle" aria-hidden="true" />
                 <span className="min-w-0 flex-1">
