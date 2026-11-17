@@ -160,7 +160,12 @@ export function createBasePrismaClient(): PrismaClient {
  * This is what the application should use everywhere.
  */
 export function createPrismaClient() {
-  return createBasePrismaClient().$extends(injectUpdatedAtExtension).$extends(retryReadsExtension);
+  const extended = createBasePrismaClient().$extends(injectUpdatedAtExtension);
+  // retryReadsExtension only wraps query execution; it adds no model or client
+  // surface. Keep the previous client type so this extra $extends layer does
+  // not re-expand every model type across the project (it pushed a default-heap
+  // `tsc --noEmit` out of memory).
+  return extended.$extends(retryReadsExtension) as unknown as typeof extended;
 }
 
 /** The application's PrismaClient type, including client extensions. */
