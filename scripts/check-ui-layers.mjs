@@ -51,6 +51,8 @@ const LAYER_OWNERS = {
     "components/selection-ask-pill.tsx",
     // Hover card for entity pills; a transient popup opened from chat, docs and panels (60), so it must clear the detail panel and dialogs (70).
     "components/patterns/entity-pill.tsx",
+    // Hover card for GitHub PR pills; a transient popup opened from docs, editors, comments and panels (60), so it must clear the detail panel and dialogs (70).
+    "components/github/pull-request-chip.tsx",
   ],
 };
 
