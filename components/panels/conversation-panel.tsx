@@ -21,6 +21,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { usePanelContext, type PanelType } from "@/components/panels/panel-context"
+import { panelTitles } from "@/components/panels/panel-titles"
+import { useLabels } from "@/components/thinking-model/thinking-model-provider"
 import { AgentChat } from "@/components/agent/agent-chat"
 import type {
   AgentParticipationMode,
@@ -82,26 +84,17 @@ export function useConversationPanelOptional() {
   return useContext(ConversationPanelContext)
 }
 
-const TYPE_SHORT_PREFIX: Record<string, string> = {
-  opportunity: "Opportunity",
-  solution: "Solution",
-  task: "Task",
-  roadmapItem: "Roadmap Item",
-  objective: "Objective",
-  keyResult: "Key Result",
-  experiment: "Experiment",
-  assumption: "Assumption",
-  feedback: "Feedback",
-  review: "Decision",
-  pullRequest: "Pull Request",
-}
-
-function initialCrumbLabel(type: PanelType, id: string, custom?: string): string {
+function initialCrumbLabel(
+  type: PanelType,
+  id: string,
+  titles: Record<string, string>,
+  custom?: string,
+): string {
   if (custom) return custom
   if (type === "conversation") {
     return id === "new" ? "New chat" : "Conversation"
   }
-  return TYPE_SHORT_PREFIX[type] ?? "Item"
+  return titles[type] ?? "Item"
 }
 
 export function ConversationPanelProvider({
@@ -120,6 +113,7 @@ export function ConversationPanelProvider({
   children: ReactNode
 }) {
   const { panel, openPanel } = usePanelContext()
+  const labels = useLabels()
   const pathname = usePathname()
   const router = useRouter()
   const [historyStack, setHistoryStack] = useState<PanelHistoryCrumb[]>([])
@@ -159,7 +153,7 @@ export function ConversationPanelProvider({
     const knownLabel =
       customLabelsRef.current.get(key) ??
       resolvedLabelsRef.current.get(key) ??
-      initialCrumbLabel(panel.type, panel.id)
+      initialCrumbLabel(panel.type, panel.id, panelTitles(labels))
 
     setHistoryStack((prev) => {
       const existingIdx = prev.findIndex((c) => c.type === panel.type && c.id === panel.id)
@@ -231,7 +225,7 @@ export function ConversationPanelProvider({
     return () => {
       cancelled = true
     }
-  }, [panel, workspaceId, orgSlug, workspaceSlug])
+  }, [panel, workspaceId, orgSlug, workspaceSlug, labels])
 
   const jumpToCrumb = useCallback(
     (index: number) => {

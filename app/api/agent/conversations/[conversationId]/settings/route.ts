@@ -15,7 +15,7 @@ import {
 
 export const runtime = "nodejs"
 
-type Params = { params: Promise<{ id: string }> }
+type Params = { params: Promise<{ conversationId: string }> }
 
 function isMissingColumn(error: unknown): boolean {
   return (
@@ -44,7 +44,7 @@ async function resolveTargetLabel(
       }
       case "SOLUTION": {
         const row = await prisma.solution.findFirst({
-          where: { id: targetId, opportunity: { workspaceId } },
+          where: { id: targetId, workspaceId },
           select: { title: true },
         })
         return row ? row.title : null
@@ -82,7 +82,7 @@ export async function GET(request: NextRequest, { params }: Params) {
   const session = await auth()
   if (!session?.user?.id) return new Response("Unauthorized", { status: 401 })
 
-  const { id: conversationId } = await params
+  const { conversationId } = await params
   const workspaceId = request.nextUrl.searchParams.get("workspaceId")
   if (!workspaceId) return Response.json({ error: "workspaceId is required." }, { status: 400 })
 
@@ -154,7 +154,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   const session = await auth()
   if (!session?.user?.id) return new Response("Unauthorized", { status: 401 })
 
-  const { id: conversationId } = await params
+  const { conversationId } = await params
   const workspaceId = request.nextUrl.searchParams.get("workspaceId")
   if (!workspaceId) return Response.json({ error: "workspaceId is required." }, { status: 400 })
 

@@ -297,6 +297,7 @@ export function Sidebar({
         <SidebarMenu>
           {/* Filled by components/agent/agent-drive.tsx (desktop only); collapses away while empty. */}
           <SidebarMenuItem id="agent-drive-slot" className="max-md:hidden empty:hidden" />
+          <AgentRailToggle />
           <SidebarMenuItem>
             <DropdownMenu>
               <DropdownMenuTrigger
