@@ -3,9 +3,28 @@
 import { useCallback, useEffect, useState } from "react"
 import { AtSign, Bot, CheckCircle2, MessageSquare, Plus, Send } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { MentionEditor, type MentionOptions } from "@/components/docs/mention-editor"
 import { useConversationPanelOptional } from "@/components/panels/conversation-panel"
 import type { ObjectConversationSummary } from "@/app/api/agent/conversations/by-target/route"
 import { formatRelativeTime } from "@/lib/agent-board"
+import { plainTextOf, serializeMention } from "@/lib/comment-mentions"
+
+const BUILTIN_COMPASS_AGENT_ID = "00000000-0000-4000-8000-000000000001"
+
+const DEFAULT_MENTION_OPTIONS: MentionOptions = {
+  people: [],
+  agents: [
+    {
+      kind: "agent",
+      id: BUILTIN_COMPASS_AGENT_ID,
+      name: "Compass Agent",
+      detail: "Workspace AI assistant",
+      access: "WRITE",
+      agentKind: "CLOUD",
+    },
+  ],
+  outside: [],
+}
 
 export function ObjectConversationsSection({
   targetType,
@@ -21,8 +40,11 @@ export function ObjectConversationsSection({
   const normalizedTargetType = targetType.toUpperCase()
 
   const [items, setItems] = useState<ObjectConversationSummary[]>([])
+  const [mentionOptions, setMentionOptions] = useState<MentionOptions>(DEFAULT_MENTION_OPTIONS)
   const [loading, setLoading] = useState(true)
   const [draft, setDraft] = useState("")
+  const [editorKey, setEditorKey] = useState(0)
+  const [autoFocusEditor, setAutoFocusEditor] = useState(false)
   const [submitting, setSubmitting] = useState(false)
 
   const load = useCallback(async () => {
@@ -38,9 +60,15 @@ export function ObjectConversationsSection({
       })
       const res = await fetch(`/api/agent/conversations/by-target?${qs.toString()}`)
       if (!res.ok) return
-      const body = (await res.json()) as { items?: ObjectConversationSummary[] }
+      const body = (await res.json()) as {
+        items?: ObjectConversationSummary[]
+        mentionOptions?: MentionOptions
+      }
       if (Array.isArray(body.items)) {
         setItems(body.items)
+      }
+      if (body.mentionOptions) {
+        setMentionOptions(body.mentionOptions)
       }
     } catch {
       // Best-effort
@@ -54,8 +82,7 @@ export function ObjectConversationsSection({
     void load()
   }, [load])
 
-  const handleQuickStart = async (e: React.FormEvent) => {
-    e.preventDefault()
+  const submitQuickStart = useCallback(async () => {
     const text = draft.trim()
     if (!text || !panelCtx || submitting) return
     setSubmitting(true)
@@ -74,13 +101,15 @@ export function ObjectConversationsSection({
       })
       if (res.ok) {
         setDraft("")
+        setAutoFocusEditor(false)
+        setEditorKey((k) => k + 1)
         const contentType = res.headers.get("content-type") ?? ""
         if (contentType.includes("application/json")) {
           const body = (await res.json()) as { conversationId?: string }
           await load()
           if (body.conversationId) {
             panelCtx.openConversationInPanel(body.conversationId, {
-              label: text.slice(0, 60),
+              label: plainTextOf(text).slice(0, 60),
               targetType: normalizedTargetType,
               targetId,
               targetLabel: targetLabel ?? null,
@@ -95,6 +124,28 @@ export function ObjectConversationsSection({
     } finally {
       setSubmitting(false)
     }
+  }, [draft, panelCtx, submitting, normalizedTargetType, targetId, targetLabel, load])
+
+  const handleQuickStart = (e: React.FormEvent) => {
+    e.preventDefault()
+    void submitQuickStart()
+  }
+
+  const handleInsertAgentMention = () => {
+    const agentOpt = mentionOptions.agents[0] ?? DEFAULT_MENTION_OPTIONS.agents[0]!
+    const token = serializeMention({
+      kind: "agent",
+      id: agentOpt.id,
+      label: agentOpt.name,
+    })
+    setDraft((prev) => {
+      if (prev.includes(`mention:agent:${agentOpt.id}`) || prev.includes("@Compass Agent")) {
+        return prev
+      }
+      return prev.trim() ? `${token} ${prev.trimStart()}` : `${token} `
+    })
+    setAutoFocusEditor(true)
+    setEditorKey((k) => k + 1)
   }
 
   return (
@@ -203,22 +254,27 @@ export function ObjectConversationsSection({
       )}
 
       {panelCtx && (
-        <form onSubmit={(e) => void handleQuickStart(e)} className="flex flex-col gap-2">
-          <div className="flex items-center gap-2">
-            <input
-              type="text"
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              placeholder="Start a conversation… (use @Compass Agent to include AI)"
-              className="h-8 min-w-0 flex-1 rounded-lg border border-default bg-surface-card px-3 text-xs text-text-primary placeholder:text-text-subtle focus-visible:border-border-focus focus-visible:outline-none"
-            />
+        <form onSubmit={handleQuickStart} className="flex flex-col gap-2">
+          <div className="flex items-start gap-2">
+            <div className="min-w-0 flex-1">
+              <MentionEditor
+                key={editorKey}
+                options={mentionOptions}
+                initialValue={draft}
+                ariaLabel="Start a conversation"
+                placeholder="Start a conversation… (type @ to mention people or agents)"
+                onChange={setDraft}
+                onSubmitShortcut={() => void submitQuickStart()}
+                submitOnEnter
+                autoFocus={autoFocusEditor}
+                disabled={submitting}
+                className="min-h-8 rounded-lg border-default bg-surface-card px-3 py-1.5 text-xs focus-visible:border-border-focus"
+                testId="object-conversation-composer"
+              />
+            </div>
             <button
               type="button"
-              onClick={() =>
-                setDraft((prev) =>
-                  prev.includes("@Compass Agent") ? prev : `@Compass Agent ${prev.trimStart()}`,
-                )
-              }
+              onClick={handleInsertAgentMention}
               title="Mention @Compass Agent"
               className="inline-flex h-8 shrink-0 items-center gap-1 rounded-lg border border-primary/30 bg-primary/10 px-2.5 text-xs font-medium text-primary hover:bg-primary/15"
             >

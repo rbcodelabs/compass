@@ -59,6 +59,8 @@ import { mergeChildAgentRuns, type SerializedChildAgentRun } from "@/lib/agent/c
 import { AGENT_MAX_GOOGLE_RESOURCES_PER_TURN, GOOGLE_DRIVE_CONNECTOR_SLUG, googleResourcesFromPaste, type GoogleResourceRef } from "@/lib/agent-google-resources"
 import { Markdown } from "@/components/agent/markdown"
 import { RecentMentions } from "@/components/agent/recent-mentions"
+import type { MentionOptions } from "@/components/docs/mention-editor"
+import { plainTextOf } from "@/lib/comment-mentions"
 import { AttachMenu, uploadAgentFiles, type AttachedItem, type AttachedUpload } from "@/components/agent/composer/attach-menu"
 import { SeedContextChip } from "@/components/agent/seed-context-chip"
 import { AgentParticipantsPanel, type Roster } from "@/components/agent/agent-participants"
@@ -286,6 +288,38 @@ export function AgentChat({
     threadStatusState.conversationKey === (activeConversationId ?? "__new__")
       ? threadStatusState.status
       : defaultThreadStatus
+
+  const [mentionOptions, setMentionOptions] = useState<MentionOptions>(() => ({
+    people: [],
+    agents: [
+      {
+        kind: "agent",
+        id: "00000000-0000-4000-8000-000000000001",
+        name: "Compass Agent",
+        detail: "Workspace AI assistant",
+        access: "WRITE",
+        agentKind: "CLOUD",
+      },
+    ],
+    outside: [],
+  }))
+
+  useEffect(() => {
+    if (!workspaceId) return
+    const controller = new AbortController()
+    void fetch(`/api/agent/conversations/by-target?workspaceId=${encodeURIComponent(workspaceId)}`, {
+      signal: controller.signal,
+    })
+      .then(async (res) => {
+        if (!res.ok) return
+        const body = (await res.json()) as { mentionOptions?: MentionOptions }
+        if (body.mentionOptions) {
+          setMentionOptions(body.mentionOptions)
+        }
+      })
+      .catch(() => {})
+    return () => controller.abort()
+  }, [workspaceId])
 
   const handleAgentModeChange = useCallback(
     (nextMode: AgentParticipationMode) => {
@@ -1656,6 +1690,7 @@ export function AgentChat({
             textareaRef={composerRef}
             value={input}
             onChange={setInput}
+            mentionOptions={mentionOptions}
             onSend={() => {
               if (canQueue) queueFollowUp()
               else if (!composerDisabled && input.trim()) void send()
@@ -1836,7 +1871,7 @@ function MessageRow({
               <p className="whitespace-pre-wrap break-words">{message.content.slice(APPROVAL_UPDATE_PREFIX.length)}</p>
             </div>
           ) : isUser ? (
-            <p className="whitespace-pre-wrap break-words">{message.content}</p>
+            <p className="whitespace-pre-wrap break-words">{plainTextOf(message.content)}</p>
           ) : message.content ? (
             <Markdown>{message.content}</Markdown>
           ) : phaseLabel ? (

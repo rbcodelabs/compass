@@ -46,6 +46,7 @@ import { clearConversationPendingQuestions } from "@/lib/agent-inbox-questions"
 import { cancelAllPendingConversationWakeups } from "@/lib/agent-scheduled-wakeups"
 import { getOrchestratorSkillAppendixForConversation } from "@/lib/orchestrator/skill"
 import { deriveConversationSummary, extractLatestPrUrl } from "@/lib/agent-card-derive"
+import { plainTextOf } from "@/lib/comment-mentions"
 import {
   defaultAgentModeForVisibility,
   isAgentParticipationMode,
@@ -283,14 +284,15 @@ export async function POST(request: NextRequest) {
       passiveConvo = { id: conversationId }
     }
     const nowPassive = new Date()
-    const passiveSummary = deriveConversationSummary(turnMessage)
+    const cleanPassiveTitle = plainTextOf(turnMessage).slice(0, 80)
+    const passiveSummary = deriveConversationSummary(plainTextOf(turnMessage))
     if (!passiveConvo) {
       try {
         passiveConvo = await prisma.agentConversation.create({
           data: {
             workspaceId,
             userId,
-            title: turnMessage.slice(0, 80),
+            title: cleanPassiveTitle,
             ...(passiveSummary ? { summary: passiveSummary } : {}),
             ...(requestedTargetType && requestedTargetId
               ? { targetType: requestedTargetType, targetId: requestedTargetId }
@@ -308,7 +310,7 @@ export async function POST(request: NextRequest) {
           data: {
             workspaceId,
             userId,
-            title: turnMessage.slice(0, 80),
+            title: cleanPassiveTitle,
             updatedAt: nowPassive,
           },
           select: { id: true },
@@ -383,6 +385,7 @@ export async function POST(request: NextRequest) {
     convo = { id: conversationId }
   }
   if (!convo) {
+    const cleanTitle = plainTextOf(message.trim()).slice(0, 80)
     const hasUnifiedMeta = Boolean(
       (requestedTargetType && requestedTargetId) || isConversationVisibility(body.visibility) || isAgentParticipationMode(body.agentMode),
     )
@@ -392,7 +395,7 @@ export async function POST(request: NextRequest) {
           data: {
             workspaceId,
             userId,
-            title: message.trim().slice(0, 80),
+            title: cleanTitle,
             ...(requestedTargetType && requestedTargetId
               ? { targetType: requestedTargetType, targetId: requestedTargetId }
               : {}),
@@ -409,7 +412,7 @@ export async function POST(request: NextRequest) {
           data: {
             workspaceId,
             userId,
-            title: message.trim().slice(0, 80),
+            title: cleanTitle,
             updatedAt: new Date(),
           },
           select: { id: true },
@@ -420,7 +423,7 @@ export async function POST(request: NextRequest) {
         data: {
           workspaceId,
           userId,
-          title: message.trim().slice(0, 80),
+          title: cleanTitle,
           updatedAt: new Date(),
         },
         select: { id: true },

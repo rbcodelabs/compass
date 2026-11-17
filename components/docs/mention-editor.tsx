@@ -42,6 +42,8 @@ interface MentionEditorProps {
   placeholder: string
   onChange: (body: string) => void
   onSubmitShortcut?: () => void
+  /** When true, plain Enter (with the mention picker closed) triggers onSubmitShortcut; Shift+Enter inserts a line break. */
+  submitOnEnter?: boolean
   /** Escape with the picker closed (lets the host cancel the composer). */
   onEscape?: () => void
   autoFocus?: boolean
@@ -153,7 +155,7 @@ function HighlightedName({ name, query }: { name: string; query: string }): Reac
 }
 
 export function MentionEditor({
-  options, initialValue, ariaLabel, placeholder, onChange, onSubmitShortcut, onEscape, autoFocus, disabled, className, testId,
+  options, initialValue, ariaLabel, placeholder, onChange, onSubmitShortcut, submitOnEnter, onEscape, autoFocus, disabled, className, testId,
 }: MentionEditorProps) {
   const editorRef = useRef<HTMLDivElement>(null)
   const listId = useId()
@@ -174,6 +176,14 @@ export function MentionEditor({
   }, [options, query])
   const flat = useMemo(() => groups.flatMap(group => group.items), [groups])
   const open = query !== null && flat.length > 0
+
+  useEffect(() => {
+    if (query === null) {
+      liveRef.current = null
+      return
+    }
+    liveRef.current = flat.length > 0 ? { flat, active: Math.min(active, flat.length - 1) } : null
+  }, [query, flat, active])
 
   const close = useCallback(() => {
     triggerRef.current = null
@@ -282,7 +292,12 @@ export function MentionEditor({
       onSubmitShortcut?.()
       return
     }
-    if (event.key === "Enter" && !event.shiftKey) {
+    if (event.key === "Enter" && !event.shiftKey && submitOnEnter) {
+      event.preventDefault()
+      onSubmitShortcut?.()
+      return
+    }
+    if (event.key === "Enter" && (!event.shiftKey || submitOnEnter)) {
       event.preventDefault()
       document.execCommand("insertLineBreak")
       emit()

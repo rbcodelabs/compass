@@ -45,13 +45,15 @@ function escapeRegExp(input: string): string {
 }
 
 /**
- * True when `text` contains an explicit `@Compass Agent`, `@agent`, or `@<agentName>` mention.
+ * True when `text` contains an explicit `@Compass Agent`, `@agent`, `@<agentName>`,
+ * or structured `@[...](mention:agent:<uuid>)` mention token.
  */
 export function messageMentionsAgent(text: string, agentName?: string | null): boolean {
   if (/(?:^|\s)@(?:compass[\s_-]*agent|agent)\b/i.test(text)) return true
+  if (/@\[[^\]]+\]\(mention:agent:[0-9a-f-]{36}\)/i.test(text)) return true
   const trimmedName = agentName?.trim()
   if (trimmedName) {
-    const pattern = new RegExp(`(?:^|\\s)@${escapeRegExp(trimmedName)}\\b`, "i")
+    const pattern = new RegExp(`(?:^|\\s)@${escapeRegExp(trimmedName)}(?:\\b|$)`, "i")
     if (pattern.test(text)) return true
   }
   return false

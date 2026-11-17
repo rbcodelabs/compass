@@ -4,14 +4,47 @@
 // auto-growing message field with its send/stop button, and a footer tray for the Agent and Model chips.
 // It is presentational: AgentChat owns the state and the semantics (what is disabled, what stop does).
 
-import { useEffect, useId, useLayoutEffect, useRef, type ReactNode, type RefObject } from "react"
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react"
 import { ArrowUp, Square } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import type { MentionOption, MentionOptions } from "@/components/docs/mention-editor"
 import { cn } from "@/lib/utils"
 
 const MAX_HEIGHT_PX = 150
 /** A send from this composer moves focus to Stop only if the run starts within this window; later runs are not ours to react to. */
 const SEND_INTENT_MS = 10_000
+const MENTION_TRIGGER = /(^|[\s(])@([^\s@][^@\n]{0,29})?$/
+const MAX_PER_GROUP = 8
+
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean)
+  return ((parts[0]?.[0] ?? "?") + (parts.length > 1 ? parts[parts.length - 1]![0] : "")).toUpperCase()
+}
+
+function matchesOption(option: MentionOption, query: string): number {
+  if (!query) return 1
+  const q = query.toLowerCase()
+  const name = option.name.toLowerCase()
+  if (name.startsWith(q) || name.split(/\s+/).some((part) => part.startsWith(q))) return 2
+  return name.includes(q) || (option.detail?.toLowerCase().includes(q) ?? false) ? 1 : 0
+}
+
+function filterGroup(group: MentionOption[], query: string): MentionOption[] {
+  return group
+    .map((option) => ({ option, score: matchesOption(option, query) }))
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) => b.score - a.score || a.option.name.localeCompare(b.option.name))
+    .slice(0, MAX_PER_GROUP)
+    .map((entry) => entry.option)
+}
+
+function groupsFor(options: MentionOptions, query: string) {
+  return [
+    { id: "people", title: "People", items: filterGroup(options.people, query) },
+    { id: "agents", title: "Agents", items: filterGroup(options.agents, query) },
+    { id: "outside", title: "Not in this workspace", items: filterGroup(options.outside, query) },
+  ].filter((group) => group.items.length > 0)
+}
 
 type Props = {
   textareaRef: RefObject<HTMLTextAreaElement | null>
@@ -39,19 +72,78 @@ type Props = {
   readOnly?: boolean
   /** False when someone else started the run being watched: their run never moves this user's focus. Default true. */
   runStartedByMe?: boolean
+  /** Optional workspace people + agents for `@` mention autocomplete. */
+  mentionOptions?: MentionOptions
 }
 
 export function ComposerCard(props: Props) {
-  const { textareaRef, value, onChange, onSend, placeholder = "Message the agent…", textareaDisabled, sendDisabled, running, onStop, stopDisabled, stopTitle, status, contextChips, chips, readOnly, onPasteText, runStartedByMe = true } = props
+  const { textareaRef, value, onChange, onSend, placeholder = "Message the agent…", textareaDisabled, sendDisabled, running, onStop, stopDisabled, stopTitle, status, contextChips, chips, readOnly, onPasteText, runStartedByMe = true, mentionOptions } = props
   const hintId = useId()
+  const listId = useId()
   const stopRef = useRef<HTMLButtonElement>(null)
   const wasRunning = useRef(running)
   // Focus intent is recorded from events, not read back from the DOM: sending disables the field and Stop unmounts when the
   // run ends, and browsers disagree on whether (and in what order) blur fires for an element that is disabled or removed.
   const sentAt = useRef(0)
   const returnFocus = useRef(false)
+  const triggerRangeRef = useRef<{ start: number; end: number } | null>(null)
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null)
+  const [activeMentionIdx, setActiveMentionIdx] = useState(0)
+
+  const groups = useMemo(() => {
+    if (mentionQuery === null || !mentionOptions) return []
+    return groupsFor(mentionOptions, mentionQuery)
+  }, [mentionOptions, mentionQuery])
+  const flatMentions = useMemo(() => groups.flatMap((g) => g.items), [groups])
+  const mentionOpen = mentionQuery !== null && flatMentions.length > 0
+
+  const closeMentions = useCallback(() => {
+    triggerRangeRef.current = null
+    setMentionQuery(null)
+    setActiveMentionIdx(0)
+  }, [])
+
+  const detectMention = useCallback(
+    (text: string, caret: number | null) => {
+      if (!mentionOptions || caret === null) {
+        closeMentions()
+        return
+      }
+      const before = text.slice(0, caret)
+      const match = MENTION_TRIGGER.exec(before)
+      if (!match) {
+        closeMentions()
+        return
+      }
+      const start = match.index + match[1]!.length
+      triggerRangeRef.current = { start, end: caret }
+      setMentionQuery(match[2] ?? "")
+      setActiveMentionIdx(0)
+    },
+    [mentionOptions, closeMentions],
+  )
+
+  const selectMention = useCallback(
+    (option: MentionOption) => {
+      const range = triggerRangeRef.current
+      if (!range) return
+      const insertion = `@${option.name} `
+      const next = value.slice(0, range.start) + insertion + value.slice(range.end)
+      const nextCaret = range.start + insertion.length
+      closeMentions()
+      onChange(next)
+      requestAnimationFrame(() => {
+        const el = textareaRef.current
+        if (!el) return
+        el.focus()
+        el.setSelectionRange(nextCaret, nextCaret)
+      })
+    },
+    [value, onChange, closeMentions, textareaRef],
+  )
 
   const send = () => {
+    closeMentions()
     sentAt.current = Date.now()
     onSend()
   }
@@ -95,9 +187,99 @@ export function ComposerCard(props: Props) {
   }, [running, textareaDisabled, textareaRef])
 
   const hasStrip = Boolean(status) || Boolean(contextChips)
+  const startOf = new Map<string, number>()
+  groups.reduce((offset, group) => {
+    startOf.set(group.id, offset)
+    return offset + group.items.length
+  }, 0)
 
   return (
-    <div className="@container/composer mx-auto w-full max-w-3xl min-w-0">
+    <div className="@container/composer relative mx-auto w-full max-w-3xl min-w-0">
+      {mentionOpen && (
+        <div
+          data-testid="mention-picker"
+          className="absolute right-0 bottom-full left-0 z-50 mb-1.5 flex flex-col rounded-lg border border-border-default bg-surface-card p-1.5 shadow-md"
+          onMouseDown={(event) => event.preventDefault()}
+        >
+          <div
+            id={listId}
+            role="listbox"
+            aria-label="Mention suggestions"
+            className="max-h-[min(16rem,40vh)] min-h-0 overflow-y-auto overscroll-contain"
+          >
+            {groups.map((group) => (
+              <div key={group.id}>
+                <div className="px-2 pt-1.5 pb-0.5 text-[11px] font-medium tracking-wide text-text-subtle uppercase">
+                  {group.title}
+                </div>
+                {group.items.map((option, itemIndex) => {
+                  const index = (startOf.get(group.id) ?? 0) + itemIndex
+                  const isAgent = option.kind === "agent"
+                  const selected = index === Math.min(activeMentionIdx, flatMentions.length - 1)
+                  return (
+                    <div
+                      key={`${option.kind}:${option.id}`}
+                      id={`${listId}-${index}`}
+                      role="option"
+                      aria-selected={selected}
+                      data-testid="mention-option"
+                      data-mention-name={option.name}
+                      onMouseEnter={() => setActiveMentionIdx(index)}
+                      onClick={() => selectMention(option)}
+                      className={cn(
+                        "flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5",
+                        selected && "bg-status-info-surface",
+                      )}
+                    >
+                      <span
+                        aria-hidden
+                        className={cn(
+                          "flex size-7 shrink-0 items-center justify-center rounded-full text-[11px] font-bold",
+                          isAgent
+                            ? "bg-agent-accent text-text-inverse"
+                            : option.outsideWorkspace
+                              ? "bg-status-warning text-text-inverse"
+                              : "bg-status-neutral text-text-inverse",
+                        )}
+                      >
+                        {isAgent ? "⚙" : initials(option.name)}
+                      </span>
+                      <span className="flex min-w-0 flex-1 flex-col leading-tight">
+                        <span className="truncate text-sm text-text-primary">{option.name}</span>
+                        {option.detail && (
+                          <span className="truncate text-xs text-text-subtle">{option.detail}</span>
+                        )}
+                      </span>
+                      {isAgent && (
+                        <span className="rounded bg-agent-accent-surface px-1.5 py-px text-[10px] font-semibold text-agent-accent">
+                          Agent
+                        </span>
+                      )}
+                      {selected && (
+                        <span aria-hidden className="text-xs text-text-subtle">
+                          {"↵"}
+                        </span>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            ))}
+          </div>
+          <div className="mt-1.5 flex gap-3 border-t border-border-default px-2 pt-1.5 pb-0.5 text-[11px] text-text-subtle">
+            <span>
+              <kbd className="rounded border border-border-default px-1">{"↑"}</kbd>{" "}
+              <kbd className="rounded border border-border-default px-1">{"↓"}</kbd> navigate
+            </span>
+            <span>
+              <kbd className="rounded border border-border-default px-1">{"↵"}</kbd> select
+            </span>
+            <span>
+              <kbd className="rounded border border-border-default px-1">esc</kbd> dismiss
+            </span>
+          </div>
+        </div>
+      )}
       <div
         data-slot="composer-card"
         data-running={running || undefined}
@@ -125,12 +307,48 @@ export function ComposerCard(props: Props) {
           <textarea
             ref={textareaRef}
             value={value}
-            onChange={(e) => onChange(e.target.value)}
+            onChange={(e) => {
+              const nextVal = e.target.value
+              const caret = e.target.selectionStart
+              onChange(nextVal)
+              detectMention(nextVal, caret)
+            }}
+            onClick={(e) => detectMention(e.currentTarget.value, e.currentTarget.selectionStart)}
+            onKeyUp={(e) => {
+              if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) {
+                detectMention(e.currentTarget.value, e.currentTarget.selectionStart)
+              }
+            }}
+            onBlur={() => window.setTimeout(closeMentions, 120)}
             onPaste={(e) => {
               if (!onPasteText) return
               if (onPasteText(e.clipboardData.getData("text/plain"))) e.preventDefault()
             }}
             onKeyDown={(e) => {
+              if (mentionOpen && flatMentions.length > 0) {
+                if (e.key === "ArrowDown") {
+                  e.preventDefault()
+                  setActiveMentionIdx((prev) => (prev + 1) % flatMentions.length)
+                  return
+                }
+                if (e.key === "ArrowUp") {
+                  e.preventDefault()
+                  setActiveMentionIdx((prev) => (prev - 1 + flatMentions.length) % flatMentions.length)
+                  return
+                }
+                if (e.key === "Enter" || e.key === "Tab") {
+                  e.preventDefault()
+                  const picked = flatMentions[Math.min(activeMentionIdx, flatMentions.length - 1)]
+                  if (picked) selectMention(picked)
+                  return
+                }
+                if (e.key === "Escape") {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  closeMentions()
+                  return
+                }
+              }
               // Safari fires compositionend before the Enter that commits an IME candidate, so isComposing is already false
               // there; keyCode 229 ("processing") is what still marks that keydown.
               if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && e.keyCode !== 229) {
@@ -140,6 +358,9 @@ export function ComposerCard(props: Props) {
             }}
             aria-label="Message the agent"
             aria-describedby={hintId}
+            aria-controls={mentionOpen ? listId : undefined}
+            aria-activedescendant={mentionOpen ? `${listId}-${Math.min(activeMentionIdx, flatMentions.length - 1)}` : undefined}
+            aria-autocomplete="list"
             placeholder={running ? "Waiting for the answer…" : placeholder}
             rows={1}
             disabled={textareaDisabled}

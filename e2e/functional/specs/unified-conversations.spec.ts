@@ -82,6 +82,15 @@ test("unified conversations: /conversations Chat|Board hub, object Conversations
     await expect(objectConvSection).toBeVisible({ timeout: 30_000 });
     await expect(objectConvSection).toContainText(seededConvTitle);
 
+    // Verify typing @ in the object Conversations composer opens the People + Agents autocomplete picker.
+    const objectComposer = objectConvSection.getByTestId("object-conversation-composer");
+    await objectComposer.click();
+    await page.keyboard.type("@");
+    const mentionPicker = objectConvSection.getByTestId("mention-picker");
+    await expect(mentionPicker).toBeVisible();
+    await expect(mentionPicker).toContainText("Compass Agent");
+    await page.keyboard.press("Escape");
+
     // 3. Click the conversation card in the object's Conversations section to open it in the Right PanelShell
     //    and verify the single-line breadcrumb history bar appears.
     await objectConvSection.getByText(seededConvTitle).click();

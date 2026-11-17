@@ -67,10 +67,20 @@ describe("agent-participation-mode", () => {
     expect(normalizeAgentParticipationMode(null, "MENTION_ONLY")).toBe("MENTION_ONLY")
   })
 
-  it("detects @Compass Agent, @agent, and custom @<agentName> mentions", () => {
+  it("detects @Compass Agent, @agent, custom @<agentName>, and structured agent mention tokens", () => {
     expect(messageMentionsAgent("Hey @Compass Agent can you summarize this?")).toBe(true)
     expect(messageMentionsAgent("@agent please check the RICE score")).toBe(true)
     expect(messageMentionsAgent("Ask @Discovery Bot for input", "Discovery Bot")).toBe(true)
+    expect(
+      messageMentionsAgent(
+        "@[Compass Agent](mention:agent:00000000-0000-4000-8000-000000000001) please review",
+      ),
+    ).toBe(true)
+    expect(
+      messageMentionsAgent(
+        "@[Quinn Morales](mention:user:00000000-0000-4000-8000-000000000002) what do you think?",
+      ),
+    ).toBe(false)
     expect(messageMentionsAgent("Just a human note for @sarah")).toBe(false)
     expect(messageMentionsAgent("email user@agent.com is not a mention")).toBe(false)
   })

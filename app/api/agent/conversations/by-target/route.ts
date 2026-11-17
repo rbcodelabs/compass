@@ -15,9 +15,34 @@ import {
   isConversationLinkTarget,
   listConversationsForObject,
 } from "@/lib/links/conversation-links"
+import { loadMentionCandidates, type MentionCandidates } from "@/lib/doc-comment-tasks"
+import { plainTextOf } from "@/lib/comment-mentions"
 import { backfillUnifiedConversations } from "@/lib/unified-conversations-backfill"
 
 export const runtime = "nodejs"
+
+const BUILTIN_COMPASS_AGENT_ID = "00000000-0000-4000-8000-000000000001"
+
+function withBuiltInCompassAgent(candidates: MentionCandidates): MentionCandidates {
+  const hasCompassAgent = candidates.agents.some(
+    (a) => a.name.trim().toLowerCase() === "compass agent",
+  )
+  if (hasCompassAgent) return candidates
+  return {
+    ...candidates,
+    agents: [
+      {
+        kind: "agent",
+        id: BUILTIN_COMPASS_AGENT_ID,
+        name: "Compass Agent",
+        detail: "Workspace AI assistant",
+        access: "WRITE",
+        agentKind: "CLOUD",
+      },
+      ...candidates.agents,
+    ],
+  }
+}
 
 export type ObjectConversationSummary = {
   id: string
@@ -37,9 +62,9 @@ export async function GET(request: NextRequest) {
   const workspaceId = request.nextUrl.searchParams.get("workspaceId")
   const targetType = request.nextUrl.searchParams.get("targetType")?.trim().toUpperCase()
   const targetId = request.nextUrl.searchParams.get("targetId")?.trim()
-  if (!workspaceId || !targetType || !targetId) {
+  if (!workspaceId) {
     return Response.json(
-      { error: "workspaceId, targetType, and targetId are required." },
+      { error: "workspaceId is required." },
       { status: 400 },
     )
   }
@@ -52,6 +77,27 @@ export async function GET(request: NextRequest) {
     select: { userId: true },
   })
   if (!membership) return new Response("Not found", { status: 404 })
+
+  const mentionOptions = await loadMentionCandidates(workspaceId)
+    .then(withBuiltInCompassAgent)
+    .catch((): MentionCandidates => ({
+      people: [],
+      agents: [
+        {
+          kind: "agent",
+          id: BUILTIN_COMPASS_AGENT_ID,
+          name: "Compass Agent",
+          detail: "Workspace AI assistant",
+          access: "WRITE",
+          agentKind: "CLOUD",
+        },
+      ],
+      outside: [],
+    }))
+
+  if (!targetType || !targetId) {
+    return Response.json({ items: [], mentionOptions })
+  }
 
   await backfillUnifiedConversations(prisma, { workspaceId, fallbackUserId: userId }).catch(() => {})
 
@@ -105,8 +151,8 @@ export async function GET(request: NextRequest) {
       )
       return {
         id: row.id,
-        title: row.title?.trim() || "Conversation",
-        summary: row.summary ?? null,
+        title: plainTextOf(row.title?.trim() || "Conversation"),
+        summary: row.summary ? plainTextOf(row.summary) : null,
         status,
         agentMode,
         visibility,
@@ -115,10 +161,10 @@ export async function GET(request: NextRequest) {
       }
     })
 
-    return Response.json({ items })
+    return Response.json({ items, mentionOptions })
   } catch {
     // Pre-124 fallback: use only linkedIds if migration 124 columns are not present yet.
-    if (linkedIds.length === 0) return Response.json({ items: [] })
+    if (linkedIds.length === 0) return Response.json({ items: [], mentionOptions })
     const rows = await prisma.agentConversation.findMany({
       where: {
         ...accessWhere,
@@ -136,7 +182,7 @@ export async function GET(request: NextRequest) {
     })
     const items: ObjectConversationSummary[] = rows.map((row) => ({
       id: row.id,
-      title: row.title?.trim() || "Conversation",
+      title: plainTextOf(row.title?.trim() || "Conversation"),
       summary: null,
       status: "OPEN",
       agentMode: "AUTO",
@@ -144,6 +190,6 @@ export async function GET(request: NextRequest) {
       messageCount: row._count.messages,
       updatedAt: row.updatedAt.toISOString(),
     }))
-    return Response.json({ items })
+    return Response.json({ items, mentionOptions })
   }
 }
