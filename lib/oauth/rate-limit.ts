@@ -20,6 +20,7 @@
  *
  * The expected legitimate volume is one registration per Geode install, ever.
  */
+import { clientAddressFromHeaders } from "@/lib/trusted-proxy"
 
 /** Requests allowed per IP per window, per instance. */
 const MAX_REGISTRATIONS_PER_WINDOW = 10
@@ -71,24 +72,18 @@ export function resetRegistrationRateLimit(): void {
 }
 
 /**
- * The client address, from the proxy headers Vercel sets.
+ * The client address, from the forwarded headers COMPASS_TRUSTED_PROXY says to
+ * believe (lib/trusted-proxy.ts).
  *
- * `x-forwarded-for` is attacker-controllable in general, but on Vercel the edge
- * rewrites it, so the *last* entry is not trustworthy while the platform's own
- * `x-real-ip` is. Preferring `x-real-ip` and falling back to the **first**
- * `x-forwarded-for` entry is the usual compromise; a caller who successfully
- * spoofs it only gives themselves a different bucket in a per-instance limiter,
- * which is why this is not load-bearing security.
+ * On Vercel (the default) that is `x-real-ip`, else the **first**
+ * `x-forwarded-for` entry: the edge rewrites both. Behind an ALB it is the
+ * right-most `x-forwarded-for` entry, the one the ALB appended; the first entry
+ * there is whatever the client sent. A caller who successfully spoofs this only
+ * gives themselves a different bucket in a per-instance limiter, which is why
+ * this is not load-bearing security.
  */
 export function clientAddress(request: Request): string {
-  const realIp = request.headers.get("x-real-ip")
-  if (realIp) return realIp.trim()
-  const forwarded = request.headers.get("x-forwarded-for")
-  if (forwarded) {
-    const first = forwarded.split(",")[0]?.trim()
-    if (first) return first
-  }
-  return "unknown"
+  return clientAddressFromHeaders(request.headers)
 }
 
 function evictStale(cutoff: number): void {

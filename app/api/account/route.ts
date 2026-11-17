@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { cookies } from "next/headers"
 import { auth } from "@/auth"
 import getPrisma from "@/lib/db"
+import { requestHostFromHeaders } from "@/lib/trusted-proxy"
 import { deleteAccount, planAccountDeletion, RetryableDeletionError } from "@/lib/account-deletion"
 
 /**
@@ -38,7 +39,7 @@ function isSameOrigin(request: Request): boolean {
   if (fetchSite && fetchSite !== "same-origin") return false
   const origin = request.headers.get("origin")
   if (!origin) return false
-  const host = request.headers.get("x-forwarded-host") ?? request.headers.get("host") ?? new URL(request.url).host
+  const host = requestHostFromHeaders(request.headers) ?? new URL(request.url).host
   try {
     return new URL(origin).host === host
   } catch {
