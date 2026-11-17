@@ -13,6 +13,7 @@ import { deleteWorkspaceAnalytics } from "@/lib/analytics/service";
 import { drainLinksFor } from "@/lib/typed-links";
 import { deleteLinksForEntity, deleteWorkspaceLinks } from "@/lib/links/service";
 import { deleteLinksOfTasks } from "@/lib/task-link-writes";
+import { deleteWorkspaceExternalLinks } from "@/lib/external-links-service";
 import { updateInBatches } from "@/lib/batched-delete";
 import { sweepWorkspaceOwnedRows } from "@/lib/workspace-export/sweep";
 
@@ -87,6 +88,9 @@ export async function deleteWorkspaceCascade(prisma: AppPrismaClient, workspaceI
   }
 
   await deleteWorkspaceResearchData(prisma, workspaceId);
+
+  // External links (ADR-0028) point at Solutions and Tasks by bare id and there are no foreign keys, so they go first.
+  await deleteWorkspaceExternalLinks(prisma, workspaceId);
 
   // 2. Null Experiment.assumptionId so assumptions can be deleted later.
   await prisma.experiment.updateMany({

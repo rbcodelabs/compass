@@ -292,6 +292,9 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   // Unified Conversations model (OPP-67 / SOL-117): twelve nullable ADD COLUMN IF NOT EXISTS statements across agent_conversations and agent_messages; no default, backfill, index or FK.
   // Postcondition pinned in REVIEWED_MIGRATION_CODE_SHA256. Digest recorded from the shipped SQL after reading it.
   "125_unified_conversations": "dc6968e7f3573b5bc5aa9982f59c2f147643c807764c7c2ad768b21182333faf",
+  // External links (ADR-0028): one additive CREATE TABLE IF NOT EXISTS (external_links) plus two ASYNC indexes (one unique); no existing table altered, no backfill, no FK.
+  // SQL-only: no TypeScript hook or postcondition. Digest recorded from the shipped SQL after reading it.
+  "126_external_links": "2e89354af42a034258ac593b9327f2f51f9fd9da407d5515a1b944a4c6b940a7",
 };
 
 /**

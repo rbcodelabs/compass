@@ -890,6 +890,11 @@ const MIGRATIONS: readonly MigrationEntry[] = [
     name: "125_unified_conversations",
     filePath: path.join(process.cwd(), "prisma/migrations/125_unified_conversations/migration.sql"),
   },
+  {
+    // external_links (new table, two async indexes): links from Solutions and Tasks to external resources (ADR-0028). Additive.
+    name: "126_external_links",
+    filePath: path.join(process.cwd(), "prisma/migrations/126_external_links/migration.sql"),
+  },
 ];
 
 const MIGRATIONS_BY_NAME = new Map(MIGRATIONS.map((migration) => [migration.name, migration]));
