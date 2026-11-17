@@ -1,0 +1,180 @@
+/**
+ * Advisory votes on tracked Decisions (ADR-0030).
+ *
+ * Votes are advisory: nothing here reads or writes the approval path. Casting a vote never changes ReviewRequest.state, never creates a
+ * DecisionRecord and never calls lib/decision-service.ts; the recorded human decision stays the outcome.
+ *
+ * Trust model: every read and write takes the workspace of the CALLER (the doc workspace, resolved by the server action) and puts it in the
+ * WHERE clause, so a request id from another workspace is indistinguishable from a missing one. The option is validated against the options
+ * frozen in the current revision packet; the client only names an index and a label.
+ *
+ * Anonymity until decided: while the request is not DECIDED, a tally carries counts and the own vote of the caller only. Voters are listed
+ * (by display name, never by email) once it is DECIDED. Votes are stored with the voter id (one vote per person), so this is anonymity toward
+ * readers and API clients, not toward database administrators.
+ */
+import getPrisma from "@/lib/db"
+import { excludeToolApprovals } from "@/lib/tool-approval/gate"
+import { isUuid } from "@/lib/canvas-cards"
+import { parsePacketQuestions } from "@/lib/tracked-decision-types"
+
+/** States in which a request accepts votes. Every other state is read-only. */
+export const VOTABLE_STATE = "PENDING"
+/** The stored column width of chosen_option. */
+export const MAX_VOTE_OPTION_LENGTH = 120
+/** Hard bound on the votes read for one tally. */
+const MAX_VOTES_READ = 5000
+const MAX_VOTER_NAMES_PER_OPTION = 50
+
+export type VoteQuestion = { question: string; options: string[] }
+
+export type DecisionTallyOption = {
+  label: string
+  count: number
+  /** Display names, only once the request is DECIDED. Absent while votes are anonymous. */
+  voters?: string[]
+}
+export type DecisionTallyQuestion = { question: string; options: DecisionTallyOption[]; myVote: string | null }
+export type DecisionTally = {
+  state: string
+  /** True while the request still accepts votes. The viewer may additionally need to be allowed to vote (the caller decides that). */
+  open: boolean
+  questions: DecisionTallyQuestion[]
+}
+
+export class DecisionVoteError extends Error {
+  constructor(public readonly code: "NOT_FOUND" | "CLOSED" | "INVALID_QUESTION" | "INVALID_OPTION", message: string) {
+    super(message)
+    this.name = "DecisionVoteError"
+  }
+}
+
+/**
+ * The questions a packet asks, with the option labels that can be voted for. A multi-question packet carries them in the questions array; a
+ * single-question packet carries a question and its options. A packet that offers no choices (Approve, Request changes, Reject only) is
+ * not votable and returns an empty list.
+ */
+export function voteQuestionsOf(packetJson: string | null | undefined): VoteQuestion[] {
+  const multi = parsePacketQuestions(packetJson)
+  if (multi.length > 0) {
+    return multi.map((q) => ({ question: q.question, options: labelsOf(q.options) }))
+  }
+  if (!packetJson) return []
+  try {
+    const packet = JSON.parse(packetJson) as { question?: unknown; options?: unknown }
+    if (typeof packet.question !== "string") return []
+    const options = labelsOf(packet.options)
+    return options.length >= 2 ? [{ question: packet.question, options }] : []
+  } catch {
+    return []
+  }
+}
+
+function labelsOf(options: unknown): string[] {
+  if (!Array.isArray(options)) return []
+  const labels: string[] = []
+  for (const option of options) {
+    const label = (option as { label?: unknown } | null)?.label
+    if (typeof label === "string" && label.length > 0) labels.push(label)
+  }
+  return labels
+}
+
+async function loadRequest(workspaceId: string, requestId: string) {
+  if (!isUuid(workspaceId) || !isUuid(requestId)) return null
+  return getPrisma().reviewRequest.findFirst({
+    where: { id: requestId.toLowerCase(), workspaceId, ...excludeToolApprovals },
+    select: { id: true, state: true, currentRevisionId: true, currentRevision: { select: { id: true, packetJson: true } } },
+  })
+}
+
+/**
+ * The tally for one request, or null when it is missing, foreign or offers no choices. The viewer id only decides which vote is marked
+ * as the own vote of the caller.
+ */
+export async function getDecisionTally(input: { workspaceId: string; requestId: string; viewerUserId: string }): Promise<DecisionTally | null> {
+  const request = await loadRequest(input.workspaceId, input.requestId)
+  if (!request?.currentRevision) return null
+  const questions = voteQuestionsOf(request.currentRevision.packetJson)
+  if (questions.length === 0) return null
+  const db = getPrisma()
+  const votes = await db.decisionVote.findMany({
+    where: { workspaceId: input.workspaceId, requestId: request.id, revisionId: request.currentRevision.id },
+    take: MAX_VOTES_READ,
+    select: { questionIndex: true, chosenOption: true, voterUserId: true },
+  })
+  const decided = request.state === "DECIDED"
+  const names: Map<string, string> = new Map()
+  if (decided && votes.length > 0) {
+    const ids = [...new Set(votes.map((v) => v.voterUserId))]
+    const users = await db.user.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } })
+    for (const u of users) names.set(u.id, u.name?.trim() || "Member")
+  }
+  return {
+    state: request.state,
+    open: request.state === VOTABLE_STATE,
+    questions: questions.map((q, questionIndex) => {
+      const mine = votes.find((v) => v.questionIndex === questionIndex && v.voterUserId === input.viewerUserId)?.chosenOption ?? null
+      return {
+        question: q.question,
+        myVote: mine && q.options.includes(mine) ? mine : null,
+        options: q.options.map((label) => {
+          const forOption = votes.filter((v) => v.questionIndex === questionIndex && v.chosenOption === label)
+          const option: DecisionTallyOption = { label, count: forOption.length }
+          if (decided) option.voters = forOption.slice(0, MAX_VOTER_NAMES_PER_OPTION).map((v) => names.get(v.voterUserId) ?? "Member")
+          return option
+        }),
+      }
+    }),
+  }
+}
+
+/**
+ * Cast or change the vote of the caller on one question. The caller must already have been authorized to vote in the workspace (a direct
+ * workspace member); this function re-checks that the request belongs to that workspace, is still open, and that the option is one the
+ * current revision offers. Replaces any earlier vote by the same person on the same question and revision.
+ */
+export async function castDecisionVote(input: { workspaceId: string; requestId: string; voterUserId: string; questionIndex: number; option: string }): Promise<void> {
+  const request = await loadRequest(input.workspaceId, input.requestId)
+  if (!request?.currentRevision) throw new DecisionVoteError("NOT_FOUND", "Decision not found.")
+  if (request.state !== VOTABLE_STATE) throw new DecisionVoteError("CLOSED", "Voting is closed for this decision.")
+  const questions = voteQuestionsOf(request.currentRevision.packetJson)
+  if (!Number.isInteger(input.questionIndex) || input.questionIndex < 0 || input.questionIndex >= questions.length) {
+    throw new DecisionVoteError("INVALID_QUESTION", "That question is not part of this decision.")
+  }
+  if (typeof input.option !== "string" || input.option.length > MAX_VOTE_OPTION_LENGTH || !questions[input.questionIndex].options.includes(input.option)) {
+    throw new DecisionVoteError("INVALID_OPTION", "That option is not offered by this decision.")
+  }
+  const now = new Date()
+  await getPrisma().decisionVote.upsert({
+    where: {
+      requestId_revisionId_questionIndex_voterUserId: {
+        requestId: request.id,
+        revisionId: request.currentRevision.id,
+        questionIndex: input.questionIndex,
+        voterUserId: input.voterUserId,
+      },
+    },
+    create: {
+      workspaceId: input.workspaceId,
+      requestId: request.id,
+      revisionId: request.currentRevision.id,
+      questionIndex: input.questionIndex,
+      chosenOption: input.option,
+      voterUserId: input.voterUserId,
+      createdAt: now,
+      updatedAt: now,
+    },
+    update: { chosenOption: input.option, updatedAt: now },
+  })
+}
+
+/** Remove the vote of the caller on one question. Idempotent. A closed request refuses, so a tally cannot be altered after the outcome. */
+export async function retractDecisionVote(input: { workspaceId: string; requestId: string; voterUserId: string; questionIndex: number }): Promise<void> {
+  const request = await loadRequest(input.workspaceId, input.requestId)
+  if (!request?.currentRevision) throw new DecisionVoteError("NOT_FOUND", "Decision not found.")
+  if (request.state !== VOTABLE_STATE) throw new DecisionVoteError("CLOSED", "Voting is closed for this decision.")
+  if (!Number.isInteger(input.questionIndex) || input.questionIndex < 0) throw new DecisionVoteError("INVALID_QUESTION", "That question is not part of this decision.")
+  await getPrisma().decisionVote.deleteMany({
+    where: { workspaceId: input.workspaceId, requestId: request.id, revisionId: request.currentRevision.id, questionIndex: input.questionIndex, voterUserId: input.voterUserId },
+  })
+}

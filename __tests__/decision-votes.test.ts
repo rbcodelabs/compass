@@ -1,0 +1,197 @@
+/**
+ * Advisory votes on tracked Decisions (ADR-0030). The fake database honours the workspace filter, the revision filter and the unique key, so a
+ * missing scope or a double vote shows up as a real wrong count rather than a mock that returns what the test told it to.
+ */
+import { beforeEach, describe, expect, it, vi } from "vitest"
+
+type Vote = { workspaceId: string; requestId: string; revisionId: string; questionIndex: number; chosenOption: string; voterUserId: string }
+const state = vi.hoisted(() => ({
+  requests: [] as { id: string; workspaceId: string; state: string; currentRevisionId: string; packetJson: string }[],
+  votes: [] as Vote[],
+  users: [] as { id: string; name: string | null }[],
+}))
+
+vi.mock("@/lib/db", () => ({
+  default: () => ({
+    reviewRequest: {
+      findFirst: async ({ where }: { where: { id: string; workspaceId: string } }) => {
+        const r = state.requests.find((x) => x.id === where.id && x.workspaceId === where.workspaceId)
+        return r ? { id: r.id, state: r.state, currentRevisionId: r.currentRevisionId, currentRevision: { id: r.currentRevisionId, packetJson: r.packetJson } } : null
+      },
+    },
+    decisionVote: {
+      findMany: async ({ where }: { where: { workspaceId: string; requestId: string; revisionId: string } }) =>
+        state.votes.filter((v) => v.workspaceId === where.workspaceId && v.requestId === where.requestId && v.revisionId === where.revisionId),
+      upsert: async ({ where, create, update }: { where: { requestId_revisionId_questionIndex_voterUserId: Omit<Vote, "workspaceId" | "chosenOption"> }; create: Vote; update: { chosenOption: string } }) => {
+        const k = where.requestId_revisionId_questionIndex_voterUserId
+        const existing = state.votes.find((v) => v.requestId === k.requestId && v.revisionId === k.revisionId && v.questionIndex === k.questionIndex && v.voterUserId === k.voterUserId)
+        if (existing) existing.chosenOption = update.chosenOption
+        else state.votes.push({ ...create })
+      },
+      deleteMany: async ({ where }: { where: Omit<Vote, "chosenOption"> }) => {
+        state.votes = state.votes.filter((v) => !(v.workspaceId === where.workspaceId && v.requestId === where.requestId && v.revisionId === where.revisionId && v.questionIndex === where.questionIndex && v.voterUserId === where.voterUserId))
+      },
+    },
+    user: { findMany: async ({ where }: { where: { id: { in: string[] } } }) => state.users.filter((u) => where.id.in.includes(u.id)) },
+  }),
+}))
+
+import { castDecisionVote, getDecisionTally, retractDecisionVote, voteQuestionsOf, DecisionVoteError } from "@/lib/decision-votes"
+
+const WS = "aaaaaaaa-0000-4000-8000-00000000000a"
+const OTHER_WS = "bbbbbbbb-0000-4000-8000-00000000000b"
+const REQ = "cccccccc-0000-4000-8000-00000000000c"
+const REV = "dddddddd-0000-4000-8000-00000000000d"
+const U1 = "11111111-0000-4000-8000-000000000001"
+const U2 = "22222222-0000-4000-8000-000000000002"
+const U3 = "33333333-0000-4000-8000-000000000003"
+
+const single = JSON.stringify({ question: "Advisory or binding?", options: [{ label: "Advisory" }, { label: "Binding" }] })
+const multi = JSON.stringify({ questions: [{ question: "Weight?", options: [{ label: "Advisory" }, { label: "Binding" }] }, { question: "Names?", options: [{ label: "Named" }, { label: "Anonymous" }] }] })
+
+function seed(packetJson = single, requestState = "PENDING") {
+  state.requests = [{ id: REQ, workspaceId: WS, state: requestState, currentRevisionId: REV, packetJson }]
+}
+const cast = (voterUserId: string, option: string, questionIndex = 0, workspaceId = WS) => castDecisionVote({ workspaceId, requestId: REQ, voterUserId, questionIndex, option })
+const tally = (viewerUserId = U1, workspaceId = WS) => getDecisionTally({ workspaceId, requestId: REQ, viewerUserId })
+
+beforeEach(() => {
+  state.requests = []
+  state.votes = []
+  state.users = [{ id: U1, name: "Ada" }, { id: U2, name: "Grace" }, { id: U3, name: null }]
+})
+
+describe("voteQuestionsOf", () => {
+  it("reads a single-question packet", () => {
+    expect(voteQuestionsOf(single)).toEqual([{ question: "Advisory or binding?", options: ["Advisory", "Binding"] }])
+  })
+  it("reads a multi-question packet", () => {
+    expect(voteQuestionsOf(multi).map((q) => q.options)).toEqual([["Advisory", "Binding"], ["Named", "Anonymous"]])
+  })
+  it("returns nothing for a packet that offers no choices, or garbage", () => {
+    expect(voteQuestionsOf(JSON.stringify({ question: "Approve?" }))).toEqual([])
+    expect(voteQuestionsOf(JSON.stringify({ question: "Approve?", options: [{ label: "Only one" }] }))).toEqual([])
+    expect(voteQuestionsOf("not json")).toEqual([])
+    expect(voteQuestionsOf(null)).toEqual([])
+  })
+})
+
+describe("castDecisionVote", () => {
+  it("records a vote and replaces it when the same person changes their mind", async () => {
+    seed()
+    await cast(U1, "Advisory")
+    await cast(U1, "Binding")
+    expect(state.votes).toHaveLength(1)
+    expect(state.votes[0].chosenOption).toBe("Binding")
+  })
+
+  it("counts one vote per person per question", async () => {
+    seed(multi)
+    await cast(U1, "Advisory", 0)
+    await cast(U1, "Named", 1)
+    await cast(U2, "Advisory", 0)
+    expect(state.votes).toHaveLength(3)
+  })
+
+  it("refuses an option the decision does not offer, and a question that does not exist", async () => {
+    seed()
+    await expect(cast(U1, "Reject")).rejects.toMatchObject({ code: "INVALID_OPTION" })
+    await expect(cast(U1, "Advisory", 3)).rejects.toMatchObject({ code: "INVALID_QUESTION" })
+    await expect(cast(U1, "Advisory", -1)).rejects.toMatchObject({ code: "INVALID_QUESTION" })
+    expect(state.votes).toHaveLength(0)
+  })
+
+  it("refuses once the decision is no longer pending", async () => {
+    for (const closed of ["DECIDED", "SUPERSEDED", "EXPIRED", "CANCELLED", "DRAFT"]) {
+      seed(single, closed)
+      await expect(cast(U1, "Advisory")).rejects.toMatchObject({ code: "CLOSED" })
+    }
+    expect(state.votes).toHaveLength(0)
+  })
+
+  it("treats a decision from another workspace exactly like a missing one", async () => {
+    seed()
+    await expect(cast(U1, "Advisory", 0, OTHER_WS)).rejects.toBeInstanceOf(DecisionVoteError)
+    await expect(cast(U1, "Advisory", 0, OTHER_WS)).rejects.toMatchObject({ code: "NOT_FOUND" })
+    state.requests = []
+    await expect(cast(U1, "Advisory")).rejects.toMatchObject({ code: "NOT_FOUND" })
+  })
+
+  it("never touches the request itself (advisory: no state change)", async () => {
+    seed()
+    const before = JSON.stringify(state.requests)
+    await cast(U1, "Advisory")
+    await cast(U2, "Advisory")
+    await cast(U3, "Advisory")
+    expect(JSON.stringify(state.requests)).toBe(before)
+  })
+})
+
+describe("getDecisionTally: anonymous until decided", () => {
+  it("shows counts and the own vote of the viewer, but no voters, while pending", async () => {
+    seed()
+    await cast(U1, "Advisory")
+    await cast(U2, "Advisory")
+    await cast(U3, "Binding")
+    const t = (await tally(U1))!
+    expect(t.open).toBe(true)
+    expect(t.questions[0].myVote).toBe("Advisory")
+    expect(t.questions[0].options).toEqual([{ label: "Advisory", count: 2 }, { label: "Binding", count: 1 }])
+    expect(JSON.stringify(t)).not.toMatch(/Ada|Grace|voters|1111|2222|3333/)
+  })
+
+  it("does not reveal who voted to someone who did not vote", async () => {
+    seed()
+    await cast(U1, "Advisory")
+    const t = (await tally("99999999-0000-4000-8000-000000000099"))!
+    expect(t.questions[0].myVote).toBeNull()
+    expect(t.questions[0].options[0].count).toBe(1)
+    expect(t.questions[0].options[0]).not.toHaveProperty("voters")
+  })
+
+  it("lists voters by display name once decided, and is closed", async () => {
+    seed()
+    await cast(U1, "Advisory")
+    await cast(U3, "Advisory")
+    state.requests[0].state = "DECIDED"
+    const t = (await tally(U2))!
+    expect(t.open).toBe(false)
+    expect(t.questions[0].options[0].voters).toEqual(["Ada", "Member"])
+    expect(t.questions[0].options[1].voters).toEqual([])
+  })
+
+  it("ignores votes cast on an earlier revision", async () => {
+    seed()
+    await cast(U1, "Advisory")
+    state.requests[0].currentRevisionId = "eeeeeeee-0000-4000-8000-00000000000e"
+    const t = (await tally(U1))!
+    expect(t.questions[0].options.map((o) => o.count)).toEqual([0, 0])
+    expect(t.questions[0].myVote).toBeNull()
+  })
+
+  it("is null for a missing or foreign decision and for one that offers no choices", async () => {
+    seed()
+    expect(await tally(U1, OTHER_WS)).toBeNull()
+    seed(JSON.stringify({ question: "Approve?" }))
+    expect(await tally()).toBeNull()
+  })
+})
+
+describe("retractDecisionVote", () => {
+  it("removes only the own vote and is idempotent", async () => {
+    seed()
+    await cast(U1, "Advisory")
+    await cast(U2, "Advisory")
+    await retractDecisionVote({ workspaceId: WS, requestId: REQ, voterUserId: U1, questionIndex: 0 })
+    await retractDecisionVote({ workspaceId: WS, requestId: REQ, voterUserId: U1, questionIndex: 0 })
+    expect(state.votes.map((v) => v.voterUserId)).toEqual([U2])
+  })
+
+  it("refuses once decided, so an outcome cannot be altered by editing votes", async () => {
+    seed()
+    await cast(U1, "Advisory")
+    state.requests[0].state = "DECIDED"
+    await expect(retractDecisionVote({ workspaceId: WS, requestId: REQ, voterUserId: U1, questionIndex: 0 })).rejects.toMatchObject({ code: "CLOSED" })
+    expect(state.votes).toHaveLength(1)
+  })
+})

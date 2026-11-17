@@ -40,6 +40,12 @@ The kinds you can embed are `opportunity`, `solution`, `metric`, `doc`, `task`, 
 
 Archived and killed records still show as cards, with their status. That is information, not an error.
 
+### Voting on an embedded Decision
+
+A **Decision** card that offers choices lists each option with its vote count, so readers can answer an open question where they read it. Members of the workspace can pick an option, change it, or click it again to take the vote back. Votes are **advisory**: they never decide anything. A person with decision rights still records the outcome, and the approval flow is unchanged.
+
+Votes are **anonymous until the Decision is decided**. While it is open you see the counts and your own vote. Once it is decided the card shows who voted for what, and voting closes. Org-wide read-only members, portal reviewers and agents can see the counts but cannot vote.
+
 ## Record unavailable
 
 A card reads **Record unavailable** when Compass cannot show it. It may mean the record was deleted, the id is wrong, the record belongs to a different workspace, or you do not have access to it. Compass deliberately does not say which, so a document can never be used to find out whether a record exists elsewhere. Nothing in the document is changed: the link stays as written until someone edits it. If you can edit the document, the card has a **Remove** button (see below).

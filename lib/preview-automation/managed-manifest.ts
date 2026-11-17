@@ -292,6 +292,9 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   // Unified Conversations model (OPP-67 / SOL-117): twelve nullable ADD COLUMN IF NOT EXISTS statements across agent_conversations and agent_messages; no default, backfill, index or FK.
   // Postcondition pinned in REVIEWED_MIGRATION_CODE_SHA256. Digest recorded from the shipped SQL after reading it.
   "125_unified_conversations": "dc6968e7f3573b5bc5aa9982f59c2f147643c807764c7c2ad768b21182333faf",
+  // Advisory votes on tracked Decisions (ADR-0030): one new table (decision_votes) plus one unique ASYNC index. Additive, no backfill, no FK, no existing table touched.
+  // The 127 postcondition is pinned in REVIEWED_MIGRATION_CODE_SHA256. Digest recorded from the shipped SQL after reading it.
+  "127_decision_votes": "acb304bf3fcb4288c2fa0d3298cc04e51bef8958108176b7f3930649d83f0691",
 };
 
 /**
@@ -514,6 +517,10 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
   // The 125 postcondition (twelve nullable columns across agent_conversations and agent_messages exist and carry expected types); editing it re-reviews the migration.
   "125_unified_conversations": {
     "lib/migrations/unified-conversations.ts": "5160ebc0955373c955f3c781c2d08089b9b2cd42730ad9a5d7a6e0e6f0ea85ef",
+  },
+  // The 127 postcondition (columns, plus the unique index valid, ready, and the right shape); editing it re-reviews the migration.
+  "127_decision_votes": {
+    "lib/migrations/decision-votes.ts": "d1e41d20a8660415762fd599a6aeb7a8d967e39d3618dae26635b7c0fd03a9fe",
   },
 };
 

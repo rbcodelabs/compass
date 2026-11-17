@@ -3007,6 +3007,24 @@ model AgentConversationReview {
   @@map("agent_conversation_reviews")
 }
 
+/// Advisory vote on a tracked Decision (ADR-0030). One row per (request, revision, question, voter).
+/// Bare UUIDs, no relations (Aurora DSQL has no foreign keys); lib/decision-votes.ts validates every id.
+/// Never read by the approval path: a vote cannot change a review request or create a decision record.
+model DecisionVote {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId   String   @map("workspace_id") @db.Uuid
+  requestId     String   @map("request_id") @db.Uuid
+  revisionId    String   @map("revision_id") @db.Uuid
+  questionIndex Int      @map("question_index")
+  chosenOption  String   @map("chosen_option") @db.VarChar(120)
+  voterUserId   String   @map("voter_user_id") @db.Uuid
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @default(now()) @map("updated_at")
+
+  @@unique([requestId, revisionId, questionIndex, voterUserId], map: "idx_decision_votes_voter")
+  @@map("decision_votes")
+}
+
 /// Generic typed association link between two entities of one workspace (ADR "One generic
 /// entity_links table for association links"). Phase 1: table only, no readers or writers.
 /// `fromType`/`toType` name the entity kinds; the ids are bare UUIDs, so the pair index needs no type.

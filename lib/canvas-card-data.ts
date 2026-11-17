@@ -22,11 +22,12 @@ import { isDocEmbedKind, type DocEmbedKind, type DocEmbedRef } from "@/lib/doc-e
 import { DOC_SPECIFIES_SCOPE_LINK_TYPE, LINK_TYPES } from "@/lib/links/registry"
 import { readArtifactKind } from "@/lib/artifact-kind"
 import { excludeToolApprovals } from "@/lib/tool-approval/gate"
+import { getDecisionTally, type DecisionTally } from "@/lib/decision-votes"
 
 export type CanvasCardFact = { label: string; value: string }
 /** The card payload for one reference. `unavailable` carries no data and is identical for missing, foreign and not-permitted records. */
 export type CardView<K extends string> =
-  | { state: "ok"; kind: K; id: string; title: string; status: string | null; facts: CanvasCardFact[]; href: string }
+  | { state: "ok"; kind: K; id: string; title: string; status: string | null; facts: CanvasCardFact[]; href: string; tally?: DecisionTally }
   | { state: "unavailable"; kind: K; id: string }
 export type CanvasCardView = CardView<CanvasCardKind>
 /** The canvas card kinds plus `artifact`: the kinds a Doc can embed. */
@@ -132,8 +133,8 @@ async function resolveUniqueRefs(
   const idsOf = (kind: DocEmbedKind) => [...unique.values()].filter((r) => r.kind === kind).map((r) => r.id)
   const slugs = { orgSlug: input.orgSlug, workspaceSlug: input.workspaceSlug }
   const out: Record<string, DocEmbedCardView> = {}
-  const ok = (kind: DocEmbedKind, id: string, title: string, status: string | null, facts: CanvasCardFact[], href: string) => {
-    out[cardKey({ kind, id })] = { state: "ok", kind, id, title, status, facts, href }
+  const ok = (kind: DocEmbedKind, id: string, title: string, status: string | null, facts: CanvasCardFact[], href: string, tally?: DecisionTally) => {
+    out[cardKey({ kind, id })] = { state: "ok", kind, id, title, status, facts, href, ...(tally ? { tally } : {}) }
   }
 
   const tasks: Promise<void>[] = []
@@ -242,11 +243,13 @@ async function resolveUniqueRefs(
         decisions: { orderBy: { decidedAt: "desc" }, take: 1, select: { decidedAt: true, option: { select: { label: true } } } },
       },
     })
-    for (const r of rows) {
+    // Advisory votes (ADR-0030): counts only until the request is decided. Read-only here; casting goes through the docs server actions.
+    const tallies = await Promise.all(rows.map((r) => getDecisionTally({ workspaceId, requestId: r.id, viewerUserId: input.userId })))
+    for (const [index, r] of rows.entries()) {
       if (!r.currentRevision) continue
       const choices = r.currentRevision.options.filter((o) => o.actionKey.startsWith("CHOICE_")).map((o) => o.label)
       const decided = r.decisions[0]
-      ok("decision", r.id, r.currentRevision.title, r.state, [...fact("Options", choices.join(" / ")), ...fact("Decided", decided?.option.label)], `${workspaceBasePath(slugs)}/reviews/${r.id}`)
+      ok("decision", r.id, r.currentRevision.title, r.state, [...fact("Options", choices.join(" / ")), ...fact("Decided", decided?.option.label)], `${workspaceBasePath(slugs)}/reviews/${r.id}`, tallies[index] ?? undefined)
     }
   })
   when("artifact", async (ids) => {
