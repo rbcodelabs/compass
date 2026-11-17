@@ -1,5 +1,6 @@
 import type { ComponentProps, ReactNode, Ref } from "react";
 import { cn } from "@/lib/utils";
+import { BoardScroller } from "./board-scroller";
 import { BoardColumnLayoutActions, type BoardColumnLayoutControls } from "./board-pinned";
 
 /*
@@ -36,7 +37,7 @@ export const BOARD_FADE_END_TRACK_CLASS = "md:pr-8";
 export function Board({ children, label = "Board", className, fadeEnd = false }: { children: ReactNode; label?: string; className?: string; fadeEnd?: boolean }) {
   // Mobile columns size against this scrollport, including nested swimlanes,
   // rather than the viewport (which may also contain panels or lane gutters).
-  return <div role="region" aria-label={label} className={cn("@container flex min-w-0 snap-x gap-4 overflow-x-auto pb-3", fadeEnd && BOARD_FADE_END_CLASS, className)}>{children}</div>;
+  return <BoardScroller label={label} className={cn("@container flex min-w-0 snap-x gap-4 overflow-x-auto pb-3", fadeEnd && BOARD_FADE_END_CLASS, className)}>{children}</BoardScroller>;
 }
 
 type BoardColumnProps = Omit<ComponentProps<"section">, "title"> & {
