@@ -16,6 +16,7 @@ import { chainGraphEnabled } from "@/lib/chain-graph/flag"
 import { AgentRailProvider } from "@/components/agent/agent-rail-context"
 import { AgentRail } from "@/components/agent/agent-rail"
 import { AgentDrive } from "@/components/agent/agent-drive"
+import { ConversationPanelProvider } from "@/components/panels/conversation-panel"
 import { initialsOf } from "@/lib/user-initials"
 import { WorkspaceThemeStyle } from "@/components/branding/workspace-theme-style"
 import { resolveWorkspaceBranding } from "@/lib/branding"
@@ -124,6 +125,13 @@ export default async function WorkspaceLayout({
             the rail over the full-page agent screen. A streaming turn keeps
             streaming while the user moves to the Roadmap. */}
         <AgentRailProvider initialPin={initialAgentPin} workspaceId={workspace.id}>
+        <ConversationPanelProvider
+          workspaceId={workspace.id}
+          userId={user.id}
+          userInitials={initialsOf(user.name ?? user.email)}
+          orgSlug={orgSlug}
+          workspaceSlug={workspaceSlug}
+        >
         {/* Mobile header — shown on small screens only (hidden on md+) */}
         <MobileHeader
           orgSlug={orgSlug}
@@ -208,6 +216,7 @@ export default async function WorkspaceLayout({
 
         {/* Mobile bottom nav — shown on small screens only */}
         <BottomNav orgSlug={orgSlug} workspaceSlug={workspaceSlug} researchCaptureEnabled={researchCaptureEnabled} updatesEnabled={updatesEnabled} />
+        </ConversationPanelProvider>
         </AgentRailProvider>
         </PanelProvider>
         </WorkItemLinkScopeProvider>

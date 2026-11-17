@@ -2924,6 +2924,20 @@ model AgentConversation {
   summary     String?   @db.VarChar(500)
   /// Latest GitHub pull request URL surfaced in the conversation, rendered as a PR chip on the board (migration 119).
   prUrl       String?   @map("pr_url") @db.VarChar(500)
+  /// Polymorphic object anchor (OPPORTUNITY | SOLUTION | ROADMAP_ITEM | TASK | DOC | EXPERIMENT | ASSUMPTION | OBJECTIVE | KEY_RESULT | FEEDBACK_ITEM) (migration 125).
+  targetType  String?   @map("target_type") @db.VarChar(40)
+  /// Polymorphic object UUID when anchored to a workspace entity; null for standalone chats (migration 125).
+  targetId    String?   @map("target_id") @db.Uuid
+  /// "PRIVATE" (owner + explicit participants) | "WORKSPACE" (shared object/workspace thread) (migration 125).
+  visibility  String?   @db.VarChar(20)
+  /// "OPEN" | "RESOLVED" | "ARCHIVED" (migration 125).
+  status      String?   @db.VarChar(20)
+  /// "AUTO" (replies on every turn) | "MENTION_ONLY" (replies on @mention) | "NONE" (human-only) (migration 125).
+  agentMode   String?   @map("agent_mode") @db.VarChar(20)
+  /// "BROWSER" | "MCP" | "PORTAL" | "SYSTEM" (migration 125).
+  source      String?   @db.VarChar(20)
+  resolvedAt  DateTime? @map("resolved_at")
+  resolvedById String?  @map("resolved_by_id") @db.Uuid
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @default(now()) @map("updated_at")
 
@@ -3352,8 +3366,15 @@ model AgentMessage {
   packProvenance String?  @map("pack_provenance") @db.Text
   /// Who sent a user message, or who asked for an assistant one. Null for
   /// every message that predates multi-user conversations, which are the owner's.
-  authorUserId   String?  @map("author_user_id") @db.Uuid
-  createdAt      DateTime @default(now()) @map("created_at")
+  authorUserId   String?   @map("author_user_id") @db.Uuid
+  /// Display name of the message author (human, agent, or external portal user) (migration 124).
+  authorName     String?   @map("author_name") @db.VarChar(255)
+  /// "HUMAN" | "AGENT" | "EXTERNAL" | "SYSTEM" (migration 124).
+  authorType     String?   @map("author_type") @db.VarChar(20)
+  /// "MESSAGE" | "PLAN_PROPOSAL" | "SYSTEM_RESOLUTION" (migration 124).
+  messageKind    String?   @map("message_kind") @db.VarChar(30)
+  editedAt       DateTime? @map("edited_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
 
   conversation AgentConversation @relation(fields: [conversationId], references: [id])
 

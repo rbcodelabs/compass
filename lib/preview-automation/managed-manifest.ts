@@ -286,6 +286,9 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   // Custom field inheritance rules (TASK-101): one new table (custom_field_inheritance_rules) plus three ASYNC indexes, two unique; IF NOT EXISTS, no data writes, no FK.
   // The 113 postcondition (columns, nullability, index validity/readiness) is pinned in REVIEWED_MIGRATION_CODE_SHA256. Digest recorded from the shipped SQL after reading it.
   "113_custom_field_inheritance_rules": "7d92b8fae877505e117ea311c88dd56b3e08025ce38915b6a8617118c7fdb373",
+  // Unified Conversations model (OPP-67 / SOL-117): twelve nullable ADD COLUMN IF NOT EXISTS statements across agent_conversations and agent_messages; no default, backfill, index or FK.
+  // Postcondition pinned in REVIEWED_MIGRATION_CODE_SHA256. Digest recorded from the shipped SQL after reading it.
+  "125_unified_conversations": "dc6968e7f3573b5bc5aa9982f59c2f147643c807764c7c2ad768b21182333faf",
 };
 
 /**
@@ -500,6 +503,10 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
   // The 113 postcondition (table shape plus valid, ready indexes with the expected columns and uniqueness); editing it re-reviews the migration.
   "113_custom_field_inheritance_rules": {
     "lib/migrations/custom-field-inheritance-rules.ts": "276075b4ed353da2eb3e5ade2746145449cab01fbcaf8863a3a844ff087658c2",
+  },
+  // The 125 postcondition (twelve nullable columns across agent_conversations and agent_messages exist and carry expected types); editing it re-reviews the migration.
+  "125_unified_conversations": {
+    "lib/migrations/unified-conversations.ts": "5160ebc0955373c955f3c781c2d08089b9b2cd42730ad9a5d7a6e0e6f0ea85ef",
   },
 };
 

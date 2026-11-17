@@ -22,7 +22,7 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { Archive, ArchiveRestore, Clock, FileText, GitPullRequest, Loader2, Search, Sparkles, X as XIcon } from "lucide-react"
+import { Archive, ArchiveRestore, CheckCircle2, Clock, FileText, GitPullRequest, Loader2, RotateCcw, Search, Sparkles, X as XIcon } from "lucide-react"
 import { fetchArchivedConversations, setConversationArchived, type ArchivedConversation } from "@/lib/agent-archive-client"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -39,6 +39,14 @@ import { useAgentChoices } from "@/components/agent/use-agent-choices"
 import { ToolsMenu, connectorsEnabledFor } from "@/components/agent/tools-menu"
 import { ModelPicker, modelLabelFor, useModelPick } from "@/components/agent/model-picker"
 import { AgentChip } from "@/components/agent/composer/agent-chip"
+import { AgentModeChip } from "@/components/agent/composer/agent-mode-chip"
+import {
+  defaultAgentModeForVisibility,
+  normalizeAgentParticipationMode,
+  type AgentParticipationMode,
+  type ConversationStatus,
+  type ConversationVisibility,
+} from "@/lib/agent-participation-mode"
 import { ComposerCard } from "@/components/agent/composer/composer-card"
 import { EmptyRailSuggestions } from "@/components/agent/empty-rail-suggestions"
 import { SubagentTeamPill } from "@/components/agent/composer/subagent-team-pill"
@@ -169,6 +177,20 @@ type Props = {
    * doing that implicitly mid-turn. The page does not pass it.
    */
   onStreamingChange?: (streaming: boolean) => void
+  /** Route segment for full-page conversation links ("agent" or "conversations"). */
+  routeSegment?: "agent" | "conversations"
+  /** Unified conversation participation mode ("AUTO" | "MENTION_ONLY" | "NONE"). */
+  initialAgentMode?: AgentParticipationMode
+  /** Unified conversation visibility ("PRIVATE" | "WORKSPACE"). */
+  initialVisibility?: ConversationVisibility
+  /** Unified conversation status ("OPEN" | "RESOLVED" | "ARCHIVED"). */
+  initialStatus?: ConversationStatus
+  /** Optional polymorphic object anchor for this conversation. */
+  initialTargetType?: string | null
+  initialTargetId?: string | null
+  initialTargetLabel?: string | null
+  /** Optional handler to open the anchored object in the Right PanelShell. */
+  onOpenTargetObject?: (targetType: string, targetId: string, targetLabel?: string | null) => void
 }
 
 type Processing = {
@@ -210,9 +232,100 @@ export function AgentChat({
   teamOpenRequest = null,
   onConversationCreated,
   onStreamingChange,
+  routeSegment = "agent",
+  initialAgentMode,
+  initialVisibility,
+  initialStatus,
+  initialTargetType = null,
+  initialTargetId = null,
+  initialTargetLabel = null,
+  onOpenTargetObject,
 }: Props) {
   const isRail = variant === "rail"
   const router = useRouter()
+  const activeSummary = useMemo(
+    () => (activeConversationId ? conversations.find((c) => c.id === activeConversationId) ?? null : null),
+    [activeConversationId, conversations],
+  )
+  const resolvedTargetType = initialTargetType ?? activeSummary?.targetType ?? null
+  const resolvedTargetId = initialTargetId ?? activeSummary?.targetId ?? null
+  const resolvedTargetLabel = initialTargetLabel ?? activeSummary?.targetLabel ?? null
+  const defaultVisibility: ConversationVisibility =
+    initialVisibility ??
+    activeSummary?.visibility ??
+    (resolvedTargetType && resolvedTargetId ? "WORKSPACE" : "PRIVATE")
+  const defaultAgentMode: AgentParticipationMode = normalizeAgentParticipationMode(
+    initialAgentMode ?? activeSummary?.agentMode,
+    defaultAgentModeForVisibility(defaultVisibility, Boolean(resolvedTargetType && resolvedTargetId)),
+  )
+  const defaultThreadStatus: ConversationStatus =
+    initialStatus ?? activeSummary?.threadStatus ?? "OPEN"
+
+  const [agentModeState, setAgentModeState] = useState<{
+    conversationKey: string
+    mode: AgentParticipationMode
+    userEdited: boolean
+  }>(() => ({
+    conversationKey: activeConversationId ?? "__new__",
+    mode: defaultAgentMode,
+    userEdited: false,
+  }))
+  const agentMode: AgentParticipationMode =
+    agentModeState.conversationKey === (activeConversationId ?? "__new__")
+      ? agentModeState.mode
+      : defaultAgentMode
+
+  const [threadStatusState, setThreadStatusState] = useState<{
+    conversationKey: string
+    status: ConversationStatus
+  }>(() => ({
+    conversationKey: activeConversationId ?? "__new__",
+    status: defaultThreadStatus,
+  }))
+  const threadStatus: ConversationStatus =
+    threadStatusState.conversationKey === (activeConversationId ?? "__new__")
+      ? threadStatusState.status
+      : defaultThreadStatus
+
+  const handleAgentModeChange = useCallback(
+    (nextMode: AgentParticipationMode) => {
+      setAgentModeState({
+        conversationKey: activeConversationId ?? "__new__",
+        mode: nextMode,
+        userEdited: true,
+      })
+      if (activeConversationId) {
+        void fetch(
+          `/api/agent/conversations/${activeConversationId}/settings?workspaceId=${encodeURIComponent(workspaceId)}`,
+          {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ agentMode: nextMode }),
+          },
+        ).catch(() => {})
+      }
+    },
+    [activeConversationId, workspaceId],
+  )
+
+  const handleToggleThreadStatus = useCallback(() => {
+    const nextStatus: ConversationStatus = threadStatus === "RESOLVED" ? "OPEN" : "RESOLVED"
+    setThreadStatusState({
+      conversationKey: activeConversationId ?? "__new__",
+      status: nextStatus,
+    })
+    if (activeConversationId) {
+      void fetch(
+        `/api/agent/conversations/${activeConversationId}/settings?workspaceId=${encodeURIComponent(workspaceId)}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: nextStatus }),
+        },
+      ).catch(() => {})
+    }
+  }, [activeConversationId, threadStatus, workspaceId])
+
   const [listQuery, setListQuery] = useState("")
   const [listGroupBy, setListGroupBy] = useState<BoardGroupBy>("status")
   // Archive: the page list shows active chats; "Archived" swaps it for the archived ones.
@@ -225,11 +338,11 @@ export function AgentChat({
   const changeArchived = useCallback(
     async (id: string, archived: boolean) => {
       if (!(await setConversationArchived(workspaceId, id, archived))) return
-      if (archived && id === activeConversationId) router.push(`${basePath}/agent`)
+      if (archived && id === activeConversationId) router.push(`${basePath}/${routeSegment}`)
       if (!archived) setArchivedChats((list) => list.filter((c) => c.id !== id))
       router.refresh()
     },
-    [workspaceId, activeConversationId, basePath, router],
+    [workspaceId, activeConversationId, basePath, routeSegment, router],
   )
   const [messages, setMessages] = useState<Message[]>(initialMessages)
   // Prefilled (editable) composer instruction from a "Send to agent" hand-off
@@ -300,7 +413,7 @@ export function AgentChat({
       // route the user is on, and `router.replace` from there would navigate
       // them to the agent screen mid-stream — the interruption the rail exists
       // to remove. The rail keeps its list current by refetching (see AgentRail).
-      if (!isRail) router.replace(`${basePath}/agent?c=${createdId}`)
+      if (!isRail) router.replace(`${basePath}/${routeSegment}?c=${createdId}`)
     },
     onSettled: ({ assistant, detached }) => {
       if (assistant) {
@@ -340,11 +453,28 @@ export function AgentChat({
   // the re-seed effect below for what that is protecting.
   const selfCreated = useRef(new Set<string>())
 
-  const shared = Boolean(roster?.available && roster.participants.length > 1)
+  const shared = Boolean(
+    (roster?.available && roster.participants.length > 1) || defaultVisibility === "WORKSPACE",
+  )
   const sharedRef = useRef(shared)
   useEffect(() => {
     sharedRef.current = shared
   }, [shared])
+  // When a participant is invited into a private chat, automatically switch default AUTO mode to MENTION_ONLY.
+  useEffect(() => {
+    if (
+      roster?.available &&
+      roster.participants.length > 1 &&
+      !agentModeState.userEdited &&
+      agentMode === "AUTO"
+    ) {
+      setAgentModeState({
+        conversationKey: activeConversationId ?? "__new__",
+        mode: "MENTION_ONLY",
+        userEdited: false,
+      })
+    }
+  }, [roster, agentMode, agentModeState.userEdited, activeConversationId])
   const messagesRef = useRef(messages)
   useEffect(() => {
     messagesRef.current = messages
@@ -454,6 +584,11 @@ export function AgentChat({
       seedContext: seedContextForThisTurn,
       agentId: agentSelection || undefined,
       model: modelPick.model || undefined,
+      ...(agentMode !== "AUTO" ? { agentMode } : {}),
+      ...(defaultVisibility === "WORKSPACE" ? { visibility: "WORKSPACE" as const } : {}),
+      ...(resolvedTargetType && resolvedTargetId
+        ? { targetType: resolvedTargetType, targetId: resolvedTargetId }
+        : {}),
       // The rail floats over whatever page the user is on, so tell the server which one.
       // Read at send time (not from render state) so it is the page NOW, not when the
       // component last rendered. A 1-click starter row forwards its snapshotted pageUrl.
@@ -461,7 +596,7 @@ export function AgentChat({
       retry,
       continueTurn: !handoff && Boolean(processing?.canContinue),
     })
-  }, [input, activeConversationId, isRail, processing?.canContinue, pendingSeedEntity, attachedItems, attachedUploads, googleResources, sending, startTurn, agentSelection, modelPick.model])
+  }, [input, activeConversationId, isRail, processing?.canContinue, pendingSeedEntity, attachedItems, attachedUploads, googleResources, sending, startTurn, agentSelection, modelPick.model, agentMode, defaultVisibility, resolvedTargetType, resolvedTargetId])
 
   // The agent's plan is its Compass tasks for this conversation (TaskCreate/TaskUpdate), read from the server so it
   // survives a reload and reaches participants. Refetched when a task tool call finishes (planVersion) and when a turn ends.
@@ -887,9 +1022,9 @@ export function AgentChat({
       setAccessLost((current) => (reason === "removed" && current === "left" ? current : reason))
       if (reason === "left") setLeftNotice(true)
       // Leaving on the full page drops the now-inaccessible thread from the URL.
-      if (reason === "left" && !isRail) router.replace(`${basePath}/agent`)
+      if (reason === "left" && !isRail) router.replace(`${basePath}/${routeSegment}`)
     },
-    [isRail, router, basePath, abortViewers],
+    [isRail, router, basePath, routeSegment, abortViewers],
   )
 
   const sendRef = useRef(send)
@@ -1103,6 +1238,7 @@ export function AgentChat({
                           status={group.id}
                           active={c.id === activeConversationId}
                           basePath={basePath}
+                          routeSegment={routeSegment}
                           archived={false}
                           onToggleArchived={() => void changeArchived(c.id, true)}
                           onOpenTeam={() => openConversationTeam(c.id)}
@@ -1145,6 +1281,7 @@ export function AgentChat({
                             }
                             active={c.id === activeConversationId}
                             basePath={basePath}
+                            routeSegment={routeSegment}
                             archived={false}
                             onToggleArchived={() => void changeArchived(c.id, true)}
                             onOpenTeam={() => openConversationTeam(c.id)}
@@ -1160,6 +1297,7 @@ export function AgentChat({
                       status={null}
                       active={c.id === activeConversationId}
                       basePath={basePath}
+                      routeSegment={routeSegment}
                       archived={showArchived}
                       onToggleArchived={() => void changeArchived(c.id, !showArchived)}
                       onOpenTeam={showArchived ? undefined : () => openConversationTeam(c.id)}
@@ -1185,6 +1323,55 @@ export function AgentChat({
           the Send button and the chip's own dismiss control off-screen on
           any width below ~1000px. */}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        {((resolvedTargetType && resolvedTargetId) || (activeConversationId && shared)) && !accessLost && (
+          <div className={cn("flex items-center justify-between gap-2 border-b border-default bg-surface-inset text-xs", isRail ? "px-3 py-1.5" : "px-4 py-1.5")}>
+            <div className="flex min-w-0 items-center gap-2">
+              {resolvedTargetType && resolvedTargetId && (
+                onOpenTargetObject ? (
+                  <button
+                    type="button"
+                    onClick={() => onOpenTargetObject(resolvedTargetType, resolvedTargetId, resolvedTargetLabel)}
+                    className="inline-flex max-w-[260px] items-center gap-1.5 truncate rounded-md border border-default bg-surface-card px-2 py-0.5 font-medium text-text-primary transition-colors hover:border-border-strong"
+                    title={resolvedTargetLabel ?? `${resolvedTargetType}`}
+                  >
+                    <span className="truncate">{resolvedTargetLabel ?? resolvedTargetType}</span>
+                  </button>
+                ) : (
+                  <span className="inline-flex max-w-[260px] items-center gap-1.5 truncate rounded-md border border-default bg-surface-card px-2 py-0.5 font-medium text-text-primary">
+                    <span className="truncate">{resolvedTargetLabel ?? resolvedTargetType}</span>
+                  </span>
+                )
+              )}
+              {threadStatus === "RESOLVED" && (
+                <span className="inline-flex items-center gap-1 rounded bg-status-success-surface px-1.5 py-0.5 text-[11px] font-medium text-status-success">
+                  <CheckCircle2 className="size-3" aria-hidden="true" />
+                  Resolved
+                </span>
+              )}
+            </div>
+            {activeConversationId && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="xs"
+                onClick={handleToggleThreadStatus}
+                className="h-6 gap-1 px-2 text-xs text-text-secondary hover:text-text-primary"
+              >
+                {threadStatus === "RESOLVED" ? (
+                  <>
+                    <RotateCcw className="size-3" aria-hidden="true" />
+                    Reopen
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 className="size-3" aria-hidden="true" />
+                    Resolve
+                  </>
+                )}
+              </Button>
+            )}
+          </div>
+        )}
         {activeConversationId && !accessLost && (
           <AgentParticipantsPanel
             conversationId={activeConversationId}
@@ -1270,7 +1457,7 @@ export function AgentChat({
                 {(accessLost ?? "left") === "left"
                   ? "You left this conversation. It no longer appears in your list."
                   : "You no longer have access to this conversation."}{" "}
-                <Link className="underline" href={`${basePath}/agent`}>
+                <Link className="underline" href={`${basePath}/${routeSegment}`}>
                   Start a new chat
                 </Link>
               </div>
@@ -1539,6 +1726,21 @@ export function AgentChat({
                 {agentChoices.agents.length > 0 && (
                   <AgentChip choices={agentChoices} value={agentSelection} defaultAgentName={defaultAgentName} disabled={composerDisabled} onChange={setAgentPick} />
                 )}
+                {!accessLost && (
+                  <AgentModeChip
+                    value={agentMode}
+                    disabled={composerDisabled}
+                    onChange={handleAgentModeChange}
+                    onInsertMention={() => {
+                      setInput((prev) =>
+                        prev.includes(`@${defaultAgentName}`)
+                          ? prev
+                          : `@${defaultAgentName} ${prev.trimStart()}`,
+                      )
+                      composerRef.current?.focus()
+                    }}
+                  />
+                )}
                 <ToolsMenu connectors={agentChoices.connectors} enabled={connectorsEnabledFor(agentSelection, agentChoices.defaultAgentId, agentChoices.agents)} loaded={agentChoices.loaded} />
                 {modelPick.visible && (
                   <ModelPicker choices={agentChoices} value={modelPick.model} defaultLabel={modelPick.defaultLabel} disabled={composerDisabled} onChange={modelPick.select} />
@@ -1668,6 +1870,7 @@ function ConversationRow({
   status,
   active,
   basePath,
+  routeSegment = "agent",
   archived,
   onToggleArchived,
   onOpenTeam,
@@ -1676,12 +1879,14 @@ function ConversationRow({
   status: BoardColumnId | null
   active: boolean
   basePath: string
+  routeSegment?: "agent" | "conversations"
   archived: boolean
   onToggleArchived: () => void
   onOpenTeam?: () => void
 }) {
   const archiveLabel = archived ? "Restore chat" : "Archive chat"
   const style = status ? STATUS_STYLE[status] : null
+  const shortTargetCode = c.targetLabel ? c.targetLabel.split(/[·:]/)[0]?.trim() : null
   const preview =
     status === "needs_you"
       ? c.pendingDecisions?.[0]?.question ?? c.proposedReply?.text ?? c.summary
@@ -1718,7 +1923,7 @@ function ConversationRow({
         <span className="flex items-center gap-2">
           {style && <span aria-hidden="true" className={cn("size-2 shrink-0 rounded-full", style.dot)} />}
           <Link
-            href={basePath + "/agent?c=" + c.id}
+            href={`${basePath}/${routeSegment}?c=${c.id}`}
             aria-current={active ? "page" : undefined}
             className={cn(
               "min-w-0 flex-1 truncate focus-visible:outline-none after:absolute after:inset-0 after:rounded-lg",
@@ -1736,6 +1941,16 @@ function ConversationRow({
         {style && c.lastActivityAt && (
           <span className="mt-1 flex flex-wrap items-center gap-1.5 pl-4 text-xs">
             <span className={cn("rounded px-1.5 py-0.5 font-medium", style.badge)}>{style.label}</span>
+            {shortTargetCode && (
+              <span className="max-w-[96px] truncate rounded border border-border-default bg-surface-card px-1.5 py-0.5 text-[10px] font-medium text-text-secondary">
+                {shortTargetCode}
+              </span>
+            )}
+            {c.threadStatus === "RESOLVED" && (
+              <span className="rounded bg-status-success-surface px-1.5 py-0.5 text-[10px] font-medium text-status-success">
+                Resolved
+              </span>
+            )}
             {subtasks && (
               <span className="rounded bg-surface-card px-1.5 py-0.5 text-[11px] tabular-nums text-text-subtle">
                 {subtasks.completed}/{subtasks.total}
@@ -1750,7 +1965,7 @@ function ConversationRow({
             {childAgents && childBadgeLabel && (
               onOpenTeam ? (
                 <Link
-                  href={`${basePath}/agent?c=${c.id}&team=1`}
+                  href={`${basePath}/${routeSegment}?c=${c.id}&team=1`}
                   onClick={(e) => {
                     if (active) e.preventDefault()
                     onOpenTeam()

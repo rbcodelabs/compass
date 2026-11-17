@@ -44,12 +44,16 @@ export function AgentPageShell({
   initialBoardCards,
   initialSquads,
   basePath,
+  title = "Agent",
+  routeSegment = "agent",
   ...chat
 }: ChatProps & {
   initialListOpen: boolean
   initialView: AgentView
   initialBoardCards: AgentBoardCard[] | null
   initialSquads?: AgentBoardCardSquad[]
+  title?: string
+  routeSegment?: "agent" | "conversations"
 }) {
   const [listOpen, setListOpen] = useState(initialListOpen)
   const [view, setView] = useState<AgentView>(initialView)
@@ -61,28 +65,38 @@ export function AgentPageShell({
   const [teamOpenRequest, setTeamOpenRequest] = useState<{ conversationId: string; nonce: number } | null>(null)
   const mergedConversations = useMemo(() => {
     if (!liveCards) return chat.conversations
-    return liveCards.map((card) => ({
-      id: card.id,
-      title: card.title,
-      messageCount: card.messageCount,
-      runStatus: card.runStatus,
-      lastActivityAt: card.lastActivityAt,
-      reviewedAt: card.reviewedAt,
-      squad: card.squad ?? null,
-      summary: card.summary ?? null,
-      prUrl: card.prUrl ?? null,
-      substatus: card.substatus ?? null,
-      currentActivity: card.currentActivity ?? null,
-      lastHeartbeatAt: card.lastHeartbeatAt ?? null,
-      subtasks: card.subtasks,
-      childAgents: card.childAgents,
-      pendingQuestions: card.pendingQuestions,
-      scheduledWakeup: card.scheduledWakeup ?? null,
-      orchestratorRole: card.orchestratorRole ?? null,
-      managerNotes: card.managerNotes ?? null,
-      proposedReply: card.proposedReply ?? null,
-      pendingDecisions: card.pendingDecisions,
-    }))
+    const initialById = new Map(chat.conversations.map((c) => [c.id, c]))
+    return liveCards.map((card) => {
+      const prior = initialById.get(card.id)
+      return {
+        id: card.id,
+        title: card.title,
+        messageCount: card.messageCount,
+        runStatus: card.runStatus,
+        lastActivityAt: card.lastActivityAt,
+        reviewedAt: card.reviewedAt,
+        squad: card.squad ?? null,
+        summary: card.summary ?? null,
+        prUrl: card.prUrl ?? null,
+        substatus: card.substatus ?? null,
+        currentActivity: card.currentActivity ?? null,
+        lastHeartbeatAt: card.lastHeartbeatAt ?? null,
+        subtasks: card.subtasks,
+        childAgents: card.childAgents,
+        pendingQuestions: card.pendingQuestions,
+        scheduledWakeup: card.scheduledWakeup ?? null,
+        orchestratorRole: card.orchestratorRole ?? null,
+        managerNotes: card.managerNotes ?? null,
+        proposedReply: card.proposedReply ?? null,
+        pendingDecisions: card.pendingDecisions,
+        visibility: card.visibility ?? prior?.visibility ?? null,
+        threadStatus: card.threadStatus ?? prior?.threadStatus ?? null,
+        agentMode: card.agentMode ?? prior?.agentMode ?? null,
+        targetType: card.targetType ?? prior?.targetType ?? null,
+        targetId: card.targetId ?? prior?.targetId ?? null,
+        targetLabel: card.targetLabel ?? prior?.targetLabel ?? null,
+      }
+    })
   }, [chat.conversations, liveCards])
   const toggleList = useCallback(() => {
     const next = !listOpen
@@ -158,7 +172,7 @@ export function AgentPageShell({
           {listOpen ? <PanelLeftClose className="size-4" aria-hidden="true" /> : <PanelLeftOpen className="size-4" aria-hidden="true" />}
         </Button>
       }
-      title="Agent"
+      title={title}
       actions={
         <>
           <WorkspaceViewSwitcher
@@ -180,7 +194,7 @@ export function AgentPageShell({
               document.cookie = `${AGENT_VIEW_COOKIE}=chat; path=/; max-age=${ONE_YEAR}`
               setView("chat")
             }}
-            render={<Link href={`${basePath}/agent`} />}
+            render={<Link href={`${basePath}/${routeSegment}`} />}
           >
             <Plus className="size-4" aria-hidden="true" />
             New chat
@@ -198,6 +212,7 @@ export function AgentPageShell({
             {...chat}
             conversations={mergedConversations}
             basePath={basePath}
+            routeSegment={routeSegment}
             listOpen={listOpen}
             reviewedIds={reviewedIds}
             squads={initialSquads}
@@ -208,6 +223,7 @@ export function AgentPageShell({
           <AgentBoard
             workspaceId={workspaceId}
             basePath={basePath}
+            routeSegment={routeSegment}
             initialCards={boardSeed}
             squads={initialSquads}
             onOpenConversation={openFromBoard}

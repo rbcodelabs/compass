@@ -14,6 +14,8 @@ import { mentionsAsMarkdownLinks } from "@/lib/comment-mentions"
 import type { CommentTaskCardData } from "@/lib/comment-task-card"
 import type { BrowserCommentDto } from "@/lib/comment-browser"
 import type { CommentTargetType } from "@/lib/comments"
+import { ObjectConversationsSection } from "@/components/conversations/object-conversations-section"
+import { useConversationPanelOptional } from "@/components/panels/conversation-panel"
 
 type Editor = { kind: "reply" | "edit"; commentId: string } | null
 type MentionContext = { options: MentionOptions; confirmedAgentIds: string[]; targetTitle: string | null }
@@ -96,6 +98,7 @@ export function Discussion(props: DiscussionProps) {
 }
 
 function DiscussionCore({ targetType, targetId, refreshKey, focusedCommentId = null, render }: DiscussionProps) {
+  const convPanel = useConversationPanelOptional()
   const [items, setItems] = useState<BrowserCommentDto[] | null>(null)
   const [loadError, setLoadError] = useState("")
   const [actionError, setActionError] = useState("")
@@ -376,7 +379,18 @@ function DiscussionCore({ targetType, targetId, refreshKey, focusedCommentId = n
     )
   }
 
-  const content = (
+  const content = convPanel ? (
+    <section
+      aria-labelledby={`discussion-${targetType}-${targetId}`}
+      className="min-w-0 space-y-3 border-t border-border pt-4"
+    >
+      <ObjectConversationsSection
+        targetType={targetType}
+        targetId={targetId}
+        targetLabel={mention.targetTitle ?? undefined}
+      />
+    </section>
+  ) : (
     <section aria-labelledby={`discussion-${targetType}-${targetId}`} aria-busy={busy ? "true" : undefined} className="min-w-0 space-y-3 border-t border-border pt-4">
       <div><h3 id={`discussion-${targetType}-${targetId}`} className="text-sm font-semibold">Discussion</h3><p className="text-xs text-muted-foreground">Comments are discussion, not decisions or authorization.</p></div>
       {items === null && !loadError && <p role="status" className="text-sm text-muted-foreground">Loading discussion…</p>}

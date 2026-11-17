@@ -60,6 +60,13 @@ export type StartTurnParams = {
   model?: string
   /** Which page the user is looking at, for surfaces that float over it. */
   pageUrl?: string
+  /** Explicit agent participation mode ("AUTO" | "MENTION_ONLY" | "NONE"). */
+  agentMode?: "AUTO" | "MENTION_ONLY" | "NONE"
+  /** Conversation visibility ("PRIVATE" | "WORKSPACE"). */
+  visibility?: "PRIVATE" | "WORKSPACE"
+  /** Optional polymorphic object anchor. */
+  targetType?: string
+  targetId?: string
   retry?: boolean
   continueTurn?: boolean
 }
@@ -380,6 +387,9 @@ export function useAgentTurn({ workspaceId, onConversationCreated, onSettled }: 
           ...(params.agentId ? { agentId: params.agentId } : {}),
           ...(params.model ? { model: params.model } : {}),
           ...(params.pageUrl ? { pageUrl: params.pageUrl } : {}),
+          ...(params.agentMode ? { agentMode: params.agentMode } : {}),
+          ...(params.visibility ? { visibility: params.visibility } : {}),
+          ...(params.targetType && params.targetId ? { targetType: params.targetType, targetId: params.targetId } : {}),
           ...(params.retry ? { retry: true } : {}),
           ...(params.continueTurn ? { continue: true } : {}),
         }),
@@ -392,6 +402,19 @@ export function useAgentTurn({ workspaceId, onConversationCreated, onSettled }: 
             ? "Your session expired — reload and sign in."
             : serverMsg || `Request failed (${res.status}).`
         )
+      }
+      // 200 JSON { passive: true, conversationId } = a human-only / passive turn
+      // (agentMode === "NONE", or agentMode === "MENTION_ONLY" without an @mention).
+      if (res.status === 200 && res.headers.get("content-type")?.includes("application/json")) {
+        const passive = await res.json() as { passive?: boolean; conversationId?: string }
+        const createdId =
+          passive.conversationId && passive.conversationId !== (params.conversationId ?? null)
+            ? passive.conversationId
+            : null
+        if (createdId) onConversationCreatedRef.current?.(createdId, { detached: false })
+        clearLive()
+        onSettledRef.current?.({ assistant: null, detached: false })
+        return true
       }
       // 202 Accepted = the turn is a detached run. The POST is already over; the
       // agent is not attached to it, and neither is this tab's survival. From here

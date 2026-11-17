@@ -73,7 +73,7 @@ Shared Discussion covers the nine detail panels above. A follow-up release will 
 
 ## Jump between related items
 
-The linked items in a panel are **clickable**. Open an Objective, click one of its Key Results, and the panel switches to that Key Result — from there click an Opportunity it drives, and so on. This lets you walk your whole opportunity-solution tree without leaving the panel or losing the thread. The browser **back** button steps back through the items you visited.
+The linked items in a panel are **clickable**. Open an Objective, click one of its Key Results, and the panel switches to that Key Result — from there click an Opportunity it drives, or open one of its **Conversations** in the same right-hand panel. As you traverse between objects and conversations, a single-line collapsible breadcrumb bar at the top of the panel (`[First] › [⋯] › [Previous] › [Current]`) lets you jump back to any earlier item without wrapping or losing your place. The browser **back** button also steps back through the items you visited.
 
 An Opportunity's **Driving Key Result** title and **Linked feedback** rows open the corresponding panels. Linked feedback includes a count and status labels; it is distinct from Evidence. These same navigation controls are also available on the opportunity's full page.
 

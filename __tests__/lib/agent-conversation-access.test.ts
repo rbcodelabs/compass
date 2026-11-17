@@ -22,12 +22,13 @@ describe("conversation access predicates", () => {
     })
   })
 
-  it("accessible predicate is owner OR active non-interview participant, behind live workspace membership", () => {
+  it("accessible predicate is owner, workspace-visible non-interview thread, OR active non-interview participant, behind live workspace membership", () => {
     expect(accessibleConversationsWhere("ws-1", "user-1")).toEqual({
       workspaceId: "ws-1",
       ...MEMBERSHIP,
       OR: [
         { userId: "user-1" },
+        { visibility: "WORKSPACE", interviewProcessingJson: null },
         {
           interviewProcessingJson: null,
           participants: { some: { userId: "user-1", workspaceId: "ws-1", removedAt: null } },

@@ -134,6 +134,8 @@ type AgentBoardProps = {
   onOpenConversation: (conversationId: string, options?: { openTeam?: boolean }) => void
   /** Optional live-card callback so the sibling Chat sidebar stays in sync when switching views. */
   onCardsChange?: (cards: AgentBoardCard[]) => void
+  /** Route segment for card links ("agent" or "conversations"). */
+  routeSegment?: "agent" | "conversations"
 }
 
 /**
@@ -141,7 +143,7 @@ type AgentBoardProps = {
  * search across threads/subtasks/activity/linked objects, Status vs. Squad grouping, and rich cards
  * displaying inline subtask checklists, live activity or idle summaries, PR badges, and linked objects.
  */
-export function AgentBoard({ workspaceId, basePath, initialCards, squads = [], onOpenConversation, onCardsChange }: AgentBoardProps) {
+export function AgentBoard({ workspaceId, basePath, initialCards, squads = [], onOpenConversation, onCardsChange, routeSegment = "agent" }: AgentBoardProps) {
   const [cards, setCards] = useState<AgentBoardCard[] | null>(initialCards)
   const cardsRef = useRef<AgentBoardCard[]>(initialCards ?? [])
   const [liveSquads, setLiveSquads] = useState<AgentBoardCardSquad[]>(squads)
@@ -327,8 +329,8 @@ export function AgentBoard({ workspaceId, basePath, initialCards, squads = [], o
               column={column.id}
               showSquadBadge
               now={now}
-              href={`${basePath}/agent?c=${card.id}`}
-              teamHref={`${basePath}/agent?c=${card.id}&team=1`}
+              href={`${basePath}/${routeSegment}?c=${card.id}`}
+              teamHref={`${basePath}/${routeSegment}?c=${card.id}&team=1`}
               onOpen={() => onOpenConversation(card.id)}
               onOpenTeam={() => onOpenConversation(card.id, { openTeam: true })}
               onMutated={() => void refresh()}
@@ -361,8 +363,8 @@ export function AgentBoard({ workspaceId, basePath, initialCards, squads = [], o
               column={classifyBoardCard(card)}
               showSquadBadge={false}
               now={now}
-              href={`${basePath}/agent?c=${card.id}`}
-              teamHref={`${basePath}/agent?c=${card.id}&team=1`}
+              href={`${basePath}/${routeSegment}?c=${card.id}`}
+              teamHref={`${basePath}/${routeSegment}?c=${card.id}&team=1`}
               onOpen={() => onOpenConversation(card.id)}
               onOpenTeam={() => onOpenConversation(card.id, { openTeam: true })}
               onMutated={() => void refresh()}

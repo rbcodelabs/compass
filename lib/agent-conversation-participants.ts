@@ -186,6 +186,7 @@ export async function addConversationParticipant(
       where: { id: existing.id },
       data: { removedAt: null, addedByUserId: ctx.actorUserId, updatedAt: now },
     })
+    await switchSharedConversationToMentionOnly(prisma, ctx.conversationId)
     return { added: true }
   }
   try {
@@ -206,7 +207,21 @@ export async function addConversationParticipant(
     if (typeof error === "object" && error !== null && "code" in error && error.code === "P2002") return { added: false }
     throw error
   }
+  await switchSharedConversationToMentionOnly(prisma, ctx.conversationId)
   return { added: true }
+}
+
+async function switchSharedConversationToMentionOnly(prisma: AppPrismaClient, conversationId: string) {
+  try {
+    if (typeof prisma.agentConversation.updateMany === "function") {
+      await prisma.agentConversation.updateMany({
+        where: { id: conversationId, OR: [{ agentMode: null }, { agentMode: "AUTO" }] },
+        data: { agentMode: "MENTION_ONLY" },
+      })
+    }
+  } catch {
+    // Pre-124 fallback: ignore if agent_mode column is not present yet.
+  }
 }
 
 /**
