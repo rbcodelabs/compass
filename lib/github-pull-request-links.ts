@@ -39,3 +39,25 @@ export function parsePullRequestPanelId(id: string): PullRequestRef | null {
 export function pullRequestUrl(ref: PullRequestRef): string {
   return ["https://github.com", ref.owner, ref.repo, "pull", ref.number].join("/")
 }
+
+export function samePullRequest(a: PullRequestRef, b: PullRequestRef): boolean {
+  return a.number === b.number && a.owner.toLowerCase() === b.owner.toLowerCase() && a.repo.toLowerCase() === b.repo.toLowerCase()
+}
+
+/**
+ * True when a link's visible text is just the raw PR URL (e.g. a pasted bare URL or `<url>` autolink) rather than custom `[label](url)` text.
+ */
+export function isBarePullRequestLabel(label: string, pr: PullRequestRef, href?: string): boolean {
+  const trimmed = label.trim()
+  if (!trimmed) return true
+  if (href && trimmed === href.trim()) return true
+  const parsed = parsePullRequestUrl(trimmed)
+  return parsed !== null && samePullRequest(parsed, pr)
+}
+
+/** Formats the resolved smart-chip label `#<number> <Title>`, avoiding `#123 #123` when GitHub returned no title. */
+export function formatPullRequestLabel(summary: { number: number; title: string }): string {
+  const prefix = `#${summary.number}`
+  const title = summary.title.trim()
+  return title && title !== prefix ? `${prefix} ${title}` : prefix
+}
