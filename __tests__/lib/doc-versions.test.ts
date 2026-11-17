@@ -242,3 +242,32 @@ describe("restoreDocVersionCore", () => {
     })
   })
 })
+
+import { pinDocVersion } from "@/lib/doc-versions"
+
+describe("pinDocVersion", () => {
+  it("creates v1 for a doc with no numbered versions", async () => {
+    mockDocVersion.findFirst.mockResolvedValue(null)
+    const result = await pinDocVersion(DOC_ID, { authorName: "Rick" })
+    expect(result).toEqual({ id: "version-new", versionNumber: 1, created: true })
+    expect(mockDocVersion.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ docId: DOC_ID, versionNumber: 1, content: "Current content" }) }))
+  })
+
+  it("numbers the next version after the latest numbered one when content changed", async () => {
+    mockDocVersion.findFirst.mockResolvedValue({ id: "v2", versionNumber: 2, title: "Current Title", content: "Older content" })
+    const result = await pinDocVersion(DOC_ID, { authorName: "Rick" })
+    expect(result).toEqual({ id: "version-new", versionNumber: 3, created: true })
+  })
+
+  it("reuses the latest numbered version when the doc is unchanged", async () => {
+    mockDocVersion.findFirst.mockResolvedValue({ id: "v2", versionNumber: 2, title: "Current Title", content: "Current content" })
+    const result = await pinDocVersion(DOC_ID, { authorName: "Rick" })
+    expect(result).toEqual({ id: "v2", versionNumber: 2, created: false })
+    expect(mockDocVersion.create).not.toHaveBeenCalled()
+  })
+
+  it("returns null when the doc no longer exists", async () => {
+    mockDoc.findUnique.mockResolvedValue(null)
+    expect(await pinDocVersion(DOC_ID, { authorName: "Rick" })).toBeNull()
+  })
+})

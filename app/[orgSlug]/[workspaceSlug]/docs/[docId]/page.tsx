@@ -12,6 +12,7 @@ import { CanvasDocEditor } from "@/components/docs/canvas/canvas-doc-editor";
 import { DocDecisionAction } from "@/components/docs/doc-decision-action";
 import { FollowButton } from "@/components/following/follow-button";
 import { listDocDecisions } from "@/lib/tracked-decisions";
+import { getDocVersionStatus } from "@/lib/doc-version-status";
 import { fetchLinkedTasksBundle } from "@/lib/linked-tasks";
 import { agentIdsAssignedInDoc, loadCommentTaskCards, loadMentionCandidates } from "@/lib/doc-comment-tasks";
 import { documentRevision, hydrateDocument } from "@/lib/document-service";
@@ -77,6 +78,9 @@ export default async function DocPage({ params, searchParams }: Props) {
 
   // An unavailable lookup is distinct from a document with no decisions.
   const decisions = await listDocDecisions(workspace.id, doc.id).catch(() => null);
+  // "Approved at v3 · edited since": compare the version the latest decision covers with the doc as it is now.
+  const decidedVersion = decisions?.latestDecided?.docVersion ?? null;
+  const versionStatus = decidedVersion ? await getDocVersionStatus(workspace.id, doc.id, decidedVersion, { title: doc.title, content: doc.content }) : null;
 
   // Lightweight fields only (no content) -- the full snapshot is fetched on
   // demand when a version is opened in the history panel, so opening a doc
@@ -115,7 +119,7 @@ export default async function DocPage({ params, searchParams }: Props) {
         workspaceSlug={workspaceSlug}
         lastWriter={lastWriter}
         initialHistoryPin={parsePanelPin(cookieStore.get(panelPinCookieName("docsHistory"))?.value)}
-        decisionAction={<DocDecisionAction orgSlug={orgSlug} workspaceSlug={workspaceSlug} docId={doc.id} docTitle={doc.title} decisions={decisions} />}
+        decisionAction={<DocDecisionAction orgSlug={orgSlug} workspaceSlug={workspaceSlug} docId={doc.id} docTitle={doc.title} decisions={decisions} versionStatus={versionStatus} />}
       />
     );
   }
@@ -161,7 +165,7 @@ export default async function DocPage({ params, searchParams }: Props) {
       taskCards={taskCards}
       confirmedAgentIds={confirmedAgentIds}
       followAction={<FollowButton key="follow" orgSlug={orgSlug} workspaceSlug={workspaceSlug} subjectType="DOC" subjectId={doc.id} />}
-      decisionAction={<DocDecisionAction key="decision" orgSlug={orgSlug} workspaceSlug={workspaceSlug} docId={doc.id} docTitle={doc.title} decisions={decisions} />}
+      decisionAction={<DocDecisionAction key="decision" orgSlug={orgSlug} workspaceSlug={workspaceSlug} docId={doc.id} docTitle={doc.title} decisions={decisions} versionStatus={versionStatus} />}
     />
   );
 }

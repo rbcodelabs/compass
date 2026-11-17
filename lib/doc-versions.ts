@@ -120,3 +120,56 @@ export async function restoreDocVersionCore(
 
   return { id: restored.id, title: restored.title, docId: version.docId, restoredFrom: version.createdAt }
 }
+
+export interface PinDocVersionOptions {
+  authorId?: string | null
+  authorName: string
+}
+
+/**
+ * Pin the doc CURRENT content as the next numbered version (v1, v2, ...).
+ *
+ * Unlike maybeSnapshotDocVersion (which captures the state before an overwrite
+ * and may coalesce), this always captures the live doc as it is right now and
+ * numbers it. Used when a decision is requested so the decision can name the
+ * exact version it covers.
+ *
+ * If the latest numbered version already holds identical title and content, that
+ * version is returned instead of creating a duplicate, so two decisions on an
+ * unchanged doc point at the same version.
+ */
+export async function pinDocVersion(
+  docId: string,
+  opts: PinDocVersionOptions
+): Promise<{ id: string; versionNumber: number; created: boolean } | null> {
+  const prisma = getPrisma()
+  const doc = await prisma.doc.findUnique({
+    where: { id: docId },
+    select: { title: true, content: true, metadata: true, icon: true },
+  })
+  if (!doc) return null
+
+  const latest = await prisma.docVersion.findFirst({
+    where: { docId, versionNumber: { not: null } },
+    orderBy: { versionNumber: "desc" },
+    select: { id: true, versionNumber: true, title: true, content: true },
+  })
+  if (latest?.versionNumber != null && latest.title === doc.title && (latest.content ?? null) === (doc.content ?? null)) {
+    return { id: latest.id, versionNumber: latest.versionNumber, created: false }
+  }
+
+  const versionNumber = (latest?.versionNumber ?? 0) + 1
+  const created = await prisma.docVersion.create({
+    data: {
+      docId,
+      title: doc.title,
+      content: doc.content,
+      metadata: doc.metadata ?? undefined,
+      icon: doc.icon,
+      versionNumber,
+      createdById: opts.authorId ?? null,
+      createdByName: opts.authorName,
+    },
+  })
+  return { id: created.id, versionNumber, created: true }
+}

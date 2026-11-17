@@ -890,6 +890,11 @@ const MIGRATIONS: readonly MigrationEntry[] = [
     name: "125_unified_conversations",
     filePath: path.join(process.cwd(), "prisma/migrations/125_unified_conversations/migration.sql"),
   },
+  {
+    // doc_versions.version_number (nullable, no default: DSQL): the v1, v2 number of a version pinned for a decision request. Additive.
+    name: "126_doc_version_numbers",
+    filePath: path.join(process.cwd(), "prisma/migrations/126_doc_version_numbers/migration.sql"),
+  },
 ];
 
 const MIGRATIONS_BY_NAME = new Map(MIGRATIONS.map((migration) => [migration.name, migration]));

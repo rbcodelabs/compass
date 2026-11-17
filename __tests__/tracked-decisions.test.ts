@@ -22,6 +22,8 @@ const prisma = {
 const { linkedTargetIds } = vi.hoisted(() => ({ linkedTargetIds: vi.fn() }))
 vi.mock("@/lib/task-links-read", () => ({ getLinkedTargetIds: linkedTargetIds }))
 vi.mock("@/lib/db", () => ({ default: () => prisma }))
+const pinDocVersion = vi.hoisted(() => vi.fn())
+vi.mock("@/lib/doc-versions", () => ({ pinDocVersion }))
 
 import {
   TrackedDecisionError,
@@ -194,6 +196,63 @@ describe("tracked decisions", () => {
     const packet = JSON.parse(prisma.reviewRevision.create.mock.calls[0][0].data.packetJson)
     expect(packet.schemaVersion).toBe("tracked-decision/v2")
     expect(packet.sources).toEqual(sources)
+  })
+
+  describe("doc version pinning", () => {
+    const docRow = { id: "doc-1", title: "Plan", workspaceId: "ws-1", updatedAt: new Date("2026-11-10T00:00:00.000Z") }
+    const createDocDecision = () => createTrackedDecisionRequest({ workspaceId: "ws-1", subjectType: "DOC", subjectId: "doc-1", question: "Publish?", context: "Review it.", requestedById: "user-1", idempotencyKey: key1 })
+
+    it("pins the doc and records the version in the packet for a new DOC decision", async () => {
+      prisma.doc.findUnique.mockResolvedValue(docRow)
+      pinDocVersion.mockResolvedValue({ id: "docver-3", versionNumber: 3, created: true })
+
+      await createDocDecision()
+
+      expect(pinDocVersion).toHaveBeenCalledWith("doc-1", { authorId: "user-1", authorName: "Decision request" })
+      const packet = JSON.parse(prisma.reviewRevision.create.mock.calls[0][0].data.packetJson)
+      expect(packet.entity.docVersion).toEqual({ id: "docver-3", number: 3 })
+    })
+
+    it("still creates the decision, without a version, when the doc cannot be pinned", async () => {
+      prisma.doc.findUnique.mockResolvedValue(docRow)
+      pinDocVersion.mockResolvedValue(null)
+
+      await createDocDecision()
+
+      const packet = JSON.parse(prisma.reviewRevision.create.mock.calls[0][0].data.packetJson)
+      expect(packet.entity.docVersion).toBeUndefined()
+    })
+
+    it("does not pin or add a version for non-DOC subjects", async () => {
+      prisma.solution.findUnique.mockResolvedValue({ id: "solution-1", title: "Simple decisions", workspaceId: "ws-1" })
+
+      await createTrackedDecisionRequest({ workspaceId: "ws-1", subjectType: "SOLUTION", subjectId: "solution-1", question: "Build it?", context: "Ctx", idempotencyKey: key1 })
+
+      expect(pinDocVersion).not.toHaveBeenCalled()
+      const packet = JSON.parse(prisma.reviewRevision.create.mock.calls[0][0].data.packetJson)
+      expect(packet.entity.docVersion).toBeUndefined()
+    })
+
+    it("does not pin a new version when an idempotent request is replayed", async () => {
+      prisma.doc.findUnique.mockResolvedValue(docRow)
+      const currentRevision = { id: "revision-current", requestId: "request-1", packetJson: JSON.stringify({ schemaVersion: "tracked-decision/v2", question: "Publish?", context: "Review it.", entity: { type: "DOC", id: "doc-1", title: "Plan", updatedAt: "2026-11-01T00:00:00.000Z", docVersion: { id: "docver-2", number: 2 } }, sources: [] }) }
+      prisma.reviewRequest.findFirst.mockResolvedValue({ id: "request-1", state: "PENDING", currentRevisionId: "revision-current", currentRevision, revisionCount: 1, decisionCycle: 1 })
+
+      await expect(createDocDecision()).resolves.toBe(currentRevision)
+      expect(pinDocVersion).not.toHaveBeenCalled()
+    })
+
+    it("pins the latest doc version when a changes-requested decision is revised", async () => {
+      prisma.doc.findUnique.mockResolvedValue(docRow)
+      pinDocVersion.mockResolvedValue({ id: "docver-4", versionNumber: 4, created: true })
+      prisma.reviewRequest.findUnique.mockResolvedValue({ id: "request-1", workspaceId: "ws-1", gateType: "TRACKED_DECISION", state: "DECIDED", currentRevisionId: "revision-old", revisionCount: 1, decisionCycle: 1, currentRevision: { packetJson: JSON.stringify({ schemaVersion: "tracked-decision/v2", entity: { type: "DOC", id: "doc-1", docVersion: { id: "docver-3", number: 3 } }, sources: [] }) } })
+      prisma.decisionRecord.findUnique.mockResolvedValue({ id: "decision-1", requestId: "request-1", revisionId: "revision-old", option: { outcomeClass: "REQUEST_CHANGES" } })
+
+      await reviseTrackedDecisionRequest({ requestId: "request-1", workspaceId: "ws-1", subjectType: "DOC", subjectId: "doc-1", question: "Publish v4?", context: "Updated.", expectedDecisionId: "decision-1", reason: "Edited after feedback", requestedById: "user-1" })
+
+      const packet = JSON.parse(prisma.reviewRevision.create.mock.calls[0][0].data.packetJson)
+      expect(packet.entity.docVersion).toEqual({ id: "docver-4", number: 4 })
+    })
   })
 
   it("rejects cross-workspace entity references before creating a request", async () => {

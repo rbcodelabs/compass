@@ -292,6 +292,8 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   // Unified Conversations model (OPP-67 / SOL-117): twelve nullable ADD COLUMN IF NOT EXISTS statements across agent_conversations and agent_messages; no default, backfill, index or FK.
   // Postcondition pinned in REVIEWED_MIGRATION_CODE_SHA256. Digest recorded from the shipped SQL after reading it.
   "125_unified_conversations": "dc6968e7f3573b5bc5aa9982f59c2f147643c807764c7c2ad768b21182333faf",
+  // Numbered doc versions: one nullable ADD COLUMN IF NOT EXISTS version_number INTEGER on doc_versions; no default, backfill, index or FK. Digest recorded from the shipped SQL after reading it.
+  "126_doc_version_numbers": "e1082457e986ef1968b13f7460aec087f595fc3e7dfd35f38610d1902f1da58b",
 };
 
 /**
