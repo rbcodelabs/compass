@@ -36,7 +36,7 @@ An embed is an ordinary markdown link to a `compass://` address:
 - The text in the square brackets is a **cached title**, only a hint for readers of the raw markdown. Compass never shows it on a card: the card always shows the record's current title, so a renamed record is correct everywhere without editing the document.
 - Loading a card never edits the document. Editing a card (below) changes the record, not the document.
 
-The kinds you can embed are `opportunity`, `solution`, `metric`, `doc`, `task`, `experiment`, `objective`, `keyResult`, `assumption`, `roadmapItem` and `artifact`. The id must be the record's UUID, from the same workspace as the document.
+The kinds you can embed are `opportunity`, `solution`, `metric`, `doc`, `task`, `experiment`, `objective`, `keyResult`, `assumption`, `roadmapItem`, `artifact` and `decision` (a tracked Decision: shows its options and chosen outcome). The id must be the record's UUID, from the same workspace as the document.
 
 Archived and killed records still show as cards, with their status. That is information, not an error.
 

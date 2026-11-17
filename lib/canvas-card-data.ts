@@ -21,6 +21,7 @@ import {
 import { isDocEmbedKind, type DocEmbedKind, type DocEmbedRef } from "@/lib/doc-embeds"
 import { DOC_SPECIFIES_SCOPE_LINK_TYPE, LINK_TYPES } from "@/lib/links/registry"
 import { readArtifactKind } from "@/lib/artifact-kind"
+import { excludeToolApprovals } from "@/lib/tool-approval/gate"
 
 export type CanvasCardFact = { label: string; value: string }
 /** The card payload for one reference. `unavailable` carries no data and is identical for missing, foreign and not-permitted records. */
@@ -228,6 +229,24 @@ async function resolveUniqueRefs(
     for (const d of archived) {
       const name = nameOf.get(d.currentRevisionId)
       if (name) ok("metric", d.id, name, "ARCHIVED", [], `${workspaceBasePath(slugs)}/metrics`)
+    }
+  })
+  when("decision", async (ids) => {
+    // A Decision is a review request. Show its question, the offered options and, once decided, the chosen option.
+    const rows = await db.reviewRequest.findMany({
+      where: { id: { in: ids }, workspaceId, ...excludeToolApprovals },
+      select: {
+        id: true,
+        state: true,
+        currentRevision: { select: { title: true, options: { orderBy: { sortOrder: "asc" }, select: { label: true, actionKey: true } } } },
+        decisions: { orderBy: { decidedAt: "desc" }, take: 1, select: { decidedAt: true, option: { select: { label: true } } } },
+      },
+    })
+    for (const r of rows) {
+      if (!r.currentRevision) continue
+      const choices = r.currentRevision.options.filter((o) => o.actionKey.startsWith("CHOICE_")).map((o) => o.label)
+      const decided = r.decisions[0]
+      ok("decision", r.id, r.currentRevision.title, r.state, [...fact("Options", choices.join(" / ")), ...fact("Decided", decided?.option.label)], `${workspaceBasePath(slugs)}/reviews/${r.id}`)
     }
   })
   when("artifact", async (ids) => {
