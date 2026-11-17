@@ -70,7 +70,7 @@ vi.mock("@/lib/db", () => {
 
 import { createPath, writePath, readPath } from "@/lib/doc-fs"
 import { DOC_TYPES } from "@/lib/doc-types"
-import { kindFromFrontmatterClaim } from "@/lib/doc-kinds"
+import { kindFromFrontmatterClaim } from "@/lib/doc-kind-frontmatter"
 import { safeMatter } from "@/lib/safe-matter"
 
 const WS = "ws-1"
