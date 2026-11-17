@@ -170,7 +170,7 @@ export async function recordDecision(input: {
       })
       await tx.reviewRequest.update({ where: { id: revision.requestId }, data: { state: "DECIDED", updatedAt: new Date() } })
       // Approvals stay out of the workspace-updates feed with the other generic decision readers.
-      if (capture && !isToolApprovalGate(revision.request.gateType) && (await isModuleEnabled(revision.request.workspaceId, "workspace_updates"))) await recordWorkspaceUpdate(tx, { workspaceId: revision.request.workspaceId, entityType: "DECISION", entityId: revision.requestId, kind: "DECISION_RECORDED", actorType: "USER", actorId: actorUserId })
+      if (capture && !isToolApprovalGate(revision.request.gateType) && (await isModuleEnabled(revision.request.workspaceId, "workspace_updates", tx))) await recordWorkspaceUpdate(tx, { workspaceId: revision.request.workspaceId, entityType: "DECISION", entityId: revision.requestId, kind: "DECISION_RECORDED", actorType: "USER", actorId: actorUserId })
       return decision
     })
   } catch (error) {

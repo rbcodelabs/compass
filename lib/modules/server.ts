@@ -37,9 +37,11 @@ function isMissingTable(error: unknown): boolean {
   return typeof error === "object" && error !== null && "code" in error && (error as { code?: unknown }).code === "P2021"
 }
 
+type ModuleDbClient = Pick<ReturnType<typeof getPrisma>, "workspaceModule" | "workspace">
+
 /** The raw rows for a workspace (key -> enabled), or the legacy fallback when the table does not exist yet. */
-async function loadStoredStates(workspaceId: string): Promise<Map<string, boolean>> {
-  const prisma = getPrisma()
+async function loadStoredStates(workspaceId: string, db?: ModuleDbClient): Promise<Map<string, boolean>> {
+  const prisma = db?.workspaceModule ? db : getPrisma()
   try {
     const rows = await prisma.workspaceModule.findMany({ where: { workspaceId }, select: { moduleKey: true, enabled: true } })
     return new Map(rows.map((row) => [row.moduleKey, row.enabled]))
@@ -57,7 +59,10 @@ export async function getWorkspaceModuleStates(workspaceId: string): Promise<Rec
   return loadResolved(workspaceId)
 }
 
-export async function isModuleEnabled(workspaceId: string, key: ModuleKey): Promise<boolean> {
+export async function isModuleEnabled(workspaceId: string, key: ModuleKey, db?: ModuleDbClient): Promise<boolean> {
+  if (db?.workspaceModule) {
+    return resolveModules(await loadStoredStates(workspaceId, db))[key].enabled
+  }
   return (await loadResolved(workspaceId))[key].enabled
 }
 

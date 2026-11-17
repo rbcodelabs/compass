@@ -214,7 +214,13 @@ export function TrackedDecisionChatCard({
       refreshRef.current()
     } catch (cause) {
       if (mounted.current) {
-        setActionError(cause instanceof Error ? cause.message : "Could not record decision.")
+        const raw = cause instanceof Error ? cause.message : "Could not record decision."
+        setActionError(
+          /Minified React error #441/i.test(raw)
+            ? "Could not record decision right now. Please try again or open the decision brief."
+            : raw,
+        )
+        refreshRef.current()
       }
     } finally {
       if (mounted.current) setSubmitting(false)
