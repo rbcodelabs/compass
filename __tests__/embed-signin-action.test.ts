@@ -220,6 +220,15 @@ describe("depositEmbedSignIn", () => {
     expect(result).toEqual({ status: "unavailable", error: "Malformed sign-in request." });
   });
 
+  it("reads the portal session for the source's own workspace, so another workspace's session cannot sign in here", async () => {
+    // A cookie minted for some other workspace resolves to null for ws-1.
+    mockSession.mockImplementation(async (workspaceId: string) => (workspaceId === "ws-other" ? { ...IDENTITY } : null));
+    const result = await depositEmbedSignIn({ token: TOKEN, nonce: NONCE, origin: WIDGET_ORIGIN });
+    expect(mockSession).toHaveBeenCalledWith("ws-1");
+    expect(result).toEqual({ status: "signin_required", mode: "PORTAL" });
+    expect(mockDeposit).not.toHaveBeenCalled();
+  });
+
   it("charges the read quota on every call, including a signed-out poll", async () => {
     mockSession.mockResolvedValue(null);
     await depositEmbedSignIn({ token: TOKEN, nonce: NONCE, origin: WIDGET_ORIGIN });

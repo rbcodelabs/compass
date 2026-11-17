@@ -204,7 +204,7 @@ export function EmbedSignInPopup({
         Your comment is published with your email address, so the team can follow up. Signing in
         happens here on Compass — the page you came from never sees your credentials.
       </p>
-      <PortalSignInGate actionLabel="leave feedback" />
+      <PortalSignInGate actionLabel="leave feedback" embedToken={token} />
       <p className="mt-4 text-xs text-text-subtle">
         Keep this window open. After you click the link in your email, it will finish on its own.
       </p>

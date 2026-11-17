@@ -34,19 +34,18 @@ export default async function PortalRoadmapPage({ params }: Props) {
   const { orgSlug, workspaceSlug } = await params;
   const prisma = getPrisma();
 
-  const [workspace, portalSession] = await Promise.all([
-    prisma.workspace.findFirst({
-      where: { slug: workspaceSlug, organization: { slug: orgSlug } },
-      select: {
-        id: true,
-        name: true,
-        roadmapPublic: true,
-        portalAuthRequired: true,
-        feedbackEnabled: true,
-      },
-    }),
-    getPortalSession(),
-  ]);
+  const workspace = await prisma.workspace.findFirst({
+    where: { slug: workspaceSlug, organization: { slug: orgSlug } },
+    select: {
+      id: true,
+      name: true,
+      roadmapPublic: true,
+      portalAuthRequired: true,
+      feedbackEnabled: true,
+    },
+  });
+  // Bound to the workspace being rendered: a session issued by another workspace is anonymous here.
+  const portalSession = workspace ? await getPortalSession(workspace.id) : null;
 
   if (!workspace || !workspace.roadmapPublic) {
     return (

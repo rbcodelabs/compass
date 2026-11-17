@@ -58,7 +58,7 @@ export async function POST(
     typeof voterName === "string" && voterName.trim() ? voterName.trim() : null;
 
   if (workspace.portalAuthRequired) {
-    const session = await getPortalSession();
+    const session = await getPortalSession(workspace.id);
     if (!session) {
       return NextResponse.json(
         { error: "Sign in required to vote", code: "PORTAL_AUTH_REQUIRED" },

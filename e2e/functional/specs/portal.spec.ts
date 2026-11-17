@@ -143,7 +143,7 @@ test.describe("Portal — account authentication (portalAuthRequired)", () => {
       const testEmail = `e2e-portal-${Date.now()}@example.com`;
       const sendRes = await anonContext.request.post(
         `${baseURL}/api/portal/auth/send`,
-        { data: { email: testEmail } }
+        { data: { email: testEmail, returnTo: `/portal/${orgSlug}/${workspaceSlug}/roadmap` } }
       );
       expect(sendRes.ok()).toBe(true);
       const sendBody = (await sendRes.json()) as { devVerifyUrl?: string };

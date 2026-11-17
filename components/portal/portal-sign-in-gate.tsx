@@ -8,6 +8,11 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 interface Props {
   /** Short copy explaining what signing in unlocks, e.g. "vote" or "submit feedback". */
   actionLabel: string;
+  /**
+   * Set only by the embed sign-in popup, which is not under /portal/<org>/<workspace>: the
+   * embed token names the feedback source (and so the workspace) the session is issued for.
+   */
+  embedToken?: string;
 }
 
 /**
@@ -16,7 +21,7 @@ interface Props {
  * no client-side session polling; the visitor re-visits after clicking the
  * emailed link (which redirects back to window.location.pathname).
  */
-export function PortalSignInGate({ actionLabel }: Props) {
+export function PortalSignInGate({ actionLabel, embedToken }: Props) {
   const [email, setEmail] = useState("");
   const [isSending, setIsSending] = useState(false);
   const [sent, setSent] = useState(false);
@@ -38,7 +43,7 @@ export function PortalSignInGate({ actionLabel }: Props) {
       await fetch("/api/portal/auth/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: trimmed, returnTo }),
+        body: JSON.stringify({ email: trimmed, returnTo, ...(embedToken ? { embedToken } : {}) }),
       });
       setSent(true);
     } catch {

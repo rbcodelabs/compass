@@ -37,7 +37,7 @@ export async function POST(
   }
 
   if (workspace.portalAuthRequired) {
-    const session = await getPortalSession();
+    const session = await getPortalSession(workspace.id);
     if (!session) {
       return NextResponse.json(
         { error: "Sign in required to submit feedback", code: "PORTAL_AUTH_REQUIRED" },

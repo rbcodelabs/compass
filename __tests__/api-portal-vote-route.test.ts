@@ -129,6 +129,27 @@ describe("POST /api/portal/[orgSlug]/[workspaceSlug]/vote — feedback votes", (
   });
 });
 
+describe("POST /api/portal/[orgSlug]/[workspaceSlug]/vote — session tenant binding", () => {
+  it("asks for the session of THIS workspace, so a session issued by another workspace is anonymous (401)", async () => {
+    mockWorkspace.findFirst.mockResolvedValue({
+      id: "ws-b",
+      feedbackEnabled: true,
+      roadmapPublic: true,
+      portalAuthRequired: true,
+    });
+    // The cookie holds a session minted for workspace A only.
+    mockGetPortalSession.mockImplementation(async (workspaceId: string) =>
+      workspaceId === "ws-a" ? { portalAccountId: "victim", email: "victim@example.com", name: null } : null
+    );
+
+    const res = await POST(makeRequest({ type: "feedback", itemId: "fb-1" }), { params });
+
+    expect(mockGetPortalSession).toHaveBeenCalledWith("ws-b");
+    expect(res.status).toBe(401);
+    expect(mockFeedbackVote.create).not.toHaveBeenCalled();
+  });
+});
+
 describe("POST /api/portal/[orgSlug]/[workspaceSlug]/vote — roadmap votes", () => {
   it("portalAuthRequired=true + valid session: session email + portalAccountId used, voterName still client-supplied", async () => {
     mockWorkspace.findFirst.mockResolvedValue({

@@ -283,6 +283,9 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   // Audit + per-turn budget for web_fetch: one additive CREATE TABLE IF NOT EXISTS (agent_web_fetches) keyed by (credential_id, seq); no index, no ALTER, no backfill, no FK.
   // Postcondition pinned in REVIEWED_MIGRATION_CODE_SHA256. Digest recorded from the shipped SQL after reading it.
   "124_agent_web_fetches": "21b066340191c00b6953436ff6f77b6fa6b7faa9bf07146eb4f3b3d068470cf4",
+  // Binds portal sessions to their issuing workspace (GHSA-8734-6xx5-cwf6): two additive nullable `ADD COLUMN IF NOT EXISTS workspace_id UUID` (portal_sessions, portal_verification_tokens); no default, index, FK, backfill or delete.
+  // Postcondition pinned in REVIEWED_MIGRATION_CODE_SHA256. Digest recorded from the shipped SQL after reading it.
+  "125_portal_session_workspace": "07af994b06775fc37afa98e6c1be6bef7d1d2d42d8cd511ad85b5a21a21b2e5e",
   // Custom field inheritance rules (TASK-101): one new table (custom_field_inheritance_rules) plus three ASYNC indexes, two unique; IF NOT EXISTS, no data writes, no FK.
   // The 113 postcondition (columns, nullability, index validity/readiness) is pinned in REVIEWED_MIGRATION_CODE_SHA256. Digest recorded from the shipped SQL after reading it.
   "113_custom_field_inheritance_rules": "7d92b8fae877505e117ea311c88dd56b3e08025ce38915b6a8617118c7fdb373",
@@ -496,6 +499,10 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
   // The 124 postcondition (column shape plus the composite (credential_id, seq) primary key before the receipt); editing it re-reviews the migration.
   "124_agent_web_fetches": {
     "lib/migrations/agent-web-fetches.ts": "14aeaf113aeb27aabe2dd92914c353a3316c4a6c9f884d2036c9fa1453afc0c4",
+  },
+  // The 125 postcondition (both workspace_id columns exist as nullable uuid before the receipt); editing it re-reviews the migration.
+  "125_portal_session_workspace": {
+    "lib/migrations/portal-session-workspace.ts": "e50ff3e7c74c707935bd5def743b0858c2542e6a28ce56784fe8183fbe9a82fc",
   },
   // The 113 postcondition (table shape plus valid, ready indexes with the expected columns and uniqueness); editing it re-reviews the migration.
   "113_custom_field_inheritance_rules": {

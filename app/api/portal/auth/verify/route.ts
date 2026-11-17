@@ -47,13 +47,19 @@ export async function GET(req: NextRequest) {
     return htmlResponse("<p>This sign-in link has expired. Please request a new one.</p>", 400);
   }
 
+  // A link with no workspace predates session binding (or was never requested from a portal): refuse it
+  // rather than mint a session no workspace would honor. It has already been consumed above.
+  if (!verification.workspaceId) {
+    return htmlResponse("<p>This sign-in link is no longer valid. Please request a new one.</p>", 400);
+  }
+
   const portalAccount = await prisma.portalAccount.upsert({
     where: { email: verification.email },
     update: {},
     create: { email: verification.email, emailVerified: new Date() },
   });
 
-  await createPortalSession(portalAccount.id);
+  await createPortalSession(portalAccount.id, verification.workspaceId);
 
   if (returnTo) {
     return NextResponse.redirect(new URL(returnTo, req.nextUrl.origin));
