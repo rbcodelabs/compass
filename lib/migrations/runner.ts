@@ -890,6 +890,11 @@ const MIGRATIONS: readonly MigrationEntry[] = [
     name: "125_unified_conversations",
     filePath: path.join(process.cwd(), "prisma/migrations/125_unified_conversations/migration.sql"),
   },
+  {
+    // Optional Task.startDate: one nullable tasks.start_date column. Additive: no default, backfill, index or FK.
+    name: "128_task_start_date",
+    filePath: path.join(process.cwd(), "prisma/migrations/128_task_start_date/migration.sql"),
+  },
 ];
 
 const MIGRATIONS_BY_NAME = new Map(MIGRATIONS.map((migration) => [migration.name, migration]));

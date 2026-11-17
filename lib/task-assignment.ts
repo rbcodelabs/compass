@@ -90,6 +90,16 @@ export async function eligibleTaskAssignees(workspaceId: string): Promise<Resolv
   })];
 }
 
+/**
+ * A task may have a start date, a due date, both or neither; when both are present the start cannot be after the due date.
+ * Pass the values the row will have AFTER the write (a partial update merges the stored value for the field it leaves out).
+ * Throws like validateTaskReferences, so callers reuse the same error handling.
+ */
+export function validateTaskDates(startDate: Date | null | undefined, dueDate: Date | null | undefined) {
+  if (startDate && Number.isNaN(startDate.getTime())) throw new Error("Invalid startDate");
+  if (startDate && dueDate && startDate.getTime() > dueDate.getTime()) throw new Error("startDate cannot be after dueDate");
+}
+
 export async function validateTaskReferences(workspaceId: string, input: { squadId?: string | null; parentTaskId?: string | null }) {
   const prisma = getPrisma();
   if (input.squadId && !await prisma.squad.findFirst({ where: { id: input.squadId, workspaceId }, select: { id: true } })) throw new Error("Squad belongs to a different workspace or does not exist");

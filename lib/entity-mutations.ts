@@ -20,7 +20,7 @@ import { SETTABLE_HORIZONS, isLaunchHorizon } from "@/lib/roadmap";
 import { LAUNCH_WORKFLOW_DISABLED_MESSAGE } from "@/lib/launch-checklist";
 import { isModuleEnabled } from "@/lib/modules/server"
 import { syncRoadmapOnSolutionChange, type SolutionSyncResult } from "@/lib/roadmap/solution-sync";
-import { assignmentUpdate, type TaskAssignee } from "@/lib/task-assignment";
+import { assignmentUpdate, validateTaskDates, type TaskAssignee } from "@/lib/task-assignment";
 import type { TaskPriority, TaskStatus } from "@/lib/types";
 import { BATCH_DESCRIPTION_MAX_LENGTH } from "@/lib/batch-create-limits";
 import { OPPORTUNITY_SEGMENT_MAX_LENGTH } from "@/lib/opportunity-draft";
@@ -419,6 +419,20 @@ async function updateTaskField(
       }
       break;
     }
+    case "startDate": {
+      if (value === null) {
+        data = { startDate: null };
+      } else if (typeof value === "string") {
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) {
+          return { ok: false, status: 400, error: "Invalid startDate" };
+        }
+        data = { startDate: date };
+      } else {
+        return { ok: false, status: 400, error: "startDate must be a date string or null" };
+      }
+      break;
+    }
     case "dueDate": {
       if (value === null) {
         data = { dueDate: null };
@@ -458,9 +472,21 @@ async function updateTaskField(
   const prisma = getPrisma();
   const exists = await prisma.task.findFirst({
     where: entityScopeWhere("task", id, workspaceId),
-    select: { id: true },
+    select: { id: true, startDate: true, dueDate: true },
   });
   if (!exists) return { ok: false, status: 404, error: "Not found" };
+
+  if ("startDate" in data || "dueDate" in data) {
+    // Editing one date keeps the other as stored, so the order check runs against the merged pair.
+    try {
+      validateTaskDates(
+        "startDate" in data ? (data.startDate as Date | null) : exists.startDate,
+        "dueDate" in data ? (data.dueDate as Date | null) : exists.dueDate,
+      );
+    } catch (error) {
+      return { ok: false, status: 400, error: error instanceof Error ? error.message : "Invalid task dates" };
+    }
+  }
 
   await captureWorkspaceMutation(prisma, "task", "update", { actorType: actor.kind === "USER" ? "USER" : "SYSTEM", actorId: actor.id }, id, tx => tx.task.update({ where: { id }, data }));
   return { ok: true };

@@ -45,7 +45,7 @@ vi.mock("@/lib/roadmap/solution-sync", () => ({ syncRoadmapOnSolutionChange: moc
 // assignmentUpdate has its own dedicated unit tests in task-assignment.test.ts
 // (workspace-membership / agent-grant validation). Here we only need to know
 // updateTaskField's "assignee" case delegates to it and applies the result.
-vi.mock("@/lib/task-assignment", () => ({ assignmentUpdate: vi.fn() }));
+vi.mock("@/lib/task-assignment", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/lib/task-assignment")>()), assignmentUpdate: vi.fn() }));
 
 import { updateEntityField, EDIT_CONFIG, TITLE_MAX_LENGTH } from "@/lib/entity-mutations";
 import { BATCH_DESCRIPTION_MAX_LENGTH } from "@/lib/batch-create-limits";

@@ -40,7 +40,7 @@ function setViewport(desktop: boolean) {
 function task(id: string, title: string, status: TaskCardData["status"]): TaskCardData {
   return {
     id, title, description: null, status, priority: "MEDIUM", sortOrder: 0, squadId: null, squad: null, assigneeUserId: null,
-    assigneeAgentId: null, assignee: null, ownerName: null, storyPoints: null, dueDate: null, iteration: null, parentTaskId: null,
+    assigneeAgentId: null, assignee: null, ownerName: null, storyPoints: null, startDate: null, dueDate: null, iteration: null, parentTaskId: null,
     subtaskCount: 0, links: [],
   } as TaskCardData;
 }

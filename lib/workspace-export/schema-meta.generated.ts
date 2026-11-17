@@ -229,7 +229,7 @@ export const OPTIONAL_FIELDS: Readonly<Record<string, readonly string[]>> = {
   SolutionPlanProposal: ["legacyPlanStatus","trackedDecisionRequestId"],
   SolutionScore: ["scoredByUserId"],
   Squad: ["createdById","updatedById"],
-  Task: ["assigneeAgentId","assigneeUserId","createdById","description","dueDate","iteration","ownerName","parentTaskId","seqNumber","seqPrefix","squadId","storyPoints","updatedById"],
+  Task: ["assigneeAgentId","assigneeUserId","createdById","description","dueDate","iteration","ownerName","parentTaskId","seqNumber","seqPrefix","squadId","startDate","storyPoints","updatedById"],
   UiCommand: ["completedAt","deliveredAt","error","resultJson"],
   UiSession: ["currentPath","endedAt"],
   User: ["emailVerified","image","name"],

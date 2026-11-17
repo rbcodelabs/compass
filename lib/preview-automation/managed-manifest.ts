@@ -292,6 +292,8 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   // Unified Conversations model (OPP-67 / SOL-117): twelve nullable ADD COLUMN IF NOT EXISTS statements across agent_conversations and agent_messages; no default, backfill, index or FK.
   // Postcondition pinned in REVIEWED_MIGRATION_CODE_SHA256. Digest recorded from the shipped SQL after reading it.
   "125_unified_conversations": "dc6968e7f3573b5bc5aa9982f59c2f147643c807764c7c2ad768b21182333faf",
+  // Optional Task.startDate: one nullable `ADD COLUMN IF NOT EXISTS start_date TIMESTAMPTZ` on tasks; no default, backfill, index or FK. No code postcondition. Digest recorded from the shipped SQL after reading it.
+  "128_task_start_date": "e357da11f90dbf6030030ee0ba16df9153e2ef2e85bbb5c53ef7db666e5ce66e",
 };
 
 /**

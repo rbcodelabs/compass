@@ -18,7 +18,7 @@ import { safeEntityUrl, withUrlLine } from "@/lib/compass-url"
 import { ok, fail } from "@/lib/mcp-output"
 import { recencyOrderBy, type RecencySort } from "@/lib/mcp-recency"
 import type { TaskStatus, TaskPriority, TaskLinkedType } from "@/lib/types"
-import { assignmentUpdate, eligibleTaskAssignees, resolveTaskAssignees, taskLinkScope, validateTaskLink, validateTaskReferences, type ResolvedTaskAssignee, type TaskAssignee } from "@/lib/task-assignment"
+import { assignmentUpdate, eligibleTaskAssignees, resolveTaskAssignees, taskLinkScope, validateTaskDates, validateTaskLink, validateTaskReferences, type ResolvedTaskAssignee, type TaskAssignee } from "@/lib/task-assignment"
 import { getMcpActor } from "@/lib/mcp-authz"
 import { workspaceMutationSource, type ProgrammaticSource } from "@/lib/programmatic-source"
 import { allocateOneSeq } from "@/lib/work-item-sequence"
@@ -121,6 +121,7 @@ export async function createTask({
   assignee,
   ownerName,
   storyPoints,
+  startDate,
   dueDate,
   iteration,
   source = "MCP",
@@ -137,6 +138,7 @@ export async function createTask({
   assignee?: TaskAssignee
   ownerName?: string
   storyPoints?: number
+  startDate?: string
   dueDate?: string
   iteration?: string
   source?: ProgrammaticSource
@@ -170,6 +172,7 @@ export async function createTask({
   try {
     assignment = await assignmentUpdate(workspaceId, { assignee, assigneeUserId })
     await validateTaskReferences(workspaceId, { squadId })
+    validateTaskDates(startDate ? new Date(startDate) : null, dueDate ? new Date(dueDate) : null)
   } catch (error) { return fail(error instanceof Error ? error.message : "Invalid task assignment") }
 
   // Place the new task at the end of its status column, same convention as
@@ -194,6 +197,7 @@ export async function createTask({
       ...assignment,
       ownerName,
       storyPoints,
+      startDate: startDate ? new Date(startDate) : undefined,
       dueDate: dueDate ? new Date(dueDate) : undefined,
       iteration,
       sortOrder,
@@ -248,6 +252,7 @@ export async function getTask({ taskId }: { taskId: string }) {
     assigneeText(resolved.assignee),
     task.ownerName ? `Owner: ${task.ownerName}` : null,
     task.storyPoints != null ? `Story points: ${task.storyPoints}` : null,
+    task.startDate ? `Start: ${task.startDate.toISOString()}` : null,
     task.dueDate ? `Due: ${task.dueDate.toISOString()}` : null,
     task.iteration ? `Iteration: ${task.iteration}` : null,
     task.squadId ? `Squad: ${task.squadId}` : null,
@@ -451,6 +456,7 @@ export async function updateTask({
   assignee,
   ownerName,
   storyPoints,
+  startDate,
   dueDate,
   iteration,
   source,
@@ -464,13 +470,14 @@ export async function updateTask({
   assignee?: TaskAssignee
   ownerName?: string | null
   storyPoints?: number | null
+  startDate?: string | null
   dueDate?: string | null
   iteration?: string | null
   source?: ProgrammaticSource
 }) {
   const prisma = getPrisma()
 
-  const existing = await prisma.task.findUnique({ where: { id: taskId }, select: { id: true, workspaceId: true } })
+  const existing = await prisma.task.findUnique({ where: { id: taskId }, select: { id: true, workspaceId: true, startDate: true, dueDate: true } })
   if (!existing) {
     return fail(`Task "${taskId}" not found.`)
   }
@@ -486,7 +493,17 @@ export async function updateTask({
   } catch (error) { return fail(error instanceof Error ? error.message : "Invalid task assignment") }
   if (ownerName !== undefined) data.ownerName = ownerName
   if (storyPoints !== undefined) data.storyPoints = storyPoints
+  if (startDate !== undefined) data.startDate = startDate ? new Date(startDate) : null
   if (dueDate !== undefined) data.dueDate = dueDate ? new Date(dueDate) : null
+  if (startDate !== undefined || dueDate !== undefined) {
+    // A partial update keeps the stored value of the date it leaves out, so the order check uses the merged pair.
+    try {
+      validateTaskDates(
+        startDate !== undefined ? (startDate ? new Date(startDate) : null) : existing.startDate,
+        dueDate !== undefined ? (dueDate ? new Date(dueDate) : null) : existing.dueDate,
+      )
+    } catch (error) { return fail(error instanceof Error ? error.message : "Invalid task dates") }
+  }
   if (iteration !== undefined) data.iteration = iteration
 
   const updated = await captureWorkspaceMutation(prisma, "task", "update", workspaceMutationSource(source), taskId, tx => tx.task.update({ where: { id: taskId }, data }))
