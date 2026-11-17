@@ -273,7 +273,7 @@ export function AgentChat({
     userEdited: false,
   }))
   const agentMode: AgentParticipationMode =
-    agentModeState.conversationKey === (activeConversationId ?? "__new__")
+    agentModeState.conversationKey === (activeConversationId ?? "__new__") && agentModeState.userEdited
       ? agentModeState.mode
       : defaultAgentMode
 
@@ -618,7 +618,12 @@ export function AgentChat({
       seedContext: seedContextForThisTurn,
       agentId: agentSelection || undefined,
       model: modelPick.model || undefined,
-      ...(agentMode !== "AUTO" ? { agentMode } : {}),
+      ...(agentMode !== "AUTO" ||
+      agentModeState.userEdited ||
+      defaultVisibility === "WORKSPACE" ||
+      Boolean(resolvedTargetType)
+        ? { agentMode }
+        : {}),
       ...(defaultVisibility === "WORKSPACE" ? { visibility: "WORKSPACE" as const } : {}),
       ...(resolvedTargetType && resolvedTargetId
         ? { targetType: resolvedTargetType, targetId: resolvedTargetId }

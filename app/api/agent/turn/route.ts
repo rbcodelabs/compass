@@ -265,9 +265,28 @@ export async function POST(request: NextRequest) {
     : hasObjectTarget
       ? "WORKSPACE"
       : undefined
+  let storedAgentMode: AgentParticipationMode | undefined
+  if (
+    !isAgentParticipationMode(body.agentMode) &&
+    typeof conversationId === "string" &&
+    typeof (prisma.agentConversation as { findUnique?: unknown })?.findUnique === "function"
+  ) {
+    try {
+      const existingModeRow = await prisma.agentConversation.findUnique({
+        where: { id: conversationId },
+        select: { agentMode: true },
+      })
+      if (isAgentParticipationMode(existingModeRow?.agentMode)) {
+        storedAgentMode = existingModeRow.agentMode
+      }
+    } catch {
+      // Pre-125 fallback
+    }
+  }
   const effectiveAgentMode: AgentParticipationMode = isAgentParticipationMode(body.agentMode)
     ? body.agentMode
-    : normalizeAgentParticipationMode(undefined, defaultAgentModeForVisibility(requestedVisibility, hasObjectTarget))
+    : storedAgentMode ??
+      normalizeAgentParticipationMode(undefined, defaultAgentModeForVisibility(requestedVisibility, hasObjectTarget))
   const invokeAgent = shouldInvokeAgentOnTurn({
     agentMode: effectiveAgentMode,
     message: turnMessage,
@@ -383,6 +402,18 @@ export async function POST(request: NextRequest) {
       return new Response("Conversation not found or access denied.", { status: 404 })
     }
     convo = { id: conversationId }
+    if (
+      isAgentParticipationMode(body.agentMode) &&
+      typeof (prisma.agentConversation as { update?: unknown })?.update === "function"
+    ) {
+      await prisma.agentConversation
+        .update({
+          where: { id: conversationId },
+          data: { agentMode: body.agentMode, updatedAt: new Date() },
+          select: { id: true },
+        })
+        .catch(() => {})
+    }
   }
   if (!convo) {
     const cleanTitle = plainTextOf(message.trim()).slice(0, 80)
