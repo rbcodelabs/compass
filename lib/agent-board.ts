@@ -206,6 +206,13 @@ export type AgentBoardCard = {
   proposedReply?: AgentBoardCardProposedReply | null
   /** Pending orchestrator decisions (`kind = "DECISION"`) awaiting human answer. */
   pendingDecisions?: AgentBoardCardPendingDecision[]
+  /** Unified Conversations (migration 124) metadata. */
+  visibility?: "PRIVATE" | "WORKSPACE" | null
+  threadStatus?: "OPEN" | "RESOLVED" | "ARCHIVED" | null
+  agentMode?: "AUTO" | "MENTION_ONLY" | "NONE" | null
+  targetType?: string | null
+  targetId?: string | null
+  targetLabel?: string | null
 }
 
 export type AgentBoardColumn = { id: BoardColumnId; label: string; cards: AgentBoardCard[] }
@@ -440,6 +447,12 @@ export type AgentListConversation = {
   managerNotes?: AgentBoardCardManagerNotes | null
   proposedReply?: AgentBoardCardProposedReply | null
   pendingDecisions?: AgentBoardCardPendingDecision[]
+  visibility?: "PRIVATE" | "WORKSPACE" | null
+  threadStatus?: "OPEN" | "RESOLVED" | "ARCHIVED" | null
+  agentMode?: "AUTO" | "MENTION_ONLY" | "NONE" | null
+  targetType?: string | null
+  targetId?: string | null
+  targetLabel?: string | null
 }
 
 export type AgentListGroup = { id: BoardColumnId; label: string; items: (AgentListConversation & { lastActivityAt: string })[] }

@@ -2,8 +2,16 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent } from "react";
-import { ExternalLink, PanelRightClose, Pin, PinOff } from "lucide-react";
+import { ExternalLink, MoreHorizontal, PanelRightClose, Pin, PinOff } from "lucide-react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
+
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 import {
   Sheet,
@@ -41,6 +49,11 @@ import { TaskDetail } from "@/components/tasks/task-detail";
 import { useLabels } from "@/components/thinking-model/thinking-model-provider";
 import { panelTitles } from "./panel-titles";
 import { ViewChainAction } from "./view-chain-action";
+import {
+  ConversationPanel,
+  ConversationPanelHeaderActions,
+  useConversationPanelOptional,
+} from "./conversation-panel";
 
 /**
  * Upper bound on how long the deep-link panel waits for a browser idle period
@@ -73,29 +86,22 @@ export interface PanelShellProps {
 }
 
 export function PanelShell({ initialPin = DEFAULT_PANEL_PIN, chainGraphEnabled = false }: PanelShellProps = {}) {
-  const { panel, closePanel, orgSlug, workspaceSlug, setDetailPanelDock } = usePanelContext();
+  const { panel: rawPanel, closePanel, orgSlug, workspaceSlug, setDetailPanelDock } = usePanelContext();
+  const pathname = usePathname();
+  const convCtx = useConversationPanelOptional();
+  const onConversationsPage = pathname?.endsWith("/conversations") ?? false;
+  const panel = onConversationsPage && rawPanel?.type === "conversation" ? null : rawPanel;
   const labels = useLabels();
   const [hydrated, setHydrated] = useState(false);
   const { pinned, width, viewportAllowsPin, isPinnedMode, togglePinned, commitWidth } = usePanelPin("detail", initialPin);
   const asideRef = useRef<HTMLElement | null>(null);
   const common = { orgSlug, workspaceSlug };
 
-  // A composer (new feedback, new opportunity) always docks as a column on
-  // wide screens, whatever the pin preference: the point of creating in a
-  // panel is that the board stays visible and usable beside it. A modal
-  // overlay would hide it.
-  //
-  // The docking then *sticks* for the rest of that panel session — through the
-  // hand-off to the created item's detail view and any rows opened from the
-  // grid afterwards — and ends when the panel closes. Without that, a submit
-  // would visibly jump the new item from a column into a modal sheet for every
-  // unpinned user. It is session state, never persisted: the saved pin
-  // preference is untouched (see commitWidth in usePanelPin).
   const isComposer = isComposerPanelType(panel?.type);
   const [composerSession, setComposerSession] = useState(false);
   if (isComposer && !composerSession) setComposerSession(true);
   if (!panel && composerSession) setComposerSession(false);
-  const docked = isPinnedMode || (viewportAllowsPin && (isComposer || composerSession));
+  const docked = isPinnedMode || (viewportAllowsPin && (isComposer || composerSession || panel?.type === "conversation"));
   // `docked` alone isn't "is there an aside on screen claiming width right
   // now" — see the early return a few lines below the JSX split: `docked &&
   // !panel` renders nothing. Reporting that distinction up is what lets a
@@ -221,11 +227,19 @@ export function PanelShell({ initialPin = DEFAULT_PANEL_PIN, chainGraphEnabled =
 
   const title = panel ? panelTitles(labels)[panel.type] ?? panel.type : "";
   const fullPageRoute = panel?.type === "task" ? "tasks" : panel?.type === "opportunity" ? "discovery" : panel?.type === "roadmapItem" ? "roadmap" : null;
-  const hasCompactHeader = fullPageRoute !== null;
-  const fullPageAction = fullPageRoute && panel ? (
+  const hasCompactHeader = fullPageRoute !== null || panel?.type === "conversation";
+  const fullPageHref =
+    panel?.type === "conversation"
+      ? panel.id !== "new"
+        ? `/${orgSlug}/${workspaceSlug}/conversations?c=${encodeURIComponent(panel.id)}`
+        : `/${orgSlug}/${workspaceSlug}/conversations`
+      : fullPageRoute && panel
+      ? `/${orgSlug}/${workspaceSlug}/${fullPageRoute}/${panel.id}`
+      : null;
+  const fullPageAction = fullPageHref ? (
     <Link
       className={buttonVariants({ variant: "ghost", size: "icon-sm" })}
-      href={`/${orgSlug}/${workspaceSlug}/${fullPageRoute}/${panel.id}`}
+      href={fullPageHref}
       aria-label="Open full page"
       title="Open full page"
     >
@@ -233,7 +247,8 @@ export function PanelShell({ initialPin = DEFAULT_PANEL_PIN, chainGraphEnabled =
     </Link>
   ) : null;
 
-  const chainAction = panel ? <ViewChainAction enabled={chainGraphEnabled} orgSlug={orgSlug} workspaceSlug={workspaceSlug} type={panel.type} id={panel.id} /> : null;
+  const conversationActions = panel?.type === "conversation" ? <ConversationPanelHeaderActions /> : null;
+  const chainAction = panel && panel.type !== "conversation" ? <ViewChainAction enabled={chainGraphEnabled} orgSlug={orgSlug} workspaceSlug={workspaceSlug} type={panel.type} id={panel.id} /> : null;
 
   const body = (
     <>
@@ -260,8 +275,107 @@ export function PanelShell({ initialPin = DEFAULT_PANEL_PIN, chainGraphEnabled =
       {panel?.type === "discovery-rail" && (
         <DiscoveryRailPanel activeOpportunityId={panel.id} {...common} />
       )}
+      {panel?.type === "conversation" && (
+        <ConversationPanel conversationId={panel.id} />
+      )}
     </>
   );
+
+  const breadcrumbHeader = (() => {
+    if (
+      !panel ||
+      !convCtx ||
+      convCtx.historyStack.length <= 1 ||
+      !convCtx.historyStack.some((c) => c.type === "conversation")
+    ) {
+      return null;
+    }
+    const stack = convCtx.historyStack;
+    // Collapse middle items into a single `⋯` dropdown when stack > 3 so the bar never wraps.
+    const shouldCollapse = stack.length > 3;
+    const firstCrumb = stack[0];
+    const collapsedMiddle = shouldCollapse ? stack.slice(1, stack.length - 2).map((c, i) => ({ crumb: c, idx: i + 1 })) : [];
+    const tailCrumbs = shouldCollapse
+      ? stack.slice(stack.length - 2).map((c, i) => ({ crumb: c, idx: stack.length - 2 + i }))
+      : stack.slice(1).map((c, i) => ({ crumb: c, idx: i + 1 }));
+
+    const renderCrumbButton = (crumb: (typeof stack)[number], idx: number, isCurrent: boolean) => (
+      <button
+        type="button"
+        onClick={() => convCtx.jumpToCrumb(idx)}
+        title={crumb.label}
+        className={`min-w-0 truncate rounded px-1.5 py-0.5 text-[11px] font-medium transition-colors ${
+          isCurrent
+            ? "max-w-[180px] bg-surface-interactive text-text-primary"
+            : "max-w-[115px] text-text-subtle hover:text-text-primary"
+        }`}
+      >
+        {crumb.label}
+      </button>
+    );
+
+    return (
+      <nav
+        aria-label="Panel history"
+        className="flex h-8 shrink-0 items-center gap-1 overflow-hidden whitespace-nowrap border-b border-border bg-surface-inset px-4 text-xs"
+      >
+        {renderCrumbButton(firstCrumb, 0, false)}
+        <span aria-hidden="true" className="shrink-0 text-text-subtle/50">
+          ›
+        </span>
+
+        {collapsedMiddle.length > 0 && (
+          <>
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={
+                  <button
+                    type="button"
+                    aria-label={`${collapsedMiddle.length} earlier items`}
+                    title="Show earlier items in history"
+                    className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-text-subtle transition-colors hover:bg-surface-interactive hover:text-text-primary"
+                  />
+                }
+              >
+                <MoreHorizontal className="size-3.5" aria-hidden="true" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="max-w-xs">
+                {collapsedMiddle.map(({ crumb, idx }) => (
+                  <DropdownMenuItem
+                    key={`${crumb.type}:${crumb.id}:${idx}`}
+                    onClick={() => convCtx.jumpToCrumb(idx)}
+                    className="truncate text-xs"
+                  >
+                    <span className="truncate">{crumb.label}</span>
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <span aria-hidden="true" className="shrink-0 text-text-subtle/50">
+              ›
+            </span>
+          </>
+        )}
+
+        {tailCrumbs.map(({ crumb, idx }, i) => {
+          const isCurrent = idx === stack.length - 1;
+          return (
+            <span
+              key={`${crumb.type}:${crumb.id}:${idx}`}
+              className="inline-flex min-w-0 items-center gap-1"
+            >
+              {renderCrumbButton(crumb, idx, isCurrent)}
+              {i < tailCrumbs.length - 1 && (
+                <span aria-hidden="true" className="shrink-0 text-text-subtle/50">
+                  ›
+                </span>
+              )}
+            </span>
+          );
+        })}
+      </nav>
+    );
+  })();
 
   const pinToggle = (
     <Button
@@ -332,6 +446,7 @@ export function PanelShell({ initialPin = DEFAULT_PANEL_PIN, chainGraphEnabled =
             {title}
           </h2>
           <div className="flex items-center gap-1">
+            {conversationActions}
             {fullPageAction}
             {chainAction}
             {escHint}
@@ -348,7 +463,17 @@ export function PanelShell({ initialPin = DEFAULT_PANEL_PIN, chainGraphEnabled =
           </div>
         </div>
 
-        <div className={bodyClassName}>{body}</div>
+        {breadcrumbHeader}
+
+        <div
+          className={
+            panel?.type === "conversation"
+              ? "flex min-h-0 flex-1 flex-col"
+              : bodyClassName
+          }
+        >
+          {body}
+        </div>
       </aside>
     );
   }
@@ -378,6 +503,7 @@ export function PanelShell({ initialPin = DEFAULT_PANEL_PIN, chainGraphEnabled =
                 control that visibly does nothing is worse than not offering
                 it. */}
             <div className="flex items-center gap-1">
+              {conversationActions}
               {fullPageAction}
               {chainAction}
               {escHint}
@@ -391,7 +517,17 @@ export function PanelShell({ initialPin = DEFAULT_PANEL_PIN, chainGraphEnabled =
           </div>
         </SheetHeader>
 
-        <div className={bodyClassName}>{body}</div>
+        {breadcrumbHeader}
+
+        <div
+          className={
+            panel?.type === "conversation"
+              ? "flex min-h-0 flex-1 flex-col"
+              : bodyClassName
+          }
+        >
+          {body}
+        </div>
       </SheetContent>
     </Sheet>
   );

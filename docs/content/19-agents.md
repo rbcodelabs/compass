@@ -249,13 +249,22 @@ and API key secrets are not included.
 
 ## Conversations linked to your work
 
+Every discussion thread and AI chat in Compass shares one **Unified Conversations** model (database migration `125_unified_conversations`):
+
+- **Conversations hub (`/conversations`):** Open **Conversations** in the left navigation to switch between **Chat** (two-pane thread list + transcript) and **Board** (Kanban triage across `Needs you`, `Working`, `Waiting`, `New`, and `Done` with `Status | Squad` grouping and the floating **Orchestrator** dock).
+- **Right detail panel (`⌘J`):** Click **New chat (`⌘J`)** in the sidebar or open any conversation from an object's **Conversations** section to work in the right-hand detail panel alongside the center workspace view, with a single-line collapsible breadcrumb bar (`[First] › [⋯] › [Previous] › [Current]`) for jumping back and forth between objects and threads.
+- **Explicit agent participation (`Participation` chip):**
+  - **Compass Agent (Auto):** Default for private 1:1 chats (`visibility = "PRIVATE"`). The agent replies on every turn.
+  - **On @mention:** Default for shared or object-anchored threads (`visibility = "WORKSPACE"`). Teammates can post human replies without starting an agent run or spending quota; mention `@Compass Agent` (or click the `@Compass Agent` chip) to invoke the agent on a turn. Inviting a teammate into a private chat automatically switches `Auto` to `On @mention`.
+  - **Off (Human-only):** Disables agent runs in the thread completely.
+
 When the in-app agent creates an opportunity, solution or task in a chat, Compass links that conversation to it automatically. If the agent only reads or updates an existing opportunity, solution or task, the link is recorded as "Mentioned". A later read or update never downgrades a "Created here" link.
 
 - **In the chat**, a "Linked objects" card lists each linked item with its title, whether the conversation created or mentioned it, and a link to open it.
-- **On an opportunity, solution or task**, a "Conversations" section lists the conversations that created or mentioned it. You see a conversation there only if you can open it. A private conversation of a teammate never appears, and its title is never sent to your browser.
+- **On an opportunity, solution or task**, a "Conversations" section lists the conversations anchored to or touching it. You see a conversation there only if you can open it. A private conversation of a teammate never appears, and its title is never sent to your browser.
 - **To remove an automatic link**, use the X on its row. The agent adds it again only if it touches that item again. Removing a link never deletes the conversation or the item.
 
-Conversations are linked only by what the agent's tools actually did; Compass does not read chat text to guess at links.
+Conversations are linked only by what the agent's tools actually did or by the object a thread was started on; Compass does not read chat text to guess at links.
 
 ## MCP discovery
 

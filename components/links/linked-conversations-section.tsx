@@ -5,6 +5,7 @@ import Link from "next/link"
 import { MessageSquareIcon, XIcon } from "lucide-react"
 import { readObjectConversations, removeObjectConversationLink } from "@/app/[orgSlug]/[workspaceSlug]/links/conversation-actions"
 import { Section } from "@/components/panels/panel-parts"
+import { useConversationPanelOptional } from "@/components/panels/conversation-panel"
 import type { ObjectConversationLink } from "@/lib/links/conversation-links"
 
 type Props = { orgSlug: string; workspaceSlug: string; entityType: "OPPORTUNITY" | "SOLUTION" | "TASK"; entityId: string }
@@ -13,11 +14,11 @@ const KIND_LABEL = { CREATED: "Created here", MENTIONS: "Mentioned" } as const
 
 /**
  * The "Conversations" section on an Opportunity, Solution or Task: the agent conversations that created or touched it, limited by the
- * server to the ones this viewer may open. Renders nothing while loading, on failure and when there are none, so an object with no agent
- * history shows no empty shell. A workspace member can remove a link; the agent re-adds it only if it touches the object again.
+ * server to the ones this viewer may open. When the unified ConversationPanelProvider is active, Discussion already renders the unified
+ * ObjectConversationsSection (merging both anchored threads and entity links), so this legacy section yields to avoid duplicate sections.
  */
 export function LinkedConversationsSection({ orgSlug, workspaceSlug, entityType, entityId }: Props) {
-  // Tagged with the object it was loaded for, so switching objects never shows the previous object's conversations.
+  const convPanel = useConversationPanelOptional()
   const objectKey = `${entityType}:${entityId}`
   const [loaded, setLoaded] = useState<{ key: string; items: ObjectConversationLink[] }>({ key: "", items: [] })
   const items = loaded.key === objectKey ? loaded.items : []
@@ -25,17 +26,20 @@ export function LinkedConversationsSection({ orgSlug, workspaceSlug, entityType,
   const [pending, startTransition] = useTransition()
 
   const load = useCallback(async () => {
+    if (convPanel) return
     try {
       const result = await readObjectConversations(orgSlug, workspaceSlug, { entityType, entityId })
       setLoaded({ key: objectKey, items: result.ok ? result.items : [] })
     } catch {
       setLoaded({ key: objectKey, items: [] })
     }
-  }, [orgSlug, workspaceSlug, entityType, entityId, objectKey])
+  }, [convPanel, orgSlug, workspaceSlug, entityType, entityId, objectKey])
 
   useEffect(() => {
     void load()
   }, [load])
+
+  if (convPanel) return null
 
   function remove(item: ObjectConversationLink) {
     setError(null)

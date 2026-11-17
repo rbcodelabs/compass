@@ -5,7 +5,9 @@ import { MessageSquare } from "lucide-react"
 
 import { AgentLink } from "@/components/agent/entity-link-card"
 import { AgentImage } from "@/components/agent/agent-image"
+import { chipClass } from "@/components/comments/mention-chips"
 import { MarkdownContent } from "@/components/markdown-content"
+import { mentionsAsMarkdownLinks, parseMentionHref } from "@/lib/comment-mentions"
 import {
   clearBoardCardHighlights,
   highlightBoardCard,
@@ -72,6 +74,18 @@ function ThreadChipLink({ threadId, children }: { threadId: string; children?: R
 }
 
 function AgentMarkdownLink({ href, children }: { href?: string; children?: ReactNode }) {
+  const mention = parseMentionHref(href)
+  if (mention) {
+    return (
+      <span
+        data-testid="comment-mention"
+        data-mention-id={mention.id}
+        className={chipClass(mention.kind, mention.outside)}
+      >
+        {children}
+      </span>
+    )
+  }
   const threadId = parseThreadLinkHref(href)
   if (threadId) {
     return <ThreadChipLink threadId={threadId}>{children}</ThreadChipLink>
@@ -88,7 +102,7 @@ export function Markdown({
   children,
   ...props
 }: Omit<ComponentProps<typeof MarkdownContent>, "linkComponent" | "imageComponent">) {
-  const rewritten = rewriteThreadWikilinks(children)
+  const rewritten = mentionsAsMarkdownLinks(rewriteThreadWikilinks(children))
   return (
     <MarkdownContent {...props} linkComponent={AgentMarkdownLink} imageComponent={AgentImage}>
       {rewritten}

@@ -56,6 +56,8 @@ import { useAgentRailOptional } from "@/components/agent/agent-rail-context"
 import { useLabels } from "@/components/thinking-model/thinking-model-provider"
 import { orderPrimaryNav } from "@/lib/workspace-nav"
 import { NotificationBellIconButton } from "@/components/notifications/notification-bell"
+import { useConversationPanelOptional } from "@/components/panels/conversation-panel"
+import { Sparkles } from "lucide-react"
 
 interface SidebarProps {
   orgSlug: string
@@ -109,7 +111,8 @@ const buildBaseNavItems = (okrsLabel: string, discoveryLabel: string, solutionsL
  */
 function AgentRailToggle() {
   const rail = useAgentRailOptional()
-  if (!rail?.available) return null
+  const convPanel = useConversationPanelOptional()
+  if (convPanel || !rail?.available) return null
 
   const Icon = rail.open ? PanelLeftClose : PanelLeftOpen
 
@@ -157,9 +160,11 @@ export function Sidebar({
   const pathname = usePathname()
   const base = `/${orgSlug}/${workspaceSlug}`
   const labels = useLabels()
+  const convPanel = useConversationPanelOptional()
   const baseNavItems = buildBaseNavItems(labels.sections.okrs, labels.opportunity.plural, labels.solution.plural, labels.sections.discoveryFirst)
   const navItems = [
     { label: "Home", path: "home", Icon: House },
+    { label: "Conversations", path: "conversations", Icon: MessageSquare },
     ...(updatesEnabled ? [{ label: "Updates", path: "updates", Icon: Clock3 }] : []),
     ...baseNavItems.slice(0, 6),
     { label: "Feedback", path: "feedback", Icon: MessageSquare },
@@ -214,6 +219,21 @@ export function Sidebar({
               orgRoadmapHref={orgWorkspaceCount > 1 || isOrgRoadmapActive ? orgRoadmapHref : undefined}
             />
           </SidebarMenuItem>
+          {convPanel && (
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                onClick={() => convPanel.startNewConversationInPanel({ agentMode: "AUTO", visibility: "PRIVATE" })}
+                tooltip="New chat (⌘J)"
+                className="h-9 rounded-lg text-text-secondary"
+              >
+                <Sparkles className="text-text-subtle" aria-hidden="true" />
+                <span>New chat</span>
+                <kbd className="ml-auto rounded bg-sidebar-accent px-1.5 py-0.5 font-sans text-[10px] text-text-subtle group-data-[collapsible=icon]:hidden">
+                  ⌘J
+                </kbd>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          )}
         </SidebarMenu>
       </SidebarHeader>
 
@@ -276,9 +296,9 @@ export function Sidebar({
 
       <SidebarFooter className="px-2 py-3">
         <SidebarMenu>
-          <AgentRailToggle />
           {/* Filled by components/agent/agent-drive.tsx (desktop only); collapses away while empty. */}
           <SidebarMenuItem id="agent-drive-slot" className="max-md:hidden empty:hidden" />
+          <AgentRailToggle />
           <SidebarMenuItem>
             <DropdownMenu>
               <DropdownMenuTrigger

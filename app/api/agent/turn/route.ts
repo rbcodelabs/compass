@@ -46,6 +46,16 @@ import { clearConversationPendingQuestions } from "@/lib/agent-inbox-questions"
 import { cancelAllPendingConversationWakeups } from "@/lib/agent-scheduled-wakeups"
 import { getOrchestratorSkillAppendixForConversation } from "@/lib/orchestrator/skill"
 import { deriveConversationSummary, extractLatestPrUrl } from "@/lib/agent-card-derive"
+import { plainTextOf } from "@/lib/comment-mentions"
+import {
+  defaultAgentModeForVisibility,
+  isAgentParticipationMode,
+  isConversationVisibility,
+  normalizeAgentParticipationMode,
+  shouldInvokeAgentOnTurn,
+  type AgentParticipationMode,
+} from "@/lib/agent-participation-mode"
+import { isConversationLinkTarget, recordConversationLink } from "@/lib/links/conversation-links"
 import { getGoldenSnapshotId } from "@/lib/agent-runtime-config"
 import { resolveRunSnapshot } from "@/lib/agent-sandbox-class"
 import { agentCapReachedBody, checkAgentRunCaps, checkAgentUsageLimit } from "@/lib/agent-limits"
@@ -238,6 +248,142 @@ export async function POST(request: NextRequest) {
   if (!requestedModel.ok) return Response.json({ error: requestedModel.message, code: requestedModel.code }, { status: 400 })
   const explicitModel = requestedModel.model
 
+  // ── Unified Conversations (OPP-67 / SOL-117): explicit agent participation mode & passive human turns ───────────────
+  const requestedTargetType =
+    typeof body.targetType === "string" && body.targetType.trim()
+      ? body.targetType.trim()
+      : seedContext?.entityType
+  const requestedTargetId =
+    typeof body.targetId === "string" && UUID_RE.test(body.targetId)
+      ? body.targetId
+      : seedContext?.entityId && UUID_RE.test(seedContext.entityId)
+        ? seedContext.entityId
+        : undefined
+  const hasObjectTarget = Boolean(requestedTargetType && requestedTargetId)
+  const requestedVisibility = isConversationVisibility(body.visibility)
+    ? body.visibility
+    : hasObjectTarget
+      ? "WORKSPACE"
+      : undefined
+  let storedAgentMode: AgentParticipationMode | undefined
+  if (
+    !isAgentParticipationMode(body.agentMode) &&
+    typeof conversationId === "string" &&
+    typeof (prisma.agentConversation as { findUnique?: unknown })?.findUnique === "function"
+  ) {
+    try {
+      const existingModeRow = await prisma.agentConversation.findUnique({
+        where: { id: conversationId },
+        select: { agentMode: true },
+      })
+      if (isAgentParticipationMode(existingModeRow?.agentMode)) {
+        storedAgentMode = existingModeRow.agentMode
+      }
+    } catch {
+      // Pre-125 fallback
+    }
+  }
+  const effectiveAgentMode: AgentParticipationMode = isAgentParticipationMode(body.agentMode)
+    ? body.agentMode
+    : storedAgentMode ??
+      normalizeAgentParticipationMode(undefined, defaultAgentModeForVisibility(requestedVisibility, hasObjectTarget))
+  const invokeAgent = shouldInvokeAgentOnTurn({
+    agentMode: effectiveAgentMode,
+    message: turnMessage,
+    agentName: runAgent?.name,
+  })
+
+  if (!invokeAgent) {
+    let passiveConvo: { id: string } | null = null
+    if (typeof conversationId === "string") {
+      const access = await resolveConversationAccess(prisma, { conversationId, workspaceId, userId })
+      if (!access) {
+        return new Response("Conversation not found or access denied.", { status: 404 })
+      }
+      passiveConvo = { id: conversationId }
+    }
+    const nowPassive = new Date()
+    const cleanPassiveTitle = plainTextOf(turnMessage).slice(0, 80)
+    const passiveSummary = deriveConversationSummary(plainTextOf(turnMessage))
+    if (!passiveConvo) {
+      try {
+        passiveConvo = await prisma.agentConversation.create({
+          data: {
+            workspaceId,
+            userId,
+            title: cleanPassiveTitle,
+            ...(passiveSummary ? { summary: passiveSummary } : {}),
+            ...(requestedTargetType && requestedTargetId
+              ? { targetType: requestedTargetType, targetId: requestedTargetId }
+              : {}),
+            visibility: requestedVisibility ?? "WORKSPACE",
+            status: "OPEN",
+            agentMode: effectiveAgentMode,
+            source: "BROWSER",
+            updatedAt: nowPassive,
+          },
+          select: { id: true },
+        })
+      } catch {
+        passiveConvo = await prisma.agentConversation.create({
+          data: {
+            workspaceId,
+            userId,
+            title: cleanPassiveTitle,
+            updatedAt: nowPassive,
+          },
+          select: { id: true },
+        })
+      }
+    } else {
+      try {
+        await prisma.agentConversation.update({
+          where: { id: passiveConvo.id },
+          data: {
+            updatedAt: nowPassive,
+            ...(passiveSummary ? { summary: passiveSummary } : {}),
+            ...(isAgentParticipationMode(body.agentMode) ? { agentMode: body.agentMode } : {}),
+          },
+          select: { id: true },
+        })
+      } catch {
+        await prisma.agentConversation.update({
+          where: { id: passiveConvo.id },
+          data: { updatedAt: nowPassive },
+          select: { id: true },
+        })
+      }
+    }
+    const authorData = await authorColumn(prisma, userId)
+    const savedPassive = await prisma.agentMessage.create({
+      data: {
+        conversationId: passiveConvo.id,
+        role: "user",
+        content: turnMessage,
+        ...authorData,
+      },
+      select: { id: true },
+    })
+    if (requestedTargetType && requestedTargetId && isConversationLinkTarget(requestedTargetType)) {
+      await recordConversationLink(prisma, {
+        conversationId: passiveConvo.id,
+        workspaceId,
+        entityType: requestedTargetType,
+        entityId: requestedTargetId,
+        kind: "MENTIONS",
+      }).catch(() => {})
+    }
+    return Response.json(
+      {
+        passive: true,
+        conversationId: passiveConvo.id,
+        messageId: savedPassive?.id ?? null,
+        agentMode: effectiveAgentMode,
+      },
+      { status: 200 },
+    )
+  }
+
   // ── Rate + cost guardrail (Phase 5): cap turns/spend per user per day ───────
   const limit = await checkAgentUsageLimit(userId).catch(async error => {
     if (typeof conversationId === "string") await failPendingInterviewProcessing(conversationId, userId, workspaceId)
@@ -256,19 +402,75 @@ export async function POST(request: NextRequest) {
       return new Response("Conversation not found or access denied.", { status: 404 })
     }
     convo = { id: conversationId }
+    if (
+      isAgentParticipationMode(body.agentMode) &&
+      typeof (prisma.agentConversation as { update?: unknown })?.update === "function"
+    ) {
+      await prisma.agentConversation
+        .update({
+          where: { id: conversationId },
+          data: { agentMode: body.agentMode, updatedAt: new Date() },
+          select: { id: true },
+        })
+        .catch(() => {})
+    }
   }
   if (!convo) {
-    convo = await prisma.agentConversation.create({
-      data: {
-        workspaceId,
-        userId,
-        title: message.trim().slice(0, 80),
-        updatedAt: new Date(),
-      },
-      select: { id: true },
-    })
+    const cleanTitle = plainTextOf(message.trim()).slice(0, 80)
+    const hasUnifiedMeta = Boolean(
+      (requestedTargetType && requestedTargetId) || isConversationVisibility(body.visibility) || isAgentParticipationMode(body.agentMode),
+    )
+    if (hasUnifiedMeta) {
+      try {
+        convo = await prisma.agentConversation.create({
+          data: {
+            workspaceId,
+            userId,
+            title: cleanTitle,
+            ...(requestedTargetType && requestedTargetId
+              ? { targetType: requestedTargetType, targetId: requestedTargetId }
+              : {}),
+            ...(requestedVisibility ? { visibility: requestedVisibility } : {}),
+            status: "OPEN",
+            agentMode: effectiveAgentMode,
+            source: "BROWSER",
+            updatedAt: new Date(),
+          },
+          select: { id: true },
+        })
+      } catch {
+        convo = await prisma.agentConversation.create({
+          data: {
+            workspaceId,
+            userId,
+            title: cleanTitle,
+            updatedAt: new Date(),
+          },
+          select: { id: true },
+        })
+      }
+    } else {
+      convo = await prisma.agentConversation.create({
+        data: {
+          workspaceId,
+          userId,
+          title: cleanTitle,
+          updatedAt: new Date(),
+        },
+        select: { id: true },
+      })
+    }
   }
   const conversationIdResolved = convo.id
+  if (requestedTargetType && requestedTargetId && isConversationLinkTarget(requestedTargetType)) {
+    await recordConversationLink(prisma, {
+      conversationId: conversationIdResolved,
+      workspaceId,
+      entityType: requestedTargetType,
+      entityId: requestedTargetId,
+      kind: "MENTIONS",
+    }).catch(() => {})
+  }
 
   // ── Resolve the "Send to agent" hand-off, if any (turn 1 only) ──────────────
   // Never trust anything the client claims about the entity beyond its type/id

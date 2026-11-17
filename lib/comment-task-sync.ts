@@ -112,6 +112,16 @@ async function reconcile(taskId: string): Promise<ThreadSyncResult> {
 
         const updated = await setDocCommentStatusCore(rootId, wanted)
         if (updated) (wanted === "RESOLVED" ? result.resolved : result.reopened).push(rootId)
+        if (prisma.agentConversation?.update) {
+          await prisma.agentConversation.update({
+            where: { id: rootId },
+            data: {
+              status: wanted,
+              resolvedAt: wanted === "RESOLVED" ? new Date() : null,
+              updatedAt: new Date(),
+            },
+          }).catch(() => {})
+        }
       }
 
       // The task may have flipped while we wrote; go again until its status holds still.

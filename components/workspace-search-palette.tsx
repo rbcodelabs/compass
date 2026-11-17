@@ -9,6 +9,7 @@ import { Search, Sparkles, XIcon } from "lucide-react"
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog"
 import { SidebarMenuButton } from "@/components/ui/sidebar"
 import { useAgentRailOptional } from "@/components/agent/agent-rail-context"
+import { useConversationPanelOptional } from "@/components/panels/conversation-panel"
 import { useAgentTurn } from "@/components/agent/use-agent-turn"
 import { PaletteAskAnswer } from "@/components/palette-ask-answer"
 import { SelectionAskPill } from "@/components/selection-ask-pill"
@@ -48,7 +49,8 @@ export function WorkspaceSearchPalette({ orgSlug, workspaceSlug }: { orgSlug: st
   // "Ask AI" hands off to the agent rail, which only exists inside a workspace
   // and is hidden on the full-page agent screen. Without it this is plain search.
   const rail = useAgentRailOptional()
-  const askAvailable = Boolean(rail?.available)
+  const convPanel = useConversationPanelOptional()
+  const askAvailable = Boolean(rail?.available || convPanel)
   const [forceAsk, setForceAsk] = useState(false)
   const [forceSearch, setForceSearch] = useState(false)
   const [selection, setSelection] = useState("")
@@ -230,14 +232,18 @@ export function WorkspaceSearchPalette({ orgSlug, workspaceSlug }: { orgSlug: st
   // promoted once it has finished.
   const canPromote = Boolean(askConversationId) && (turn.transport === "run" || !turn.isStreaming)
   const promoteToRail = () => {
-    if (!rail || !askConversationId || !canPromote) return
+    if ((!rail && !convPanel) || !askConversationId || !canPromote) return
     skipFinalFocusRef.current = true
     turn.reset()
     setAsked(null)
     setAnswer(null)
     setOpen(false)
-    rail.setView("agent")
-    rail.openRail({ conversationId: askConversationId })
+    if (convPanel) {
+      convPanel.openConversationInPanel(askConversationId)
+    } else if (rail) {
+      rail.setView("agent")
+      rail.openRail({ conversationId: askConversationId })
+    }
     setAskConversationId(null)
   }
 

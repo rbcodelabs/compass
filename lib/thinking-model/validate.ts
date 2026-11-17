@@ -51,6 +51,7 @@ export const RESERVED_SECTION_NAMES: readonly string[] = [
   "Decisions",
   "Docs",
   "Canvas",
+  "Conversations",
   "Agent",
   "Agents",
   "Home",

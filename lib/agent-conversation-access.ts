@@ -65,6 +65,7 @@ export function accessibleConversationsWhere(workspaceId: string, userId: string
     workspace: { members: { some: { userId } } },
     OR: [
       { userId },
+      { visibility: "WORKSPACE", interviewProcessingJson: null },
       {
         interviewProcessingJson: null,
         participants: { some: { userId, workspaceId, removedAt: null } },

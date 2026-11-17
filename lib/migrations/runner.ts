@@ -75,6 +75,7 @@ import { AGENT_INTERACTIVE_CONTROLS_MIGRATION, assertAgentInteractiveControlsMig
 import { AGENT_ORCHESTRATOR_SUPERVISION_MIGRATION, assertAgentOrchestratorSupervisionMigration } from "@/lib/migrations/agent-orchestrator-supervision";
 import { AGENT_ORCHESTRATOR_WAKEUPS_MIGRATION, assertAgentOrchestratorWakeupsMigration } from "@/lib/migrations/agent-orchestrator-wakeups";
 import { AGENT_WEB_FETCHES_MIGRATION, assertAgentWebFetchesMigration } from "@/lib/migrations/agent-web-fetches";
+import { UNIFIED_CONVERSATIONS_MIGRATION, assertUnifiedConversationsMigration } from "@/lib/migrations/unified-conversations";
 
 
 
@@ -882,6 +883,12 @@ const MIGRATIONS: readonly MigrationEntry[] = [
     // The code treats a missing table as "no rules", so it may ship before this applies. The hook asserts columns and index readiness before the receipt.
     name: "113_custom_field_inheritance_rules",
     filePath: path.join(process.cwd(), "prisma/migrations/113_custom_field_inheritance_rules/migration.sql"),
+  },
+  {
+    // Unified Conversations model (OPP-67 / SOL-117): twelve nullable columns across agent_conversations and agent_messages.
+    // Additive: no default, no backfill, no index, no FK. The 125 postcondition proves all twelve columns.
+    name: "125_unified_conversations",
+    filePath: path.join(process.cwd(), "prisma/migrations/125_unified_conversations/migration.sql"),
   },
 ];
 
@@ -2455,6 +2462,7 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
       if (migration.name === AGENT_ORCHESTRATOR_SUPERVISION_MIGRATION) await assertAgentOrchestratorSupervisionMigration(client, schema)
       if (migration.name === AGENT_ORCHESTRATOR_WAKEUPS_MIGRATION) await assertAgentOrchestratorWakeupsMigration(client, schema)
       if (migration.name === AGENT_WEB_FETCHES_MIGRATION) await assertAgentWebFetchesMigration(client, schema)
+      if (migration.name === UNIFIED_CONVERSATIONS_MIGRATION) await assertUnifiedConversationsMigration(client, schema)
       if (migration.name === "110_artifact_external_share") await assertArtifactExternalShareMigration(client, schema)
       if (migration.name === AGENT_SANDBOX_CLASS_MIGRATION) await assertAgentSandboxClassMigration(client, schema)
       if (migration.name === WORKSPACE_ID_MIGRATION || migration.name === WORKSPACE_ID_RESIDUAL_MIGRATION) {
