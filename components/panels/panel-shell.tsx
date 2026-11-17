@@ -282,7 +282,14 @@ export function PanelShell({ initialPin = DEFAULT_PANEL_PIN, chainGraphEnabled =
   );
 
   const breadcrumbHeader = (() => {
-    if (!convCtx || convCtx.historyStack.length <= 1) return null;
+    if (
+      !panel ||
+      !convCtx ||
+      convCtx.historyStack.length <= 1 ||
+      !convCtx.historyStack.some((c) => c.type === "conversation")
+    ) {
+      return null;
+    }
     const stack = convCtx.historyStack;
     // Collapse middle items into a single `⋯` dropdown when stack > 3 so the bar never wraps.
     const shouldCollapse = stack.length > 3;

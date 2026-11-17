@@ -21,6 +21,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { usePanelContext, type PanelType } from "@/components/panels/panel-context"
+import { isComposerPanelType } from "@/components/panels/composer-panel-types"
 import { panelTitles } from "@/components/panels/panel-titles"
 import { useLabels } from "@/components/thinking-model/thinking-model-provider"
 import { AgentChat } from "@/components/agent/agent-chat"
@@ -148,7 +149,13 @@ export function ConversationPanelProvider({
 
   // Track panel navigation in the non-wrapping breadcrumb stack and resolve human-readable titles.
   useEffect(() => {
-    if (!panel) return
+    if (!panel) {
+      setHistoryStack([])
+      return
+    }
+    if (isComposerPanelType(panel.type) || panel.type === "discovery-rail") {
+      return
+    }
     const key = `${panel.type}:${panel.id}`
     const knownLabel =
       customLabelsRef.current.get(key) ??
