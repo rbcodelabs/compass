@@ -4,6 +4,8 @@ import * as React from "react"
 
 import {
   THEME_STORAGE_KEY,
+  THEME_COLOR_LIGHT,
+  THEME_COLOR_DARK,
   getResolvedTheme,
   syncThemeColorMeta,
   isThemePreference,
@@ -41,7 +43,10 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
       document.documentElement.removeAttribute("data-theme")
       document.documentElement.style.removeProperty("color-scheme")
       // Leaving the workspace shell: title bar goes back to following the OS.
-      syncThemeColorMeta(window.matchMedia?.("(prefers-color-scheme: dark)")?.matches ? "dark" : "light")
+      document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"][media="(prefers-color-scheme: light)"]')
+        .forEach((tag) => { tag.content = THEME_COLOR_LIGHT })
+      document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"][media="(prefers-color-scheme: dark)"]')
+        .forEach((tag) => { tag.content = THEME_COLOR_DARK })
     }
   }, [])
 
