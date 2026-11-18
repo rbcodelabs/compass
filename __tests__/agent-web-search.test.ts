@@ -11,6 +11,9 @@ import {
   extractBedrockCitations,
   gatewayPerplexitySearch,
   selectSearchBackend,
+  agentCoreSearchConfig,
+  agentCoreWebSearch,
+  shapeAgentCoreResults,
   claimSearchSlot,
   clampMaxResults,
   formatSearchOutcome,
@@ -253,5 +256,50 @@ describe("Bedrock Web Search backend", () => {
       expect(await bedrockWebSearch("q", 5, new AbortController().signal)).toEqual({ ok: false, reason })
     }
     vi.unstubAllGlobals()
+  })
+})
+
+describe("AgentCore Gateway web search backend", () => {
+  const url = "https://gw-abc123.gateway.bedrock-agentcore.us-east-1.amazonaws.com/mcp"
+
+  afterEach(() => { vi.restoreAllMocks() })
+
+  it("maps connector results (text -> snippet, publishedDate -> date) and rejects odd payloads", () => {
+    const text = JSON.stringify({
+      id: "x",
+      results: [
+        { title: "Productboard Plans & Pricing", url: "https://www.productboard.com/pricing/", text: "Business \n\n includes 500 credits", publishedDate: "12:47PM, Wednesday, October 28 2026, PDT" },
+        { title: "bad", url: "javascript:alert(1)", text: "no" },
+      ],
+    })
+    const results = shapeAgentCoreResults(text, 5)!
+    expect(results).toHaveLength(1)
+    expect(results[0]).toMatchObject({ title: "Productboard Plans & Pricing", snippet: "Business includes 500 credits" })
+    expect(results[0].date).toBeTruthy()
+    expect(shapeAgentCoreResults("not json", 5)).toBeNull()
+    expect(shapeAgentCoreResults("{}", 5)).toBeNull()
+  })
+
+  it("reads the region from the gateway URL and needs the URL to be set", () => {
+    expect(agentCoreSearchConfig({})).toBeNull()
+    expect(agentCoreSearchConfig({ AGENT_WEB_SEARCH_GATEWAY_URL: url, AWS_REGION: "eu-west-1" })).toMatchObject({
+      region: "us-east-1",
+      tool: "web-search___WebSearch",
+    })
+    expect(agentCoreSearchConfig({ AGENT_WEB_SEARCH_GATEWAY_URL: "https://gw.example.test/mcp", AWS_REGION: "eu-west-1" })?.region).toBe("eu-west-1")
+  })
+
+  it("is opt-in: only AGENT_WEB_SEARCH_BACKEND=agentcore selects it, and defaults match upstream", () => {
+    expect(selectSearchBackend({ AGENT_WEB_SEARCH_BACKEND: " AgentCore " })).toBe(agentCoreWebSearch)
+    // A configured gateway URL alone, or any other env, never changes the selection.
+    expect(selectSearchBackend({})).toBe(gatewayPerplexitySearch)
+    expect(selectSearchBackend({ AGENT_WEB_SEARCH_GATEWAY_URL: url })).toBe(gatewayPerplexitySearch)
+    expect(selectSearchBackend({ AGENT_WEB_SEARCH_GATEWAY_URL: url, AGENT_MODEL_PROVIDER: "bedrock" })).toBe(gatewayPerplexitySearch)
+    expect(selectSearchBackend({ AGENT_WEB_SEARCH_BACKEND: "bedrock", AGENT_WEB_SEARCH_GATEWAY_URL: url })).toBe(bedrockWebSearch)
+  })
+
+  it("reports upstream when the URL is missing", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {})
+    expect(await agentCoreWebSearch("q", 5, new AbortController().signal)).toEqual({ ok: false, reason: "upstream" })
   })
 })
