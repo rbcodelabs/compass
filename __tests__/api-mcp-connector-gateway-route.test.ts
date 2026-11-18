@@ -412,3 +412,122 @@ describe("MCP connector gateway — a lost response is not a failed call", () =>
     expect(message).toContain(`${Math.round(GATEWAY_TIMEOUT_MS / 1000)}s`)
   })
 })
+
+describe("MCP connector gateway — provider failures are logged, redacted, and still passed through", () => {
+  const logged = async (spy: { mock: { calls: unknown[][] } }) => {
+    await vi.waitFor(() => expect(spy.mock.calls.some(call => call[0] === "[mcp-gateway] upstream non-2xx")).toBe(true))
+    return JSON.parse(spy.mock.calls.find((call: unknown[]) => call[0] === "[mcp-gateway] upstream non-2xx")![1] as string) as Record<string, unknown>
+  }
+
+  it("logs a provider 403 with its status, the JSON-RPC method and a redacted excerpt, and returns the response unchanged", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {})
+    const providerBody = JSON.stringify({
+      error: { code: 403, message: "Drive MCP API has not been used in project 123 before or it is disabled.", detail: "token v0-access-token Bearer ya29.abcdef" },
+    })
+    stubFetch(() => new Response(providerBody, { status: 403, headers: { "content-type": "application/json" } }))
+
+    const response = await POST(request({ body: TOOLS_CALL }), params())
+
+    expect(response.status).toBe(403)
+    expect(await response.text()).toBe(providerBody)
+    const entry = await logged(spy)
+    expect(entry).toMatchObject({ slug: "v0", method: "POST", rpcMethod: "tools/list", status: 403, contentType: "application/json" })
+    expect(String(entry.body)).toContain("has not been used in project 123")
+    expect(String(entry.body)).not.toContain("v0-access-token")
+    expect(String(entry.body)).not.toContain("ya29")
+  })
+
+  it("logs at most 500 characters of a long body", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {})
+    stubFetch(() => new Response("e".repeat(20_000), { status: 500 }))
+    const response = await POST(request({ body: TOOLS_CALL }), params())
+    // The sandbox always drains the response; the log read rides a tee of it.
+    expect((await response.text()).length).toBe(20_000)
+    const entry = await logged(spy)
+    expect(String(entry.body).length).toBeLessThanOrEqual(500)
+  })
+
+  it("does not log a success, or the routine 405 on a GET stream probe", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {})
+    stubFetch(() => new Response("{}", { status: 200 }), () => new Response("no", { status: 405 }))
+    await POST(request({ body: TOOLS_CALL }), params())
+    await GET(request({ method: "GET" }), params())
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(spy.mock.calls.some(call => call[0] === "[mcp-gateway] upstream non-2xx")).toBe(false)
+  })
+})
+
+describe("MCP connector gateway — tool errors inside a successful response are logged", () => {
+  const GOOGLE_DENIED = (id: number) =>
+    JSON.stringify({ id, jsonrpc: "2.0", result: { content: [{ text: "The caller does not have permission", type: "text" }], isError: true } })
+  const CALL = (name: string) => JSON.stringify({ jsonrpc: "2.0", id: 5, method: "tools/call", params: { name, arguments: { fileId: "1AbC" } } })
+
+  const toolErrors = (spy: { mock: { calls: unknown[][] } }) =>
+    spy.mock.calls.filter(call => call[0] === "[mcp-gateway] upstream tool error").map(call => JSON.parse(call[1] as string) as Record<string, unknown>)
+
+  it("logs a Google 'caller does not have permission' result inside a 200, with the tool name, and returns the response unchanged", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {})
+    const providerBody = GOOGLE_DENIED(5)
+    stubFetch(() => new Response(providerBody, { status: 200, headers: { "content-type": "application/json" } }))
+
+    const response = await POST(request({ body: CALL("read_file_content") }), params("google-drive"))
+
+    expect(response.status).toBe(200)
+    expect(await response.text()).toBe(providerBody)
+    await vi.waitFor(() => expect(toolErrors(spy)).toHaveLength(1))
+    expect(toolErrors(spy)[0]).toEqual({
+      slug: "google-drive",
+      rpcMethod: "tools/call",
+      toolName: "read_file_content",
+      status: 200,
+      error: "The caller does not have permission",
+    })
+    // The 2xx is not also reported as a non-2xx failure.
+    expect(spy.mock.calls.some(call => call[0] === "[mcp-gateway] upstream non-2xx")).toBe(false)
+  })
+
+  it("logs a JSON-RPC error object inside a 200, and an SSE-framed tool error", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {})
+    stubFetch(
+      () => new Response(JSON.stringify({ jsonrpc: "2.0", id: 5, error: { code: -32602, message: "Invalid params" } }), { status: 200 }),
+      () => new Response(`event: message\ndata: ${GOOGLE_DENIED(5)}\n\n`, { status: 200, headers: { "content-type": "text/event-stream" } }),
+    )
+    await (await POST(request({ body: CALL("search_files") }), params("google-drive"))).text()
+    await (await POST(request({ body: CALL("get_file_metadata") }), params("google-drive"))).text()
+    await vi.waitFor(() => expect(toolErrors(spy)).toHaveLength(2))
+    expect(toolErrors(spy).map(entry => [entry.toolName, entry.error])).toEqual([
+      ["search_files", "[-32602] Invalid params"],
+      ["get_file_metadata", "The caller does not have permission"],
+    ])
+  })
+
+  it("redacts the live bearer and credential shapes before truncating", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {})
+    const leaky = `denied for token v0-access-token and Bearer ya29.abcdef ${"x".repeat(2000)}`
+    stubFetch(
+      () => new Response(JSON.stringify({ id: 5, jsonrpc: "2.0", result: { content: [{ text: leaky, type: "text" }], isError: true } }), { status: 200 }),
+    )
+    await (await POST(request({ body: CALL("read_file_content") }), params())).text()
+    await vi.waitFor(() => expect(toolErrors(spy)).toHaveLength(1))
+    const error = String(toolErrors(spy)[0].error)
+    expect(error.length).toBeLessThanOrEqual(500)
+    expect(error).not.toContain("v0-access-token")
+    expect(error).not.toContain("ya29")
+    expect(error).toContain("denied for token")
+  })
+
+  it("does not log a normal result, an oversized result, or a non-POST", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {})
+    const huge = JSON.stringify({ id: 5, jsonrpc: "2.0", result: { content: [{ text: "a".repeat(40_000), type: "text" }], isError: true } })
+    stubFetch(
+      () => new Response(JSON.stringify({ id: 5, jsonrpc: "2.0", result: { content: [{ text: "ok", type: "text" }] } }), { status: 200 }),
+      () => new Response(huge, { status: 200 }),
+      () => new Response(GOOGLE_DENIED(5), { status: 200 }),
+    )
+    await (await POST(request({ body: CALL("search_files") }), params("google-drive"))).text()
+    await (await POST(request({ body: CALL("read_file_content") }), params("google-drive"))).text()
+    await (await GET(request({ method: "GET" }), params("google-drive"))).text()
+    await new Promise(resolve => setTimeout(resolve, 50))
+    expect(toolErrors(spy)).toHaveLength(0)
+  })
+})

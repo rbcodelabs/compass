@@ -26,7 +26,12 @@ import {
   FORWARDED_RESPONSE_HEADERS,
   GATEWAY_TIMEOUT_MS,
   MAX_GATEWAY_REQUEST_BYTES,
+  UPSTREAM_RESULT_SCAN_BYTES,
+  jsonRpcMethodOf,
   pickHeaders,
+  redactUpstreamExcerpt,
+  toolErrorTextOf,
+  toolNameOf,
 } from "@/lib/mcp-connectors/gateway"
 import { requireHttpsUrl } from "@/lib/mcp-connectors/http"
 import { mcpConnectorsAvailable } from "@/lib/mcp-connectors/store"
@@ -97,7 +102,9 @@ async function proxy(request: NextRequest, context: { params: Promise<{ slug: st
         `You have not connected ${connectorDefinition(slug)?.displayName ?? slug} to Compass. Connect it in Settings → My agents, then try again.`,
       )
 
-    let upstream = await forward(resolved.connector.serverUrl, request, body, resolved.accessToken)
+    // The bearer actually sent last, so redaction covers a refreshed token too.
+    let bearer = resolved.accessToken
+    let upstream = await forward(resolved.connector.serverUrl, request, body, bearer)
 
     // Retry once, and only on a 401. A provider can revoke or expire a token
     // early — before the `expires_at` Compass recorded — so a 401 here does not
@@ -107,7 +114,8 @@ async function proxy(request: NextRequest, context: { params: Promise<{ slug: st
       await upstream.body?.cancel().catch(() => {})
       const refreshed = await refreshConnectorToken(resolved, userId)
       if (!refreshed) return jsonRpcError(403, -32004, "This connection was removed while the turn was running.")
-      upstream = await forward(resolved.connector.serverUrl, request, body, refreshed)
+      bearer = refreshed
+      upstream = await forward(resolved.connector.serverUrl, request, body, bearer)
       if (upstream.status === 401) {
         await upstream.body?.cancel().catch(() => {})
         return jsonRpcError(
@@ -117,6 +125,10 @@ async function proxy(request: NextRequest, context: { params: Promise<{ slug: st
         )
       }
     }
+
+    if (!upstream.ok && !(request.method === "GET" && upstream.status === 405))
+      logUpstreamFailure(slug, request.method, jsonRpcMethodOf(body), upstream, [bearer])
+    else if (request.method === "POST" && upstream.ok) logUpstreamToolError(slug, jsonRpcMethodOf(body), toolNameOf(body), upstream, [bearer])
 
     // Streamed rather than buffered: an SSE response has no end until the server
     // closes it, and buffering would both stall the agent and hold the whole
@@ -148,6 +160,79 @@ async function proxy(request: NextRequest, context: { params: Promise<{ slug: st
     }
     throw error
   }
+}
+
+/**
+ * Writes a provider's non-2xx answer to the log, because the sandbox only ever sees
+ * the status: without this a 403 from the provider is indistinguishable from any
+ * other and the real reason (API not enabled, scope refused) is lost. Reads a clone,
+ * so the response the agent gets is untouched; fire-and-forget, so it cannot delay it.
+ * Only the first part of the body is read, and it is redacted before it is logged.
+ */
+function logUpstreamFailure(slug: string, method: string, rpcMethod: string | null, upstream: Response, secrets: readonly string[]): void {
+  const contentType = upstream.headers.get("content-type")
+  void (async () => {
+    let excerpt = ""
+    try {
+      const reader = upstream.clone().body?.getReader()
+      const decoder = new TextDecoder()
+      let received = 0
+      while (reader && received < 8192) {
+        const { done, value } = await reader.read()
+        if (done || !value) break
+        received += value.byteLength
+        excerpt += decoder.decode(value, { stream: true })
+      }
+      await reader?.cancel().catch(() => {})
+    } catch {
+      excerpt = "(body unreadable)"
+    }
+    console.error(
+      "[mcp-gateway] upstream non-2xx",
+      JSON.stringify({ slug, method, rpcMethod, status: upstream.status, contentType, body: redactUpstreamExcerpt(excerpt, secrets) }),
+    )
+  })()
+}
+
+/**
+ * Logs a tool failure that arrived inside a successful (2xx) response. Google's Drive
+ * MCP server answers "The caller does not have permission" with HTTP 200 and
+ * `result.isError`, so `logUpstreamFailure` never sees it and the only trace is a
+ * small response size. Same constraints: reads a clone in the background, so the
+ * response the agent gets is untouched and not delayed, and only the first
+ * {@link UPSTREAM_RESULT_SCAN_BYTES} are read. A body that does not end inside the cap
+ * is a document, not an error, and is skipped. The text is redacted before it is cut.
+ */
+function logUpstreamToolError(slug: string, rpcMethod: string | null, toolName: string | null, upstream: Response, secrets: readonly string[]): void {
+  void (async () => {
+    let text = ""
+    let complete = false
+    try {
+      const reader = upstream.clone().body?.getReader()
+      const decoder = new TextDecoder()
+      let received = 0
+      while (reader) {
+        const { done, value } = await reader.read()
+        if (done) {
+          complete = true
+          break
+        }
+        received += value.byteLength
+        text += decoder.decode(value, { stream: true })
+        if (received >= UPSTREAM_RESULT_SCAN_BYTES) break
+      }
+      await reader?.cancel().catch(() => {})
+    } catch {
+      return
+    }
+    if (!complete) return
+    const errorText = toolErrorTextOf(text)
+    if (errorText === null) return
+    console.error(
+      "[mcp-gateway] upstream tool error",
+      JSON.stringify({ slug, rpcMethod, toolName, status: upstream.status, error: redactUpstreamExcerpt(errorText, secrets) }),
+    )
+  })()
 }
 
 async function forward(

@@ -238,3 +238,27 @@ unset that button is hidden and magic link and passkey sign-in are unaffected.
 `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `AUTH_GOOGLE_ID` and
 `AUTH_GOOGLE_SECRET` are no longer read by Compass and can be removed from each
 environment once production has been verified.
+
+### Optional catalog fields for a pre-registered client
+
+A catalog entry in `lib/mcp-connectors/config.ts` that declares a `staticClient` can also set
+two optional fields. Both default to the standard behaviour when absent.
+
+- `redirectPath` is a root-relative path used as the OAuth `redirect_uri` in place of
+  `/api/connectors/<slug>/callback`, for a client whose allowed callback URLs cannot be changed.
+  Whatever route serves that path must hand the request to the connector callback handler.
+- `omitResourceParameter` leaves the RFC 8707 `resource` parameter off the authorize, token
+  exchange and refresh requests, for an authorization server that binds tokens another way
+  (for example an Auth0 `audience`).
+
+When a `staticClient` connector has a revocation endpoint, disconnecting and emergency
+revocation authenticate the revoke request with the client secret, as RFC 7009 requires of a
+confidential client.
+
+### Gateway logging
+
+When a provider answers through the MCP gateway with a non-2xx status (other than the routine
+405 on a stream probe), or reports a tool error inside a 2xx response (`isError` or a JSON-RPC
+`error`), Compass writes one log line with the connector slug, JSON-RPC method, status and up to
+500 characters of the provider's message. Bearer tokens and common credential shapes are
+redacted before the text is cut. The response the agent receives is not changed.

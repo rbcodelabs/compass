@@ -22,6 +22,7 @@ import {
   connectorAccessView,
   connectorDefinition,
   connectorGuidance,
+  connectorRedirectUri,
   connectorEncryptionKey,
   isConnectorConfigured,
   staticClientCredentials,
@@ -50,6 +51,7 @@ import {
   exchangeAuthorizationCode,
   refreshGrant,
   refreshTokens,
+  revokeAtProvider,
 } from "@/lib/mcp-connectors/tokens"
 
 // `refreshGrant` writes through `rotateGrantTokens`, which defaults to the shared
@@ -1347,5 +1349,82 @@ describe("access levels", () => {
     it("is empty for a connector with a single fixed access", () => {
       expect(connectorAccessView(v0, "mcp")).toEqual({ accessLevels: [], defaultAccessLevel: null, accessLevel: null })
     })
+  })
+})
+
+describe("redirectPath, omitResourceParameter and static-client revocation (fixture entry)", () => {
+  const catalog = CONNECTOR_DEFINITIONS as ConnectorDefinition[]
+  const shipped = catalog.find(definition => definition.slug === "google-drive")!
+  const original = catalog.indexOf(shipped)
+  const redirectUri = "https://compass.example/auth/custom-callback"
+  const fixture: ConnectorRecord = {
+    ...connector,
+    id: "connector-fixture",
+    slug: "google-drive",
+    revocationEndpoint: "https://idp.example/oauth/revoke",
+    clientId: "stored-client-id",
+  }
+
+  afterEach(() => {
+    catalog[original] = shipped
+  })
+
+  function declare(extra: Partial<ConnectorDefinition>) {
+    catalog[original] = {
+      ...shipped,
+      tokenSource: undefined,
+      staticClient: { clientIdEnv: "GOOGLE_CLIENT_ID", clientSecretEnv: "GOOGLE_CLIENT_SECRET" },
+      ...extra,
+    }
+    vi.stubEnv("GOOGLE_CLIENT_ID", "env-client-id")
+    vi.stubEnv("GOOGLE_CLIENT_SECRET", "env-client-secret")
+  }
+
+  it("defaults: the callback path and the resource parameter are unchanged when the fields are absent", async () => {
+    expect(connectorRedirectUri("v0", "https://compass.example")).toBe("https://compass.example/api/connectors/v0/callback")
+    expect(connectorRedirectUri("unknown-slug", "https://compass.example")).toBe(
+      "https://compass.example/api/connectors/unknown-slug/callback",
+    )
+    declare({})
+    expect(connectorRedirectUri("google-drive", "https://compass.example")).toBe(
+      "https://compass.example/api/connectors/google-drive/callback",
+    )
+    const url = new URL(buildAuthorizeUrl(fixture, { state: "s", codeVerifier: "v", redirectUri }))
+    expect(url.searchParams.get("resource")).toBe(fixture.resource)
+  })
+
+  it("uses redirectPath for the redirect_uri, resolved against the trusted origin", () => {
+    declare({ redirectPath: "/auth/custom-callback" })
+    expect(connectorRedirectUri("google-drive", "https://compass.example")).toBe(redirectUri)
+  })
+
+  it("omits resource from the authorize, exchange and refresh requests when asked", async () => {
+    declare({ omitResourceParameter: true })
+    const url = new URL(buildAuthorizeUrl(fixture, { state: "s", codeVerifier: "v", redirectUri }))
+    expect(url.searchParams.has("resource")).toBe(false)
+
+    const calls = routeFetch({
+      [fixture.tokenEndpoint]: () => json({ access_token: "at", expires_in: 3599, token_type: "Bearer" }),
+    })
+    await exchangeAuthorizationCode(fixture, { code: "c", codeVerifier: "v", redirectUri })
+    await refreshTokens(fixture, "rt-old")
+    expect(calls).toHaveLength(2)
+    for (const call of calls) expect(new URLSearchParams(call.init.body as string).has("resource")).toBe(false)
+  })
+
+  it("revokes with the static client's credentials, and with only the stored client_id otherwise", async () => {
+    declare({})
+    const calls = routeFetch({ [fixture.revocationEndpoint!]: () => json({}) })
+    expect(await revokeAtProvider(fixture, "rt-1")).toBe(true)
+    const confidential = new URLSearchParams(calls[0].init.body as string)
+    expect(confidential.get("client_id")).toBe("env-client-id")
+    expect(confidential.get("client_secret")).toBe("env-client-secret")
+    expect(confidential.get("token")).toBe("rt-1")
+
+    catalog[original] = shipped
+    expect(await revokeAtProvider({ ...fixture, slug: "v0" }, "rt-2")).toBe(true)
+    const publicClient = new URLSearchParams(calls[1].init.body as string)
+    expect(publicClient.get("client_id")).toBe(fixture.clientId)
+    expect(publicClient.has("client_secret")).toBe(false)
   })
 })

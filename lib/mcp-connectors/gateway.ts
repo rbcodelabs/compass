@@ -101,3 +101,108 @@ export function pickHeaders(source: Headers, allowed: readonly string[]): Header
   }
   return picked
 }
+
+/** How much of a provider's error body CloudWatch gets. Enough for a Google error, far short of a document. */
+export const UPSTREAM_ERROR_LOG_CHARS = 500
+
+/**
+ * Makes a provider response excerpt safe to log: known credential shapes are
+ * replaced, `secrets` (the live bearer, refreshed or not) are removed wherever
+ * they appear, whitespace is collapsed and the result is cut to
+ * {@link UPSTREAM_ERROR_LOG_CHARS}. Redaction runs on the whole text before the
+ * cut so a token straddling the limit cannot survive as a prefix.
+ */
+export function redactUpstreamExcerpt(text: string, secrets: readonly string[] = []): string {
+  let out = text
+  for (const secret of secrets) if (secret.length >= 8) out = out.split(secret).join("[redacted]")
+  out = out
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [redacted]")
+    .replace(/\bya29\.[A-Za-z0-9._-]+/g, "[redacted]")
+    .replace(/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*/g, "[redacted]")
+    .replace(/("(?:access_token|refresh_token|id_token|client_secret)"\s*:\s*")[^"]*(")/gi, "$1[redacted]$2")
+    .replace(/\s+/g, " ")
+    .trim()
+  return out.slice(0, UPSTREAM_ERROR_LOG_CHARS)
+}
+
+/** The JSON-RPC `method` of a request body (`tools/list`), or null when it is not one. */
+export function jsonRpcMethodOf(body: ArrayBuffer | undefined): string | null {
+  if (!body || body.byteLength === 0 || body.byteLength > 64 * 1024) return null
+  try {
+    const parsed: unknown = JSON.parse(new TextDecoder().decode(body))
+    const method = Array.isArray(parsed) ? (parsed[0] as { method?: unknown } | undefined)?.method : (parsed as { method?: unknown }).method
+    return typeof method === "string" ? method.slice(0, 64) : null
+  } catch {
+    return null
+  }
+}
+
+/** The tool a `tools/call` request names (`params.name`), or null for any other request. */
+export function toolNameOf(body: ArrayBuffer | undefined): string | null {
+  if (!body || body.byteLength === 0 || body.byteLength > 64 * 1024) return null
+  try {
+    const parsed: unknown = JSON.parse(new TextDecoder().decode(body))
+    const first = (Array.isArray(parsed) ? parsed[0] : parsed) as { method?: unknown; params?: { name?: unknown } } | undefined
+    const name = first?.method === "tools/call" ? first.params?.name : undefined
+    return typeof name === "string" ? name.slice(0, 128) : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * How much of a successful response is read looking for an error. A tool error is a
+ * sentence; a result bigger than this is a document, not an error, and is skipped.
+ */
+export const UPSTREAM_RESULT_SCAN_BYTES = 16 * 1024
+
+type JsonRpcMessage = {
+  error?: { code?: unknown; message?: unknown }
+  result?: { isError?: unknown; content?: unknown }
+}
+
+function errorTextOfMessage(message: JsonRpcMessage | null | undefined): string | null {
+  if (!message || typeof message !== "object") return null
+  if (message.error && typeof message.error === "object") {
+    const text = typeof message.error.message === "string" ? message.error.message : "(no message)"
+    return typeof message.error.code === "number" ? `[${message.error.code}] ${text}` : text
+  }
+  if (message.result?.isError === true) {
+    const content = Array.isArray(message.result.content) ? message.result.content : []
+    const text = content
+      .map(part => (part && typeof part === "object" && typeof (part as { text?: unknown }).text === "string" ? (part as { text: string }).text : ""))
+      .filter(Boolean)
+      .join(" ")
+    return text || "(tool error with no text)"
+  }
+  return null
+}
+
+/**
+ * The error text carried by a *successful* HTTP response, or null when there is none.
+ *
+ * Google's Drive MCP server reports a tool failure ("The caller does not have
+ * permission") as `{result:{isError:true,content:[{text}]}}` inside a 200, which the
+ * non-2xx log cannot see. Handles a plain JSON body, a batch, and an SSE stream
+ * (`data:` lines). Text that is not complete JSON-RPC (a truncated or non-JSON
+ * body) yields null rather than a guess.
+ */
+export function toolErrorTextOf(raw: string): string | null {
+  const payloads: string[] = []
+  const trimmed = raw.trim()
+  if (trimmed.startsWith("{") || trimmed.startsWith("[")) payloads.push(trimmed)
+  else for (const line of raw.split(/\r?\n/)) if (line.startsWith("data:")) payloads.push(line.slice(5).trim())
+  for (const payload of payloads) {
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(payload)
+    } catch {
+      continue
+    }
+    for (const message of Array.isArray(parsed) ? parsed : [parsed]) {
+      const text = errorTextOfMessage(message as JsonRpcMessage)
+      if (text !== null) return text
+    }
+  }
+  return null
+}

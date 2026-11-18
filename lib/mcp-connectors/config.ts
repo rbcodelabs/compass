@@ -123,6 +123,19 @@ export interface ConnectorDefinition {
      */
     authorizeParams?: Readonly<Record<string, string>>
   }
+  /**
+   * A root-relative path to use as the OAuth `redirect_uri` instead of
+   * `/api/connectors/<slug>/callback`, for a pre-registered client whose allowed
+   * callbacks cannot change. Whatever route serves the path must hand the
+   * request to the connector callback handler. Absent means the default.
+   */
+  redirectPath?: string
+  /**
+   * Leave RFC 8707 `resource` off the authorize, exchange and refresh requests,
+   * for an authorization server that binds tokens some other way (Auth0's
+   * `audience`). Absent means send it, which is what v0 requires.
+   */
+  omitResourceParameter?: boolean
 }
 
 /**
@@ -340,7 +353,8 @@ export function isConnectorConfigured(definition: ConnectorDefinition): boolean 
  * `origin` must come from `trustedCompassBaseUrl()` rather than a request header.
  */
 export function connectorRedirectUri(slug: string, origin: string): string {
-  return new URL(`/api/connectors/${encodeURIComponent(slug)}/callback`, origin).toString()
+  const path = connectorDefinition(slug)?.redirectPath ?? `/api/connectors/${encodeURIComponent(slug)}/callback`
+  return new URL(path, origin).toString()
 }
 
 /**
