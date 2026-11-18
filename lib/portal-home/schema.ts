@@ -6,6 +6,8 @@ import { feedbackCtaConfig, feedbackCtaDefinition } from "./widgets/feedback-cta
 import { recentUpdatesConfig, recentUpdatesDefinition } from "./widgets/recent-updates"
 import { richTextConfig, richTextDefinition } from "./widgets/rich-text"
 import { docsConfig, docsDefinition } from "./widgets/docs"
+import { artifactGalleryConfig, artifactGalleryDefinition } from "./widgets/artifact-gallery"
+import { okrSummaryConfig, okrSummaryDefinition } from "./widgets/okr-summary"
 import { DEFAULT_PORTAL_TEMPLATE, type PortalTemplate } from "./templates"
 
 /**
@@ -46,6 +48,8 @@ export const widgetSchema = z.discriminatedUnion("type", [
   z.object({ ...base, type: z.literal("recent_updates"), config: recentUpdatesConfig }),
   z.object({ ...base, type: z.literal("rich_text"), config: richTextConfig }),
   z.object({ ...base, type: z.literal("docs"), config: docsConfig }),
+  z.object({ ...base, type: z.literal("artifact_gallery"), config: artifactGalleryConfig }),
+  z.object({ ...base, type: z.literal("okr_summary"), config: okrSummaryConfig }),
 ])
 export type PortalHomeWidget = z.infer<typeof widgetSchema>
 export type WidgetType = PortalHomeWidget["type"]
@@ -64,6 +68,8 @@ export const WIDGET_DEFINITIONS = {
   recent_updates: recentUpdatesDefinition,
   rich_text: richTextDefinition,
   docs: docsDefinition,
+  artifact_gallery: artifactGalleryDefinition,
+  okr_summary: okrSummaryDefinition,
 } as const
 
 export const WIDGET_TYPES = Object.keys(WIDGET_DEFINITIONS) as WidgetType[]

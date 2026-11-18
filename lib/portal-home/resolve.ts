@@ -7,6 +7,8 @@ import { resolveRoadmapSpotlight } from "./resolvers/roadmap-spotlight"
 import { resolveRecentUpdates } from "./resolvers/recent-updates"
 import { resolveFeedbackCta } from "./resolvers/feedback-cta"
 import { resolveDocs } from "./resolvers/docs"
+import { resolveArtifactGallery } from "./resolvers/artifact-gallery"
+import { resolveOkrSummary } from "./resolvers/okr-summary"
 
 async function resolveWidget(ctx: ResolveContext, widget: PortalHomeWidget): Promise<WidgetResolution> {
   switch (widget.type) {
@@ -26,6 +28,10 @@ async function resolveWidget(ctx: ResolveContext, widget: PortalHomeWidget): Pro
       return resolveFeedbackCta(ctx, widget.config)
     case "docs":
       return resolveDocs(ctx, widget.config)
+    case "artifact_gallery":
+      return resolveArtifactGallery(ctx, widget.config)
+    case "okr_summary":
+      return resolveOkrSummary(ctx, widget.config)
   }
 }
 

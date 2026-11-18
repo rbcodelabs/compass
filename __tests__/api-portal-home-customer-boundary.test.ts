@@ -22,6 +22,9 @@ const prisma = {
   workspace: { findUnique: vi.fn(async () => ({ id: WS, roadmapPublic: true, feedbackEnabled: true })) },
   roadmapItem: { findMany: roadmapFindMany },
   doc: { findMany: vi.fn(async () => []) },
+  artifact: { findMany: vi.fn(async () => [{ id: "a1", title: "Deck", kind: "SLIDE_DECK", sourceType: "HTML_UPLOAD" }]) },
+  oKRCycle: { findMany: vi.fn(async () => [{ id: "c1", title: "Q4", status: "ACTIVE" }]) },
+  objective: { findMany: vi.fn(async () => [{ id: "o1", title: "Grow", cycle: { title: "Q4" } }, { id: "o2", title: "Loose", cycle: null }]) },
 }
 
 vi.mock("@/lib/permissions", async (importOriginal) => ({
@@ -72,6 +75,30 @@ describe("pin picker", () => {
     const args = roadmapFindMany.mock.calls[0][0] as unknown as { where: Record<string, unknown>; select: Record<string, boolean> }
     expect(args.where).toEqual({ workspaceId: WS, status: { not: "ARCHIVED" } })
     expect(args.select.isPrivate).toBe(true)
+  })
+})
+
+describe("internal pickers (artifact gallery / OKR widgets)", () => {
+  it("offers only this workspace's ACTIVE artifacts, its cycles and objectives, with flattened cycle titles", async () => {
+    const { GET } = await import("@/app/api/portal-home/[orgSlug]/[workspaceSlug]/options/route")
+    const response = await GET(new Request("http://x"), route)
+    expect(response.status).toBe(200)
+    expect(prisma.artifact.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { workspaceId: WS, status: "ACTIVE" } }))
+    expect(prisma.oKRCycle.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { workspaceId: WS } }))
+    expect(prisma.objective.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { workspaceId: WS } }))
+    const body = (await response.json()) as { artifacts: unknown[]; okrCycles: unknown[]; objectives: { id: string; cycleTitle: string | null }[] }
+    expect(body.artifacts).toHaveLength(1)
+    expect(body.okrCycles).toHaveLength(1)
+    expect(body.objectives).toEqual([{ id: "o1", title: "Grow", cycleTitle: "Q4" }, { id: "o2", title: "Loose", cycleTitle: null }])
+  })
+
+  it("the customer resolve route returns neither widget, even when both are visible to everyone", async () => {
+    const { POST } = await import("@/app/api/portal-home/[orgSlug]/[workspaceSlug]/resolve/route")
+    const widgets = [createWidget("artifact_gallery", 0), createWidget("okr_summary", 1)]
+    const body = (await (await POST(post({ widgets, audience: "customer" }), route)).json()) as { widgets: unknown[]; resolved: Record<string, unknown> }
+    expect(body.widgets ?? []).toEqual([])
+    expect(JSON.stringify(body)).not.toContain("Deck")
+    expect(prisma.artifact.findMany).not.toHaveBeenCalled()
   })
 })
 
