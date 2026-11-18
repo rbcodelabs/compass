@@ -415,6 +415,31 @@ describe("finalizeAgentRun", () => {
     expect(prisma.agentRun.update.mock.calls[0][0].data).toMatchObject({ sandboxStoppedAt: NOW })
   })
 
+  it("links the assistant message to its run, so spend can be counted once (ADR-0032)", async () => {
+    const prisma = fakePrisma()
+    prisma.agentRun.findUnique.mockResolvedValue(runRow())
+    await finalizeAgentRun({ prisma, runId: RUN_ID, status: "SUCCEEDED", text: "ok", usage: { totalCostUsd: 0.5 }, now: NOW, cleanup })
+    expect(prisma.agentMessage.create.mock.calls[0][0].data).toMatchObject({ runId: RUN_ID, costUsd: 0.5 })
+  })
+
+  it("keeps the cost of a FAILED run that reported usage, on both the run and its message", async () => {
+    const prisma = fakePrisma()
+    prisma.agentRun.findUnique.mockResolvedValue(runRow())
+    await finalizeAgentRun({ prisma, runId: RUN_ID, status: "FAILED", error: "max turns", usage: { totalCostUsd: 0.4, numTurns: 9 }, now: NOW, cleanup })
+    expect(prisma.agentRun.updateMany.mock.calls[0][0].data).toMatchObject({ status: "FAILED", costUsd: 0.4 })
+    expect(prisma.agentMessage.create.mock.calls[0][0].data).toMatchObject({ runId: RUN_ID, costUsd: 0.4, numTurns: 9 })
+  })
+
+  it("leaves cost null (never zero) when a run is swept without any usage", async () => {
+    const prisma = fakePrisma()
+    prisma.agentRun.findUnique.mockResolvedValue(runRow())
+    await finalizeAgentRun({ prisma, runId: RUN_ID, status: "INTERRUPTED", error: "stale", now: NOW, cleanup })
+    expect(prisma.agentRun.updateMany.mock.calls[0][0].data.costUsd).toBeNull()
+    const data = prisma.agentMessage.create.mock.calls[0][0].data
+    expect(data.runId).toBe(RUN_ID)
+    expect(data).not.toHaveProperty("costUsd")
+  })
+
   it("does nothing at all when the run is already terminal", async () => {
     const prisma = fakePrisma()
     prisma.agentRun.findUnique.mockResolvedValue(runRow({ status: "SUCCEEDED" }))

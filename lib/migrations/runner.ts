@@ -890,6 +890,12 @@ const MIGRATIONS: readonly MigrationEntry[] = [
     name: "125_unified_conversations",
     filePath: path.join(process.cwd(), "prisma/migrations/125_unified_conversations/migration.sql"),
   },
+  {
+    // agent_messages.run_id (nullable UUID) plus one async index: links an assistant message to the run that produced it so
+    // spend is counted once (ADR-0032). Additive, no backfill, no FK. Apply BEFORE the code that maps the column ships.
+    name: "129_agent_message_run_id",
+    filePath: path.join(process.cwd(), "prisma/migrations/129_agent_message_run_id/migration.sql"),
+  },
 ];
 
 const MIGRATIONS_BY_NAME = new Map(MIGRATIONS.map((migration) => [migration.name, migration]));

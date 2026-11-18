@@ -70,7 +70,8 @@
 //   AGENT_DOC_STATE <json> — final materialized doc tree (ADR 0019 §2.4), emitted
 //                            once after query() finishes and before AGENT_RESULT
 //   AGENT_RESULT <json>    — final { text, usage } on success
-//   AGENT_ERROR <json>     — { message } on failure
+//   AGENT_ERROR <json>     — { message, usage? } on failure; usage is present when the SDK
+//                            reported a (non-success) result before the failure, so spend is not lost
 //   AGENT_SESSION <json>   — { sessionId } the session a successful turn ended in
 //                            (differs from AGENT_SESSION_ID after a resume fallback)
 
@@ -140,6 +141,9 @@ function requireEnv(name: string, value: string | undefined): string {
 
 
 let reporter: RunReporter | undefined
+// Usage from the last SDK result message of ANY subtype. A failed turn still cost money; reporting it
+// on the error path is what lets the host record spend for runs that did not succeed (ADR-0032).
+let failureUsage: Record<string, unknown> | undefined
 /** Captured at module scope so the session upload can authenticate after the env scrub. */
 let runCallbackHeaders: Record<string, string> | undefined
 
@@ -918,6 +922,13 @@ async function main(): Promise<void> {
           } else if (parkedReason) {
             return { kind: "parked", message: parkedReason }
           } else {
+            failureUsage = {
+              durationMs: message.duration_ms,
+              durationApiMs: message.duration_api_ms,
+              numTurns: message.num_turns,
+              totalCostUsd: message.total_cost_usd,
+              usage: message.usage,
+            }
             throw new Error(`query() ended with subtype: ${message.subtype}`)
           }
         }
@@ -1005,9 +1016,10 @@ async function main(): Promise<void> {
 
 main().catch(async (err: unknown) => {
   const message = err instanceof Error ? err.message : String(err)
-  emit("AGENT_ERROR", { message })
+  const errorPayload = failureUsage ? { message, usage: failureUsage } : { message }
+  emit("AGENT_ERROR", errorPayload)
   try {
-    await reporter?.finish("error", { message })
+    await reporter?.finish("error", errorPayload)
   } catch {
     /* the sweeper is the backstop when even the terminal report cannot land */
   }

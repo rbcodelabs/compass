@@ -63,6 +63,8 @@ const usageSchema = z.looseObject({
 const resultPayloadSchema = z.looseObject({ text: z.string().max(200_000), usage: usageSchema.nullish() })
 const errorPayloadSchema = z.looseObject({
   message: z.string().max(4_000).optional(),
+  // usage rides along when the worker saw a non-success SDK result before failing, so the failed run's spend is recorded.
+  usage: usageSchema.nullish(),
   code: z.enum(["WORKER_REPORTED", "AWAITING_USER"]).optional(),
 })
 
@@ -175,6 +177,7 @@ export async function handleAgentRunCallback(
               status: "FAILED" as const,
               error: payload.message ?? "The agent reported an error.",
               errorCode: "WORKER_REPORTED",
+              usage: payload.usage ?? null,
             }
           })()
     const finalized = await finalizeAgentRun({ prisma, runId, rawToken, ...outcome, cleanup })
