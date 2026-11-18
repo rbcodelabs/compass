@@ -22,6 +22,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { ChevronDown, ChevronRight, GripVertical, X } from "lucide-react";
 import type { ObjectiveStatus, CustomFieldDefinitionData, CustomFieldValue, SquadData } from "@/lib/types";
 import { averageProgress, STATUS_BADGE } from "@/lib/okrs";
+import { HighlightMatch } from "@/components/okrs/highlight-match";
 import { KeyResultBar } from "@/components/okrs/key-result-bar";
 import type { SupportingObjectiveOption } from "@/components/okrs/key-result-bar";
 import { AddKeyResultForm } from "@/components/okrs/add-key-result-form";
@@ -260,7 +261,7 @@ export function ObjectiveRow({
                 onClick={() => openPanel("objective", objective.id)}
                 className="text-left font-medium text-base hover:underline underline-offset-2"
               >
-                {objective.title}
+                <HighlightMatch text={objective.title} />
               </button>
         </span>
       }

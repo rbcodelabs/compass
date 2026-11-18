@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition, useId } from "react";
+import { useState, useTransition, useId, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   DndContext,
@@ -18,6 +18,8 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { groupableObjectiveFields } from "@/lib/okr-grouping";
+import { useOkrFilter } from "@/components/okrs/okr-filter-context";
+import { objectiveMatches, normalizeQuery } from "@/lib/okr-name-filter";
 import { ObjectiveRow } from "@/components/okrs/objective-row";
 import { useLabels } from "@/components/thinking-model/thinking-model-provider";
 import {
@@ -83,6 +85,15 @@ export function ObjectivesList({
 }: Props) {
   const [objectives, setObjectives] = useState(initialObjectives);
   const labels = useLabels();
+  const { query, setCounts } = useOkrFilter();
+  const filterActive = normalizeQuery(query) !== "";
+  // Reorder state stays on the full list; the filter only narrows what is rendered.
+  const visibleObjectives = filterActive ? objectives.filter((o) => objectiveMatches(o, query)) : objectives;
+  const shownCount = visibleObjectives.length;
+  const totalCount = objectives.length;
+  useEffect(() => {
+    setCounts({ shown: shownCount, total: totalCount });
+  }, [shownCount, totalCount, setCounts]);
   // Collapsed ids are view state only (not persisted); everything starts expanded.
   const [collapsedIds, setCollapsedIds] = useState<ReadonlySet<string>>(() => new Set());
   const [, startTransition] = useTransition();
@@ -104,13 +115,13 @@ export function ObjectivesList({
           key: opt.value,
           label: opt.label,
           color: opt.color,
-          items: objectives.filter((o) => valueOf(o) === opt.value),
+          items: visibleObjectives.filter((o) => valueOf(o) === opt.value),
         })),
         {
           key: "__none__",
           label: `No ${groupField.name}`,
           color: undefined as string | undefined,
-          items: objectives.filter(
+          items: visibleObjectives.filter(
             (o) => !(groupField.options ?? []).some((opt) => opt.value === valueOf(o))
           ),
         },
@@ -148,7 +159,7 @@ export function ObjectivesList({
     }
   }
 
-  const objectiveIds = objectives.map((o) => o.id);
+  const objectiveIds = visibleObjectives.map((o) => o.id);
 
   function setCollapsed(id: string, collapsed: boolean) {
     setCollapsedIds((prev) => {
@@ -174,14 +185,20 @@ export function ObjectivesList({
       supportingObjectiveOptions={supportingObjectiveOptions}
       paceElapsed={paceElapsed}
       hideProgress={hideProgress}
-      collapsed={collapsedIds.has(obj.id)}
+      // While filtering, matches stay expanded so a key-result hit is visible.
+      collapsed={filterActive ? false : collapsedIds.has(obj.id)}
       onCollapsedChange={(c) => setCollapsed(obj.id, c)}
     />
   );
 
   return (
     <>
-    {objectives.length > 1 && (
+    {filterActive && visibleObjectives.length === 0 && (
+      <div className="rounded-lg border border-dashed border-border-default p-8 text-center text-sm text-text-secondary">
+        No {labels.objective.lowerPlural} or {labels.keyResult.lowerPlural} match &ldquo;{query.trim()}&rdquo;.
+      </div>
+    )}
+    {objectives.length > 1 && !filterActive && (
       <div className="flex justify-end">
         <button
           type="button"
@@ -215,7 +232,7 @@ export function ObjectivesList({
         ))
       ) : (
         <SortableContext items={objectiveIds} strategy={verticalListSortingStrategy}>
-          {objectives.map(renderRow)}
+          {visibleObjectives.map(renderRow)}
         </SortableContext>
       )}
     </DndContext>
