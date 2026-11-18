@@ -132,3 +132,20 @@ test("keyboard navigation retains the nested native vertical scrollport", async 
   await expect.poll(() => top(nested)).toBeGreaterThan(50);
   expect(await left(board)).toBe(0);
 });
+
+test("the same mounted Board switches wheel ownership at the 767px and 768px breakpoint", async ({ page, base }) => {
+  const { board, target, outer } = await scrollFixture(page, base);
+  for (const width of [767, 768, 767]) {
+    await page.setViewportSize({ width, height: 844 });
+    await outer.evaluate(element => { element.scrollTop = 0; });
+    await board.evaluate(element => { element.scrollLeft = 0; });
+    await wheel(page, target, 0, 100);
+    if (width < 768) {
+      await expect.poll(() => top(outer)).toBeGreaterThan(25);
+      expect(await left(board)).toBe(0);
+    } else {
+      await expect.poll(() => left(board)).toBeGreaterThan(50);
+      expect(await top(outer)).toBe(0);
+    }
+  }
+});
