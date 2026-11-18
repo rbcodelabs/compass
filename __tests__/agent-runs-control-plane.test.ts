@@ -33,6 +33,7 @@ import {
   MAX_AGENT_RUN_CALLBACK_EVENTS,
   MIN_AGENT_RUN_BUDGET_MS,
   agentRunFailureMessage,
+  agentConversationSandboxName,
   agentRunSandboxName,
   agentRunWorkerTokenIsBound,
   agentRunsAvailable,
@@ -44,6 +45,7 @@ import {
   hashAgentRunWorkerToken,
   isTerminalAgentRunStatus,
   markAgentRunStarted,
+  reapIdleConversationSandboxes,
   resetAgentRunsAvailabilityCache,
   resolveAgentRunBudgetMs,
   sweepAgentRuns,
@@ -579,5 +581,39 @@ describe("isTerminalAgentRunStatus", () => {
   it("treats only the four end states as terminal, and an unknown string as non-terminal", () => {
     expect(["SUCCEEDED", "FAILED", "INTERRUPTED", "CANCELED"].every(isTerminalAgentRunStatus)).toBe(true)
     expect(["QUEUED", "RUNNING", "", "PENDING"].some(isTerminalAgentRunStatus)).toBe(false)
+  })
+})
+
+describe("reapIdleConversationSandboxes", () => {
+  const CONV = agentConversationSandboxName("c-1")
+  const idleFor = (ms: number) => new Date(NOW.getTime() - ms)
+  const candidate = (over: Record<string, unknown> = {}) => ({ id: "run-a", conversationId: "c-1", sandboxName: CONV, finishedAt: idleFor(6 * 60_000), ...over })
+  const cleanup = { stopSandbox: mockStopSandbox }
+  // Earlier tests leave a rejecting implementation on the shared mock; clearAllMocks keeps implementations.
+  beforeEach(() => mockStopSandbox.mockReset().mockResolvedValue(undefined))
+
+  it("reaps a conversation with several finished turns: the newest run decides, even though the older ones each have a newer run", async () => {
+    // Three SUCCEEDED turns left warm on one sandbox, oldest first (the sweeper orders by finishedAt ascending).
+    const prisma = fakePrisma()
+    prisma.agentRun.findMany.mockResolvedValue([
+      candidate({ id: "run-1", finishedAt: idleFor(40 * 60_000) }),
+      candidate({ id: "run-2", finishedAt: idleFor(30 * 60_000) }),
+      candidate({ id: "run-3", finishedAt: idleFor(20 * 60_000) }),
+    ])
+    // run-1 and run-2 each have a newer run; run-3 has none.
+    prisma.agentRun.findFirst.mockImplementation(({ where }: Any) => Promise.resolve(where.id.not !== "run-3" ? { id: "newer" } : null))
+    const result = await reapIdleConversationSandboxes({ prisma, now: NOW, cleanup })
+    expect(mockStopSandbox).toHaveBeenCalledTimes(1)
+    expect(mockStopSandbox).toHaveBeenCalledWith(CONV)
+    expect(result).toMatchObject({ examined: 3, stopped: [CONV], failed: [] })
+  })
+
+  it("never stops the sandbox while a later run exists", async () => {
+    const prisma = fakePrisma()
+    prisma.agentRun.findMany.mockResolvedValue([candidate({ id: "run-1" }), candidate({ id: "run-2" })])
+    prisma.agentRun.findFirst.mockResolvedValue({ id: "run-3-active" })
+    const result = await reapIdleConversationSandboxes({ prisma, now: NOW, cleanup })
+    expect(mockStopSandbox).not.toHaveBeenCalled()
+    expect(result.stopped).toEqual([])
   })
 })

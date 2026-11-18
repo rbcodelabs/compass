@@ -1103,7 +1103,6 @@ export async function reapIdleConversationSandboxes({
   for (const candidate of candidates) {
     const sandboxName = candidate.sandboxName
     if (!isConversationSandboxName(sandboxName) || !candidate.finishedAt || seen.has(sandboxName)) continue
-    seen.add(sandboxName)
     try {
       const newer = await prisma.agentRun.findFirst({
         where: {
@@ -1114,6 +1113,9 @@ export async function reapIdleConversationSandboxes({
         select: { id: true },
       })
       if (newer) continue
+      // Only now is this sandbox decided. Marking it seen before the check above let the oldest warm run of a conversation, which always
+      // has a newer run, shadow the newest one: a conversation with two or more finished turns was never reaped.
+      seen.add(sandboxName)
       await effects.stopSandbox(sandboxName)
       await prisma.agentRun.updateMany({
         where: { conversationId: candidate.conversationId, sandboxName, sandboxStoppedAt: null },
