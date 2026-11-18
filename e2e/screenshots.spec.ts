@@ -84,6 +84,7 @@ const GUIDED_PAGES = buildScreenshotCases({
   workspaceBase: WORKSPACE_BASE,
   includeGuidedUx: FUNCTIONAL || process.env.DOCS_GUIDED_UX_SCREENSHOTS === "1",
   includeSharedDiscussion: FUNCTIONAL,
+  includeSettingsShell: true,
   researchToken: process.env.DOCS_RESEARCH_TOKEN || (FUNCTIONAL ? GUIDED_UX_SCREENSHOT_TOKEN : null),
 });
 
@@ -110,6 +111,11 @@ async function prepareScreenshot(
     await expect(disclosure).toHaveAttribute("aria-expanded", "false");
     await disclosure.click();
     await expect(disclosure).toHaveAttribute("aria-expanded", "true");
+    return;
+  }
+  if (entry.prepare === "settings-nav-sheet") {
+    await page.getByRole("button", { name: /^Settings menu, current page/ }).click();
+    await page.getByRole("navigation", { name: "Settings sections" }).waitFor();
     return;
   }
   if (entry.prepare === "workspace-search") {

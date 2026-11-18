@@ -13,6 +13,8 @@ import { cookies } from "next/headers";
 import { panelPinCookieName, parsePanelPin } from "@/lib/panel-pin";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { LAST_WORKSPACE_COOKIE, pickAnchorWorkspace } from "@/lib/last-workspace";
+import { SettingsShell } from "@/components/settings/settings-shell";
 
 interface OrgSettingsLayoutProps {
   children: React.ReactNode;
@@ -63,7 +65,9 @@ export default async function OrgSettingsLayout({
     notFound();
   }
 
-  const anchorWorkspace = workspaces.find((ws) => ws.orgSlug === orgSlug);
+  const cookieStore = await cookies();
+  // The workspace they last used in this organization, else the first one in it.
+  const anchorWorkspace = pickAnchorWorkspace(workspaces, cookieStore.get(LAST_WORKSPACE_COOKIE)?.value, { orgSlug });
   if (!anchorWorkspace) {
     // Org admin with no workspace membership in this org — no workspace to
     // anchor nav on. Extremely unlikely (org admins are typically also
@@ -71,7 +75,6 @@ export default async function OrgSettingsLayout({
     notFound();
   }
   const researchCaptureEnabled = await researchNavEnabled(anchorWorkspace.id);
-  const cookieStore = await cookies();
   const sidebarDefaultOpen = cookieStore.get("sidebar_state")?.value !== "false";
   // Same server-seeded read as the workspace layout — see the note there.
   const initialPanelPin = parsePanelPin(
@@ -118,7 +121,12 @@ export default async function OrgSettingsLayout({
           />
 
           <SidebarInset className="min-w-0 overflow-y-auto bg-surface-app pb-16 md:pb-0">
-            {children}
+            <SettingsShell
+              backHref={"/" + orgSlug + "/" + anchorWorkspace.slug}
+              context={{ orgSlug, workspaceSlug: anchorWorkspace.slug, workspaceName: anchorWorkspace.name, isOrgAdmin: true }}
+            >
+              {children}
+            </SettingsShell>
           </SidebarInset>
 
           {/* Inside SidebarProvider, after SidebarInset — see the note in the

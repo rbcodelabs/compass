@@ -30,6 +30,11 @@ const cookiesGet = vi.hoisted(() => vi.fn(() => undefined));
 
 vi.mock("@/auth", () => ({ auth }));
 vi.mock("@/lib/workspace", () => ({ getUserWorkspaces }));
+vi.mock("@/lib/db", () => ({
+  default: () => ({
+    organizationMember: { findFirst: vi.fn(async () => ({ role: "MEMBER" })) },
+  }),
+}));
 vi.mock("next/headers", () => ({ cookies: async () => ({ get: cookiesGet }) }));
 vi.mock("next/navigation", () => ({
   redirect,

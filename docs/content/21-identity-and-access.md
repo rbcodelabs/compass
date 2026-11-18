@@ -15,9 +15,24 @@ everything it is allowed to do.
 This page explains the credential types, how to choose between them, and what
 no assistant can do regardless of which one it holds.
 
+## Finding settings
+
+Every settings page shares one navigation, grouped by what the setting applies to:
+
+- **Account** applies to you everywhere: **Profile**, **Passkeys** and **My agents** (your registered agents, connected apps and connected MCP servers).
+- **Workspace** applies to one workspace, whose name is shown under the heading: **Workspace settings** (squads, members, custom fields, scoring, agents, the portal, branding and the rest) and **Modules**. On a workspace's own settings pages it is that workspace. On Account and Organization pages, which do not belong to a single workspace, it is the workspace you used most recently (on Organization pages, the one you used most recently in that organization). Compass remembers this in a cookie in your browser; if there is none yet, or you no longer belong to that workspace, it shows your first workspace instead. Check the name before you change anything.
+- **Organization** applies to every workspace in the organization: **Organization settings**. It appears only for organization owners and admins.
+- **Platform** appears only for platform administrators.
+
+Open settings from your account menu, then use the navigation to move between pages. The page you are on is highlighted. **Back to Compass** returns you to the app.
+
+On a phone the navigation is a button showing the current page. Tap it to open the full list; choosing a page closes the list.
+
+Hiding a link is only a convenience. Each page checks your role itself, so being able to open a page by its address does not give you access to anything your role does not allow.
+
 ## Your profile and comment name
 
-Open your account menu and choose **Profile** to set a display name. Names are
+Open your account menu and choose **Profile**, or choose **Profile** in the **Account** group of the settings navigation, to set a display name. Names are
 shared across your workspaces and must contain 1–120 characters. Your sign-in
 email is shown read-only on this page.
 

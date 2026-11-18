@@ -1,4 +1,3 @@
-import Link from "next/link"
 import { redirect } from "next/navigation"
 import { auth } from "@/auth"
 import getPrisma from "@/lib/db"
@@ -17,7 +16,6 @@ export default async function ProfilePage() {
   if (!profile) redirect("/login")
   const deletionPlan = await planAccountDeletion(prisma, session.user.id)
   return <main className="mx-auto flex max-w-3xl flex-col gap-6 p-4 sm:p-8">
-    <Link href="/dashboard" className="text-sm text-text-subtle underline">Back to Compass</Link>
     <PageHeader title="Profile" description="Your name across Compass." />
     <ProfileForm name={profile.name} email={profile.email} />
     <DeleteAccountPanel email={profile.email} plan={deletionPlan} />
