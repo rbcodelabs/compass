@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition, useId } from "react";
+import { useServerSyncedState } from "@/hooks/use-server-synced-state";
 import { useSearchParams } from "next/navigation";
 import {
   DndContext,
@@ -81,11 +82,12 @@ export function ObjectivesList({
   paceElapsed,
   hideProgress,
 }: Props) {
-  const [objectives, setObjectives] = useState(initialObjectives);
+  const [isSaving, startTransition] = useTransition();
+  // Follows the server (live refresh) but defers adopting it while a reorder/save is in flight.
+  const { state: objectives, setState: setObjectives } = useServerSyncedState(initialObjectives, (o) => o, isSaving);
   const labels = useLabels();
   // Collapsed ids are view state only (not persisted); everything starts expanded.
   const [collapsedIds, setCollapsedIds] = useState<ReadonlySet<string>>(() => new Set());
-  const [, startTransition] = useTransition();
   const searchParams = useSearchParams();
 
   // The picker lives in the page header (OkrGroupByToggle); this list only reads

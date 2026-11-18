@@ -18,7 +18,7 @@ import { listCardSortNewEntries } from "@/lib/card-sort-new-entries";
  * page filter: it is a superset signal, so a filtered board may refresh once
  * for a change it cannot see (a harmless no-op re-render), never miss one.
  */
-export const LIVE_SCOPES = ["opportunities", "solutions", "tasks", "experiments", "roadmap", "cardSort"] as const;
+export const LIVE_SCOPES = ["opportunities", "solutions", "tasks", "experiments", "roadmap", "cardSort", "okrs"] as const;
 export type LiveScope = (typeof LIVE_SCOPES)[number];
 
 export function isLiveScope(value: string | null): value is LiveScope {
@@ -123,6 +123,35 @@ export async function computeChangeToken(
         prisma.evidence.count({ where: { workspaceId } }),
       ]);
       return hashRows([opportunities, solutions, [evidenceCount]]);
+    }
+    case "okrs": {
+      // Feeds the OKR cycles index, the Outcomes index and every cycle page: cycles, objectives, key results
+      // (current/target move on check-in), check-in count (progress history) and objective custom-field values.
+      const [cycles, objectives, keyResults, checkInCount] = await Promise.all([
+        prisma.oKRCycle.findMany({
+          where: { workspaceId },
+          select: { id: true, title: true, status: true, startDate: true, endDate: true, updatedAt: true },
+        }),
+        prisma.objective.findMany({
+          where: { workspaceId },
+          select: {
+            id: true, cycleId: true, squadId: true, parentKeyResultId: true, title: true, description: true,
+            owner: true, status: true, sortOrder: true, updatedAt: true,
+          },
+        }),
+        prisma.keyResult.findMany({
+          where: { objective: { workspaceId } },
+          select: { id: true, objectiveId: true, title: true, target: true, current: true, unit: true, sortOrder: true, updatedAt: true },
+        }),
+        prisma.checkIn.count({ where: { keyResult: { objective: { workspaceId } } } }),
+      ]);
+      const fieldValues = objectives.length === 0
+        ? []
+        : await prisma.customFieldValue.findMany({
+            where: { objectId: { in: objectives.map((objective) => objective.id) } },
+            select: { fieldId: true, objectId: true, value: true, updatedAt: true },
+          });
+      return hashRows([cycles, objectives, keyResults, [checkInCount], fieldValues]);
     }
     case "solutions": {
       const [solutions, opportunities] = await Promise.all([

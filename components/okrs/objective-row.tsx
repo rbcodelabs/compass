@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { useId, useRef, useTransition, useState } from "react";
+import { useServerSyncedState } from "@/hooks/use-server-synced-state";
 import {
   DndContext,
   type DragEndEvent,
@@ -417,8 +418,8 @@ function SortableKeyResults({
   paceElapsed?: number | null;
   hideProgress?: boolean;
 }) {
-  const [keyResults, setKeyResults] = useState(initialKeyResults);
-  const [, startTransition] = useTransition();
+  const [isSaving, startTransition] = useTransition();
+  const { state: keyResults, setState: setKeyResults } = useServerSyncedState(initialKeyResults, (k) => k, isSaving);
 
   // Stable across server and client; without it @dnd-kit numbers its
   // aria-describedby ids from a global counter and hydration mismatches.
