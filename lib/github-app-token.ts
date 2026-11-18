@@ -5,7 +5,7 @@ import { DEFAULT_AGENT_GITHUB_ACCESS, type AgentGithubAccess } from "@/lib/agent
 /**
  * GitHub App installation tokens come from one of two sources. On Vercel, a
  * Vercel Connect connector (COMPASS_GITHUB_CONNECTOR) holds the App's private key.
- * Off Vercel (ECS), Compass signs with the key itself (COMPASS_GITHUB_APP_ID and
+ * Off Vercel, Compass signs with the key itself (COMPASS_GITHUB_APP_ID and
  * COMPASS_GITHUB_APP_PRIVATE_KEY). The connector wins when both are set. Neither
  * means the feature is off and agent turns run without push access.
  */
