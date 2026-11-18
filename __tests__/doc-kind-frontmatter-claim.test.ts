@@ -88,7 +88,7 @@ describe("kindFromFrontmatterClaim", () => {
   it.each(["qa-report", "qa_report", "qa report", "QA_REPORT", "QA-Report", "  QA Report  ", "qa--report", "qa _report", "Qa\tReport"])("accepts %j", (v) => {
     expect(kindFromFrontmatterClaim(v)).toBe("QA_REPORT")
   })
-  it.each(["canvas", "CANVAS", "spec", "SPEC", "gtm", "GTM_POSITIONING_BRIEF", "adr", "ADR", "design", "note", "qa", "qareport", "qa-reports", "", "   ", null, undefined, 7, true, {}, ["qa-report"]])("rejects %j", (v) => {
+  it.each(["canvas", "CANVAS", "spec", "SPEC", "gtm", "GTM_POSITIONING_BRIEF", "adr", "ADR", "design", "note", "qa", "qareport", "qa-reports", "constructor", "toString", "__proto__", "", "   ", null, undefined, 7, true, {}, ["qa-report"]])("rejects %j", (v) => {
     expect(kindFromFrontmatterClaim(v)).toBeNull()
   })
 })
@@ -132,6 +132,14 @@ describe("create from an agent file (createPath)", () => {
     const read = safeMatter((await readPath(WS, "Spoof"))!.content).data
     expect(read.compass_doc_type).toBe("STANDARD")
     expect(read.compass_kind).toBe("QA_REPORT")
+  })
+})
+
+describe("inherited property claims on creation", () => {
+  it.each([["createPath", createPath], ["writePath", writePath]] as const)("%s preserves metadata without assigning a kind", async (_name, create) => {
+    await create(WS, "Inherited", fm("constructor"), opts)
+    expect(rowAt("Inherited").kind ?? null).toBeNull()
+    expect(rowAt("Inherited").metadata).toEqual({ kind: "constructor", topic: "x" })
   })
 })
 

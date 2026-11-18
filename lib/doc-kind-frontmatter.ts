@@ -22,5 +22,6 @@ function normalizeKindClaim(value: string): string {
  */
 export function kindFromFrontmatterClaim(value: unknown): DocKind | null {
   if (typeof value !== "string") return null
-  return FRONTMATTER_KIND_WHITELIST[normalizeKindClaim(value)] ?? null
+  const claim = normalizeKindClaim(value)
+  return Object.hasOwn(FRONTMATTER_KIND_WHITELIST, claim) ? FRONTMATTER_KIND_WHITELIST[claim] : null
 }
