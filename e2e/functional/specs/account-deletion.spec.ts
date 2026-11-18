@@ -1,5 +1,6 @@
 import { test, expect } from "../fixtures/index";
 import { isolatedE2EConnectionString } from "../fixtures/isolated-database";
+import { cleanupAccountDeletionMember } from "../fixtures/account-deletion-cleanup";
 import type { APIRequestContext, BrowserContext } from "@playwright/test";
 import pg from "pg";
 import { randomUUID } from "node:crypto";
@@ -90,7 +91,24 @@ test("a user deletes their account: personal data and session go, teammates and 
     const confirm = xPage.getByLabel(/Type .* to confirm/);
     const submit = xPage.getByRole("button", { name: "Delete my account" });
     await expect(submit, "disabled until the email is typed").toBeDisabled();
-    await expect(xPage.getByRole("alert"), "no blockers for an ordinary member").toHaveCount(0);
+    const alerts = xPage.getByRole("alert");
+    try {
+      await expect(alerts, "no blockers for an ordinary member").toHaveCount(0);
+    } catch (error) {
+      await testInfo.attach("account-deletion-alerts", {
+        body: JSON.stringify(await alerts.evaluateAll((elements) => elements.map((element) => {
+          const root = element.getRootNode();
+          return {
+            tag: element.tagName,
+            id: element.id,
+            text: element.textContent,
+            shadowHost: root instanceof ShadowRoot ? root.host.tagName : null,
+          };
+        })), null, 2),
+        contentType: "application/json",
+      });
+      throw error;
+    }
     await confirm.fill("someone-else@example.com");
     await expect(submit, "a wrong email keeps it disabled").toBeDisabled();
     await xPage.screenshot({ path: testInfo.outputPath("account-deletion-settings.png"), fullPage: true });
@@ -138,10 +156,13 @@ test("a user deletes their account: personal data and session go, teammates and 
     await pool.query(`DELETE FROM "${S}".comments WHERE id = $1`, [own.comment]).catch(() => undefined);
     await pool.query(`DELETE FROM "${S}".agent_messages WHERE conversation_id = ANY($1::uuid[])`, [[own.conv, own.theirConv]]).catch(() => undefined);
     await pool.query(`DELETE FROM "${S}".agent_conversations WHERE id = ANY($1::uuid[])`, [[own.conv, own.theirConv]]).catch(() => undefined);
-    await pool.query(`DELETE FROM "${S}".users WHERE email = $1`, [email]).catch(() => undefined);
-    for (const context of contexts) await context.close().catch(() => undefined);
-    for (const api of disposables) await api.dispose().catch(() => undefined);
-    await pool.end();
+    try {
+      await cleanupAccountDeletionMember(pool, email);
+    } finally {
+      for (const context of contexts) await context.close().catch(() => undefined);
+      for (const api of disposables) await api.dispose().catch(() => undefined);
+      await pool.end();
+    }
   }
 });
 
