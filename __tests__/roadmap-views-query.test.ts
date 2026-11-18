@@ -92,6 +92,43 @@ describe("loadCrossWorkspaceRoadmap", () => {
     expect(out.items).toHaveLength(MAX_ROADMAP_ITEMS)
   })
 
+  it("filters by a field label across workspaces whose option values differ, then loads shown values for the page", async () => {
+    const defs = [
+      { id: "d1", workspaceId: "a", name: "Status", fieldType: "SELECT", order: 0, options: [{ label: "At risk", value: "risk" }], sharedOptionSet: null },
+      { id: "d2", workspaceId: "b", name: "status", fieldType: "SELECT", order: 0, options: [{ label: "At Risk", value: "at_risk" }], sharedOptionSet: null },
+    ]
+    const stored = [
+      { fieldId: "d1", objectId: "r1", value: "risk" },
+      { fieldId: "d2", objectId: "r2", value: "at_risk" },
+      { fieldId: "d1", objectId: "r3", value: "other" },
+    ]
+    const seen: { where?: { id?: unknown } } = {}
+    const db = {
+      customFieldDefinition: { findMany: async () => defs },
+      customFieldValue: { findMany: async (args: { where: { objectId?: { in: string[] } } }) => (args.where.objectId ? stored.filter((v) => args.where.objectId!.in.includes(v.objectId)) : stored) },
+      roadmapItem: { findMany: async (args: { where: { id?: unknown } }) => { seen.where = args.where; return [row("r1", "a"), row("r2", "b")] } },
+    } as never
+    tasksLinkedTo.mockResolvedValue([])
+    const out = await loadCrossWorkspaceRoadmap(
+      ["a", "b"],
+      { ...DEFAULT_ROADMAP_FILTERS, fields: [{ key: "SELECT:status", values: ["at risk"] }] },
+      { ...DEFAULT_ROADMAP_DISPLAY, fields: ["SELECT:status"] },
+      db,
+    )
+    expect((seen.where!.id as { in: string[] }).in.sort()).toEqual(["r1", "r2"])
+    expect(out.items.map((i) => i.fieldValues["SELECT:status"]?.[0].label)).toEqual(["At risk", "At Risk"])
+  })
+
+  it("returns nothing, without querying items, when a field filter matches no item", async () => {
+    const db = {
+      customFieldDefinition: { findMany: async () => [] },
+      customFieldValue: { findMany: async () => [] },
+      roadmapItem: { findMany: async () => { throw new Error("items must not be queried") } },
+    } as never
+    const out = await loadCrossWorkspaceRoadmap(["a"], { ...DEFAULT_ROADMAP_FILTERS, fields: [{ key: "SELECT:status", values: ["x"] }] }, DEFAULT_ROADMAP_DISPLAY, db)
+    expect(out).toEqual({ items: [], truncated: false })
+  })
+
   it("applies the derived delivery-status filter in memory", async () => {
     const links = [{ linkedId: "r1", task: { status: "BLOCKED" } }]
     const { db } = fakeDb([row("r1"), row("r2")], links)
