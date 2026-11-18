@@ -202,4 +202,8 @@ describe("validateTaskDates", () => {
   it("rejects an invalid start date", () => {
     expect(() => validateTaskDates(new Date("nope"), late)).toThrow("Invalid startDate")
   })
+  it("rejects an invalid due date whether or not a start is present", () => {
+    expect(() => validateTaskDates(null, new Date("nope"))).toThrow("Invalid dueDate")
+    expect(() => validateTaskDates(early, new Date("nope"))).toThrow("Invalid dueDate")
+  })
 })

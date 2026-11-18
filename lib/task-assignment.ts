@@ -97,6 +97,7 @@ export async function eligibleTaskAssignees(workspaceId: string): Promise<Resolv
  */
 export function validateTaskDates(startDate: Date | null | undefined, dueDate: Date | null | undefined) {
   if (startDate && Number.isNaN(startDate.getTime())) throw new Error("Invalid startDate");
+  if (dueDate && Number.isNaN(dueDate.getTime())) throw new Error("Invalid dueDate");
   if (startDate && dueDate && startDate.getTime() > dueDate.getTime()) throw new Error("startDate cannot be after dueDate");
 }
 
