@@ -26,6 +26,7 @@
  */
 import { getPublicFileStore } from "@/lib/storage/public-store"
 import { configuredBlobStoreHostname } from "@/lib/feedback-attachments"
+import { parsePublicFileUrl } from "@/lib/public-file-keys"
 
 /**
  * 400 KiB decoded. The widget caps its own capture at 480px wide JPEG at quality
@@ -171,6 +172,9 @@ export async function storeEmbedScreenshot(input: {
  */
 export function isEmbedScreenshotUrl(value: unknown): value is string {
   if (typeof value !== "string" || !value) return false
+  // The S3 backend stores the app route. Same prefix rule as below: only keys this
+  // module's shape produces, never another part of the public store.
+  if (parsePublicFileUrl(value)?.startsWith(`${EMBED_SCREENSHOT_PREFIX}/`)) return true
   try {
     const parsed = new URL(value)
     if (parsed.protocol !== "https:") return false

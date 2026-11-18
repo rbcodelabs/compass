@@ -59,3 +59,25 @@ describe("direct upload (browser)", () => {
     expect(onProgress).toHaveBeenCalledWith(40)
   })
 })
+
+describe("direct upload on the S3 backend", () => {
+  it("returns a presigned POST (empty clientToken), pins the first content type and exact size, and adds the route URL for the public store", async () => {
+    vi.resetModules()
+    vi.stubEnv("COMPASS_STORAGE_BACKEND", "s3")
+    vi.stubEnv("COMPASS_S3_BUCKET", "test-bucket")
+    const createPresignedUpload = vi.fn().mockResolvedValue({ method: "POST", url: "https://s3/x", fields: { key: "k" } })
+    vi.doMock("@/lib/storage/s3", () => ({ createPresignedUpload }))
+    const mod = await import("@/lib/storage/direct-upload")
+    expect(mod.privateDirectUploadConfigured()).toBe(true)
+
+    const priv = await mod.createDirectUpload({ ...base, store: "private", allowedContentTypes: ["application/zip", "application/octet-stream"], maxBytes: 99 })
+    expect(priv).toEqual({ clientToken: "", upload: { method: "POST", url: "https://s3/x", fields: { key: "k" } }, backend: "s3" })
+    expect(createPresignedUpload).toHaveBeenLastCalledWith({ store: "artifacts", pathname: "a/b.html", contentType: "application/zip", fileSize: 99, expiresInSeconds: 60 })
+
+    const pub = await mod.createDirectUpload({ ...base, store: "public", pathname: "feedback/ws1/0f8fad5b-d9cb-469f-a165-70867728950e-a.png", allowedContentTypes: ["image/png"] })
+    expect(pub).toMatchObject({ clientToken: "", backend: "s3", url: "/api/files/public/feedback/ws1/0f8fad5b-d9cb-469f-a165-70867728950e-a.png" })
+    expect(createPresignedUpload).toHaveBeenLastCalledWith(expect.objectContaining({ store: "public" }))
+    vi.doUnmock("@/lib/storage/s3")
+    vi.unstubAllEnvs()
+  })
+})

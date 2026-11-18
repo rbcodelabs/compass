@@ -1,55 +1,74 @@
 import { generateClientTokenFromReadWriteToken } from "@vercel/blob/client"
+import { resolveStorageBackend } from "@/lib/storage/config"
+import { createPresignedUpload, type PresignedPostTarget } from "@/lib/storage/s3"
+import { publicFileUrl } from "@/lib/public-file-keys"
 
 /**
  * Server side of a browser (or agent) direct-to-store upload: the app hands out a
  * short-lived, path- and size-scoped credential and the bytes go straight to the
  * object store, bypassing the serverless request-body limit.
  *
- * Callers use this instead of `@vercel/blob/client`, so a deployment on another
- * store changes one implementation. The browser half is
- * `lib/storage/direct-upload-client.ts`.
+ * Callers use this instead of a storage SDK, so a deployment on another store
+ * changes one implementation. The browser half is `lib/storage/direct-upload-client.ts`.
+ *
+ * Backends: Vercel Blob (a client token) and S3 (a presigned POST that pins the key,
+ * the exact content type and the exact byte length). The local-disk backend has no
+ * direct upload; callers gate on {@link directUploadAvailable} first where that matters.
  */
 export type DirectUploadStore = "private" | "public"
 
 const PRIVATE_NOT_CONFIGURED = "Private artifact storage is not configured"
 
-/** The private store's read/write token, or null when direct upload is not set up. */
+/** The private store's Blob read/write token, or null when it is not set. */
 function privateStoreToken(): string | null {
   return process.env.ARTIFACT_BLOB_READ_WRITE_TOKEN?.trim() || null
 }
 
-/** Whether a private-store direct upload can be issued at all (no local-disk fallback is considered here). */
+/** Whether a private-store direct upload can be issued at all. */
 export function privateDirectUploadConfigured(): boolean {
-  return privateStoreToken() !== null
+  return resolveStorageBackend() === "s3" || privateStoreToken() !== null
 }
 
 export type DirectUploadRequest = {
-  /** `private` uses the artifact store's token; `public` uses the ambient Blob token. */
+  /** `private` is the artifact/research store; `public` is the shareable-URL store. */
   store: DirectUploadStore
   pathname: string
   allowedContentTypes: string[]
+  /** Exact byte length the uploader declared. Blob treats it as a ceiling; S3 pins it exactly. */
   maxBytes: number
-  /** Epoch ms after which the credential stops working. */
+  /** Epoch ms after which a Blob credential stops working. */
   validUntil: number
-  /**
-   * The same window as a duration, for stores whose credential is signed with a lifetime rather than an expiry
-   * instant. Vercel Blob uses `validUntil` and ignores this.
-   */
+  /** How long an S3 presigned POST stays valid. */
   ttlSeconds: number
-  /** Refuse to replace an existing object at `pathname`. */
+  /** Refuse to replace an existing object at `pathname` (Blob). */
   allowOverwrite?: boolean
-  /** Error message when the private store has no token. */
+  /** Error message when the private Blob store has no token. */
   notConfiguredMessage?: string
 }
 
 /**
- * The fields a prepare-upload response carries for the credential. Spread them into the response
- * (`{ ..., ...credential }`) instead of naming `clientToken`, so a store with a different credential shape
- * adds fields without every caller changing.
+ * The fields a prepare-upload response carries for the credential. `clientToken` is
+ * always present (empty on S3) so the response shape does not depend on the backend;
+ * `upload` (and `url` for the public store) appear only on S3.
  */
-export type DirectUploadFields = { clientToken: string }
+export type BlobDirectUploadFields = { clientToken: string }
+export type S3DirectUploadFields = { clientToken: ""; upload: PresignedPostTarget; backend: "s3" }
 
-export async function createDirectUpload(request: DirectUploadRequest): Promise<DirectUploadFields> {
+export async function createDirectUpload(request: DirectUploadRequest & { store: "public" }): Promise<BlobDirectUploadFields | (S3DirectUploadFields & { url: string })>
+export async function createDirectUpload(request: DirectUploadRequest & { store: "private" }): Promise<BlobDirectUploadFields | S3DirectUploadFields>
+export async function createDirectUpload(request: DirectUploadRequest): Promise<BlobDirectUploadFields | S3DirectUploadFields | (S3DirectUploadFields & { url: string })> {
+  if (resolveStorageBackend() === "s3") {
+    // For the public store, publicFileUrl() refuses a pathname the serving route would not serve.
+    const url = request.store === "public" ? publicFileUrl(request.pathname) : undefined
+    const upload = await createPresignedUpload({
+      store: request.store === "public" ? "public" : "artifacts",
+      pathname: request.pathname,
+      contentType: request.allowedContentTypes[0],
+      fileSize: request.maxBytes,
+      expiresInSeconds: request.ttlSeconds,
+    })
+    return { clientToken: "", upload, backend: "s3", ...(url ? { url } : {}) } as S3DirectUploadFields
+  }
   return { clientToken: await createDirectUploadToken(request) }
 }
 

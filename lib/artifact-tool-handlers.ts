@@ -5,6 +5,7 @@ import { getMcpActor } from "@/lib/mcp-authz"
 import { isAgentIdentityActor } from "@/lib/agent-access"
 import { createV0Artifact, refreshV0Artifact } from "@/lib/v0-artifacts"
 import { loadStagedArtifactUpload, prepareArtifactUpload } from "@/lib/artifact-upload"
+import { S3_UPLOAD_INSTRUCTIONS } from "@/lib/storage/instructions"
 import {
   archiveArtifact as archiveArtifactCore,
   createExternalArtifact,
@@ -102,7 +103,9 @@ export async function prepareArtifactUploadTool(input: { workspaceId: string; fi
   try {
     const prepared = await prepareArtifactUpload(input)
     return ok(["**Private Artifact HTML upload prepared**", `Upload ID: ${prepared.uploadId}`, `Pathname: ${prepared.pathname}`, `Expires: ${new Date(prepared.expiresAt).toISOString()}`,
-      "Upload the file from disk (do NOT paste its contents into a tool call) with @vercel/blob/client put(pathname, file, { access: \"private\", token: clientToken, contentType: \"text/html\" }),",
+      "upload" in prepared
+        ? `Upload the file from disk (do NOT paste its contents into a tool call). ${S3_UPLOAD_INSTRUCTIONS}`
+        : "Upload the file from disk (do NOT paste its contents into a tool call) with @vercel/blob/client put(pathname, file, { access: \"private\", token: clientToken, contentType: \"text/html\" }),",
       "then call create_artifact or update_artifact with uploadReceipt set to the returned receipt and no html."].join("\n"), prepared)
   } catch (error) { return fail(error instanceof Error ? error.message : "Could not prepare artifact upload.") }
 }

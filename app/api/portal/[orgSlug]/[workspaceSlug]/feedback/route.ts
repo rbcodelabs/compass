@@ -5,6 +5,7 @@ import {
   type FeedbackAttachmentMetadata,
   validateFeedbackAttachmentMetadata,
 } from "@/lib/feedback-attachments";
+import { parsePublicFileUrl } from "@/lib/public-file-keys";
 import { PORTAL_FEEDBACK_SOURCE, PUBLIC_FEEDBACK_SELECT, publicFeedbackItemWhere, serializePublicFeedbackItem } from "@/lib/public-feedback";
 import { allocateOneSeq, withSequenceTransaction } from "@/lib/work-item-sequence"
 
@@ -120,6 +121,16 @@ export async function POST(
 
   if (!workspace.feedbackEnabled) {
     return NextResponse.json({ error: "Feedback is not enabled for this workspace" }, { status: 403 });
+  }
+
+  // An app-route attachment URL (S3 backend) must point into this workspace's own
+  // prefix. Blob URLs keep their existing, workspace-agnostic check.
+  const referencesOtherWorkspace = validatedAttachments.some((attachment) => {
+    const key = parsePublicFileUrl(attachment.url);
+    return key !== null && !key.startsWith(`feedback/${workspace.id}/`);
+  });
+  if (referencesOtherWorkspace) {
+    return NextResponse.json({ error: "Invalid attachment URL" }, { status: 422 });
   }
 
   // Resolve identity: if this workspace requires a verified portal account,

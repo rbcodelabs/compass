@@ -1,4 +1,6 @@
-import { del, put } from "@vercel/blob"
+import { vercelBlobPublicFileStore } from "@/lib/storage/blob-public-store"
+import { resolveStorageBackend } from "@/lib/storage/config"
+import { s3PublicFileStore } from "@/lib/storage/s3-public-store"
 
 /**
  * The seam between Compass and whatever object store holds its *public* files
@@ -29,29 +31,9 @@ export interface PublicFileStore {
   fetch(url: string): Promise<{ bytes: Uint8Array; contentType: string } | null>
 }
 
-export const vercelBlobPublicFileStore: PublicFileStore = {
-  async put(pathname, body, options = {}) {
-    const blob = await put(pathname, body instanceof Blob ? body : Buffer.from(body), {
-      access: "public",
-      ...(options.contentType !== undefined ? { contentType: options.contentType } : {}),
-      ...(options.addRandomSuffix !== undefined ? { addRandomSuffix: options.addRandomSuffix } : {}),
-    })
-    return { url: blob.url }
-  },
-  async delete(urls) {
-    if (urls.length) await del(urls)
-  },
-  async fetch(url) {
-    const res = await fetch(url)
-    if (!res.ok) return null
-    return {
-      bytes: new Uint8Array(await res.arrayBuffer()),
-      contentType: res.headers.get("content-type") ?? "application/octet-stream",
-    }
-  },
-}
-
 /** The active public store. One place decides; every caller goes through it. */
 export function getPublicFileStore(): PublicFileStore {
-  return vercelBlobPublicFileStore
+  return resolveStorageBackend() === "s3" ? s3PublicFileStore : vercelBlobPublicFileStore
 }
+
+export { vercelBlobPublicFileStore }

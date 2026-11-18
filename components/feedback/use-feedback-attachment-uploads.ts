@@ -39,7 +39,16 @@ export type AttachmentTransport = {
   upload: (
     pathname: string,
     file: File,
-    options: { token: string; contentType: string; onProgress: (percentage: number) => void; signal: AbortSignal },
+    options: {
+      token: string;
+      contentType: string;
+      onProgress: (percentage: number) => void;
+      signal: AbortSignal;
+      /** S3 backend: upload with this presigned POST instead of a Blob client token. */
+      presignedPost?: { url: string; fields: Record<string, string> };
+      /** S3 backend: the app-route URL the finished upload is served at. */
+      url?: string;
+    },
   ) => Promise<{ url: string }>;
   discard: (upload: UploadedFeedbackAttachment) => Promise<unknown>;
 };
@@ -47,8 +56,12 @@ export type AttachmentTransport = {
 export function defaultAttachmentTransport(orgSlug: string, workspaceSlug: string): AttachmentTransport {
   return {
     prepare: (file) => prepareFeedbackAttachment(orgSlug, workspaceSlug, file),
-    upload: (pathname, file, { token, contentType, onProgress, signal }) =>
-      uploadToTarget({ pathname, clientToken: token, access: "public" }, file, { contentType, signal, onProgress }),
+    upload: (pathname, file, { token, contentType, onProgress, signal, presignedPost, url }) =>
+      uploadToTarget(
+        { pathname, clientToken: token, access: "public", ...(presignedPost ? { upload: presignedPost } : {}), ...(url ? { url } : {}) },
+        file,
+        { contentType, signal, onProgress },
+      ),
     discard: (upload) => discardFeedbackAttachment(orgSlug, workspaceSlug, upload),
   };
 }
@@ -136,6 +149,8 @@ export function useFeedbackAttachmentUploads({
         if (controller.signal.aborted) return;
         const blob = await transportRef.current.upload(prepared.upload.pathname, file, {
           token: prepared.upload.clientToken,
+          presignedPost: prepared.upload.presignedPost,
+          url: prepared.upload.url,
           contentType: file.type,
           signal: controller.signal,
           onProgress: (percentage) => patch(localId, { progress: Math.min(99, Math.round(percentage)) }),

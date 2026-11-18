@@ -54,6 +54,25 @@ Deployed HTML Artifacts require `ARTIFACT_BLOB_READ_WRITE_TOKEN` for a **private
 
 When upgrading an existing installation, point this credential at the private store that already contains its Artifact revisions, or migrate those files before switching stores. Revisions retain storage paths, so changing the credential alone does not move existing files.
 
+### Storing files on Amazon S3 instead of Vercel Blob
+
+Vercel Blob is the default and needs no extra setting. An administrator who hosts Compass elsewhere can store the same files in one Amazon S3 bucket by setting `COMPASS_STORAGE_BACKEND`:
+
+| Variable | Meaning |
+| --- | --- |
+| `COMPASS_STORAGE_BACKEND` | `blob` (default when unset), `s3`, or `local` (development and self-hosted runs with `DATABASE_URL` set, never on Vercel). An unknown value stops the first storage call with an error; nothing falls back silently. |
+| `COMPASS_S3_BUCKET` | Required with `s3`: the bucket name. |
+| `COMPASS_S3_REGION` | Optional. Falls back to `AWS_REGION` and the standard AWS configuration. |
+| `COMPASS_S3_FORCE_PATH_STYLE` | Set to `1` to use path-style addressing, for an S3-compatible server such as MinIO (together with `AWS_ENDPOINT_URL_S3`). |
+
+Credentials come from the standard AWS credential chain (environment variables, shared config, or an attached role); Compass never reads an access key of its own. The bucket stays **private**. Each store is a prefix in it: `artifacts/`, `capability-packs/`, `research/`, `agent-sessions/`, and `public/`. Uploads staged for the direct-upload flow go under `tmp/`, so a lifecycle rule on that prefix can expire abandoned ones.
+
+Browser and agent uploads use a presigned POST that pins the exact key, content type and byte length. The bucket's CORS rule must allow `POST` from the Compass origin.
+
+Files that Vercel Blob serves from a public URL (feedback attachments, embedded-feedback screenshots, workspace logos) are served by Compass itself at `/api/files/public/<key>` on S3. Only keys of the shapes Compass generates, each containing a random UUID, are served, with or without a session; this is the same exposure as an unguessable Blob URL. Private stores are never reachable through that route.
+
+Switching an existing installation does not move files: stored paths and URLs are kept as they are, so copy existing objects into the bucket under the same prefixes before switching.
+
 Artifacts have stable identities and appear alongside Docs and Diagrams in the Library. They are not nested into the Page hierarchy. An Artifact can be linked to multiple Solutions, and a Solution can link to multiple Artifacts.
 
 Artifacts can also be attached to **Experiments**: the Artifact page has a **Linked experiments** section where you can choose an experiment to link or unlink, and the experiment shows the same relationship under **Linked artifacts** (see [Experiments](/help/03-experiments)). Archived Artifacts cannot be newly linked to an experiment, but existing links stay visible and removable.

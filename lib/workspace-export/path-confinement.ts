@@ -1,3 +1,4 @@
+import { parsePublicFileUrl } from "@/lib/public-file-keys"
 import { configuredBlobStoreHostname } from "@/lib/feedback-attachments"
 
 /**
@@ -68,6 +69,7 @@ export function capabilityPackArtifactPath(pathname: unknown, sha256: unknown): 
 export function isOwnFeedbackAttachmentUrl(url: unknown, sourceWorkspaceId: string): url is string {
   if (typeof url !== "string" || !url) return false
   const ownSegment = `feedback/${sourceWorkspaceId.toLowerCase()}/`
+  if (parsePublicFileUrl(url)?.toLowerCase().startsWith(ownSegment)) return true
   try {
     const parsed = new URL(url)
     return (
