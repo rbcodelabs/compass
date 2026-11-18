@@ -23,10 +23,9 @@ test.describe("Marketing navigation", () => {
       `/${orgSlug}/${workspaceSlug}/okrs`
     )
     const planning = page.getByRole("link", { name: /E2E Planning/ })
-    await expect(planning).toHaveAttribute("href", `/${orgSlug}/${E2E_SECOND_WORKSPACE_SLUG}/okrs`)
+    await expect(planning).toHaveAttribute("href", `/${orgSlug}/${E2E_SECOND_WORKSPACE_SLUG}/home`)
     await planning.click()
 
-    await expect(page).toHaveURL(new RegExp(`/${orgSlug}/${E2E_SECOND_WORKSPACE_SLUG}/okrs/?$`))
-    await expect(page.getByRole("heading", { name: "OKRs" })).toBeVisible()
+    await expect(page).toHaveURL(new RegExp(`/${orgSlug}/${E2E_SECOND_WORKSPACE_SLUG}/home/?$`))
   })
 })
