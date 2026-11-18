@@ -16,9 +16,12 @@ export const MAX_AGGREGATE_ERRORS = 5
 const MAX_STRING = 2000
 
 const SECRET_KEYS = "password|passwd|pwd|token|secret|x-migration-secret|x-vercel-protection-bypass|authorization"
+const SECRET_META_KEY = new RegExp(SECRET_KEYS, "i")
 const REDACTIONS: ReadonlyArray<[RegExp, string]> = [
+  // Consume the whole quoted value before the unquoted rule: spaces, commas and escaped quotes can all belong to a credential.
+  [new RegExp(String.raw`(\\?["']?\b[\w-]*?(?:${SECRET_KEYS})\\?["']?\s*[:=]\s*)(?:"(?:\\.|[^"\\])*(?:"|$)|'(?:\\.|[^'\\])*(?:'|$)|\\"(?:\\\\.|[^\\]|\\(?!"))*(?:\\"|$)|\\'(?:\\\\.|[^\\]|\\(?!'))*(?:\\'|$))`, "gi"), "$1[redacted]"],
   // postgres://user:password@host/db and postgresql://...
-  [/\b(postgres(?:ql)?:\/\/)[^\s"'`]+/gi, "$1[redacted]"],
+  [/\b(postgres(?:ql)?:\/\/)[^\s"`]+/gi, "$1[redacted]"],
   // DSQL / SigV4 presigned token parts, wherever they appear, in any case.
   [/\b(x-amz-[a-z-]+)=[^&\s"'`]+/gi, "$1=[redacted]"],
   // key=value / key: value / "key":"value" (also backslash-escaped JSON) secrets in libpq strings, headers, JSON or error text. The key may be
@@ -63,7 +66,7 @@ const isObject = (value: unknown): value is Record<string, unknown> => typeof va
 function describeDriverAdapterError(value: unknown): Record<string, unknown> | undefined {
   if (!isObject(value)) return undefined
   const out: Record<string, unknown> = {}
-  if (typeof value.name === "string") out.name = value.name
+  if (typeof value.name === "string") out.name = redact(value.name)
   if (typeof value.message === "string" && value.message) out.message = redact(value.message)
   if (isObject(value.cause)) {
     const cause: Record<string, unknown> = {}
@@ -82,12 +85,14 @@ function safeMeta(meta: unknown): unknown {
   if (!isObject(meta)) return undefined
   const out: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(meta).slice(0, 20)) {
-    if (key === "driverAdapterError") {
+    const safeKey = redact(key)
+    if (SECRET_META_KEY.test(key)) out[safeKey] = "[redacted]"
+    else if (key === "driverAdapterError") {
       const described = describeDriverAdapterError(value)
-      if (described) out[key] = described
-    } else if (typeof value === "string") out[key] = redact(value)
-    else if (typeof value === "number" || typeof value === "boolean" || value === null) out[key] = value
-    else if (Array.isArray(value)) out[key] = value.slice(0, 10).map((v) => (typeof v === "string" ? redact(v) : typeof v === "number" ? v : String(typeof v)))
+      if (described) out[safeKey] = described
+    } else if (typeof value === "string") out[safeKey] = redact(value)
+    else if (typeof value === "number" || typeof value === "boolean" || value === null) out[safeKey] = value
+    else if (Array.isArray(value)) out[safeKey] = value.slice(0, 10).map((v) => (typeof v === "string" ? redact(v) : typeof v === "number" ? v : String(typeof v)))
   }
   return out
 }
@@ -112,18 +117,18 @@ export function describeErrorChain(error: unknown, depth = 0, ancestors: Set<unk
 function describeOne(error: Record<string, unknown>, depth: number, ancestors: Set<unknown>): ErrorDescription {
 
   const out: ErrorDescription = {}
-  if (typeof error.name === "string") out.name = error.name
+  if (typeof error.name === "string") out.name = redact(error.name)
   if (typeof error.message === "string") out.message = redact(error.message)
   if (typeof error.code === "string" || typeof error.code === "number") out.code = typeof error.code === "string" ? redact(error.code) : error.code
-  if (typeof error.errno === "string" || typeof error.errno === "number") out.errno = error.errno
-  if (typeof error.syscall === "string") out.syscall = error.syscall
-  if (typeof error.address === "string") out.address = error.address
+  if (typeof error.errno === "string" || typeof error.errno === "number") out.errno = typeof error.errno === "string" ? redact(error.errno) : error.errno
+  if (typeof error.syscall === "string") out.syscall = redact(error.syscall)
+  if (typeof error.address === "string") out.address = redact(error.address)
   if (typeof error.port === "number") out.port = error.port
   if ("meta" in error) {
     const meta = safeMeta(error.meta)
     if (meta !== undefined) out.meta = meta
   }
-  if (typeof error.clientVersion === "string") out.clientVersion = error.clientVersion
+  if (typeof error.clientVersion === "string") out.clientVersion = redact(error.clientVersion)
 
   if (Array.isArray(error.errors)) {
     if (depth >= MAX_CAUSE_DEPTH) out.causeTruncated = true

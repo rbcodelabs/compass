@@ -39,6 +39,15 @@ beforeEach(() => {
 })
 
 describe("legacy decision review migration hook", () => {
+  it("propagates connection failure during explicit apply and disconnects", async () => {
+    mocks.findWorkspace.mockRejectedValueOnce(Object.assign(new Error("synthetic connection failure"), { code: "P1001" }))
+
+    await expect(applyLegacyDecisionReviewRepair(pool as never, "compass_prod")).rejects.toThrow("synthetic connection failure")
+    expect(mocks.repair).not.toHaveBeenCalled()
+    expect(mocks.disconnect).toHaveBeenCalledOnce()
+    expect(pool.end).not.toHaveBeenCalled()
+  })
+
   it("treats an absent allowlisted workspace as a safe environment no-op", async () => {
     mocks.findWorkspace.mockResolvedValueOnce(null)
 

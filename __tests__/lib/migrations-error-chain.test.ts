@@ -274,6 +274,50 @@ describe("the same error reached through two siblings is not a cycle", () => {
 })
 
 describe("redaction, re-review gaps", () => {
+  it("redacts connection URIs whose password contains a literal apostrophe", () => {
+    expect(redact("postgres://admin:hello'SECRET@host/db")).not.toContain("SECRET")
+  })
+
+  it.each(["name", "errno", "syscall", "address", "clientVersion"])("redacts credentials in the %s field", (field) => {
+    const error = Object.assign(new Error("failed"), { [field]: "password=FIELD_SECRET" })
+    expect(formatCrashLine(error)).not.toContain("FIELD_SECRET")
+  })
+
+  it("redacts the driver adapter name", () => {
+    const error = prismaKnownAdapterError("DatabaseNotReachable")
+    error.meta.driverAdapterError.name = "password=ADAPTER_SECRET"
+    expect(formatCrashLine(error)).not.toContain("ADAPTER_SECRET")
+  })
+
+  it.each([
+    ["password", "META_SECRET"],
+    ["access_token", ["META_SECRET", 8675309]],
+    ["db_password", 8675309],
+    ["authorization", "META_SECRET"],
+    ["x-vercel-protection-bypass", "META_SECRET"],
+  ])("redacts the complete value of sensitive metadata key %s", (key, value) => {
+    const described = describeErrorChain(Object.assign(new Error("failed"), { meta: { [key]: value, modelName: "Workspace" } }))
+    expect(described.meta).toEqual({ [key]: "[redacted]", modelName: "Workspace" })
+  })
+
+  it("redacts credentials embedded in metadata keys", () => {
+    const serialized = JSON.stringify(describeErrorChain({ meta: { "password=KEY_SECRET": "value" } }))
+    expect(serialized).not.toContain("KEY_SECRET")
+  })
+
+  it.each([
+    'password="MULTI WORD SECRET"',
+    "password='MULTI,WORD,SECRET'",
+    '{"authorization":"Bearer MULTI WORD SECRET"}',
+    String.raw`{\"password\":\"MULTI WORD SECRET\"}`,
+    String.raw`{\"password\":\"MULTI,WORD,SECRET\"}`,
+    String.raw`{"password":"MULTI \"WORD\" SECRET"}`,
+  ])("redacts entire quoted credentials in %s", (text) => {
+    const out = redact(text)
+    for (const part of ["MULTI", "WORD", "SECRET"]) expect(out).not.toContain(part)
+    expect(out).toContain("[redacted]")
+  })
+
   it("covers Basic credentials, keys that end a longer name, and backslash-escaped JSON", () => {
     const out = redact(['Authorization: Basic dXNlcjpwYXNz', "access_token=acctok&db_password=dbpw", '{\\"password\\":\\"escpw\\"}'].join(" "))
     for (const secret of ["dXNlcjpwYXNz", "acctok", "dbpw", "escpw"]) expect(out).not.toContain(secret)
