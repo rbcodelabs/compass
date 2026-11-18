@@ -65,7 +65,7 @@ test("desktop vertical wheel pans the real board and horizontal wheel input stay
 });
 
 test("SVG hit targets retain their nested vertical scroll owner", async ({ page, base }) => {
-  const { board, target, nested } = await scrollFixture(page, base, { nested: "vertical" });
+  const { board, target, nested, outer } = await scrollFixture(page, base, { nested: "vertical" });
   await wheel(page, target, 0, 100);
   await expect.poll(() => top(nested)).toBeGreaterThan(50);
   expect(await left(board)).toBe(0);
@@ -74,6 +74,7 @@ test("SVG hit targets retain their nested vertical scroll owner", async ({ page,
   const box = (await nested.boundingBox())!;
   await page.mouse.move(box.x + 100, box.y + 75);
   await page.mouse.wheel(0, 100);
+  await expect.poll(() => top(outer)).toBeGreaterThan(25);
   expect(await left(board)).toBe(0);
 });
 
