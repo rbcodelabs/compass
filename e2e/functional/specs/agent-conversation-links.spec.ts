@@ -110,7 +110,10 @@ test("the chat lists linked objects; opportunities and tasks list only the conve
     await page.screenshot({ path: path.join(SHOTS, "opportunity-mobile.png") });
     await conversations.getByRole("button", { name: new RegExp(`^${visibleTitle}`) }).click();
     await expect(page).toHaveURL(new RegExp(`detail=conversation(?::|%3A)${visibleId}`));
-    await expect(page.getByRole("navigation", { name: "Panel history" })).toContainText(visibleTitle);
+    const conversationPanel = page.getByRole("dialog", { name: "Conversation", exact: true });
+    await expect(conversationPanel).toBeVisible();
+    await expect(conversationPanel.getByRole("link", { name: "Open full page" })).toHaveAttribute("href", `${base}/conversations?c=${visibleId}`);
+    await expect(conversationPanel.getByRole("region", { name: "Linked objects" }).getByRole("link", { name: oppTitle, exact: true })).toHaveAttribute("href", `${base}/discovery/${oppId}`);
 
     // ── Task: the same, as "Mentioned"
     await page.setViewportSize({ width: 1280, height: 800 });

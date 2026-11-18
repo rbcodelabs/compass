@@ -6,13 +6,13 @@ import { isolatedE2EConnectionString } from "../fixtures/isolated-database";
 async function seed(pool: pg.Pool) {
   const fixture = { task: randomUUID(), conversation: randomUUID(), privateConversation: randomUUID(), foreignConversation: randomUUID(), foreignWorkspace: randomUUID(), otherUser: randomUUID(), createdLink: randomUUID(), privateLink: randomUUID(), otherTask: randomUUID(), mentionedLink: randomUUID() };
   const { rows: [scope] } = await pool.query<{ workspace: string; organization: string; owner: string }>(`SELECT w.id AS workspace, w.organization_id AS organization, (SELECT id FROM compass_dev.users WHERE email='dev@localhost.dev') AS owner FROM compass_dev.workspaces w JOIN compass_dev.organizations o ON o.id=w.organization_id WHERE w.slug='e2e-workspace' AND o.slug='e2e-test-org'`);
-  const ownerName = (await pool.query<{ name: string }>(`SELECT COALESCE(name,email) AS name FROM compass_dev.users WHERE id=$1`, [scope.owner])).rows[0].name;
+  const owner = (await pool.query<{ name: string; email: string }>(`SELECT COALESCE(name,email) AS name, email FROM compass_dev.users WHERE id=$1`, [scope.owner])).rows[0];
   await pool.query(`INSERT INTO compass_dev.users (id,email,name) VALUES ($1,$2,'Other fixture user')`, [fixture.otherUser, `recovery-${fixture.otherUser}@localhost.dev`]);
   await pool.query(`INSERT INTO compass_dev.workspaces (id,organization_id,slug,name) VALUES ($1,$2,$3,'Foreign workspace')`, [fixture.foreignWorkspace, scope.organization, `recovery-${fixture.foreignWorkspace}`]);
   await pool.query(`INSERT INTO compass_dev.tasks (id,workspace_id,title) VALUES ($1,$2,'Conversation recovery fixture'),($3,$2,'Another linked task')`, [fixture.task, scope.workspace, fixture.otherTask]);
   await pool.query(`INSERT INTO compass_dev.agent_conversations (id,workspace_id,user_id,title,target_type,target_id,visibility,status,agent_mode) VALUES ($1,$2,$3,'Shared anchored thread','TASK',$4,'WORKSPACE','OPEN','MENTION_ONLY'),($5,$2,$6,'Hidden private anchored thread','TASK',$4,'PRIVATE','OPEN','MENTION_ONLY'),($7,$8,$3,'Hidden foreign anchored thread','TASK',$4,'WORKSPACE','OPEN','MENTION_ONLY')`, [fixture.conversation, scope.workspace, scope.owner, fixture.task, fixture.privateConversation, fixture.otherUser, fixture.foreignConversation, fixture.foreignWorkspace]);
   await pool.query(`INSERT INTO compass_dev.entity_links (id,workspace_id,link_type,from_type,from_id,to_type,to_id,origin,source,created_at,updated_at) VALUES ($1,$2,'CONVERSATION_CREATED','AGENT_CONVERSATION',$3,'TASK',$4,'DIRECT','AGENT',NOW(),NOW()),($5,$2,'CONVERSATION_CREATED','AGENT_CONVERSATION',$6,'TASK',$4,'DIRECT','AGENT',NOW(),NOW()),($7,$2,'CONVERSATION_MENTIONS','AGENT_CONVERSATION',$3,'TASK',$8,'DIRECT','AGENT',NOW(),NOW())`, [fixture.createdLink, scope.workspace, fixture.conversation, fixture.task, fixture.privateLink, fixture.privateConversation, fixture.mentionedLink, fixture.otherTask]);
-  return { ...fixture, ...scope, ownerName };
+  return { ...fixture, ...scope, ownerName: owner.name, ownerEmail: owner.email };
 }
 
 async function dispose(pool: pg.Pool, fixture: Awaited<ReturnType<typeof seed>>) {
@@ -59,7 +59,7 @@ for (const failure of ["503", "network"] as const) {
       const draft = `Keep the exact recovery draft ${fixture.task}.`;
       await editor.fill(`${draft} `);
       await editor.pressSequentially("@");
-      await section.getByTestId("mention-option").filter({ hasText: fixture.ownerName }).click();
+      await section.getByTestId("mention-option").filter({ has: page.getByText(fixture.ownerEmail, { exact: true }) }).click();
       await expect(editor.getByTestId("mention-chip")).toHaveAttribute("data-mention-id", fixture.owner);
       const visibleDraft = await editor.innerText();
       await section.getByRole("button", { name: "Send", exact: true }).click();
