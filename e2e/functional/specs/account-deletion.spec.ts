@@ -92,7 +92,8 @@ test("a user deletes their account: personal data and session go, teammates and 
     const confirm = xPage.getByLabel(/Type .* to confirm/);
     const submit = xPage.getByRole("button", { name: "Delete my account" });
     await expect(submit, "disabled until the email is typed").toBeDisabled();
-    const alerts = xPage.getByRole("alert");
+    const deletionPanel = xPage.locator("section").filter({ has: xPage.getByRole("heading", { level: 2, name: "Delete account", exact: true }) });
+    const alerts = deletionPanel.getByRole("alert");
     try {
       await expect(alerts, "no blockers for an ordinary member").toHaveCount(0);
     } catch (error) {
@@ -218,7 +219,8 @@ test("deletion is blocked for the sole administrator of a shared workspace, and 
     const zPage = await zContext.newPage();
     await zPage.setViewportSize({ width: 1280, height: 1000 });
     await zPage.goto("/settings/profile");
-    const blockers = zPage.getByRole("alert").filter({ hasText: "Before you can delete your account" });
+    const deletionPanel = zPage.locator("section").filter({ has: zPage.getByRole("heading", { level: 2, name: "Delete account", exact: true }) });
+    const blockers = deletionPanel.getByRole("alert").filter({ hasText: "Before you can delete your account" });
     await expect(blockers).toBeVisible({ timeout: 45_000 });
     await expect(blockers).toContainText("Shared Team");
     await expect(zPage.getByRole("button", { name: "Delete my account" })).toBeDisabled();
@@ -297,7 +299,8 @@ test("in an organization with two OWNERs, deleting one OWNER's account keeps the
     await page.setViewportSize({ width: 1280, height: 1000 });
     await page.goto("/settings/profile");
     await expect(page.getByRole("heading", { name: "Delete account" })).toBeVisible({ timeout: 45_000 });
-    await expect(page.getByRole("alert"), "the other OWNER keeps the workspace administrable: no blocker").toHaveCount(0);
+    const deletionPanel = page.locator("section").filter({ has: page.getByRole("heading", { level: 2, name: "Delete account", exact: true }) });
+    await expect(deletionPanel.getByRole("alert"), "the other OWNER keeps the workspace administrable: no blocker").toHaveCount(0);
     await expect(page.getByText("would be deleted too"), "and it is not offered for deletion").toHaveCount(0);
     await page.getByLabel(/Type .* to confirm/).fill(vEmail);
     await Promise.all([page.waitForURL((url) => url.pathname === "/", { timeout: 90_000 }), page.getByRole("button", { name: "Delete my account" }).click()]);
