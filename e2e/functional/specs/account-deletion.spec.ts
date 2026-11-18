@@ -4,6 +4,7 @@ import { cleanupAccountDeletionMember } from "../fixtures/account-deletion-clean
 import type { APIRequestContext, BrowserContext } from "@playwright/test";
 import pg from "pg";
 import { randomUUID } from "node:crypto";
+import { writeFile } from "node:fs/promises";
 
 /**
  * Self-service account deletion (Settings, Profile).
@@ -95,8 +96,8 @@ test("a user deletes their account: personal data and session go, teammates and 
     try {
       await expect(alerts, "no blockers for an ordinary member").toHaveCount(0);
     } catch (error) {
-      await testInfo.attach("account-deletion-alerts", {
-        body: JSON.stringify(await alerts.evaluateAll((elements) => elements.map((element) => {
+      const alertDiagnosticsPath = testInfo.outputPath("account-deletion-alerts.json");
+      await writeFile(alertDiagnosticsPath, JSON.stringify(await alerts.evaluateAll((elements) => elements.map((element) => {
           const root = element.getRootNode();
           return {
             tag: element.tagName,
@@ -104,7 +105,9 @@ test("a user deletes their account: personal data and session go, teammates and 
             text: element.textContent,
             shadowHost: root instanceof ShadowRoot ? root.host.tagName : null,
           };
-        })), null, 2),
+        })), null, 2));
+      await testInfo.attach("account-deletion-alerts", {
+        path: alertDiagnosticsPath,
         contentType: "application/json",
       });
       throw error;
