@@ -2,8 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent } from "react";
-import { ExternalLink, MoreHorizontal, PanelRightClose, Pin, PinOff } from "lucide-react";
-import Link from "next/link";
+import { MoreHorizontal, PanelRightClose, Pin, PinOff } from "lucide-react";
 import { usePathname } from "next/navigation";
 
 import {
@@ -19,7 +18,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
 import { usePanelPin } from "@/hooks/use-panel-pin";
 import {
   DEFAULT_PANEL_PIN,
@@ -49,6 +48,7 @@ import { TaskDetail } from "@/components/tasks/task-detail";
 import { useLabels } from "@/components/thinking-model/thinking-model-provider";
 import { panelTitles } from "./panel-titles";
 import { ViewChainAction } from "./view-chain-action";
+import { PanelHeaderActionsContext, PanelHeaderIcons, type PanelHeaderConfig } from "./panel-header-actions";
 import {
   ConversationPanel,
   ConversationPanelHeaderActions,
@@ -93,6 +93,8 @@ export function PanelShell({ initialPin = DEFAULT_PANEL_PIN, chainGraphEnabled =
   const panel = onConversationsPage && rawPanel?.type === "conversation" ? null : rawPanel;
   const labels = useLabels();
   const [hydrated, setHydrated] = useState(false);
+  // What the open panel asked to show in the header (see panel-header-actions.tsx); the shell renders it in one fixed order.
+  const [headerConfig, setHeaderConfig] = useState<PanelHeaderConfig | null>(null);
   const { pinned, width, viewportAllowsPin, isPinnedMode, togglePinned, commitWidth } = usePanelPin("detail", initialPin);
   const asideRef = useRef<HTMLElement | null>(null);
   const common = { orgSlug, workspaceSlug };
@@ -227,7 +229,9 @@ export function PanelShell({ initialPin = DEFAULT_PANEL_PIN, chainGraphEnabled =
 
   const title = panel ? panelTitles(labels)[panel.type] ?? panel.type : "";
   const fullPageRoute = panel?.type === "task" ? "tasks" : panel?.type === "opportunity" ? "discovery" : panel?.type === "roadmapItem" ? "roadmap" : null;
-  const hasCompactHeader = fullPageRoute !== null || panel?.type === "conversation";
+  // Every entity panel has the same compact header: title on the left, icon actions and an explicit Close on the right.
+  // Composers keep their own header (Esc hint, the sheet's built-in close).
+  const hasCompactHeader = !isComposer;
   const fullPageHref =
     panel?.type === "conversation"
       ? panel.id !== "new"
@@ -236,21 +240,20 @@ export function PanelShell({ initialPin = DEFAULT_PANEL_PIN, chainGraphEnabled =
       : fullPageRoute && panel
       ? `/${orgSlug}/${workspaceSlug}/${fullPageRoute}/${panel.id}`
       : null;
-  const fullPageAction = fullPageHref ? (
-    <Link
-      className={buttonVariants({ variant: "ghost", size: "icon-sm" })}
-      href={fullPageHref}
-      aria-label="Open full page"
-      title="Open full page"
-    >
-      <ExternalLink aria-hidden />
-    </Link>
-  ) : null;
+  const headerActions = (
+    <PanelHeaderIcons
+      config={headerConfig}
+      orgSlug={orgSlug}
+      workspaceSlug={workspaceSlug}
+      fallbackFullPageHref={fullPageHref}
+    />
+  );
 
   const conversationActions = panel?.type === "conversation" ? <ConversationPanelHeaderActions /> : null;
   const chainAction = panel && panel.type !== "conversation" ? <ViewChainAction enabled={chainGraphEnabled} orgSlug={orgSlug} workspaceSlug={workspaceSlug} type={panel.type} id={panel.id} /> : null;
 
   const body = (
+    <PanelHeaderActionsContext.Provider value={setHeaderConfig}>
     <>
       {panel?.type === "objective" && <ObjectivePanel id={panel.id} {...common} />}
       {panel?.type === "keyResult" && <KeyResultPanel id={panel.id} {...common} />}
@@ -279,6 +282,7 @@ export function PanelShell({ initialPin = DEFAULT_PANEL_PIN, chainGraphEnabled =
         <ConversationPanel conversationId={panel.id} />
       )}
     </>
+    </PanelHeaderActionsContext.Provider>
   );
 
   const breadcrumbHeader = (() => {
@@ -447,7 +451,7 @@ export function PanelShell({ initialPin = DEFAULT_PANEL_PIN, chainGraphEnabled =
           </h2>
           <div className="flex items-center gap-1">
             {conversationActions}
-            {fullPageAction}
+            {headerActions}
             {chainAction}
             {escHint}
             {!isComposer && pinToggle}
@@ -504,7 +508,7 @@ export function PanelShell({ initialPin = DEFAULT_PANEL_PIN, chainGraphEnabled =
                 it. */}
             <div className="flex items-center gap-1">
               {conversationActions}
-              {fullPageAction}
+              {headerActions}
               {chainAction}
               {escHint}
               {!isComposer && <div className="hidden lg:flex items-center">{pinToggle}</div>}
