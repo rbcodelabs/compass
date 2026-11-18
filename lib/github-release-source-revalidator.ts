@@ -1,4 +1,4 @@
-import { mintRepoInstallationToken, githubConnectorUid } from "@/lib/github-app-token"
+import { mintRepoInstallationToken, githubAppConfigured } from "@/lib/github-app-token"
 import {
   releaseSourceFingerprint,
   unconfiguredReleaseSourceRevalidator,
@@ -135,5 +135,5 @@ export function createGitHubReleaseSourceRevalidator(deps: GitHubReleaseRevalida
 
 /** GitHub-backed when the App connector is configured; otherwise the fail-closed stub. */
 export function getReleaseSourceRevalidator(): ReleaseSourceRevalidator {
-  return githubConnectorUid() ? createGitHubReleaseSourceRevalidator() : unconfiguredReleaseSourceRevalidator
+  return githubAppConfigured() ? createGitHubReleaseSourceRevalidator() : unconfiguredReleaseSourceRevalidator
 }

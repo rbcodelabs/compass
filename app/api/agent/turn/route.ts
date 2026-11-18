@@ -68,7 +68,7 @@ import { effectiveTurnModel, parseRequestedTurnModel } from "@/lib/agent-turn-mo
 import { BUILT_IN_AGENT_SELECTION } from "@/lib/agent-defaults"
 import { agentMayUseOwnerConnectors, type AgentRecord } from "@/lib/agent-ownership"
 import { mintAgentMcpKey, revokeAgentMcpKey } from "@/lib/agent-mcp-key"
-import { readWorkspaceAgentRepos } from "@/lib/agent-github-repos"
+import { readWorkspaceAgentGithub } from "@/lib/agent-github-repos"
 import { mintAgentGithubEnv } from "@/lib/github-app-token"
 import { gitAuthorEnv, readAgentGitAuthor } from "@/lib/agent-git-author"
 import { turnEgressPolicy, developerNpmToken, githubShellEnabled } from "@/lib/agent-github-access"
@@ -802,7 +802,8 @@ export async function POST(request: NextRequest) {
       // An agent-scoped key is honoured only while a live run names it, so the run must name it before the sandbox exists.
       if (runAgent && !(await attachAgentRunKey({ prisma, runId: run.id, apiKeyId }))) throw new Error("agent run ended before its key could be attached")
       // A named agent may commit as a configured identity (migration 111); otherwise the sandbox keeps the bot author.
-      const githubEnv = { ...(await mintAgentGithubEnv(await readWorkspaceAgentRepos(prisma, workspaceId))), ...(runAgent ? gitAuthorEnv(await readAgentGitAuthor(prisma, runAgent.id)) : {}) }
+      const githubConfig = await readWorkspaceAgentGithub(prisma, workspaceId)
+      const githubEnv = { ...(await mintAgentGithubEnv(githubConfig.repos, githubConfig.access)), ...(runAgent ? gitAuthorEnv(await readAgentGitAuthor(prisma, runAgent.id)) : {}) }
       // Bash + GitHub only when the docs tree will be materialized (same condition as docMaterial below). Every sandbox, shell or not, is created with a deny-by-default
       // egress allowlist, so there is never a moment where the agent can run with open egress.
       const githubShell = githubShellEnabled({ githubEnv, harness, docs: !scope && harness !== "opencode" })
@@ -948,7 +949,8 @@ export async function POST(request: NextRequest) {
         const minted = await analysisStep(() => mintAgentMcpKey(userId, workspaceId, scope), deadline, abort, late => revokeAgentMcpKey(late.apiKeyId))
         apiKeyId = minted.apiKeyId
         const token = minted.token
-        const githubEnv = await mintAgentGithubEnv(await readWorkspaceAgentRepos(prisma, workspaceId))
+        const githubConfig = await readWorkspaceAgentGithub(prisma, workspaceId)
+        const githubEnv = await mintAgentGithubEnv(githubConfig.repos, githubConfig.access)
         const preparedPacks = await step(() => prepareCapabilityPacksForTurn(activePacks, { get: (pathname) => getCapabilityPackArtifactStorage().get(pathname) }))
         packProvenance = preparedPacks.provenanceJson
         sse("status", { phase: "booting", conversationId: conversationIdResolved })
