@@ -29,6 +29,7 @@ const { GET: settingsRoute } = await import("@/app/api/agent/conversations/[conv
 
 const databaseUrl = integrationDatabaseUrl
 
+type RouteHandler = (request: NextRequest, ctx: { params: Promise<{ conversationId: string }> }) => Promise<Response>
 type Snapshot = { status: number; body: string; contentType: string | null; cacheControl: string | null }
 
 describe.skipIf(!databaseUrl)("agent conversation read access: member, non-member, other workspace, private, unknown", () => {
@@ -37,11 +38,11 @@ describe.skipIf(!databaseUrl)("agent conversation read access: member, non-membe
   let prisma: AppPrismaClient
   const ids = {} as Record<string, string>
 
-  const read = async (route: typeof messagesRoute, userId: string, conversationId: string, workspaceId: string): Promise<Snapshot> => {
+  const read = async (route: RouteHandler, userId: string, conversationId: string, workspaceId: string): Promise<Snapshot> => {
     connection.userId = userId
     const res = await route(
-      new NextRequest(`http://x/api?workspaceId=${workspaceId}`) as never,
-      { params: Promise.resolve({ conversationId }) } as never,
+      new NextRequest(`http://x/api?workspaceId=${workspaceId}`),
+      { params: Promise.resolve({ conversationId }) },
     )
     return {
       status: res.status,
@@ -106,7 +107,7 @@ describe.skipIf(!databaseUrl)("agent conversation read access: member, non-membe
   })
 
   it("lets the owner, a workspace member (shared), a participant (private) and archived-but-readable through", async () => {
-    for (const route of [messagesRoute, settingsRoute]) {
+    for (const route of [messagesRoute, settingsRoute] as RouteHandler[]) {
       expect((await read(route, ids.owner, ids.private, ids.ws)).status).toBe(200)
       expect((await read(route, ids.teammate, ids.shared, ids.ws)).status).toBe(200)
       expect((await read(route, ids.participant, ids.withParticipant, ids.ws)).status).toBe(200)
@@ -133,7 +134,7 @@ describe.skipIf(!databaseUrl)("agent conversation read access: member, non-membe
       ["right user, conversation lives in another workspace", ids.owner, ids.elsewhere, ids.ws],
       ["participant of a different private chat", ids.participant, ids.private, ids.ws],
     ]
-    for (const route of [messagesRoute, settingsRoute]) {
+    for (const route of [messagesRoute, settingsRoute] as RouteHandler[]) {
       const snapshots = await Promise.all(unreadable.map(([, user, conv, ws]) => read(route, user, conv, ws)))
       for (const snap of snapshots) {
         expect(snap.status).toBe(404)
