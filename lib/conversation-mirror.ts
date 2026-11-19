@@ -20,10 +20,19 @@
  * `removeCommentMirror` hard-deletes a conversation, but only when every row in it is a mirror of a
  * comment that the legacy API has itself just hard-deleted, so there is no user content to lose.
  * Archiving such a mirror would keep the deleted text readable, which is worse. It is a data-hygiene
- * path for two callers ONLY: legacy comment deletes, and the compensating delete in lib/comment-target-tasks.ts that withdraws a
- * comment whose task could not be created (the comment is deleted first; only then is its mirror removed). It must never be reused by the new-model Delete/Archive
+ * path for three callers ONLY: legacy comment deletes; the compensating delete in lib/comment-target-tasks.ts that withdraws a
+ * comment whose task could not be created (the comment is deleted first; only then is its mirror removed); and the
+ * create-vs-delete undo inside `ensureConversationForComment`, which runs when a comment (or its root) vanishes while the mirror
+ * was being written. That last one is reached from the dual-write hook AND from the read-path repair in
+ * lib/conversation-locate.ts (GET /api/agent/conversations/locate), so a plain read can trigger a purge, and only ever of rows
+ * that same call just wrote for a comment that no longer exists. It must never be reused by the new-model Delete/Archive
  * action (slice S2), which archives. Anything that is not a pure mirror is archived here too, with
  * its title and summary blanked so the deleted comment's text is not visible on the row.
+ *
+ * `editedAt` follows CONTENT, never `Comment.updatedAt`: resolving or reopening a thread bumps the root comment's updatedAt
+ * (that is the only resolve time `Comment` has), so deriving "edited" from it marked every resolved root as edited. A repair
+ * leaves a message's `editedAt` alone while the text is unchanged, stamps the comment's updatedAt when the text differs from
+ * what the message holds, and creates a ROOT message unedited (a root's updatedAt cannot tell an edit from a resolve).
  *
  * S1 NOTE: an edit made through the conversation surface must write BOTH the `Comment` row and the
  * `AgentMessage` row. This module treats the Comment as the source of truth for comment-origin
@@ -70,6 +79,9 @@ export function deriveConversationTitleFromComment(body: string): string {
       .find(Boolean) ?? "Discussion thread"
   return firstLine.length > 80 ? `${firstLine.slice(0, 79)}…` : firstLine
 }
+
+/** The most replies one read-path repair (locate) will write for a thread, plus the requested comment if it lies beyond the cap. */
+export const LOCATE_REPAIR_REPLY_CAP = 100
 
 /** The `Comment` columns the mirror reads; `solutionPlanProposal` is optional so plain rows work too. */
 export type MirrorSourceComment = {
@@ -146,13 +158,19 @@ export async function mirrorCommentThread(
     // The updatedAt write extension bumps `updatedAt` to now on any upsert/update that omits it, so an "empty" update
     // would silently reorder the conversation. Write only when there is something to change, and always say updatedAt.
     if (!existing) {
-      await prisma.agentConversation.upsert({
-        where: { id: root.id },
-        create: createHeader(deriveConversationSummary(lastMessage.body) ?? title.slice(0, 140), threadUpdatedAt),
-        update: { updatedAt: threadUpdatedAt },
+      // Create-only, never an upsert: between the read above and this write a panel message or an agent run may have created
+      // the conversation, and an upsert's update branch would lower its updatedAt and summary. If it exists now, leave it.
+      await prisma.agentConversation.createMany({
+        data: [createHeader(deriveConversationSummary(lastMessage.body) ?? title.slice(0, 140), threadUpdatedAt)],
+        skipDuplicates: true,
       })
     } else if (newer && target) {
-      await prisma.agentConversation.updateMany({ where: { id: root.id }, data: { summary: targetSummary, updatedAt: target.createdAt } })
+      // Conditional on the stored updatedAt still being older than this comment: a newer panel message that landed after the
+      // read keeps its updatedAt and summary (the write then matches no row).
+      await prisma.agentConversation.updateMany({
+        where: { id: root.id, updatedAt: { lt: target.createdAt } },
+        data: { summary: targetSummary, updatedAt: target.createdAt },
+      })
     }
   } else {
     const summary = deriveConversationSummary(lastMessage.body) ?? title.slice(0, 140)
@@ -168,12 +186,20 @@ export async function mirrorCommentThread(
     }
   }
 
+  const existingMessages = new Map(
+    (await prisma.agentMessage.findMany({ where: { id: { in: items.map((item) => item.id) } }, select: { id: true, content: true } })).map((row) => [row.id, row]),
+  )
   let messagesPromoted = 0
   for (const item of items) {
     const isAssistant = item.authorType === "AGENT" || item.authorType === "AI"
     const role = isAssistant ? "assistant" : "user"
-    const editedAt = item.updatedAt > item.createdAt ? item.updatedAt : null
     const messageKind = commentMirrorMessageKind(Boolean(item.solutionPlanProposal))
+    const stored = existingMessages.get(item.id)
+    const touched = item.updatedAt > item.createdAt
+    // Content, not updatedAt (see the module header): a root created here has no edit evidence; a reply's updatedAt only moves on an edit.
+    const createdEditedAt = item.id !== root.id && touched ? item.updatedAt : null
+    // Unchanged text leaves the stored editedAt alone (the key is omitted); changed text is an edit as of the comment's last update.
+    const editedUpdate = stored && stored.content !== item.body ? { editedAt: touched ? item.updatedAt : new Date() } : {}
     await prisma.agentMessage.upsert({
       where: { id: item.id },
       create: {
@@ -185,11 +211,11 @@ export async function mirrorCommentThread(
         authorName: item.authorName,
         authorType: item.authorType ?? (isAssistant ? "AGENT" : "HUMAN"),
         messageKind,
-        editedAt,
+        editedAt: createdEditedAt,
         createdAt: item.createdAt,
       },
       // The kind is rewritten too so a row dual-written as "MESSAGE" converges on the shared value.
-      update: { content: item.body, editedAt, messageKind },
+      update: { content: item.body, messageKind, ...editedUpdate },
     })
     messagesPromoted++
   }
@@ -237,7 +263,16 @@ export async function ensureConversationForComment(
   }
   if (!ownerUserId) return null
 
-  const replies = await prisma.comment.findMany({ where: { parentId: root.id }, include, orderBy: [{ createdAt: "asc" }, { id: "asc" }] })
+  // The read-path repair is reachable by any workspace member through a GET, so it is bounded: the first replies up to the cap,
+  // plus the comment that was asked for. (The create path and the backfill read the whole thread, as before.)
+  const bounded = options.scope === "create-only"
+  const replies = await prisma.comment.findMany({
+    where: { parentId: root.id },
+    include,
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    ...(bounded ? { take: LOCATE_REPAIR_REPLY_CAP } : {}),
+  })
+  if (bounded && comment.id !== root.id && !replies.some((reply) => reply.id === comment.id)) replies.push(comment)
   await mirrorCommentThread(prisma, { root, replies, ownerUserId, ...(options.scope === "comment" ? { onlyCommentId: comment.id } : {}), ...(options.scope === "create-only" ? { createOnly: true } : {}) })
 
   // Create-vs-delete race: if the comment (or its root) was deleted while we wrote, undo what we wrote so no ghost remains.
