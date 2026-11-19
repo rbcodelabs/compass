@@ -147,6 +147,19 @@ describe.skipIf(!databaseUrl)("comment-origin deep link locate (real PostgreSQL)
     expect(await conversation(thread.rootId)).toMatchObject({ updatedAt: newer, summary: "Newer agent answer" })
   })
 
+  it("a conversation that appears between the check and the repair keeps its newer updatedAt, status and summary (create-only repair)", async () => {
+    const thread = await makeCommentThread({ replies: 1 })
+    const newer = at(700)
+    // The other writer wins the race: its conversation exists before the repair's header write.
+    await prisma.agentConversation.create({
+      data: { id: thread.rootId, workspaceId, userId: u.owner, title: "winner", summary: "Winner summary", targetType: "OPPORTUNITY", targetId: opportunityId, visibility: "WORKSPACE", status: "RESOLVED", agentMode: "MENTION_ONLY", createdAt: at(0), updatedAt: newer },
+    })
+    const { ensureConversationForComment } = await import("@/lib/conversation-mirror")
+    await ensureConversationForComment(prisma, thread.replyIds[0]!, { scope: "create-only" })
+    expect(await conversation(thread.rootId)).toMatchObject({ title: "winner", summary: "Winner summary", status: "RESOLVED", updatedAt: newer })
+    expect(await messageIds(thread.rootId)).toEqual([thread.rootId, ...thread.replyIds].sort())
+  })
+
   describe("who may locate what (404 everywhere else: nothing is created, nothing is revealed)", () => {
     it("a workspace member locates a shared thread by message id and by comment id", async () => {
       const panel = await makePanelConversation({ updatedAt: at(10) })

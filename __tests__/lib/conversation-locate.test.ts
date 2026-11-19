@@ -100,7 +100,7 @@ describe("locateConversationMessage: comment ids (the mirror may be missing)", (
     expect(await locate()).toMatchObject({ conversationId: CONV, messageId: MSG })
     expect(mocks.ensure).toHaveBeenCalledTimes(1)
     const options = (mocks.ensure.mock.calls[0]![2] ?? {}) as { scope?: string; fallbackUserId?: string }
-    expect(options.scope).not.toBe("comment")
+    expect(options.scope).toBe("create-only")
     // The viewer must not become the owner of a conversation they did not start.
     expect(options.fallbackUserId).toBeUndefined()
   })

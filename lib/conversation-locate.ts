@@ -14,7 +14,7 @@
  *    is only touched after the read check passes.
  *  - Locate never moves `updatedAt`. The repo's Prisma write extension sets `updatedAt = now` on any update that omits it,
  *    so the repair paths are the S0 ones that state it explicitly: a whole-thread repair creates the conversation with
- *    the thread's own time, and a one-message repair into an existing conversation (scope "comment") never lowers the
+ *    the thread's own time (header insert-only, never an update, so a concurrent creator wins), and a one-message repair into an existing conversation (scope "comment") never lowers the
  *    time or overwrites a newer summary. A plain hit writes nothing.
  */
 
@@ -76,6 +76,8 @@ export async function locateConversationMessage(
   // No conversation at all: only a workspace member may cause one to be created, and the viewer does not become its owner.
   const membership = await prisma.workspaceMember.findFirst({ where: { workspaceId, userId }, select: { userId: true } })
   if (!membership) return null
-  const repaired = await ensureConversationForComment(prisma, comment.id)
+  // "create-only": the header is inserted only if absent, so a writer that creates the conversation between the check above
+  // and this write keeps its newer updatedAt, status and summary (the whole-thread rewrite would lower them).
+  const repaired = await ensureConversationForComment(prisma, comment.id, { scope: "create-only" })
   return repaired ? describe(repaired.conversationId, repaired.messageId) : null
 }
