@@ -54,4 +54,21 @@ describe("AgentChat task cards", () => {
       expect(within(row).getByTestId("comment-task-card")).toHaveTextContent("Draft the rollout")
     } finally { vi.useRealTimers() }
   })
+
+  it("replaces a polled card by id, and drops it when the server no longer reports one for a message it returned", async () => {
+    const again = { ...MESSAGES[1], createdAt: "2026-11-19T10:01:00.000Z" }
+    let reply: unknown = { messages: [again], taskCards: { "m-plain": { ...card, status: "DONE", title: "Renamed" } } }
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => String(url).includes("/messages") ? Response.json(reply) : new Response("{}", { status: 200 })))
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      render(<AgentChat {...props({ initialTaskCards: { "m-plain": card, "m-task": card } })} />)
+      await vi.advanceTimersByTimeAsync(5_000)
+      await waitFor(() => expect(within(document.getElementById("message-m-plain")!).getByTestId("comment-task-card")).toHaveTextContent("Renamed"))
+      reply = { messages: [again], taskCards: {} }
+      await vi.advanceTimersByTimeAsync(5_000)
+      await waitFor(() => expect(within(document.getElementById("message-m-plain")!).queryByTestId("comment-task-card")).toBeNull())
+      // A message the poll did not return keeps its card.
+      expect(within(document.getElementById("message-m-task")!).getByTestId("comment-task-card")).toBeInTheDocument()
+    } finally { vi.useRealTimers() }
+  })
 })

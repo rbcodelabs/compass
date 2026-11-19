@@ -21,11 +21,12 @@ import { ObjectConversationsSection } from "@/components/conversations/object-co
 
 const QUINN = "6f1c2a40-1111-4222-8333-944455556666"
 const BOT = "8b1c2a40-1111-4222-8333-944455556668"
+const BUILTIN = "00000000-0000-4000-8000-000000000001"
 const quinn = serializeMention({ kind: "user", id: QUINN, label: "Quinn Morales" })
 const bot = serializeMention({ kind: "agent", id: BOT, label: "QA Agent" })
 const mentionOptions = {
   people: [{ kind: "user", id: QUINN, name: "Quinn Morales", detail: "quinn@example.com" }],
-  agents: [{ kind: "agent", id: BOT, name: "QA Agent", detail: "Agent", access: "WRITE", agentKind: "CLOUD" }],
+  agents: [{ kind: "agent", id: BUILTIN, name: "Compass Agent", detail: "Workspace AI assistant", access: "WRITE", agentKind: "CLOUD" }, { kind: "agent", id: BOT, name: "QA Agent", detail: "Agent", access: "WRITE", agentKind: "CLOUD" }],
   outside: [],
 }
 const item = { id: "conversation", title: "Team thread", summary: null, status: "OPEN", visibility: "WORKSPACE", agentMode: "MENTION_ONLY", messageCount: 1, updatedAt: "2026-11-19T00:00:00Z", anchored: true, links: [] }
@@ -47,24 +48,63 @@ beforeEach(() => {
 })
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
+const optIn = () => fireEvent.click(screen.getByTestId("create-task-toggle"))
+
 async function composeWith(body: string) {
   await screen.findByRole("button", { name: /Team thread/ })
   fireEvent.change(screen.getByRole("textbox", { name: "Start a conversation" }), { target: { value: body } })
 }
 
 describe("task row in the section composer", () => {
-  it("offers the task box once someone is mentioned, with the shipped selectors", async () => {
+  it("offers the task box as an opt-in once someone is mentioned: a plain mention is still a plain Send", async () => {
     mount()
     await composeWith(`Can you draft this ${quinn}`)
     expect(screen.getByTestId("comment-task-box")).toHaveTextContent("Assign as task to @Quinn Morales")
-    expect(screen.getByTestId("create-task-toggle")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Send" })).toBeEnabled()
+    expect(screen.queryByRole("button", { name: "Comment & create task" })).toBeNull()
+    expect(screen.queryByTestId("task-fields")).toBeNull()
+    optIn()
     expect(screen.getByRole("button", { name: "Comment & create task" })).toBeEnabled()
     expect(screen.getByTestId("object-conversation-composer")).toBeInTheDocument()
+  })
+
+  it("never offers the built-in Compass Agent as a task assignee: Agent + Send stays a chat turn", async () => {
+    mount()
+    await screen.findByRole("button", { name: /Team thread/ })
+    fireEvent.click(screen.getByRole("button", { name: "Agent" }))
+    const editor = screen.getByRole("textbox", { name: "Start a conversation" }) as HTMLTextAreaElement
+    fireEvent.change(editor, { target: { value: `${editor.value}what changed?` } })
+    expect(screen.queryByTestId("comment-task-box")).toBeNull()
+    expect(screen.queryByRole("button", { name: "Comment & create task" })).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "Send" }))
+    await waitFor(() => expect(mocks.open).toHaveBeenCalledWith("turn-conversation", expect.anything()))
+    expect(postedTo("/api/comments")).toHaveLength(0)
+    expect(postedTo("/api/agent/turn")).toHaveLength(1)
+  })
+
+  it("assigns to the person when the built-in agent is mentioned first and a member second", async () => {
+    mount()
+    await composeWith(`${serializeMention({ kind: "agent", id: BUILTIN, label: "Compass Agent" })} ${quinn} please`)
+    expect(screen.getByTestId("comment-task-box")).toHaveTextContent("Assign as task to @Quinn Morales")
+    optIn()
+    fireEvent.click(screen.getByRole("button", { name: "Comment & create task" }))
+    await waitFor(() => expect(postedTo("/api/comments")).toHaveLength(1))
+    expect(JSON.parse(postedTo("/api/comments")[0][1].body)).toMatchObject({ assignee: { kind: "user", id: QUINN } })
+  })
+
+  it("does not claim a run starts or that the plain mention is notification-only", async () => {
+    mount()
+    await composeWith(`Run this ${bot}`)
+    expect(screen.getByTestId("comment-task-box")).not.toHaveTextContent(/notification only/i)
+    optIn()
+    fireEvent.click(screen.getByRole("button", { name: "Comment & create task" }))
+    expect(await screen.findByTestId("agent-scope-confirm")).not.toHaveTextContent(/starts a run|run started/i)
   })
 
   it("posts a task-bearing root through /api/comments, starts no chat turn, and opens the new conversation", async () => {
     mount()
     await composeWith(`Can you draft this ${quinn}`)
+    optIn()
     fireEvent.click(screen.getByRole("button", { name: "Comment & create task" }))
     await waitFor(() => expect(mocks.open).toHaveBeenCalledWith("comment-1", expect.objectContaining({ targetType: "ROADMAP_ITEM", targetId: "item-1", visibility: "WORKSPACE" })))
     expect(postedTo("/api/agent/turn")).toHaveLength(0)
@@ -83,6 +123,7 @@ describe("task row in the section composer", () => {
       init?.method === "POST" ? Response.json({ error: "x", code: "ASSIGNEE_NOT_IN_WORKSPACE" }, { status: 422 }) : Response.json(list))
     mount()
     await composeWith(`Please ${quinn}`)
+    optIn()
     fireEvent.click(screen.getByRole("button", { name: "Comment & create task" }))
     expect(await screen.findByTestId("composer-error")).toHaveTextContent("That person is not in this workspace")
     expect(screen.getByRole("textbox", { name: "Start a conversation" })).toHaveValue(`Please ${quinn}`)
@@ -90,10 +131,9 @@ describe("task row in the section composer", () => {
     expect(postedTo("/api/agent/turn")).toHaveLength(0)
   })
 
-  it("keeps the old quick-start (a chat turn, no comment) when the task is switched off", async () => {
+  it("keeps the old quick-start (a chat turn, no comment) for a mention nobody opted into a task for", async () => {
     mount()
     await composeWith(`FYI ${quinn}`)
-    fireEvent.click(screen.getByTestId("create-task-toggle"))
     fireEvent.click(screen.getByRole("button", { name: "Send" }))
     await waitFor(() => expect(mocks.open).toHaveBeenCalledWith("turn-conversation", expect.anything()))
     expect(postedTo("/api/comments")).toHaveLength(0)
@@ -103,6 +143,7 @@ describe("task row in the section composer", () => {
   it("asks to confirm scope before assigning a task to an agent that holds none here, then posts confirmed", async () => {
     mount()
     await composeWith(`Run this ${bot}`)
+    optIn()
     fireEvent.click(screen.getByRole("button", { name: "Comment & create task" }))
     expect(await screen.findByTestId("agent-scope-confirm")).toBeInTheDocument()
     expect(posts()).toHaveLength(0)
@@ -116,9 +157,32 @@ describe("task row in the section composer", () => {
     list = { ...list, confirmedAgentIds: [BOT] }
     mount()
     await composeWith(`Run this ${bot}`)
+    optIn()
     fireEvent.click(screen.getByRole("button", { name: "Comment & create task" }))
     await waitFor(() => expect(postedTo("/api/comments")).toHaveLength(1))
     expect(screen.queryByTestId("agent-scope-confirm")).toBeNull()
+  })
+
+  it("reopens the scope step, and forgets the agent, when the server says the agent still needs confirming", async () => {
+    list = { ...list, confirmedAgentIds: [BOT] }
+    mocks.fetch.mockImplementation(async (url: string, init?: RequestInit) =>
+      init?.method === "POST" ? Response.json({ error: "x", code: "AGENT_SCOPE_CONFIRMATION_REQUIRED" }, { status: 422 }) : Response.json(list))
+    mount()
+    await composeWith(`Run this ${bot}`)
+    optIn()
+    fireEvent.click(screen.getByRole("button", { name: "Comment & create task" }))
+    expect(await screen.findByTestId("agent-scope-confirm")).toBeInTheDocument()
+  })
+
+  it.each([["NO_ASSIGNEE", /Mention someone/], ["EMPTY_BODY", /Write something/], ["PARENT_IS_REPLY", /reply/i]])("shows fixed copy for %s", async (code, copy) => {
+    mocks.fetch.mockImplementation(async (url: string, init?: RequestInit) =>
+      init?.method === "POST" ? Response.json({ error: "raw server text", code }, { status: 422 }) : Response.json(list))
+    mount()
+    await composeWith(`Please ${quinn}`)
+    optIn()
+    fireEvent.click(screen.getByRole("button", { name: "Comment & create task" }))
+    expect(await screen.findByTestId("composer-error")).toHaveTextContent(copy)
+    expect(screen.getByTestId("composer-error")).not.toHaveTextContent("raw server text")
   })
 
   it("still inserts the Compass Agent mention from the Agent button", async () => {

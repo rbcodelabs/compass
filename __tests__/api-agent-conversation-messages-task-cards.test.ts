@@ -26,6 +26,26 @@ describe("GET /messages taskCards", () => {
     expect(body.messages).toHaveLength(2)
   })
 
+  it("looks cards up only for person-authored comment-kind messages, never agent, plan or system rows", async () => {
+    mocks.messages.mockResolvedValue([
+      { id: "u1", role: "user", messageKind: "COMMENT" }, { id: "u2", role: "user", messageKind: null }, { id: "u3", role: "user", messageKind: "MESSAGE" },
+      { id: "a1", role: "assistant", messageKind: null }, { id: "p1", role: "user", messageKind: "PLAN_PROPOSAL" }, { id: "s1", role: "user", messageKind: "SYSTEM_RESOLUTION" },
+    ].map((m) => ({ ...m, content: "x" })))
+    mocks.cards.mockResolvedValue({})
+    await call()
+    expect(mocks.cards).toHaveBeenCalledWith("ws-1", ["u1", "u2", "u3"])
+  })
+
+  it("caps the lookup at the 500 newest eligible messages", async () => {
+    mocks.messages.mockResolvedValue(Array.from({ length: 700 }, (_, i) => ({ id: `m${i}`, role: "user", messageKind: "COMMENT", content: "x" })))
+    mocks.cards.mockResolvedValue({})
+    await call()
+    const ids = mocks.cards.mock.calls[0][1] as string[]
+    expect(ids).toHaveLength(500)
+    expect(ids[0]).toBe("m200")
+    expect(ids[499]).toBe("m699")
+  })
+
   it("reads no task data when the caller has no access (404, not an empty list)", async () => {
     mocks.messages.mockResolvedValue(null)
     expect((await call()).status).toBe(404)

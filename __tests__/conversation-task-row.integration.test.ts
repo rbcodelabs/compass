@@ -16,7 +16,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest"
 import type { AppPrismaClient } from "@/lib/db"
 import { injectUpdatedAtExtension } from "@/lib/prisma-updated-at"
 
-const connection = vi.hoisted(() => ({ prisma: null as AppPrismaClient | null, userId: "", failTask: false }))
+const connection = vi.hoisted(() => ({ prisma: null as AppPrismaClient | null, userId: "", failTask: false, failResolve: false, onTaskFail: null as null | (() => Promise<void>) }))
 vi.mock("@/lib/db", () => ({ default: () => connection.prisma }))
 vi.mock("@/auth", () => ({ auth: async () => ({ user: { id: connection.userId } }) }))
 vi.mock("@/lib/task-create", async (importActual) => {
@@ -24,8 +24,24 @@ vi.mock("@/lib/task-create", async (importActual) => {
   return {
     ...actual,
     createWorkspaceTask: (...args: Parameters<typeof actual.createWorkspaceTask>) => {
-      if (connection.failTask) { connection.failTask = false; return Promise.reject(new Error("forced task failure")) }
+      if (connection.failTask) {
+        connection.failTask = false
+        const hook = connection.onTaskFail
+        connection.onTaskFail = null
+        return (hook ? hook() : Promise.resolve()).then(() => { throw new Error("forced task failure") })
+      }
       return actual.createWorkspaceTask(...args)
+    },
+  }
+})
+// After createWorkspaceTask has committed, building the card is the only thing that fails.
+vi.mock("@/lib/task-assignment", async (importActual) => {
+  const actual = await importActual<typeof import("@/lib/task-assignment")>()
+  return {
+    ...actual,
+    resolveTaskAssignees: (...args: Parameters<typeof actual.resolveTaskAssignees>) => {
+      if (connection.failResolve) { connection.failResolve = false; return Promise.reject(new Error("forced resolver failure")) }
+      return actual.resolveTaskAssignees(...args)
     },
   }
 })
@@ -39,6 +55,9 @@ const databaseUrl = integrationDatabaseUrl
 const BASE = new Date("2026-11-16T12:00:00.000Z").getTime()
 const at = (minutes: number) => new Date(BASE + minutes * 60_000)
 const SECRET = "Body text that must not be left behind by a failed task"
+const SECRET_ROOT_MARK = "withdrawn-root-text"
+const SECRET_REPLY_MARK = "withdrawn-reply-text"
+const SECRET_ROOT_MARK2 = "withdrawn-second-root-text"
 
 describe.skipIf(!databaseUrl)("conversation task row (real PostgreSQL)", () => {
   const schema = `conversation_task_row_${randomUUID().replaceAll("-", "")}`
@@ -152,5 +171,54 @@ describe.skipIf(!databaseUrl)("conversation task row (real PostgreSQL)", () => {
     expect(await prisma.agentMessage.count({ where: { conversationId: result.comment.id } })).toBe(1)
     expect(await tableCount("tasks", "workspace_id = $1", [workspaceId])).toBe(1)
     expect(await tableCount("agent_runs", "workspace_id = $1", [workspaceId])).toBe(0)
+  })
+
+  it("keeps the comment, mirror and committed task when only building the card fails, and a retry does not duplicate", async () => {
+    const tasksBefore = await tableCount("tasks", "workspace_id = $1", [workspaceId])
+    connection.failResolve = true
+    const result = await post(`Card failure ${mention()}`)
+    expect(result).toMatchObject({ ok: true, card: null })
+    if (!result.ok) return
+    const commentId = result.comment.id
+    expect(await tableCount("comments", "id = $1", [commentId])).toBe(1)
+    expect(await tableCount("agent_conversations", "id = $1", [commentId])).toBe(1)
+    expect(await tableCount("agent_messages", "id = $1", [commentId])).toBe(1)
+    expect(await tableCount("tasks", "workspace_id = $1", [workspaceId])).toBe(tasksBefore + 1)
+    expect(await tableCount("entity_links", "link_type = 'TASK_CREATED_FROM' AND to_id = $1", [commentId])).toBe(1)
+    // The card is readable from the committed task.
+    expect((await loadConversationTaskCards(workspaceId, [commentId]))[commentId]).toMatchObject({ title: "Do the thing" })
+  })
+
+  it("a failed reply withdraws only the reply: the root thread, its message and its comment stay", async () => {
+    const root = await post(`Root of a thread ${SECRET_ROOT_MARK}`, { task: null })
+    if (!root.ok) throw new Error("root post failed")
+    connection.failTask = true
+    const reply = await post(`Reply that fails ${SECRET_REPLY_MARK} ${mention()}`, { parentId: root.comment.id })
+    expect(reply).toMatchObject({ ok: false, error: "TASK_FAILED" })
+    expect(await tableCount("comments", "body LIKE $1", [`%${SECRET_REPLY_MARK}%`])).toBe(0)
+    expect(await tableCount("agent_messages", "content LIKE $1", [`%${SECRET_REPLY_MARK}%`])).toBe(0)
+    expect(await tableCount("comments", "id = $1", [root.comment.id])).toBe(1)
+    expect(await tableCount("agent_messages", "conversation_id = $1", [root.comment.id])).toBe(1)
+    const conversation = await prisma.agentConversation.findUnique({ where: { id: root.comment.id }, select: { archivedAt: true, summary: true } })
+    expect(conversation?.archivedAt).toBeNull()
+    expect(JSON.stringify(conversation)).not.toContain(SECRET_REPLY_MARK)
+  })
+
+  it("a failed root post whose conversation already holds a panel message is archived blank, not destroyed, and keeps no withdrawn text", async () => {
+    connection.failTask = true
+    connection.onTaskFail = async () => {
+      const comment = await prisma.comment.findFirst({ where: { workspaceId, body: { contains: SECRET_ROOT_MARK2 } }, select: { id: true } })
+      await prisma.agentMessage.create({ data: { conversationId: comment!.id, role: "user", content: "Panel message that must survive", authorUserId: u.assignee, createdAt: new Date(Date.now() + 60_000) } })
+    }
+    const result = await post(`Root that fails ${SECRET_ROOT_MARK2} ${mention()}`)
+    expect(result).toMatchObject({ ok: false, error: "TASK_FAILED" })
+    expect(await tableCount("comments", "body LIKE $1", [`%${SECRET_ROOT_MARK2}%`])).toBe(0)
+    expect(await tableCount("agent_messages", "content LIKE $1", [`%${SECRET_ROOT_MARK2}%`])).toBe(0)
+    const kept = await prisma.agentMessage.findFirst({ where: { content: "Panel message that must survive" }, select: { conversationId: true } })
+    expect(kept).not.toBeNull()
+    const conversation = await prisma.agentConversation.findUnique({ where: { id: kept!.conversationId } })
+    expect(conversation?.archivedAt).not.toBeNull()
+    expect(conversation?.title).toBe("Archived conversation")
+    expect(conversation?.summary).toBeNull()
   })
 })

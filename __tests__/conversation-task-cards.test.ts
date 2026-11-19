@@ -54,3 +54,13 @@ describe("loadTaskComposerContext", () => {
     expect(await loadTaskComposerContext(WS, "OPPORTUNITY", "x")).toEqual({ confirmedAgentIds: [], targetTitle: "Kept title" })
   })
 })
+
+describe("loadTaskComposerContext when the module itself cannot load", () => {
+  it("fails soft instead of failing the list", async () => {
+    vi.resetModules()
+    vi.doMock("@/lib/comment-target-tasks", () => { throw new Error("import boom") })
+    const { loadTaskComposerContext: load } = await import("@/lib/conversation-task-cards")
+    expect(await load(WS, "OPPORTUNITY", "x")).toEqual({ confirmedAgentIds: [], targetTitle: null })
+    vi.doUnmock("@/lib/comment-target-tasks")
+  })
+})

@@ -165,7 +165,7 @@ describe("creating a task from a comment", () => {
   it("deletes the comment when the task cannot be created", async () => {
     mocks.createTask.mockRejectedValue(new Error("db down"))
     const result = await postTargetCommentWithOptionalTask({ ...base, body: quinn, task: withTask })
-    expect(result).toEqual({ ok: false, error: "TASK_FAILED", message: "db down" })
+    expect(result).toEqual({ ok: false, error: "TASK_FAILED", message: "Could not create the task." })
     expect(mocks.db.comment.deleteMany).toHaveBeenCalledWith({ where: { id: COMMENT } })
   })
 
@@ -182,6 +182,32 @@ describe("creating a task from a comment", () => {
     mocks.createComment.mockImplementation(async (input: { body: string }) => ({ id: COMMENT, body: input.body, parentId: "00000000-0000-4000-8000-0000000000b1" }))
     await postTargetCommentWithOptionalTask({ ...base, body: quinn, task: withTask, parentId: "00000000-0000-4000-8000-0000000000b1" })
     expect(mocks.removeMirror).toHaveBeenCalledWith({ conversationId: "00000000-0000-4000-8000-0000000000b1", commentIds: [COMMENT], threadDeleted: false })
+  })
+
+  it("removes the mirror only if the comment itself was deleted", async () => {
+    mocks.createTask.mockRejectedValue(new Error("db down"))
+    mocks.db.comment.deleteMany.mockRejectedValue(new Error("delete failed"))
+    vi.spyOn(console, "error").mockImplementation(() => {})
+    const result = await postTargetCommentWithOptionalTask({ ...base, body: quinn, task: withTask })
+    expect(result).toMatchObject({ ok: false, error: "TASK_FAILED" })
+    expect(mocks.removeMirror).not.toHaveBeenCalled()
+  })
+
+  // The task is committed once createWorkspaceTask returns. Building the card afterwards must never withdraw the comment.
+  it("keeps the comment, the mirror and the task when only the card cannot be built", async () => {
+    mocks.resolveAssignees.mockRejectedValue(new Error("resolver down"))
+    vi.spyOn(console, "error").mockImplementation(() => {})
+    const result = await postTargetCommentWithOptionalTask({ ...base, body: quinn, task: withTask })
+    expect(result).toMatchObject({ ok: true, card: null })
+    expect(mocks.db.comment.deleteMany).not.toHaveBeenCalled()
+    expect(mocks.removeMirror).not.toHaveBeenCalled()
+  })
+
+  it("logs a failed task by error name only, never its message", async () => {
+    mocks.createTask.mockRejectedValue(Object.assign(new Error("Invalid prisma.task.create() column secret_col"), { code: "P2022" }))
+    const log = vi.spyOn(console, "error").mockImplementation(() => {})
+    await postTargetCommentWithOptionalTask({ ...base, body: quinn, task: withTask })
+    expect(JSON.stringify(log.mock.calls)).not.toContain("secret_col")
   })
 
   it("does not touch the mirror when the task was created", async () => {
@@ -201,6 +227,11 @@ describe("agent scope confirmation", () => {
     const result = await postTargetCommentWithOptionalTask({ ...base, body: bot, task: withTask, agentScopeConfirmed: true })
     expect(result.ok).toBe(true)
     expect(mocks.createTask.mock.calls[0][1].assignee).toEqual({ type: "AGENT", id: BOT })
+  })
+
+  it("bounds the comment scan that decides which agents are already known", async () => {
+    await agentIdsAssignedOnTarget(WS, "ROADMAP_ITEM", TARGET)
+    expect(mocks.db.comment.findMany).toHaveBeenCalledWith(expect.objectContaining({ orderBy: { createdAt: "desc" }, take: 1000 }))
   })
 
   it("skips the step for an agent already assigned from this target's comments", async () => {
