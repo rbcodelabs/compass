@@ -1,8 +1,9 @@
 import { NextRequest } from "next/server"
 import { auth } from "@/auth"
 import getPrisma, { type AppPrismaClient } from "@/lib/db"
-import { resolveConversationAccess } from "@/lib/agent-conversation-access"
+import { isClosedToNewTurns, resolveConversationAccess } from "@/lib/agent-conversation-access"
 import { conversationNotFound, NO_STORE_HEADERS } from "@/lib/agent-conversation-not-found"
+import { archiveCapabilities } from "@/lib/conversation-archive"
 import {
   defaultAgentModeForVisibility,
   isAgentParticipationMode,
@@ -126,7 +127,12 @@ export async function GET(request: NextRequest, { params }: Params) {
       defaultAgentModeForVisibility(visibility, Boolean(row.targetType && row.targetId)),
     )
     const targetLabel = await resolveTargetLabel(prisma, workspaceId, row.targetType ?? null, row.targetId ?? null)
+    // Server-computed (starter, workspace admin or org admin of a shared conversation); archive and restore share the rule.
+    const capabilities = await archiveCapabilities({ conversationId, workspaceId, userId: session.user.id }).catch(() => ({ archived: false, canArchive: false, canRestore: false }))
     return Response.json({
+      archived: capabilities.archived,
+      canArchive: capabilities.canArchive,
+      canRestore: capabilities.canRestore,
       id: row.id,
       title: row.title,
       visibility,
@@ -170,6 +176,10 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     userId: session.user.id,
   })
   if (!access) return new Response("Not found", { status: 404 })
+  // An archived shared thread is read-only (TASK-195 S2); restore it first.
+  if (isClosedToNewTurns(access)) {
+    return Response.json({ error: "This conversation is archived. Restore it to change it.", code: "ARCHIVED" }, { status: 409 })
+  }
 
   const body = (await request.json().catch(() => ({}))) as Record<string, unknown>
   const now = new Date()

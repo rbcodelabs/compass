@@ -20,11 +20,14 @@ const runTransaction = async (operation: (client: typeof tx) => unknown, options
 const transaction = vi.fn(runTransaction)
 vi.mock("@/lib/db", () => ({ default: () => ({ $transaction: transaction }) }))
 vi.mock("@/auth", () => ({ auth: vi.fn() }))
+const mirror = vi.hoisted(() => ({ removeCommentMirrorAfterCommit: vi.fn() }))
+vi.mock("@/lib/conversation-mirror", () => mirror)
 
 import { deleteBrowserComment, CommentHttpError } from "@/lib/comment-browser"
 
 beforeEach(() => {
   vi.clearAllMocks()
+  mirror.removeCommentMirrorAfterCommit.mockResolvedValue(undefined)
   transaction.mockImplementation(runTransaction)
   tx.comment.findMany.mockResolvedValue([])
   tx.comment.deleteMany.mockResolvedValue({ count: 0 })
@@ -44,6 +47,26 @@ describe("atomic browser comment deletion", () => {
       .resolves.toEqual({ id: "root-1", deletedReplies: 0 })
     expect(tx.comment.delete).toHaveBeenCalledWith({ where: { id: "root-1" } })
     expect(transaction).toHaveBeenCalledTimes(1)
+  })
+
+  it("removes the mirrored conversation after the delete commits (no ghost mirror)", async () => {
+    tx.comment.findUnique.mockResolvedValue({ id: "root-1", parentId: null, authorId: "admin-1", solutionPlanProposal: null, _count: { replies: 1 } })
+    tx.comment.findMany.mockResolvedValue([{ id: "reply-1" }])
+    let committed = false
+    transaction.mockImplementation(async (op: Parameters<typeof runTransaction>[0], options?: { isolationLevel: string }) => { const out = await runTransaction(op, options); committed = true; return out })
+    mirror.removeCommentMirrorAfterCommit.mockImplementation(async () => { expect(committed).toBe(true) })
+    await deleteBrowserComment("root-1", { userId: "admin-1", admin: true }, true)
+    expect(mirror.removeCommentMirrorAfterCommit).toHaveBeenCalledWith({ conversationId: "root-1", commentIds: ["reply-1", "root-1"], threadDeleted: true })
+  })
+
+  it("removes only the reply's mirror message when a reply is deleted, and nothing when the delete is refused", async () => {
+    tx.comment.findUnique.mockResolvedValue({ id: "reply-1", parentId: "root-1", authorId: "user-1", solutionPlanProposal: null, _count: { replies: 0 } })
+    await deleteBrowserComment("reply-1", { userId: "user-1", admin: false }, false)
+    expect(mirror.removeCommentMirrorAfterCommit).toHaveBeenCalledWith({ conversationId: "root-1", commentIds: ["reply-1"], threadDeleted: false })
+    mirror.removeCommentMirrorAfterCommit.mockClear()
+    tx.comment.findUnique.mockResolvedValue({ id: "root-1", parentId: null, authorId: "user-1", solutionPlanProposal: null, _count: { replies: 1 } })
+    await expect(deleteBrowserComment("root-1", { userId: "user-1", admin: false }, false)).rejects.toMatchObject({ status: 409 })
+    expect(mirror.removeCommentMirrorAfterCommit).not.toHaveBeenCalled()
   })
 
   it("rechecks replies inside the transaction and blocks an author after a concurrent reply arrives", async () => {

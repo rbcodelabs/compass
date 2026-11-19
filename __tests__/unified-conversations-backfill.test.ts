@@ -89,6 +89,7 @@ describe("backfillUnifiedConversations", () => {
       role: "user",
       authorName: "Rick Bowman",
       authorType: "HUMAN",
+      messageKind: "COMMENT",
     })
     expect(messageUpsert.mock.calls[1]?.[0]?.create).toMatchObject({
       id: replyId,

@@ -25,6 +25,10 @@ import Link from "next/link"
 import { Archive, ArchiveRestore, CheckCircle2, Clock, FileText, GitPullRequest, Loader2, RotateCcw, Search, Sparkles, X as XIcon } from "lucide-react"
 import { fetchArchivedConversations, setConversationArchived, type ArchivedConversation } from "@/lib/agent-archive-client"
 import { Button } from "@/components/ui/button"
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
+import { announceConversationArchiveChange } from "@/components/conversations/archive-events"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { APPROVAL_UPDATE_PREFIX, isApprovalUpdateMessage } from "@/lib/tool-approval/messages"
@@ -61,6 +65,8 @@ import { Markdown } from "@/components/agent/markdown"
 import { RecentMentions } from "@/components/agent/recent-mentions"
 import type { MentionOptions } from "@/components/docs/mention-editor"
 import { plainTextOf } from "@/lib/comment-mentions"
+import { refreshEditedMessages } from "@/lib/conversation-message-merge"
+import { SharedMessageContent } from "@/components/conversations/message-actions"
 import { AttachMenu, uploadAgentFiles, type AttachedItem, type AttachedUpload } from "@/components/agent/composer/attach-menu"
 import { SeedContextChip } from "@/components/agent/seed-context-chip"
 import { AgentParticipantsPanel, type Roster } from "@/components/agent/agent-participants"
@@ -98,11 +104,35 @@ type Message = {
   /** Who sent a user message. Absent on a message this tab has only optimistically shown. */
   authorUserId?: string | null
   authorName?: string | null
+  /** ISO instant a person last changed the text; drives the "Edited" marker. */
+  editedAt?: string | null
+  authorType?: string | null
+  messageKind?: string | null
+  /** Computed by the server for the signed-in user (author or workspace admin). Never inferred here. */
+  canEdit?: boolean
+  /** Always false: there is no per-message removal (TASK-195 S2). The whole thread is archived instead. */
+  canDelete?: boolean
 }
 type ConversationSummary = AgentListConversation
 type SeedEntity = { entityType: string; entityId: string; label: string; summary: string; sourceUrl: string }
 
 type Props = {
+  /**
+   * Server-computed (thread starter, workspace admin or org admin of a shared conversation): offer "Archive conversation"
+   * in the header. Never inferred from the user id on the client.
+   */
+  canArchive?: boolean
+  /** The conversation was archived from this header; the host leaves it (the panel goes back one crumb). */
+  onConversationArchived?: () => void
+  /** The conversation is archived (server-computed): read-only, with Restore for those who may. */
+  initialArchived?: boolean
+  /**
+   * The message a comment-origin deep link points at (`?comment=<id>`, TASK-195 S3): it is highlighted, scrolled into view
+   * once it is on screen, and announced politely. A message that is not in this conversation is silently ignored.
+   */
+  focusMessageId?: string | null
+  /** Server-computed: the caller may restore this archived conversation. */
+  canRestore?: boolean
   workspaceId: string
   basePath: string // `/${orgSlug}/${workspaceSlug}`
   conversations: ConversationSummary[]
@@ -212,6 +242,11 @@ const isLocalMessageId = (id: string) => /^(local|run|a)-/.test(id)
 const SHARED_POLL_MS = 4_000
 
 export function AgentChat({
+  canArchive = false,
+  canRestore = false,
+  initialArchived = false,
+  focusMessageId,
+  onConversationArchived,
   workspaceId,
   basePath,
   conversations,
@@ -358,6 +393,56 @@ export function AgentChat({
     }
   }, [activeConversationId, threadStatus, workspaceId])
 
+  // Archive the whole thread (there is no per-message delete). Reversible: it is restored from the section's Archived view.
+  const [archivedOverride, setArchivedOverride] = useState<{ key: string; value: boolean } | null>(null)
+  const archived = archivedOverride?.key === (activeConversationId ?? "__new__") ? archivedOverride.value : initialArchived
+  const [restoring, setRestoring] = useState(false)
+  const [restoreFailed, setRestoreFailed] = useState(false)
+  const handleRestoreConversation = useCallback(async () => {
+    if (!activeConversationId || restoring) return
+    setRestoring(true)
+    setRestoreFailed(false)
+    try {
+      const res = await fetch(`/api/agent/conversations/${activeConversationId}?workspaceId=${encodeURIComponent(workspaceId)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ archived: false }),
+      })
+      if (!res.ok) { setRestoreFailed(true); return }
+      setArchivedOverride({ key: activeConversationId, value: false })
+      announceConversationArchiveChange({ conversationId: activeConversationId, archived: false })
+    } catch {
+      setRestoreFailed(true)
+    } finally {
+      setRestoring(false)
+    }
+  }, [activeConversationId, restoring, workspaceId])
+  const [archiveOpen, setArchiveOpen] = useState(false)
+  const [archiving, setArchiving] = useState(false)
+  const [archiveFailed, setArchiveFailed] = useState(false)
+  const onConversationArchivedRef = useRef(onConversationArchived)
+  useEffect(() => { onConversationArchivedRef.current = onConversationArchived }, [onConversationArchived])
+  const handleArchiveConversation = useCallback(async () => {
+    if (!activeConversationId || archiving) return
+    setArchiving(true)
+    setArchiveFailed(false)
+    try {
+      const res = await fetch(`/api/agent/conversations/${activeConversationId}?workspaceId=${encodeURIComponent(workspaceId)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ archived: true }),
+      })
+      if (!res.ok) { setArchiveFailed(true); return }
+      setArchiveOpen(false)
+      announceConversationArchiveChange({ conversationId: activeConversationId, archived: true })
+      onConversationArchivedRef.current?.()
+    } catch {
+      setArchiveFailed(true)
+    } finally {
+      setArchiving(false)
+    }
+  }, [activeConversationId, archiving, workspaceId])
+
   const [listQuery, setListQuery] = useState("")
   const [listGroupBy, setListGroupBy] = useState<BoardGroupBy>("status")
   // Archive: the page list shows active chats; "Archived" swaps it for the archived ones.
@@ -377,6 +462,12 @@ export function AgentChat({
     [workspaceId, activeConversationId, basePath, routeSegment, router],
   )
   const [messages, setMessages] = useState<Message[]>(initialMessages)
+
+  // The editor captures its mention options when it mounts, so they must already be here by the first click on Edit.
+  const hasEditableMessage = messages.some((m) => m.canEdit)
+  useEffect(() => {
+    if (hasEditableMessage) loadMentionOptions()
+  }, [hasEditableMessage, loadMentionOptions])
   // Prefilled (editable) composer instruction from a "Send to agent" hand-off
   // — only for a brand-new chat. Lazy initializer so this never overwrites
   // composer text when resuming a past conversation (activeConversationId set).
@@ -435,6 +526,9 @@ export function AgentChat({
   const modelPick = useModelPick({ userId, workspaceId, choices: agentChoices, agentSelection })
   const turn = useAgentTurn({
     workspaceId,
+    // Archived while this tab was open: the next send answers 404 with an "archived" marker. Show the read-only
+    // archived state, not an error banner and not the "removed" wording.
+    onConversationUnavailable: () => setArchivedOverride({ key: activeConversationId ?? "__new__", value: true }),
     onConversationCreated: (createdId) => {
       selfCreated.current.add(createdId)
       onConversationCreatedRef.current?.(createdId)
@@ -532,6 +626,31 @@ export function AgentChat({
   const jumpToBottom = useRef(false)
   const transcriptHostRef = useRef<HTMLDivElement>(null)
 
+  // Comment-origin deep link: scroll the linked message into view once it is rendered, once per (conversation, message).
+  const focusDoneRef = useRef<string | null>(null)
+  // While the linked message is what the reader is looking at, the end-of-transcript scroll below must not pull the page
+  // away from it. Holds the message count at the time of the focus scroll; any new message (the reader sends or others post)
+  // releases it, and so does a different link or conversation.
+  const focusHoldRef = useRef<{ key: string; count: number } | null>(null)
+  const focusKeyRef = useRef<string | null>(null)
+  useEffect(() => {
+    focusKeyRef.current = focusMessageId && activeConversationId ? `${activeConversationId}:${focusMessageId}` : null
+  })
+  const [focusAnnounced, setFocusAnnounced] = useState<string | null>(null)
+  useEffect(() => {
+    if (!focusMessageId || !activeConversationId) return
+    const key = `${activeConversationId}:${focusMessageId}`
+    if (focusDoneRef.current === key) return
+    if (!messages.some((m) => m.id === focusMessageId)) return
+    const rows = transcriptHostRef.current?.querySelectorAll("[data-message-id]")
+    const target = rows ? Array.from(rows).find((row) => row.getAttribute("data-message-id") === focusMessageId) : undefined
+    if (!target) return
+    focusDoneRef.current = key
+    focusHoldRef.current = { key, count: messages.length }
+    target.scrollIntoView?.({ block: "center" })
+    setFocusAnnounced(key)
+  }, [focusMessageId, activeConversationId, messages])
+
   // Re-seed the transcript whenever the selected conversation changes — with one
   // exception, consumed exactly once.
   //
@@ -570,6 +689,12 @@ export function AgentChat({
     const instant = jumpToBottom.current
     jumpToBottom.current = false
     if (transcriptHostRef.current?.classList.contains("hidden")) return
+    // Declared after the focus effect, so on the commit that scrolled to a linked message this runs second: skip it.
+    const hold = focusHoldRef.current
+    if (hold) {
+      if (hold.key === focusKeyRef.current && messages.length <= hold.count) return
+      focusHoldRef.current = null
+    }
     bottomRef.current?.scrollIntoView({ behavior: instant ? "auto" : "smooth", block: "end" })
   }, [messages, streamingText, liveToolSteps, livePlan, liveSubagents, phase])
 
@@ -959,6 +1084,13 @@ export function AgentChat({
     }
   }, [activeConversationId, workspaceId, attachToRun])
 
+  // A saved edit replaces the text in place. Order, ids and everything else about the row are untouched.
+  const applyMessageEdit = useCallback((edit: { id: string; content: string; editedAt: string }) => {
+    setMessages((current) =>
+      current.map((m) => (m.id === edit.id ? { ...m, content: edit.content, editedAt: edit.editedAt } : m)),
+    )
+  }, [])
+
   // Shared conversations: what other participants say, and the runs
   // they start, arrive by polling. There is no server push in v1, so this is the
   // whole of "live" — a few seconds behind, by design.
@@ -975,7 +1107,7 @@ export function AgentChat({
           null,
         )
     const url = `/api/agent/conversations/${activeConversationId}/messages?workspaceId=${encodeURIComponent(workspaceId)}${
-      after ? `&after=${encodeURIComponent(after)}` : ""
+      after ? `&after=${encodeURIComponent(after)}&includeEdited=1` : ""
     }`
     const res = await fetch(url)
     if (res.status === 404) {
@@ -1009,12 +1141,15 @@ export function AgentChat({
     if (incoming.length === 0) return
     setMessages((current) => {
       const known = new Set(current.map((m) => m.id))
+      // `includeEdited=1` makes the server also send every edited message, which is how somebody else's edit to an
+      // older message reaches this tab.
+      const base = refreshEditedMessages(current, incoming)
       const fresh = incoming.filter((m) => !known.has(m.id))
-      if (fresh.length === 0) return current
+      if (fresh.length === 0) return base
       // The cursor is inclusive, so the last message comes back every time and is
       // skipped above. A provisional copy of a message the server now reports is
       // dropped rather than shown twice.
-      const kept = current.filter(
+      const kept = base.filter(
         (m) => !(isLocalMessageId(m.id) && fresh.some((f) => f.role === m.role && f.content === m.content)),
       )
       return [...kept, ...fresh]
@@ -1105,7 +1240,7 @@ export function AgentChat({
   const runStarterId = activeRun?.startedByUserId ?? null
   const runStartedByOther = Boolean(runStarterId && runStarterId !== userId)
   const canCancelRun = !runStartedByOther || roster?.viewerRole === "OWNER"
-  const composerDisabled = isStreaming || composerBlocked || Boolean(accessLost)
+  const composerDisabled = isStreaming || composerBlocked || Boolean(accessLost) || archived
   const showEmptyRailSuggestions =
     isRail &&
     (railActive ?? true) &&
@@ -1387,28 +1522,61 @@ export function AgentChat({
               )}
             </div>
             {activeConversationId && (
-              <Button
-                type="button"
-                variant="ghost"
-                size="xs"
-                onClick={handleToggleThreadStatus}
-                className="h-6 gap-1 px-2 text-xs text-text-secondary hover:text-text-primary"
-              >
-                {threadStatus === "RESOLVED" ? (
-                  <>
-                    <RotateCcw className="size-3" aria-hidden="true" />
-                    Reopen
-                  </>
-                ) : (
-                  <>
-                    <CheckCircle2 className="size-3" aria-hidden="true" />
-                    Resolve
-                  </>
+              <div className="flex items-center gap-1">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="xs"
+                  onClick={handleToggleThreadStatus}
+                  className="h-6 gap-1 px-2 text-xs text-text-secondary hover:text-text-primary"
+                >
+                  {threadStatus === "RESOLVED" ? (
+                    <>
+                      <RotateCcw className="size-3" aria-hidden="true" />
+                      Reopen
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 className="size-3" aria-hidden="true" />
+                      Resolve
+                    </>
+                  )}
+                </Button>
+                {(canArchive || canRestore) && !archived && shared && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="xs"
+                    onClick={() => { setArchiveFailed(false); setArchiveOpen(true) }}
+                    className="h-6 gap-1 px-2 text-xs text-text-secondary hover:text-text-primary"
+                  >
+                    <Archive className="size-3" aria-hidden="true" />
+                    Archive conversation
+                  </Button>
                 )}
-              </Button>
+              </div>
             )}
           </div>
         )}
+        <AlertDialog open={archiveOpen} onOpenChange={(open) => { if (!archiving) setArchiveOpen(open) }}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Archive this conversation?</AlertDialogTitle>
+              <AlertDialogDescription>
+                It leaves the list for everyone and takes no new replies while archived. Every message is kept, and you can restore it from Archived.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            {archiveFailed && (
+              <p role="alert" className="text-sm text-status-danger">We couldn’t archive this conversation. Please try again.</p>
+            )}
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={archiving}>Cancel</AlertDialogCancel>
+              <AlertDialogAction type="button" disabled={archiving} onClick={() => void handleArchiveConversation()}>
+                {archiving ? "Archiving…" : "Archive"}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
         {activeConversationId && !accessLost && (
           <AgentParticipantsPanel
             conversationId={activeConversationId}
@@ -1463,8 +1631,14 @@ export function AgentChat({
               </div>
             )}
 
+            {/* Rendered empty first and filled later: a live region inserted together with its text is often not announced. */}
+            {focusMessageId && (
+              <p role="status" aria-live="polite" className="sr-only">
+                {focusAnnounced === `${activeConversationId}:${focusMessageId}` ? "Showing the linked message." : ""}
+              </p>
+            )}
             {messages.map((m) => (
-              <MessageRow key={m.id} message={m} userInitials={userInitials} userId={userId} shared={shared} workspaceId={workspaceId} conversationId={activeConversationId} basePath={basePath} onInspectSubagent={selectChildRun} />
+              <MessageRow key={m.id} focused={Boolean(focusMessageId) && m.id === focusMessageId} message={m} userInitials={userInitials} userId={userId} shared={shared} workspaceId={workspaceId} conversationId={activeConversationId} basePath={basePath} onInspectSubagent={selectChildRun} mentionOptions={mentionOptions} onOpenMentions={loadMentionOptions} onMessageEdited={applyMessageEdit} />
             ))}
 
             {isStreaming && (
@@ -1478,6 +1652,7 @@ export function AgentChat({
                 conversationId={activeConversationId}
                 basePath={basePath}
                 onInspectSubagent={selectChildRun}
+                mentionOptions={mentionOptions}
               />
             )}
 
@@ -1487,6 +1662,18 @@ export function AgentChat({
               <p className="pl-10 text-xs text-text-subtle">
                 {`${nameOf(runStarterId) ?? "Another participant"} asked this. You can watch, and send your own message once it finishes.`}
               </p>
+            )}
+
+            {archived && !accessLost && (
+              <div role="status" className="flex flex-wrap items-center gap-2 rounded-lg border border-default bg-surface-inset px-4 py-3 text-sm text-text-secondary">
+                <span>This conversation is archived and read-only. Its messages are kept.</span>
+                {canRestore && (
+                  <Button type="button" variant="outline" size="xs" disabled={restoring} onClick={() => void handleRestoreConversation()}>
+                    {restoring ? "Restoring…" : "Restore"}
+                  </Button>
+                )}
+                {restoreFailed && <span role="alert" className="basis-full text-status-danger">We couldn’t restore this conversation. Please try again.</span>}
+              </div>
             )}
 
             {(accessLost ?? (leftNotice ? "left" : null)) && (
@@ -1814,6 +2001,7 @@ function AttachedChip({ label, hint, file, onRemove }: { label: string; hint: st
 
 function MessageRow({
   message,
+  focused = false,
   userInitials,
   userId,
   shared,
@@ -1822,8 +2010,13 @@ function MessageRow({
   conversationId,
   basePath,
   onInspectSubagent,
+  mentionOptions,
+  onOpenMentions,
+  onMessageEdited,
 }: {
   message: Message
+  /** The message a deep link points at: ringed and marked `data-comment-focused`. */
+  focused?: boolean
   userInitials: string
   userId: string
   shared: boolean
@@ -1832,6 +2025,9 @@ function MessageRow({
   conversationId: string | null
   basePath: string
   onInspectSubagent?: (subagentId: string) => void
+  mentionOptions: MentionOptions
+  onOpenMentions?: () => void
+  onMessageEdited?: (edit: { id: string; content: string; editedAt: string }) => void
 }) {
   const isUser = message.role === "user"
   // A message with no recorded author is this tab's own, not yet reported back.
@@ -1843,8 +2039,16 @@ function MessageRow({
   const persistedDecisionIds = !isUser && workspaceId && message.content
     ? trackedDecisionIdsFromText(message.content, basePath).filter((id) => !stepDecisionIds.includes(id))
     : []
+  // Stored messages are articles with stable hooks (deep links and E2E target them); the streaming and
+  // optimistic copies have no durable id, so they stay plain containers.
+  const stored = message.id !== "streaming" && !isLocalMessageId(message.id)
+  const Row = stored ? "article" : "div"
   return (
-    <div className={`flex gap-3 ${isUser && !fromOther ? "flex-row-reverse" : "flex-row"}`}>
+    <Row
+      {...(stored ? { id: `message-${message.id}`, "data-testid": "conversation-message", "data-message-id": message.id } : {})}
+      {...(stored && focused ? { "data-comment-focused": "true" } : {})}
+      className={`flex gap-3 ${isUser && !fromOther ? "flex-row-reverse" : "flex-row"}${stored && focused ? " scroll-mt-4 rounded-xl ring-2 ring-primary/60 ring-offset-2 ring-offset-background" : ""}`}
+    >
       <Avatar className="size-7 shrink-0">
         <AvatarFallback className={isUser ? "bg-surface-interactive text-text-secondary" : "bg-primary text-primary-foreground"}>
           {isUser ? (fromOther ? initialsOf(authorName) : userInitials) : <Sparkles className="size-4" aria-hidden="true" />}
@@ -1874,6 +2078,20 @@ function MessageRow({
               <p className="mb-1 text-xs font-medium text-text-subtle">Approval update (system-generated)</p>
               <p className="whitespace-pre-wrap break-words">{message.content.slice(APPROVAL_UPDATE_PREFIX.length)}</p>
             </div>
+          ) : isUser && shared ? (
+            // People's words in a shared conversation render like the old Discussion did: markdown, mention chips,
+            // PR chips. Private chats keep plain text (see the module doc of message-actions).
+            <SharedMessageContent
+              message={message}
+              authorLabel={message.authorName ?? "Participant"}
+              workspaceId={workspaceId}
+              conversationId={conversationId}
+              mentionOptions={mentionOptions}
+              onOpenMentions={onOpenMentions}
+              onEdited={(edit) => onMessageEdited?.(edit)}
+              onPrimary={!fromOther}
+              bodyClassName={fromOther ? undefined : "[&_a]:text-primary-foreground [&_code]:text-text-primary"}
+            />
           ) : isUser ? (
             <p className="whitespace-pre-wrap break-words">{plainTextOf(message.content)}</p>
           ) : message.content ? (
@@ -1888,7 +2106,7 @@ function MessageRow({
           )}
         </div>
       </div>
-    </div>
+    </Row>
   )
 }
 

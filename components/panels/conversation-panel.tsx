@@ -10,7 +10,7 @@ import {
   useState,
   type ReactNode,
 } from "react"
-import { usePathname, useRouter } from "next/navigation"
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { Check, MessagesSquare, Plus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -21,12 +21,17 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { usePanelContext, type PanelType } from "@/components/panels/panel-context"
+import { leaveArchivedConversation } from "@/components/panels/leave-archived-conversation"
 import { isComposerPanelType } from "@/components/panels/composer-panel-types"
 import { panelTitles } from "@/components/panels/panel-titles"
 import { useLabels } from "@/components/thinking-model/thinking-model-provider"
 import { AgentChat } from "@/components/agent/agent-chat"
 import { ConversationNotAvailable } from "@/components/panels/conversation-not-available"
+import { CommentDeepLinkOpener } from "@/components/panels/comment-deep-link-opener"
+import { isCommentId } from "@/lib/comment-deep-link"
 import { LegacyRailLinkRedirect } from "@/components/panels/legacy-rail-link-redirect"
+import { parseConversationMessagesResponse, type PanelLoadedMessage } from "@/lib/conversation-panel-messages"
+import type { CommentTaskCardData } from "@/lib/comment-task-card"
 import type {
   AgentParticipationMode,
   ConversationStatus,
@@ -361,6 +366,7 @@ export function ConversationPanelProvider({
 
   return (
     <ConversationPanelContext.Provider value={value}>
+      <CommentDeepLinkOpener />
       <LegacyRailLinkRedirect />
       {children}
     </ConversationPanelContext.Provider>
@@ -429,16 +435,10 @@ export function ConversationPanelHeaderActions() {
   )
 }
 
-type LoadedMessage = {
-  id: string
-  role: "user" | "assistant"
-  content: string
-  createdAt?: string
-  authorUserId?: string | null
-  authorName?: string | null
-}
+type LoadedMessage = PanelLoadedMessage
 
 const EMPTY_MESSAGES: LoadedMessage[] = []
+const EMPTY_TASK_CARDS: Record<string, CommentTaskCardData> = {}
 
 function targetTypeToPanelType(targetType: string): PanelType | null {
   switch (targetType.toUpperCase()) {
@@ -468,14 +468,18 @@ function targetTypeToPanelType(targetType: string): PanelType | null {
 
 export function ConversationPanel({ conversationId }: { conversationId: string }) {
   const ctx = useConversationPanelOptional()
-  const { openPanel } = usePanelContext()
+  const { openPanel, closePanel } = usePanelContext()
+  // `?comment=<messageId>` (set by the deep-link opener, or present on a shared link) names the message to highlight.
+  const linkedMessageId = useSearchParams().get("comment")
+  const focusMessageId = isCommentId(linkedMessageId) ? linkedMessageId : undefined
   const isNew = conversationId === "new"
   const activeConversationId = isNew ? null : conversationId
 
   const [messagesState, setMessagesState] = useState<{
     id: string
     messages: LoadedMessage[]
-  }>({ id: conversationId, messages: EMPTY_MESSAGES })
+    taskCards: Record<string, CommentTaskCardData>
+  }>({ id: conversationId, messages: EMPTY_MESSAGES, taskCards: EMPTY_TASK_CARDS })
 
   // Set when either read answers 404: unknown and unreadable ids are indistinguishable by design.
   const [unavailableId, setUnavailableId] = useState<string | null>(null)
@@ -488,6 +492,9 @@ export function ConversationPanel({ conversationId }: { conversationId: string }
     targetType: string | null
     targetId: string | null
     targetLabel: string | null
+    canArchive: boolean
+    canRestore: boolean
+    archived: boolean
   } | null>(null)
 
   useEffect(() => {
@@ -504,22 +511,9 @@ export function ConversationPanel({ conversationId }: { conversationId: string }
             return
           }
           if (!res.ok) return
-          const body = (await res.json()) as { messages?: Record<string, unknown>[] }
-          if (!Array.isArray(body.messages)) return
-          const parsed: LoadedMessage[] = body.messages.flatMap((m) => {
-            if (!m || typeof m.id !== "string" || typeof m.content !== "string") return []
-            return [
-              {
-                id: m.id,
-                role: m.role === "assistant" ? ("assistant" as const) : ("user" as const),
-                content: m.content,
-                ...(typeof m.createdAt === "string" ? { createdAt: m.createdAt } : {}),
-                ...(typeof m.authorUserId === "string" ? { authorUserId: m.authorUserId } : {}),
-                ...(typeof m.authorName === "string" ? { authorName: m.authorName } : {}),
-              },
-            ]
-          })
-          setMessagesState({ id: conversationId, messages: parsed })
+          const parsed = parseConversationMessagesResponse(await res.json())
+          if (!parsed) return
+          setMessagesState({ id: conversationId, messages: parsed.messages, taskCards: parsed.taskCards })
         })
         .catch(() => {}),
       fetch(`/api/agent/conversations/${encodeURIComponent(conversationId)}/settings?${qs}`, {
@@ -538,6 +532,9 @@ export function ConversationPanel({ conversationId }: { conversationId: string }
             targetType?: string | null
             targetId?: string | null
             targetLabel?: string | null
+            canArchive?: boolean
+            canRestore?: boolean
+            archived?: boolean
           }
           setSettingsState({
             id: conversationId,
@@ -547,6 +544,9 @@ export function ConversationPanel({ conversationId }: { conversationId: string }
             targetType: body.targetType ?? null,
             targetId: body.targetId ?? null,
             targetLabel: body.targetLabel ?? null,
+            canArchive: body.canArchive === true,
+            canRestore: body.canRestore === true,
+            archived: body.archived === true,
           })
         })
         .catch(() => {}),
@@ -593,6 +593,13 @@ export function ConversationPanel({ conversationId }: { conversationId: string }
       initialTargetType={initialTargetType}
       initialTargetId={initialTargetId}
       initialTargetLabel={initialTargetLabel}
+      canArchive={currentSettings?.canArchive === true}
+      canRestore={currentSettings?.canRestore === true}
+      initialArchived={currentSettings?.archived === true}
+      focusMessageId={focusMessageId}
+      onConversationArchived={() =>
+        leaveArchivedConversation({ historyStack: ctx.historyStack, jumpToCrumb: ctx.jumpToCrumb, closePanel })
+      }
       onConversationCreated={(createdId) => {
         ctx.adoptCreatedConversationId(createdId)
       }}

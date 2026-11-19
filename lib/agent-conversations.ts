@@ -6,9 +6,11 @@
  */
 
 import getPrisma from "@/lib/db"
+import type { AppPrismaClient } from "@/lib/db"
 import { agentParticipantsAvailable } from "@/lib/agent-conversation-participants"
 import { sanitizeAuthorLabel } from "@/lib/agent-author-label"
-import { accessibleConversationsWhere, ownedConversationsWhere, resolveConversationAccess } from "@/lib/agent-conversation-access"
+import { accessibleConversationsWhere, ownedConversationsWhere } from "@/lib/agent-conversation-access"
+import { canEditMessage, isWorkspaceAdmin, loadAccessibleConversation } from "@/lib/conversation-messages"
 
 export type ConversationSummary = {
   id: string
@@ -28,6 +30,16 @@ export type ChatMessage = {
    */
   authorUserId: string | null
   authorName: string | null
+  /** When a person last changed the text, or null if never. Drives the "Edited" marker. */
+  editedAt: Date | null
+  /** "HUMAN" | "AGENT" | "EXTERNAL" | "SYSTEM"; null on rows that predate migration 124. */
+  authorType: string | null
+  /** "MESSAGE" | "COMMENT" | "PLAN_PROPOSAL" | "SYSTEM_RESOLUTION"; null on older rows. */
+  messageKind: string | null
+  /** Computed on the server for the caller (author, or workspace admin); the client never infers it. */
+  canEdit: boolean
+  /** Always false until messages can be archived (TASK-195 S2). */
+  canDelete: boolean
 }
 
 /**
@@ -122,17 +134,30 @@ export async function getAgentConversationMessages(
      * dedupe by id.
      */
     after?: Date
+    /**
+     * With `after`, also return every message that has been edited, however old. A poll that only asks for new messages
+     * would never see somebody else's edit to an older one. Edited rows are few, and callers merge by id.
+     */
+    includeEdited?: boolean
   } = {}
 ): Promise<ChatMessage[] | null> {
   const prisma = getPrisma()
-  const access = await resolveConversationAccess(prisma, { conversationId, workspaceId, userId })
-  if (!access) return null
+  const conversation = await loadAccessibleConversation(prisma, { conversationId, workspaceId, userId })
+  if (!conversation) return null
+  const access = { ownerUserId: conversation.userId }
   const withAuthor = await agentParticipantsAvailable(prisma)
   const rows = await prisma.agentMessage.findMany({
-    where: { conversationId, ...(options.after ? { createdAt: { gte: options.after } } : {}) },
+    where: {
+      conversationId,
+      ...(options.after
+        ? options.includeEdited && withAuthor
+          ? { OR: [{ createdAt: { gte: options.after } }, { editedAt: { not: null } }] }
+          : { createdAt: { gte: options.after } }
+        : {}),
+    },
     orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     select: withAuthor
-      ? { id: true, role: true, content: true, createdAt: true, authorUserId: true }
+      ? { id: true, role: true, content: true, createdAt: true, authorUserId: true, authorType: true, messageKind: true, editedAt: true }
       : { id: true, role: true, content: true, createdAt: true },
   })
 
@@ -147,20 +172,71 @@ export async function getAgentConversationMessages(
     : []
   const names = new Map(users.map((u) => [u.id, sanitizeAuthorLabel(u.name, u.email)]))
 
-  return authored.map(({ row, authorUserId }) => ({
-    id: row.id,
-    role: row.role,
-    content: row.content,
-    createdAt: row.createdAt,
-    authorUserId,
-    authorName: authorUserId ? (names.get(authorUserId) ?? null) : null,
-  }))
+  type Extra = { authorType?: string | null; messageKind?: string | null; editedAt?: Date | null }
+  // The admin lookup is only needed when somebody else's words are in play, so a plain own-messages read costs nothing extra.
+  const editContext = { ownerUserId: conversation.userId, visibility: conversation.visibility, isInterview: conversation.interviewProcessingJson != null, userId, archived: conversation.archivedAt != null }
+  const needsAdmin = authored.some(({ row, authorUserId }) => row.role === "user" && authorUserId !== userId)
+  const isAdmin = needsAdmin && conversation.visibility === "WORKSPACE" ? await isWorkspaceAdmin(prisma, workspaceId, userId) : false
+
+  return authored.map(({ row, authorUserId }) => {
+    const extra = row as Extra
+    const authorType = extra.authorType ?? null
+    const messageKind = extra.messageKind ?? null
+    return {
+      id: row.id,
+      role: row.role,
+      content: row.content,
+      createdAt: row.createdAt,
+      authorUserId,
+      authorName: authorUserId ? (names.get(authorUserId) ?? null) : null,
+      editedAt: extra.editedAt ?? null,
+      authorType,
+      messageKind,
+      canEdit: canEditMessage(
+        { role: row.role, content: row.content, authorUserId, authorType, messageKind },
+        { ...editContext, isAdmin },
+      ),
+      canDelete: false,
+    }
+  })
 }
 
 /**
- * Archive or restore a conversation. Owner-only: a participant who wants a shared chat
- * out of their way leaves it instead. Returns false when the caller is not the owner (or
- * has no access), which routes report as 404.
+ * Stamp or clear `archivedAt` without disturbing `updatedAt`.
+ *
+ * Prisma's updatedAt write extension sets `now` on any update that omits the column, which would reorder every list, so
+ * the conversation's own value is written back explicitly. That value is re-read here (inside the caller's transaction)
+ * and the write is compare-and-set on it: if a message bumped `updatedAt` in between, the write matches no row and is
+ * retried against the new value, so a concurrent bump is never reverted. Returns whether anything changed (false when the
+ * row is already in the requested state or is gone), so repeats are no-ops.
+ */
+export async function stampConversationArchived(
+  db: Pick<AppPrismaClient, "agentConversation">,
+  input: { conversationId: string; workspaceId: string; archived: boolean; now?: Date },
+): Promise<boolean> {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const current = await db.agentConversation.findUnique({
+      where: { id: input.conversationId },
+      select: { archivedAt: true, updatedAt: true },
+    })
+    if (!current || (current.archivedAt != null) === input.archived) return false
+    const { count } = await db.agentConversation.updateMany({
+      where: {
+        id: input.conversationId,
+        workspaceId: input.workspaceId,
+        updatedAt: current.updatedAt,
+        archivedAt: input.archived ? null : { not: null },
+      },
+      data: { archivedAt: input.archived ? (input.now ?? new Date()) : null, updatedAt: current.updatedAt },
+    })
+    if (count > 0) return true
+  }
+  throw new Error("Could not update the conversation; please try again.")
+}
+
+/**
+ * Archive or restore a PRIVATE conversation. Owner-only: a participant who wants a shared chat out of their way leaves
+ * it instead. Returns false when the caller is not the owner (or has no access), which routes report as 404.
  */
 export async function setAgentConversationArchived(
   conversationId: string,
@@ -169,9 +245,11 @@ export async function setAgentConversationArchived(
   archived: boolean
 ): Promise<boolean> {
   const prisma = getPrisma()
-  const { count } = await prisma.agentConversation.updateMany({
+  const owned = await prisma.agentConversation.findFirst({
     where: { id: conversationId, ...ownedConversationsWhere(workspaceId, userId) },
-    data: { archivedAt: archived ? new Date() : null },
+    select: { id: true },
   })
-  return count > 0
+  if (!owned) return false
+  await stampConversationArchived(prisma, { conversationId, workspaceId, archived })
+  return true
 }
