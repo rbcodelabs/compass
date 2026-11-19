@@ -128,7 +128,19 @@ test.describe("GitHub PR smart chips", () => {
         });
       });
       await page.keyboard.press("ArrowRight");
-      console.log("DIAG-198 after ArrowRight " + JSON.stringify(await page.evaluate(() => ({ active: document.activeElement?.tagName, sel: window.getSelection()?.toString() }))));
+      const readSel = await (async () => {
+        const read = () => page.evaluate(() => {
+          const ed = (document.querySelector(".ProseMirror") as unknown as { editor: { state: { selection: { from: number; to: number } } } }).editor;
+          const sel = window.getSelection();
+          const node = sel?.anchorNode ?? null;
+          const describe = (n: Node | null) => (n ? (n.nodeType === 3 ? "#text(" + (n.textContent ?? "").slice(0, 20) + ")<" + (n.parentElement?.tagName ?? "") + "." + (n.parentElement?.className ?? "").toString().slice(0, 25) : (n as Element).tagName + "." + ((n as Element).className ?? "").toString().slice(0, 25)) : null);
+          return { pm: ed.state.selection.from + "-" + ed.state.selection.to, domCollapsed: sel?.isCollapsed, anchor: describe(node), off: sel?.anchorOffset, bubble: !!document.querySelector("[data-testid=doc-bubble-menu]"), focus: document.hasFocus() };
+        });
+        return read;
+      })();
+      console.log("DIAG-198 t0 " + JSON.stringify(await readSel()));
+      await page.waitForTimeout(60);
+      console.log("DIAG-198 t60 " + JSON.stringify(await readSel()));
       await page.keyboard.press("Enter");
       await page.keyboard.type("Unapproved: ");
       await pastePlainText(page, ".ProseMirror", UNAPPROVED_PR_URL);
