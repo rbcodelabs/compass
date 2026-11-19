@@ -60,6 +60,26 @@ describe("LegacyRailLinkRedirect", () => {
     expect(replace).not.toHaveBeenCalled();
   });
 
+  it("redirects a client-side navigation to an rc URL after mount", () => {
+    const { rerender } = mount("foo=bar");
+    expect(replace).not.toHaveBeenCalled();
+    search = "foo=bar&rc=c2";
+    rerender(<LegacyRailLinkRedirect />);
+    expect(replace).toHaveBeenCalledTimes(1);
+    expect(replace).toHaveBeenCalledWith("/acme/main/okrs?foo=bar&detail=conversation%3Ac2", { scroll: false });
+  });
+
+  it("preserves the hash", () => {
+    window.location.hash = "#section";
+    mount("rc=c1");
+    expect(replace).toHaveBeenCalledWith("/acme/main/okrs?detail=conversation%3Ac1#section", { scroll: false });
+  });
+
+  it("ignores a bare rc=", () => {
+    mount("rc=&foo=bar");
+    expect(replace).not.toHaveBeenCalled();
+  });
+
   it("redirects once: re-render does not loop", () => {
     const { rerender } = mount("rc=c1");
     rerender(<LegacyRailLinkRedirect />);
