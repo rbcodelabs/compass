@@ -111,7 +111,7 @@ describe("AgentChat shared messages", () => {
   })
 
   it("loads the workspace's mention options up front when something is editable, so the first Edit click has them", async () => {
-    const fetchMock = vi.fn(async () => new Response("{}", { status: 200 }))
+    const fetchMock = vi.fn(async (_url: string) => new Response("{}", { status: 200 }))
     vi.stubGlobal("fetch", fetchMock)
     render(<AgentChat {...props()} />)
     await waitFor(() =>
