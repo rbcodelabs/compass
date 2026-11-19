@@ -151,9 +151,7 @@ export async function postTargetCommentWithOptionalTask(input: PostTargetComment
       // The comment was mirrored into a conversation after it committed (TASK-195 S0): withdraw that too, or the failed post
       // would leave a ghost conversation and message the list shows. A root takes its conversation with it (a pure mirror is
       // the one hard delete S0 allows); a reply only loses its own message.
-      await removeCommentMirrorAfterCommit(created.parentId
-        ? { conversationId: created.parentId, commentIds: [created.id], threadDeleted: false }
-        : { conversationId: created.id, commentIds: [created.id], threadDeleted: true })
+      // MUTATION CHECK: cleanup removed
       return { ok: false, error: "TASK_FAILED", message: error instanceof Error ? error.message : "Could not create the task." }
     }
   }
