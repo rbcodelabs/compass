@@ -399,7 +399,7 @@ export function ObjectiveRow({
  * resolves the nearest SortableContext, so an enclosing key-result context
  * would swallow the objective drag and reorder would silently do nothing.
  */
-function SortableKeyResults({
+export function SortableKeyResults({
   keyResults: initialKeyResults,
   objectiveId,
   orgSlug,
@@ -419,7 +419,9 @@ function SortableKeyResults({
   hideProgress?: boolean;
 }) {
   const [isSaving, startTransition] = useTransition();
-  const { state: keyResults, setState: setKeyResults } = useServerSyncedState(initialKeyResults, (k) => k, isSaving);
+  // A drag in progress also defers adoption: the list must not change under the pointer.
+  const [isDragging, setIsDragging] = useState(false);
+  const { state: keyResults, setState: setKeyResults } = useServerSyncedState(initialKeyResults, (k) => k, isSaving || isDragging);
 
   // Stable across server and client; without it @dnd-kit numbers its
   // aria-describedby ids from a global counter and hydration mismatches.
@@ -430,6 +432,7 @@ function SortableKeyResults({
   );
 
   function handleDragEnd(event: DragEndEvent) {
+    setIsDragging(false);
     const { active, over } = event;
     if (!over || active.id === over.id) return;
 
@@ -446,7 +449,7 @@ function SortableKeyResults({
   }
 
   return (
-    <DndContext id={dndId} sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+    <DndContext id={dndId} sensors={sensors} collisionDetection={closestCenter} onDragStart={() => setIsDragging(true)} onDragCancel={() => setIsDragging(false)} onDragEnd={handleDragEnd}>
       <SortableContext items={keyResults.map((kr) => kr.id)} strategy={verticalListSortingStrategy}>
         <div className="okx-krs">
           {keyResults.map((kr) => (

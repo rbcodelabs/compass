@@ -284,9 +284,6 @@ export default async function CyclePage({ params, searchParams }: CyclePageProps
       {/* Objectives list + inline add */}
       <div className="flex flex-col gap-4">
         <ObjectivesList
-          key={objectivesWithData
-            .map((o) => `${o.id}:${o.parentKeyResultId ?? ""}`)
-            .join(",")}
           objectives={objectivesWithData.map((obj) => ({
             ...obj,
             parentKeyResultId: obj.parentKeyResultId ?? null,

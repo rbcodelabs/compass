@@ -84,7 +84,9 @@ export function ObjectivesList({
 }: Props) {
   const [isSaving, startTransition] = useTransition();
   // Follows the server (live refresh) but defers adopting it while a reorder/save is in flight.
-  const { state: objectives, setState: setObjectives } = useServerSyncedState(initialObjectives, (o) => o, isSaving);
+  // A drag in progress also defers adoption: the list must not change under the pointer.
+  const [isDragging, setIsDragging] = useState(false);
+  const { state: objectives, setState: setObjectives } = useServerSyncedState(initialObjectives, (o) => o, isSaving || isDragging);
   const labels = useLabels();
   // Collapsed ids are view state only (not persisted); everything starts expanded.
   const [collapsedIds, setCollapsedIds] = useState<ReadonlySet<string>>(() => new Set());
@@ -128,6 +130,7 @@ export function ObjectivesList({
   );
 
   function handleDragEnd(event: DragEndEvent) {
+    setIsDragging(false);
     const { active, over } = event;
     if (!over || active.id === over.id) return;
 
@@ -198,6 +201,8 @@ export function ObjectivesList({
       id={dndId}
       sensors={sensors}
       collisionDetection={closestCenter}
+      onDragStart={() => setIsDragging(true)}
+      onDragCancel={() => setIsDragging(false)}
       onDragEnd={handleDragEnd}
     >
       {groups ? (
