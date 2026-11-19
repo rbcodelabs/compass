@@ -67,6 +67,9 @@ import type { MentionOptions } from "@/components/docs/mention-editor"
 import { plainTextOf } from "@/lib/comment-mentions"
 import { refreshEditedMessages } from "@/lib/conversation-message-merge"
 import { SharedMessageContent } from "@/components/conversations/message-actions"
+import { CommentTaskCard } from "@/components/docs/comment-task-card"
+import type { CommentTaskCardData } from "@/lib/comment-task-card"
+import { parseTaskCards } from "@/lib/conversation-panel-messages"
 import { AttachMenu, uploadAgentFiles, type AttachedItem, type AttachedUpload } from "@/components/agent/composer/attach-menu"
 import { SeedContextChip } from "@/components/agent/seed-context-chip"
 import { AgentParticipantsPanel, type Roster } from "@/components/agent/agent-participants"
@@ -138,6 +141,8 @@ type Props = {
   conversations: ConversationSummary[]
   activeConversationId: string | null
   initialMessages: Message[]
+  /** Task cards by message id (the comment a task was made from shares its id with the message): shown under that message. */
+  initialTaskCards?: Record<string, CommentTaskCardData>
   userInitials: string
   /** The signed-in user, to tell their messages from other participants'. */
   userId: string
@@ -252,6 +257,7 @@ export function AgentChat({
   conversations,
   activeConversationId,
   initialMessages,
+  initialTaskCards,
   userInitials,
   userId,
   seedEntity,
@@ -462,6 +468,9 @@ export function AgentChat({
     [workspaceId, activeConversationId, basePath, routeSegment, router],
   )
   const [messages, setMessages] = useState<Message[]>(initialMessages)
+  const [taskCards, setTaskCards] = useState<Record<string, CommentTaskCardData>>(initialTaskCards ?? {})
+  // The server's cards for this conversation replace what a previously open one showed.
+  useEffect(() => { setTaskCards(initialTaskCards ?? {}) }, [activeConversationId, initialTaskCards])
 
   // The editor captures its mention options when it mounts, so they must already be here by the first click on Edit.
   const hasEditableMessage = messages.some((m) => m.canEdit)
@@ -1115,7 +1124,19 @@ export function AgentChat({
       return
     }
     if (!res.ok) return
-    const body = await res.json() as { messages?: Message[] }
+    const body = await res.json() as { messages?: Message[]; taskCards?: unknown }
+    // Cards ride along with every read; a poll only returns new (and edited) messages, so cards are replaced per returned message.
+    const polledCards = parseTaskCards(body.taskCards)
+    const returnedIds = (body.messages ?? []).flatMap((m) => (m && typeof m.id === "string" ? [m.id] : []))
+    if (returnedIds.length > 0 || Object.keys(polledCards).length > 0) {
+      // For every message the server just returned, its card is whatever the server says now (changed, or gone). Messages
+      // the poll did not return keep the card they have.
+      setTaskCards((current) => {
+        const next = { ...current }
+        for (const id of returnedIds) delete next[id]
+        return { ...next, ...polledCards }
+      })
+    }
     const incoming = (body.messages ?? []).flatMap((m) =>
       m && typeof m.id === "string" && typeof m.content === "string"
         ? [{ ...m, role: m.role === "assistant" ? ("assistant" as const) : ("user" as const) }]
@@ -1638,7 +1659,7 @@ export function AgentChat({
               </p>
             )}
             {messages.map((m) => (
-              <MessageRow key={m.id} focused={Boolean(focusMessageId) && m.id === focusMessageId} message={m} userInitials={userInitials} userId={userId} shared={shared} workspaceId={workspaceId} conversationId={activeConversationId} basePath={basePath} onInspectSubagent={selectChildRun} mentionOptions={mentionOptions} onOpenMentions={loadMentionOptions} onMessageEdited={applyMessageEdit} />
+              <MessageRow key={m.id} focused={Boolean(focusMessageId) && m.id === focusMessageId} message={m} userInitials={userInitials} userId={userId} shared={shared} workspaceId={workspaceId} conversationId={activeConversationId} basePath={basePath} onInspectSubagent={selectChildRun} mentionOptions={mentionOptions} onOpenMentions={loadMentionOptions} onMessageEdited={applyMessageEdit} taskCard={taskCards[m.id]} />
             ))}
 
             {isStreaming && (
@@ -2013,6 +2034,7 @@ function MessageRow({
   mentionOptions,
   onOpenMentions,
   onMessageEdited,
+  taskCard,
 }: {
   message: Message
   /** The message a deep link points at: ringed and marked `data-comment-focused`. */
@@ -2028,6 +2050,7 @@ function MessageRow({
   mentionOptions: MentionOptions
   onOpenMentions?: () => void
   onMessageEdited?: (edit: { id: string; content: string; editedAt: string }) => void
+  taskCard?: CommentTaskCardData
 }) {
   const isUser = message.role === "user"
   // A message with no recorded author is this tab's own, not yet reported back.
@@ -2105,6 +2128,7 @@ function MessageRow({
             <p className="text-text-subtle">…</p>
           )}
         </div>
+        {taskCard && stored && <CommentTaskCard card={taskCard} startsRun={false} taskHref={`${basePath}/tasks/${taskCard.taskId}`} />}
       </div>
     </Row>
   )

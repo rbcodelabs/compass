@@ -559,6 +559,8 @@ export function ConversationPanel({ conversationId }: { conversationId: string }
 
   const initialMessages =
     !isNew && messagesState.id === conversationId ? messagesState.messages : EMPTY_MESSAGES
+  const initialTaskCards =
+    !isNew && messagesState.id === conversationId ? messagesState.taskCards : EMPTY_TASK_CARDS
   const currentSettings = !isNew && settingsState?.id === conversationId ? settingsState : null
   const seed = ctx.pendingSeed
 
@@ -584,6 +586,7 @@ export function ConversationPanel({ conversationId }: { conversationId: string }
       conversations={ctx.threads.map((t) => ({ id: t.id, title: t.title }))}
       activeConversationId={activeConversationId}
       initialMessages={initialMessages}
+      initialTaskCards={initialTaskCards}
       userId={ctx.userId}
       userInitials={ctx.userInitials}
       suggestedInstruction={isNew ? seed?.suggestedInstruction : undefined}

@@ -11,11 +11,14 @@ import { z } from "zod"
 import { auth } from "@/auth"
 import { getAgentConversationMessages } from "@/lib/agent-conversations"
 import { conversationNotFound, NO_STORE_HEADERS } from "@/lib/agent-conversation-not-found"
+import { loadConversationTaskCards } from "@/lib/conversation-task-cards"
 
 // `AgentConversation.id` is `@db.Uuid`. A malformed id would otherwise reach
 // Postgres as a failed cast and surface as a Prisma 500; it names no
 // conversation the caller could own, so it gets the same 404 as any other.
 const conversationIdSchema = z.string().uuid()
+
+const MAX_CARD_LOOKUPS = 500
 
 export async function GET(
   request: Request,
@@ -48,6 +51,14 @@ export async function GET(
   })
   if (!messages) return conversationNotFound()
 
-  // `taskCards` is a stub until task rows land (TASK-195 S4); it is keyed by message id, so the shape will not change.
-  return Response.json({ messages, taskCards: {} }, { headers: NO_STORE_HEADERS })
+  // A task made from a root post is keyed by the post's comment id, which is the message id (the mirror reuses it). Access
+  // was proven above, so cards are only ever read for a conversation this caller may see.
+  // Only person-authored comment-kind messages can carry a task (agent replies, plan proposals and system rows never do), and
+  // only the newest 500 are looked up, so a very long thread cannot turn one read into an unbounded IN list.
+  const cardable = messages
+    .filter((message) => message.role === "user" && (!message.messageKind || message.messageKind === "COMMENT" || message.messageKind === "MESSAGE"))
+    .map((message) => message.id)
+    .slice(-MAX_CARD_LOOKUPS)
+  const taskCards = await loadConversationTaskCards(workspaceId, cardable)
+  return Response.json({ messages, taskCards }, { headers: NO_STORE_HEADERS })
 }
