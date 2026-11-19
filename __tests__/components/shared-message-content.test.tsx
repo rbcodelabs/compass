@@ -12,6 +12,12 @@ vi.mock("@/components/github/pull-request-chip", () => ({
   ),
 }))
 
+const markdownRenders = vi.hoisted(() => ({ count: 0 }))
+vi.mock("@/components/markdown-content", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/components/markdown-content")>()
+  return { ...actual, MarkdownContent: (props: React.ComponentProps<typeof actual.MarkdownContent>) => { markdownRenders.count += 1; return actual.MarkdownContent(props) } }
+})
+
 import { SharedMessageBody, SharedMessageContent } from "@/components/conversations/message-actions"
 import type { MentionOptions } from "@/components/docs/mention-editor"
 
@@ -147,5 +153,29 @@ describe("SharedMessageContent", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("You can't edit this message.")
     expect(screen.getByTestId("message-edit-form")).toBeInTheDocument()
     expect(onEdited).not.toHaveBeenCalled()
+  })
+
+  it("returns focus to the Edit button after Cancel and after Save", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ message: { id: "m-1", content: "first words", editedAt: "2026-11-19T10:00:00.000Z" } })))
+    renderContent()
+    fireEvent.click(screen.getByRole("button", { name: "Edit comment by Dana" }))
+    fireEvent.click(await screen.findByRole("button", { name: "Cancel" }))
+    await waitFor(() => expect(screen.getByRole("button", { name: "Edit comment by Dana" })).toHaveFocus())
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit comment by Dana" }))
+    fireEvent.click(await screen.findByRole("button", { name: "Save edit" }))
+    await waitFor(() => expect(screen.queryByTestId("message-edit-form")).toBeNull())
+    await waitFor(() => expect(screen.getByRole("button", { name: "Edit comment by Dana" })).toHaveFocus())
+  })
+})
+
+describe("SharedMessageBody memoization", () => {
+  it("does not re-render the markdown when the parent re-renders with the same content and options", () => {
+    markdownRenders.count = 0
+    const { rerender } = render(<SharedMessageBody content="same" mentionOptions={OPTIONS} />)
+    rerender(<SharedMessageBody content="same" mentionOptions={OPTIONS} />)
+    expect(markdownRenders.count).toBe(1)
+    rerender(<SharedMessageBody content="different" mentionOptions={OPTIONS} />)
+    expect(markdownRenders.count).toBe(2)
   })
 })

@@ -7,11 +7,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const mockPrisma = {
-  agentConversation: { findFirst: vi.fn(), update: vi.fn() },
+  agentConversation: { findFirst: vi.fn(), findUnique: vi.fn(), updateMany: vi.fn() },
   agentMessage: { findFirst: vi.fn(), update: vi.fn() },
   comment: { findUnique: vi.fn(), update: vi.fn() },
   workspace: { findUnique: vi.fn() },
-  agentRun: { create: vi.fn() },
   $transaction: vi.fn(),
 }
 vi.mock("@/lib/db", () => ({ default: () => mockPrisma }))
@@ -57,7 +56,8 @@ beforeEach(() => {
     args?.orderBy ? { id: MSG } : message(),
   )
   mockPrisma.agentMessage.update.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({ ...message(), ...data }))
-  mockPrisma.agentConversation.update.mockResolvedValue({})
+  mockPrisma.agentConversation.findUnique.mockImplementation(async () => ({ title: "Original words", summary: "Original words", updatedAt: CONV_UPDATED }))
+  mockPrisma.agentConversation.updateMany.mockResolvedValue({ count: 1 })
   mockPrisma.comment.findUnique.mockResolvedValue(null)
   mockPrisma.comment.update.mockResolvedValue({})
   mockPrisma.workspace.findUnique.mockResolvedValue(noAdmin)
@@ -188,25 +188,60 @@ describe("editConversationMessage writes", () => {
 
   it("does not reorder the conversation: updatedAt is never bumped", async () => {
     await edit("author")
-    for (const [arg] of mockPrisma.agentConversation.update.mock.calls) {
+    for (const [arg] of mockPrisma.agentConversation.updateMany.mock.calls) {
       expect(arg.data.updatedAt).toEqual(CONV_UPDATED)
     }
   })
 
   it("re-derives the title only when it still equals the one derived from the old text", async () => {
-    mockPrisma.agentConversation.findFirst.mockResolvedValue(conversation({ title: "Original words" }))
     await edit("author", "Brand new opening line\nmore")
-    expect(mockPrisma.agentConversation.update.mock.calls[0]![0].data).toMatchObject({ title: "Brand new opening line" })
+    expect(mockPrisma.agentConversation.updateMany.mock.calls[0]![0].data).toMatchObject({ title: "Brand new opening line" })
 
-    mockPrisma.agentConversation.update.mockClear()
-    mockPrisma.agentConversation.findFirst.mockResolvedValue(conversation({ title: "Renamed by a person" }))
+    mockPrisma.agentConversation.updateMany.mockClear()
+    mockPrisma.agentConversation.findUnique.mockResolvedValue({ title: "Renamed by a person", summary: "x", updatedAt: CONV_UPDATED })
     await edit("author", "Brand new opening line")
-    const data = mockPrisma.agentConversation.update.mock.calls[0]?.[0].data ?? {}
+    const data = mockPrisma.agentConversation.updateMany.mock.calls[0]?.[0].data ?? {}
     expect(data).not.toHaveProperty("title")
   })
 
-  it("never starts or re-runs an agent, even when the message was already answered", async () => {
-    await edit("author")
-    expect(mockPrisma.agentRun.create).not.toHaveBeenCalled()
+  it("refuses a plan-proposal comment (404, like the legacy comment route) and writes nothing", async () => {
+    mockPrisma.comment.findUnique.mockResolvedValue({ id: MSG, workspaceId: WS, solutionPlanProposal: { commentId: MSG } })
+    expect(await edit("author")).toMatchObject({ ok: false, status: 404 })
+    expect(mockPrisma.agentMessage.update).not.toHaveBeenCalled()
+    expect(mockPrisma.comment.update).not.toHaveBeenCalled()
+  })
+
+  it("writes derived fields only against the row it just read: a concurrent bump of updatedAt makes it a no-op", async () => {
+    const fresh = new Date("2026-11-02T10:00:00.000Z")
+    mockPrisma.agentConversation.findUnique.mockResolvedValue({ title: "Original words", summary: "Original words", updatedAt: fresh })
+    await edit("author", "Brand new opening line")
+    expect(mockPrisma.agentConversation.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: CONV, updatedAt: fresh }, data: expect.objectContaining({ updatedAt: fresh }) }),
+    )
+  })
+
+  it("maps a message deleted mid-edit (P2025) to 404 instead of a 500", async () => {
+    mockPrisma.agentMessage.update.mockRejectedValue(Object.assign(new Error("gone"), { code: "P2025" }))
+    expect(await edit("author")).toMatchObject({ ok: false, status: 404 })
+  })
+
+  it("retries a serialization conflict up to 3 attempts, then surfaces it", async () => {
+    mockPrisma.agentMessage.update
+      .mockRejectedValueOnce(Object.assign(new Error("OC000 conflict"), { code: "P2034" }))
+      .mockImplementationOnce(async ({ data }: { data: Record<string, unknown> }) => ({ ...message(), ...data }))
+    expect((await edit("author")).ok).toBe(true)
+    expect(mockPrisma.$transaction).toHaveBeenCalledTimes(2)
+
+    mockPrisma.$transaction.mockClear()
+    mockPrisma.agentMessage.update.mockReset()
+    mockPrisma.agentMessage.update.mockRejectedValue(Object.assign(new Error("x"), { code: "40001" }))
+    await expect(edit("author")).rejects.toThrow()
+    expect(mockPrisma.$transaction).toHaveBeenCalledTimes(3)
+  })
+
+  it("does not retry an ordinary failure", async () => {
+    mockPrisma.agentMessage.update.mockRejectedValue(new Error("boom"))
+    await expect(edit("author")).rejects.toThrow("boom")
+    expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1)
   })
 })

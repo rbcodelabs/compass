@@ -155,39 +155,78 @@ export async function editConversationMessage(input: {
   if (!canEditMessage(message, ctx)) return { ok: false, status: 403, error: "You can't edit this message." }
 
   const editedAt = new Date()
-  const updated = await prisma.$transaction(async (tx) => {
-    const row = await tx.agentMessage.update({ where: { id: messageId }, data: { content, editedAt } })
+  const operation = () =>
+    prisma.$transaction(
+      async (tx) => {
+        // The legacy comment route refuses to edit a plan proposal. A proposal posted as the user's own comment can
+        // mirror as an ordinary message first, so the guard has to read the comment row, not trust the message kind.
+        const comment = await tx.comment.findUnique({
+          where: { id: messageId },
+          select: { id: true, workspaceId: true, solutionPlanProposal: { select: { commentId: true } } },
+        })
+        if (comment?.solutionPlanProposal) return null
 
-    // `edited` on the legacy DTO is `updatedAt !== createdAt`, so the comment moves with the message.
-    const comment = await tx.comment.findUnique({ where: { id: messageId }, select: { id: true, workspaceId: true } })
-    if (comment && comment.workspaceId === workspaceId) {
-      await tx.comment.update({ where: { id: messageId }, data: { body: content, updatedAt: editedAt } })
-    }
+        const row = await tx.agentMessage.update({ where: { id: messageId }, data: { content, editedAt } })
 
-    const first = await tx.agentMessage.findFirst({
-      where: { conversationId },
-      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-      select: { id: true },
-    })
-    const last = await tx.agentMessage.findFirst({
-      where: { conversationId },
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      select: { id: true },
-    })
-    const data: { title?: string; summary?: string; updatedAt: Date } = { updatedAt: conversation.updatedAt }
-    if (first?.id === messageId && conversation.title != null) {
-      const old = autoTitles(message.content).find((candidate) => candidate.title === conversation.title)
-      if (old) data.title = old.derive(content)
+        // `edited` on the legacy DTO is `updatedAt !== createdAt`, so the comment moves with the message.
+        if (comment && comment.workspaceId === workspaceId) {
+          await tx.comment.update({ where: { id: messageId }, data: { body: content, updatedAt: editedAt } })
+        }
+
+        // Re-read inside the transaction: the copy read earlier may be stale by now (a reply or an agent turn can have
+        // bumped the conversation), and writing it back would silently undo that.
+        const fresh = await tx.agentConversation.findUnique({
+          where: { id: conversationId },
+          select: { title: true, summary: true, updatedAt: true },
+        })
+        if (fresh) {
+          const first = await tx.agentMessage.findFirst({
+            where: { conversationId },
+            orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+            select: { id: true },
+          })
+          const last = await tx.agentMessage.findFirst({
+            where: { conversationId },
+            orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+            select: { id: true },
+          })
+          // `updatedAt` is restated on purpose: the repo's write extension bumps it to now on any update that omits it,
+          // and an edit must not move the conversation in a list.
+          const data: { title?: string; summary?: string; updatedAt: Date } = { updatedAt: fresh.updatedAt }
+          if (first?.id === messageId && fresh.title != null) {
+            const old = autoTitles(message.content).find((candidate) => candidate.title === fresh.title)
+            if (old) data.title = old.derive(content)
+          }
+          if (last?.id === messageId) {
+            const summary = deriveConversationSummary(content)
+            if (summary) data.summary = summary
+          }
+          if (data.title !== undefined || data.summary !== undefined) {
+            // Conditional on the updatedAt just read: if something bumped the conversation since, skip rather than revert it.
+            await tx.agentConversation.updateMany({ where: { id: conversationId, updatedAt: fresh.updatedAt }, data })
+          }
+        }
+        return row
+      },
+      // Aurora DSQL supports Repeatable Read, not Serializable (same choice as deleteBrowserComment).
+      { isolationLevel: "RepeatableRead" },
+    )
+
+  let updated: Awaited<ReturnType<typeof operation>> = null
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      updated = await operation()
+      break
+    } catch (error) {
+      const value = error as { code?: string; meta?: { code?: string }; message?: string }
+      // The message was deleted or archived between the read and the write.
+      if (value.code === "P2025") return NOT_FOUND
+      const retryable =
+        value.code === "P2034" || value.code === "40001" || value.meta?.code === "40001" || /OC00\d|serialization/i.test(value.message ?? "")
+      if (!retryable || attempt === 2) throw error
     }
-    if (last?.id === messageId) {
-      const summary = deriveConversationSummary(content)
-      if (summary) data.summary = summary
-    }
-    if (data.title !== undefined || data.summary !== undefined) {
-      await tx.agentConversation.update({ where: { id: conversationId }, data })
-    }
-    return row
-  })
+  }
+  if (!updated) return NOT_FOUND
 
   return {
     ok: true,

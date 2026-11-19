@@ -43,7 +43,10 @@ export async function GET(
     after = new Date(afterParam)
     if (Number.isNaN(after.getTime())) return new Response("Invalid after cursor", { status: 400 })
   }
-  const messages = await getAgentConversationMessages(conversationId, workspaceId, session.user.id, { after })
+  const messages = await getAgentConversationMessages(conversationId, workspaceId, session.user.id, {
+    after,
+    includeEdited: after ? new URL(request.url).searchParams.get("includeEdited") === "1" : false,
+  })
   if (!messages) return new Response("Not found", { status: 404 })
 
   // `taskCards` is a stub until task rows land (TASK-195 S4); it is keyed by message id, so the shape will not change.

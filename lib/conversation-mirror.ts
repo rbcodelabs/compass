@@ -104,7 +104,9 @@ export async function mirrorCommentThread(
   const { root, replies, ownerUserId, onlyCommentId } = thread
   const allMessages = [root, ...replies]
   const lastMessage = allMessages[allMessages.length - 1]!
-  const threadUpdatedAt = lastMessage.updatedAt > root.updatedAt ? lastMessage.updatedAt : root.updatedAt
+  // Thread activity is when somebody last SAID something, not when text was last edited: a comment's updatedAt moves on
+  // an edit (and on resolve), and letting that reach the conversation would reorder every list after a repair.
+  const threadUpdatedAt = allMessages.reduce((latest, item) => (item.createdAt > latest ? item.createdAt : latest), root.createdAt)
   const title = deriveConversationTitleFromComment(root.body)
   const status = root.status === "RESOLVED" ? "RESOLVED" : "OPEN"
   // `Comment` has no resolve timestamp; the resolve bumps the root's updatedAt, which is the best real time available.
@@ -132,12 +134,18 @@ export async function mirrorCommentThread(
     const target = items[0]
     const existing = await prisma.agentConversation.findUnique({ where: { id: root.id }, select: { updatedAt: true } })
     const targetSummary = deriveConversationSummary(target?.body ?? "") ?? title.slice(0, 140)
-    const newer = Boolean(target && existing && target.updatedAt > existing.updatedAt)
-    await prisma.agentConversation.upsert({
-      where: { id: root.id },
-      create: createHeader(deriveConversationSummary(lastMessage.body) ?? title.slice(0, 140), threadUpdatedAt),
-      update: newer && target ? { summary: targetSummary, updatedAt: target.updatedAt } : {},
-    })
+    const newer = Boolean(target && existing && target.createdAt > existing.updatedAt)
+    // The updatedAt write extension bumps `updatedAt` to now on any upsert/update that omits it, so an "empty" update
+    // would silently reorder the conversation. Write only when there is something to change, and always say updatedAt.
+    if (!existing) {
+      await prisma.agentConversation.upsert({
+        where: { id: root.id },
+        create: createHeader(deriveConversationSummary(lastMessage.body) ?? title.slice(0, 140), threadUpdatedAt),
+        update: { updatedAt: threadUpdatedAt },
+      })
+    } else if (newer && target) {
+      await prisma.agentConversation.updateMany({ where: { id: root.id }, data: { summary: targetSummary, updatedAt: target.createdAt } })
+    }
   } else {
     const summary = deriveConversationSummary(lastMessage.body) ?? title.slice(0, 140)
     await prisma.agentConversation.upsert({
@@ -147,7 +155,8 @@ export async function mirrorCommentThread(
       update: { status, summary, updatedAt: threadUpdatedAt, ...(status === "OPEN" ? { resolvedAt: null, resolvedById: null } : {}) },
     })
     if (status === "RESOLVED") {
-      await prisma.agentConversation.updateMany({ where: { id: root.id, resolvedAt: null }, data: { resolvedAt } })
+      // updatedAt is restated: the write extension would otherwise bump it to now.
+      await prisma.agentConversation.updateMany({ where: { id: root.id, resolvedAt: null }, data: { resolvedAt, updatedAt: threadUpdatedAt } })
     }
   }
 
@@ -277,39 +286,57 @@ function isRetryable(error: unknown): boolean {
   return value.code === "P2034" || value.code === "40001" || value.meta?.code === "40001" || /OC00\d|serialization/i.test(value.message ?? "")
 }
 
+type CounterDb = AppPrismaClient | AppTransactionClient
+/** Tables that may not be migrated on every deployment. Each counts rows of one kind that are not a comment mirror. */
+const OPTIONAL_COUNTERS: Array<[string, (db: CounterDb, conversationId: string, mirrorUsers: string[]) => Promise<number>]> = [
+  ["agentRun", (db, id) => db.agentRun.count({ where: { conversationId: id } })],
+  ["agentChildRun", (db, id) => db.agentChildRun.count({ where: { conversationId: id } })],
+  ["agentInboxItem", (db, id) => db.agentInboxItem.count({ where: { conversationId: id } })],
+  ["agentScheduledWakeup", (db, id) => db.agentScheduledWakeup.count({ where: { conversationId: id } })],
+  ["agentConversationParticipant", (db, id, users) => db.agentConversationParticipant.count({ where: { conversationId: id, userId: { notIn: users } } })],
+  ["agentConversationReview", (db, id) => db.agentConversationReview.count({ where: { conversationId: id } })],
+  ["agentAuditLog", (db, id) => db.agentAuditLog.count({ where: { conversationId: id } })],
+  ["agentSession", (db, id) => db.agentSession.count({ where: { conversationId: id } })],
+  ["agentWebSearch", (db, id) => db.agentWebSearch.count({ where: { conversationId: id } })],
+  ["agentWebFetch", (db, id) => db.agentWebFetch.count({ where: { conversationId: id } })],
+]
+const NIL_UUID = "00000000-0000-0000-0000-000000000000"
+
+/**
+ * Which optional tables exist on this deployment. Probed OUTSIDE the delete transaction because in Postgres a
+ * statement that fails on a missing table aborts the whole transaction, so the transaction must never touch one.
+ */
+async function availableOptionalCounters(prisma: AppPrismaClient): Promise<Set<string>> {
+  const available = new Set<string>()
+  for (const [name, count] of OPTIONAL_COUNTERS) {
+    if ((await tolerateMissingTable(async () => { await count(prisma, NIL_UUID, []); return true }, false))) available.add(name)
+  }
+  return available
+}
+
 /**
  * Anything in the conversation that is not a mirror of a deleted comment: other messages, agent
  * runs, queued work, reviews, audit rows, transcripts, web rows, an interview, a non-comment
- * participant, or an origin link. Missing tables count as empty.
+ * participant, or an origin link. Optional tables that are not migrated are skipped (`available`).
  */
 async function hasNonMirrorContent(
   db: AppTransactionClient,
   conversation: { id: string; userId: string; interviewProcessingJson: string | null },
   commentAuthorIds: string[],
+  available: ReadonlySet<string>,
 ): Promise<boolean> {
   if (conversation.interviewProcessingJson) return true
   const conversationId = conversation.id
   const { countNonMirrorConversationLinks } = await import("@/lib/links/conversation-links")
   const mirrorUsers = [...new Set([conversation.userId, ...commentAuthorIds])]
-  const counts: Array<() => Promise<number>> = [
-    () => db.agentMessage.count({ where: { conversationId } }),
-    () => db.agentRun.count({ where: { conversationId } }),
-    () => db.agentChildRun.count({ where: { conversationId } }),
-    () => db.agentInboxItem.count({ where: { conversationId } }),
-    () => db.agentScheduledWakeup.count({ where: { conversationId } }),
-    () => db.agentConversationParticipant.count({ where: { conversationId, userId: { notIn: mirrorUsers } } }),
-    () => db.agentConversationReview.count({ where: { conversationId } }),
-    () => db.agentAuditLog.count({ where: { conversationId } }),
-    () => db.agentSession.count({ where: { conversationId } }),
-    () => db.agentWebSearch.count({ where: { conversationId } }),
-    () => db.agentWebFetch.count({ where: { conversationId } }),
-    () => db.pMInterview.count({ where: { agentConversationId: conversationId } }),
-    () => db.apiKey.count({ where: { scopeConversationId: conversationId } }),
-    // The mirror's own CONVERSATION_MENTIONS link is not content; any other link (task origin, CREATED) is.
-    () => countNonMirrorConversationLinks(db, conversationId),
-  ]
-  for (const count of counts) if ((await tolerateMissingTable(count, 0)) > 0) return true
-  return false
+  if ((await db.agentMessage.count({ where: { conversationId } })) > 0) return true
+  for (const [name, count] of OPTIONAL_COUNTERS) {
+    if (available.has(name) && (await count(db, conversationId, mirrorUsers)) > 0) return true
+  }
+  if ((await db.pMInterview.count({ where: { agentConversationId: conversationId } })) > 0) return true
+  if ((await db.apiKey.count({ where: { scopeConversationId: conversationId } })) > 0) return true
+  // The mirror's own CONVERSATION_MENTIONS link is not content; any other link (task origin, CREATED) is.
+  return (await countNonMirrorConversationLinks(db, conversationId)) > 0
 }
 
 /**
@@ -331,10 +358,11 @@ export async function removeCommentMirror(prisma: AppPrismaClient, input: Remove
     const latest = await prisma.agentMessage.findFirst({
       where: { conversationId },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      select: { content: true, createdAt: true, editedAt: true },
+      select: { content: true, createdAt: true },
     })
     if (!latest) return
-    const updatedAt = latest.editedAt && latest.editedAt > latest.createdAt ? latest.editedAt : latest.createdAt
+    // Activity time, not edit time (see mirrorCommentThread).
+    const updatedAt = latest.createdAt
     await prisma.agentConversation.updateMany({
       where: { id: conversationId },
       data: { summary: deriveConversationSummary(latest.content) ?? null, updatedAt },
@@ -342,9 +370,10 @@ export async function removeCommentMirror(prisma: AppPrismaClient, input: Remove
     return
   }
 
+  const available = await availableOptionalCounters(prisma)
   for (let attempt = 0; ; attempt += 1) {
     try {
-      await prisma.$transaction((tx) => removeDeletedThread(tx, conversationId, ids), { isolationLevel: "RepeatableRead" })
+      await prisma.$transaction((tx) => removeDeletedThread(tx, conversationId, ids, available), { isolationLevel: "RepeatableRead" })
       return
     } catch (error) {
       if (!isRetryable(error) || attempt >= 2) throw error
@@ -352,7 +381,7 @@ export async function removeCommentMirror(prisma: AppPrismaClient, input: Remove
   }
 }
 
-async function removeDeletedThread(tx: AppTransactionClient, conversationId: string, ids: string[]): Promise<void> {
+async function removeDeletedThread(tx: AppTransactionClient, conversationId: string, ids: string[], available: ReadonlySet<string>): Promise<void> {
   const conversation = await tx.agentConversation.findUnique({
     where: { id: conversationId },
     select: { id: true, userId: true, interviewProcessingJson: true, updatedAt: true, archivedAt: true },
@@ -365,16 +394,16 @@ async function removeDeletedThread(tx: AppTransactionClient, conversationId: str
   await tx.agentConversation.updateMany({ where: { id: conversationId }, data: { updatedAt: conversation.updatedAt } })
   const authorIds = await deleteMirrorMessages(tx, conversationId, ids)
 
-  if (await hasNonMirrorContent(tx, conversation, authorIds)) {
+  if (await hasNonMirrorContent(tx, conversation, authorIds, available)) {
     await tx.agentConversation.updateMany({
       where: { id: conversationId },
-      data: { archivedAt: conversation.archivedAt ?? new Date(), title: ARCHIVED_MIRROR_TITLE, summary: null },
+      data: { archivedAt: conversation.archivedAt ?? new Date(), title: ARCHIVED_MIRROR_TITLE, summary: null, updatedAt: conversation.updatedAt },
     })
     return
   }
   // Pure mirror: hard delete, children first (no FKs). See the named exception in the module header.
   const { deleteLinksForEntity } = await import("@/lib/links/service")
-  await tolerateMissingTable(() => tx.agentConversationParticipant.deleteMany({ where: { conversationId } }), { count: 0 })
+  if (available.has("agentConversationParticipant")) await tx.agentConversationParticipant.deleteMany({ where: { conversationId } })
   await deleteLinksForEntity(tx, "AGENT_CONVERSATION", [conversationId])
   await tx.agentConversation.deleteMany({ where: { id: conversationId } })
 }

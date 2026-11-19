@@ -104,4 +104,18 @@ describe("AgentChat shared messages", () => {
     expect(within(rows[0]!).queryByRole("button", { name: /Edit comment/ })).toBeNull()
     expect(rows[0]!.querySelector("strong")).toBeNull()
   })
+
+  it("falls back to a neutral name, never an empty one, in the Edit label", async () => {
+    render(<AgentChat {...props({ initialMessages: [{ id: "m-x", role: "user", content: "hi", authorUserId: "user-1", authorName: null, canEdit: true }] })} />)
+    expect(await screen.findByRole("button", { name: "Edit comment by Participant" })).toBeInTheDocument()
+  })
+
+  it("loads the workspace's mention options up front when something is editable, so the first Edit click has them", async () => {
+    const fetchMock = vi.fn(async (_url: string) => new Response("{}", { status: 200 }))
+    vi.stubGlobal("fetch", fetchMock)
+    render(<AgentChat {...props()} />)
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some(([u]) => String(u).includes("/api/agent/conversations/by-target?workspaceId=ws-1"))).toBe(true),
+    )
+  })
 })

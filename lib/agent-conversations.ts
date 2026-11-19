@@ -133,6 +133,11 @@ export async function getAgentConversationMessages(
      * dedupe by id.
      */
     after?: Date
+    /**
+     * With `after`, also return every message that has been edited, however old. A poll that only asks for new messages
+     * would never see somebody else's edit to an older one. Edited rows are few, and callers merge by id.
+     */
+    includeEdited?: boolean
   } = {}
 ): Promise<ChatMessage[] | null> {
   const prisma = getPrisma()
@@ -141,7 +146,14 @@ export async function getAgentConversationMessages(
   const access = { ownerUserId: conversation.userId }
   const withAuthor = await agentParticipantsAvailable(prisma)
   const rows = await prisma.agentMessage.findMany({
-    where: { conversationId, ...(options.after ? { createdAt: { gte: options.after } } : {}) },
+    where: {
+      conversationId,
+      ...(options.after
+        ? options.includeEdited && withAuthor
+          ? { OR: [{ createdAt: { gte: options.after } }, { editedAt: { not: null } }] }
+          : { createdAt: { gte: options.after } }
+        : {}),
+    },
     orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     select: withAuthor
       ? { id: true, role: true, content: true, createdAt: true, authorUserId: true, authorType: true, messageKind: true, editedAt: true }
