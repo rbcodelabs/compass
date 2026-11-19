@@ -116,9 +116,16 @@ test.describe("GitHub PR smart chips", () => {
       const customChip = editor.locator('a[data-github-pr-link="ready"]').filter({ hasText: "Custom PR label" });
       await expect(customChip).toBeVisible({ timeout: 10_000 });
       await expect(customChip).toHaveText("Custom PR label");
+      // Applying the link starts an autosave and the editor host re-renders as it settles; ProseMirror re-asserts its own selection onto the
+      // DOM whenever the view updates, which would undo a native caret move made in that window (observed: DOM collapsed, ProseMirror
+      // still on the old range). Let the save settle before touching the selection.
+      await expect(page.getByTestId("doc-save-status")).toHaveAttribute("data-state", "saved", { timeout: 15_000 });
 
       // 3. Collapse the selection after `Custom PR label` with ArrowRight, then paste an unapproved PR URL on a third line.
       await page.keyboard.press("ArrowRight");
+      // The bubble menu shows only for a non-empty ProseMirror selection, so it hiding proves the editor itself (not just the DOM) has
+      // collapsed. Enter on a still-ranged selection would replace `Custom PR label` with the new paragraph.
+      await expect(bubble).toBeHidden({ timeout: 5_000 });
       await page.keyboard.press("Enter");
       await page.keyboard.type("Unapproved: ");
       await pastePlainText(page, ".ProseMirror", UNAPPROVED_PR_URL);
