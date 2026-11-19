@@ -25,6 +25,7 @@ import { isComposerPanelType } from "@/components/panels/composer-panel-types"
 import { panelTitles } from "@/components/panels/panel-titles"
 import { useLabels } from "@/components/thinking-model/thinking-model-provider"
 import { AgentChat } from "@/components/agent/agent-chat"
+import { LegacyRailLinkRedirect } from "@/components/panels/legacy-rail-link-redirect"
 import type {
   AgentParticipationMode,
   ConversationStatus,
@@ -359,6 +360,7 @@ export function ConversationPanelProvider({
 
   return (
     <ConversationPanelContext.Provider value={value}>
+      <LegacyRailLinkRedirect />
       {children}
     </ConversationPanelContext.Provider>
   )
