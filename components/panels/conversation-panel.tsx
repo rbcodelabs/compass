@@ -26,6 +26,8 @@ import { isComposerPanelType } from "@/components/panels/composer-panel-types"
 import { panelTitles } from "@/components/panels/panel-titles"
 import { useLabels } from "@/components/thinking-model/thinking-model-provider"
 import { AgentChat } from "@/components/agent/agent-chat"
+import { parseConversationMessagesResponse, type PanelLoadedMessage } from "@/lib/conversation-panel-messages"
+import type { CommentTaskCardData } from "@/lib/comment-task-card"
 import type {
   AgentParticipationMode,
   ConversationStatus,
@@ -427,16 +429,10 @@ export function ConversationPanelHeaderActions() {
   )
 }
 
-type LoadedMessage = {
-  id: string
-  role: "user" | "assistant"
-  content: string
-  createdAt?: string
-  authorUserId?: string | null
-  authorName?: string | null
-}
+type LoadedMessage = PanelLoadedMessage
 
 const EMPTY_MESSAGES: LoadedMessage[] = []
+const EMPTY_TASK_CARDS: Record<string, CommentTaskCardData> = {}
 
 function targetTypeToPanelType(targetType: string): PanelType | null {
   switch (targetType.toUpperCase()) {
@@ -473,7 +469,8 @@ export function ConversationPanel({ conversationId }: { conversationId: string }
   const [messagesState, setMessagesState] = useState<{
     id: string
     messages: LoadedMessage[]
-  }>({ id: conversationId, messages: EMPTY_MESSAGES })
+    taskCards: Record<string, CommentTaskCardData>
+  }>({ id: conversationId, messages: EMPTY_MESSAGES, taskCards: EMPTY_TASK_CARDS })
 
   const [settingsState, setSettingsState] = useState<{
     id: string
@@ -498,22 +495,9 @@ export function ConversationPanel({ conversationId }: { conversationId: string }
       })
         .then(async (res) => {
           if (!res.ok) return
-          const body = (await res.json()) as { messages?: Record<string, unknown>[] }
-          if (!Array.isArray(body.messages)) return
-          const parsed: LoadedMessage[] = body.messages.flatMap((m) => {
-            if (!m || typeof m.id !== "string" || typeof m.content !== "string") return []
-            return [
-              {
-                id: m.id,
-                role: m.role === "assistant" ? ("assistant" as const) : ("user" as const),
-                content: m.content,
-                ...(typeof m.createdAt === "string" ? { createdAt: m.createdAt } : {}),
-                ...(typeof m.authorUserId === "string" ? { authorUserId: m.authorUserId } : {}),
-                ...(typeof m.authorName === "string" ? { authorName: m.authorName } : {}),
-              },
-            ]
-          })
-          setMessagesState({ id: conversationId, messages: parsed })
+          const parsed = parseConversationMessagesResponse(await res.json())
+          if (!parsed) return
+          setMessagesState({ id: conversationId, messages: parsed.messages, taskCards: parsed.taskCards })
         })
         .catch(() => {}),
       fetch(`/api/agent/conversations/${encodeURIComponent(conversationId)}/settings?${qs}`, {
@@ -554,6 +538,8 @@ export function ConversationPanel({ conversationId }: { conversationId: string }
 
   const initialMessages =
     !isNew && messagesState.id === conversationId ? messagesState.messages : EMPTY_MESSAGES
+  const initialTaskCards =
+    !isNew && messagesState.id === conversationId ? messagesState.taskCards : EMPTY_TASK_CARDS
   const currentSettings = !isNew && settingsState?.id === conversationId ? settingsState : null
   const seed = ctx.pendingSeed
 
@@ -579,6 +565,7 @@ export function ConversationPanel({ conversationId }: { conversationId: string }
       conversations={ctx.threads.map((t) => ({ id: t.id, title: t.title }))}
       activeConversationId={activeConversationId}
       initialMessages={initialMessages}
+      initialTaskCards={initialTaskCards}
       userId={ctx.userId}
       userInitials={ctx.userInitials}
       suggestedInstruction={isNew ? seed?.suggestedInstruction : undefined}

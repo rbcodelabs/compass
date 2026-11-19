@@ -1,9 +1,12 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { Archive, AtSign, Bot, CheckCircle2, MessageSquare, Plus, Send } from "lucide-react"
+import { Archive, AtSign, Bot, CheckCircle2, ListChecks, MessageSquare, Plus } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { MentionEditor, type MentionOptions } from "@/components/docs/mention-editor"
+import type { MentionOptions } from "@/components/docs/mention-editor"
+import { DocCommentComposer, type ComposerPayload, type ComposerResult } from "@/components/docs/doc-comment-composer"
+import { CommentTaskCard } from "@/components/docs/comment-task-card"
+import type { CommentTaskCardData } from "@/lib/comment-task-card"
 import { useConversationPanelOptional } from "@/components/panels/conversation-panel"
 import type { ObjectConversationSummary } from "@/app/api/agent/conversations/by-target/route"
 import { formatRelativeTime } from "@/lib/agent-board"
@@ -81,9 +84,15 @@ function ObjectConversationsContent({
   const [items, setItems] = useState<ObjectConversationSummary[]>([])
   const [mentionOptions, setMentionOptions] = useState<MentionOptions>(DEFAULT_MENTION_OPTIONS)
   const [loading, setLoading] = useState(true)
+  // The composer keeps its own text; `draft` mirrors it (for Retry send and the Agent button), and a new `composerKey` remounts
+  // it with `composerSeed` as its starting text.
   const [draft, setDraft] = useState("")
-  const [editorKey, setEditorKey] = useState(0)
+  const [composerKey, setComposerKey] = useState(0)
+  const [composerSeed, setComposerSeed] = useState("")
   const [autoFocusEditor, setAutoFocusEditor] = useState(false)
+  // Agents that already hold a task made from a comment on this item (no scope confirmation for them) and the item's title.
+  const [confirmedAgentIds, setConfirmedAgentIds] = useState<string[]>([])
+  const [targetTitle, setTargetTitle] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [sendError, setSendError] = useState<"rejected" | "uncertain" | null>(null)
@@ -133,6 +142,8 @@ function ObjectConversationsContent({
         items?: ObjectConversationSummary[]
         mentionOptions?: MentionOptions
         archivedCapped?: boolean
+        confirmedAgentIds?: unknown
+        targetTitle?: unknown
       }
       if (!Array.isArray(body.items)) throw new Error("Invalid list response")
       if (!current()) return
@@ -141,6 +152,8 @@ function ObjectConversationsContent({
       if (body.mentionOptions) {
         setMentionOptions(body.mentionOptions)
       }
+      if (Array.isArray(body.confirmedAgentIds)) setConfirmedAgentIds(body.confirmedAgentIds.filter((id): id is string => typeof id === "string"))
+      setTargetTitle(typeof body.targetTitle === "string" ? body.targetTitle : null)
     } catch {
       if (current()) setLoadError("Could not load conversations. Please try again.")
     } finally {
@@ -203,9 +216,10 @@ function ObjectConversationsContent({
     }
   }
 
-  const submitQuickStart = useCallback(async () => {
-    const text = draft
-    if (!text.trim() || !panelCtx || sendPending.current) return
+  // A plain post: a chat turn on the item (no comment, no task). Returns whether the server accepted it. `viaComposer` is true
+  // when the composer sent it (it clears itself on success); the Retry button is not the composer, so it remounts it empty.
+  const submitQuickStart = useCallback(async (text: string, viaComposer = true): Promise<boolean> => {
+    if (!text.trim() || !panelCtx || sendPending.current) return false
     sendPending.current = true
     const generation = lifetime.current
     const current = () => mounted.current && lifetime.current === generation
@@ -226,49 +240,110 @@ function ObjectConversationsContent({
           agentMode: "MENTION_ONLY",
         }),
       })
-      if (!current()) return
+      if (!current()) return false
       if (!res.ok) {
         setSendError(res.status >= 500 ? "uncertain" : "rejected")
-        return
+        return false
       }
       // A malformed acceptance cannot tell us which conversation received the
       // message. Keep the draft for deliberate recovery, never resend silently.
       const conversationId = await acceptedConversationId(res)
-      if (!current()) return
+      if (!current()) return false
       if (!conversationId) {
         setSendError("uncertain")
-        return
+        return false
       }
+      accepted = true
+      setDraft("")
+      setAutoFocusEditor(false)
+      if (!viaComposer) { setComposerSeed(""); setComposerKey((k) => k + 1) }
+      setStatus("Message sent.")
+      await load()
       if (current()) {
-        accepted = true
-        setDraft("")
-        setAutoFocusEditor(false)
-        setEditorKey((k) => k + 1)
-        setStatus("Message sent.")
-        await load()
-        if (current()) {
-          panelCtx.openConversationInPanel(conversationId, {
-            label: plainTextOf(text).slice(0, 60),
-            targetType: normalizedTargetType,
-            targetId,
-            targetLabel: targetLabel ?? null,
-            visibility: "WORKSPACE",
-            agentMode: "MENTION_ONLY",
-          })
-        }
+        panelCtx.openConversationInPanel(conversationId, {
+          label: plainTextOf(text).slice(0, 60),
+          targetType: normalizedTargetType,
+          targetId,
+          targetLabel: targetLabel ?? null,
+          visibility: "WORKSPACE",
+          agentMode: "MENTION_ONLY",
+        })
       }
+      return true
     } catch {
       if (current() && !accepted) setSendError("uncertain")
+      return accepted
     } finally {
       sendPending.current = false
       if (current()) setSubmitting(false)
     }
-  }, [draft, panelCtx, submitting, normalizedTargetType, targetId, targetLabel, load])
+  }, [panelCtx, normalizedTargetType, targetId, targetLabel, load])
 
-  const handleQuickStart = (e: React.FormEvent) => {
-    e.preventDefault()
-    void submitQuickStart()
-  }
+  // A task-bearing root post is a comment, not a chat turn: Comment stays the write path for threads that carry a task
+  // (POST /api/comments creates the comment, the task and its provenance; the mirror makes the conversation after commit).
+  // No agent turn starts, even when an agent is the assignee: that task runs through the task system.
+  const submitTaskPost = useCallback(async (payload: ComposerPayload): Promise<ComposerResult> => {
+    if (!panelCtx || sendPending.current) return { ok: false, error: "BUSY", message: "" }
+    sendPending.current = true
+    const generation = lifetime.current
+    const current = () => mounted.current && lifetime.current === generation
+    setSubmitting(true)
+    setSendError(null)
+    setStatus("")
+    try {
+      const res = await fetch("/api/comments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          targetType: normalizedTargetType,
+          targetId,
+          parentId: null,
+          body: payload.body,
+          task: payload.task,
+          assignee: payload.assignee,
+          agentScopeConfirmed: payload.agentScopeConfirmed,
+        }),
+      })
+      const result: unknown = await res.json().catch(() => null)
+      if (!res.ok) {
+        const failure = typeof result === "object" && result ? result as { error?: unknown; code?: unknown } : {}
+        return {
+          ok: false,
+          error: typeof failure.code === "string" ? failure.code : "ERROR",
+          message: res.status < 500 && typeof failure.error === "string" ? failure.error : "The comment could not be posted. Your draft is kept.",
+        }
+      }
+      if (!current()) return { ok: true }
+      const created = (typeof result === "object" && result ? result : {}) as { id?: unknown; taskCard?: CommentTaskCardData | null }
+      const agentId = created.taskCard?.assignee?.type === "AGENT" ? created.taskCard.assignee.id : null
+      if (agentId) setConfirmedAgentIds((ids) => (ids.includes(agentId) ? ids : [...ids, agentId]))
+      setDraft("")
+      setStatus(payload.task ? "Comment posted and task created." : "Comment posted.")
+      await load()
+      if (current() && typeof created.id === "string" && created.id) {
+        panelCtx.openConversationInPanel(created.id, {
+          label: plainTextOf(payload.body).slice(0, 60),
+          targetType: normalizedTargetType,
+          targetId,
+          targetLabel: targetLabel ?? null,
+          visibility: "WORKSPACE",
+          agentMode: "MENTION_ONLY",
+        })
+      }
+      return { ok: true }
+    } catch {
+      return { ok: false, error: "ERROR", message: "We couldn’t confirm whether this was posted. Check conversations before retrying." }
+    } finally {
+      sendPending.current = false
+      if (current()) setSubmitting(false)
+    }
+  }, [panelCtx, normalizedTargetType, targetId, targetLabel, load])
+
+  const submitComposer = useCallback(async (payload: ComposerPayload): Promise<ComposerResult> => {
+    if (payload.task) return submitTaskPost(payload)
+    // Not accepted: the section's own alert (with Retry send / Refresh) says why, so the composer adds no second message.
+    return (await submitQuickStart(payload.body)) ? { ok: true } : { ok: false, error: "SEND_FAILED", message: "" }
+  }, [submitTaskPost, submitQuickStart])
 
   async function removeLink(item: ObjectConversationSummary, linkId: string) {
     if (!panelCtx || removalPending.current.has(item.id)) return
@@ -314,14 +389,13 @@ function ObjectConversationsContent({
       id: agentOpt.id,
       label: agentOpt.name,
     })
-    setDraft((prev) => {
-      if (prev.includes(`mention:agent:${agentOpt.id}`) || prev.includes("@Compass Agent")) {
-        return prev
-      }
-      return prev.trim() ? `${token} ${prev.trimStart()}` : `${token} `
-    })
+    const next = draft.includes(`mention:agent:${agentOpt.id}`) || draft.includes("@Compass Agent")
+      ? draft
+      : draft.trim() ? `${token} ${draft.trimStart()}` : `${token} `
+    setDraft(next)
+    setComposerSeed(next)
     setAutoFocusEditor(true)
-    setEditorKey((k) => k + 1)
+    setComposerKey((k) => k + 1)
   }
 
   return (
@@ -442,6 +516,13 @@ function ObjectConversationsContent({
                         )}
                       </span>
                     )}
+                    {item.taskCard && (
+                      <span data-testid="conversation-task-chip" className="inline-flex items-center gap-1 rounded bg-status-info-surface px-1.5 py-0.5 font-medium text-status-info">
+                        <ListChecks className="size-3" aria-hidden="true" />
+                        <span className="sr-only">Task </span>
+                        {item.taskCard.displayId ?? "Task"}
+                      </span>
+                    )}
                     <span className="tabular-nums text-text-subtle">
                       {item.messageCount} {item.messageCount === 1 ? "msg" : "msgs"}
                     </span>
@@ -454,6 +535,9 @@ function ObjectConversationsContent({
                   <p className="truncate pl-5 text-xs text-text-subtle">{item.summary}</p>
                 )}
               </button>
+              {item.taskCard && panelCtx && (
+                <CommentTaskCard card={item.taskCard} taskHref={`/${panelCtx.orgSlug}/${panelCtx.workspaceSlug}/tasks/${item.taskCard.taskId}`} />
+              )}
               {item.canRestore && (
                 <div className="flex flex-wrap items-center gap-2 pt-1 text-xs text-text-subtle">
                   <span>Archived</span>
@@ -485,29 +569,33 @@ function ObjectConversationsContent({
       )}
 
       {panelCtx && (
-        <form onSubmit={handleQuickStart} className="flex flex-col gap-2">
+        <div className="flex flex-col gap-2">
           {sendError && <div role="alert" className="rounded-lg border border-status-danger/30 bg-status-danger-surface p-3 text-sm text-status-danger">
             <p>{sendError === "uncertain" ? "We couldn’t confirm whether this was sent. Check conversations before retrying." : "Could not send your message. Your draft is kept."}</p>
             <div className="mt-2 flex flex-wrap gap-2">
               {sendError === "uncertain" && <Button type="button" variant="outline" size="xs" disabled={loading} onClick={() => void load()}>Refresh conversations</Button>}
-              <Button type="button" variant="outline" size="xs" disabled={submitting || !draft.trim()} onClick={() => void submitQuickStart()}>Retry send</Button>
+              <Button type="button" variant="outline" size="xs" disabled={submitting || !draft.trim()} onClick={() => void submitQuickStart(draft, false)}>Retry send</Button>
             </div>
           </div>}
           <div className="flex items-start gap-2">
             <div className="min-w-0 flex-1">
-              <MentionEditor
-                key={editorKey}
+              <DocCommentComposer
+                key={composerKey}
                 options={mentionOptions}
-                initialValue={draft}
+                confirmedAgentIds={confirmedAgentIds}
+                docTitle={targetTitle ?? targetLabel ?? ""}
+                targetNoun="item"
                 ariaLabel="Start a conversation"
                 placeholder="Start a conversation… (type @ to mention people or agents)"
-                onChange={setDraft}
-                onSubmitShortcut={() => void submitQuickStart()}
-                submitOnEnter
+                idleLabel={submitting ? "Sending…" : "Send"}
+                initialBody={composerSeed}
+                onBodyChange={setDraft}
                 autoFocus={autoFocusEditor}
                 disabled={submitting}
-                className="min-h-8 rounded-lg border-default bg-surface-card px-3 py-1.5 text-xs focus-visible:border-border-focus"
-                testId="object-conversation-composer"
+                submitOnEnter
+                editorTestId="object-conversation-composer"
+                editorClassName="min-h-8 rounded-lg border-default bg-surface-card px-3 py-1.5 text-xs focus-visible:border-border-focus"
+                onSubmit={submitComposer}
               />
             </div>
             <button
@@ -520,17 +608,8 @@ function ObjectConversationsContent({
               <AtSign className="size-3" aria-hidden="true" />
               <span>Agent</span>
             </button>
-            <Button
-              type="submit"
-              size="sm"
-              disabled={!draft.trim() || submitting}
-              className="h-8 gap-1 px-3 text-xs"
-            >
-              <Send className="size-3" aria-hidden="true" />
-              {submitting ? "Sending…" : "Send"}
-            </Button>
           </div>
-        </form>
+        </div>
       )}
       <p role="status" className="text-xs text-text-secondary">{status}</p>
     </div>

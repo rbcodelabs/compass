@@ -10,6 +10,7 @@ import { z } from "zod"
 
 import { auth } from "@/auth"
 import { getAgentConversationMessages } from "@/lib/agent-conversations"
+import { loadConversationTaskCards } from "@/lib/conversation-task-cards"
 
 // `AgentConversation.id` is `@db.Uuid`. A malformed id would otherwise reach
 // Postgres as a failed cast and surface as a Prisma 500; it names no
@@ -49,6 +50,8 @@ export async function GET(
   })
   if (!messages) return new Response("Not found", { status: 404 })
 
-  // `taskCards` is a stub until task rows land (TASK-195 S4); it is keyed by message id, so the shape will not change.
-  return Response.json({ messages, taskCards: {} })
+  // A task made from a root post is keyed by the post's comment id, which is the message id (the mirror reuses it). Access
+  // was proven above, so cards are only ever read for a conversation this caller may see.
+  const taskCards = await loadConversationTaskCards(workspaceId, messages.map((message) => message.id))
+  return Response.json({ messages, taskCards })
 }

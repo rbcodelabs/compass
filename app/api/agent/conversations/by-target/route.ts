@@ -20,6 +20,8 @@ import { loadMentionCandidates, type MentionCandidates } from "@/lib/doc-comment
 import { plainTextOf } from "@/lib/comment-mentions"
 import { listRestorableArchivedConversations } from "@/lib/conversation-archive"
 import { backfillUnifiedConversations } from "@/lib/unified-conversations-backfill"
+import { loadConversationTaskCards, loadTaskComposerContext } from "@/lib/conversation-task-cards"
+import type { CommentTaskCardData } from "@/lib/comment-task-card"
 
 export const runtime = "nodejs"
 
@@ -60,6 +62,8 @@ export type ObjectConversationSummary = {
   /** Present (true) only on rows returned for `archived=1`; those are only ever rows the caller may restore. */
   archived?: true
   canRestore?: true
+  /** The task made from this conversation's root post, when there is one (the section row shows its chip and card). */
+  taskCard?: CommentTaskCardData
 }
 
 export async function GET(request: NextRequest) {
@@ -156,6 +160,12 @@ export async function GET(request: NextRequest) {
       },
     })
 
+    // Cards and composer context are enrichments: each degrades to nothing on failure (see lib/conversation-task-cards.ts).
+    const [taskCards, taskContext] = await Promise.all([
+      loadConversationTaskCards(workspaceId, rows.map((row) => row.id)),
+      loadTaskComposerContext(workspaceId, targetType, targetId),
+    ])
+
     const items: ObjectConversationSummary[] = rows.map((row) => {
       const visibility: ConversationVisibility = isConversationVisibility(row.visibility)
         ? row.visibility
@@ -179,10 +189,11 @@ export async function GET(request: NextRequest) {
         anchored: row.targetType === targetType && row.targetId === targetId,
         links: linked.filter(link => link.conversationId === row.id).map(({ linkId, kind, auto }) => ({ linkId, kind, auto })),
         ...(wantsArchived ? { archived: true as const, canRestore: true as const } : {}),
+        ...(taskCards[row.id] ? { taskCard: taskCards[row.id] } : {}),
       }
     })
 
-    return Response.json({ items, mentionOptions, ...(wantsArchived ? { archivedCapped } : {}) })
+    return Response.json({ items, mentionOptions, ...taskContext, ...(wantsArchived ? { archivedCapped } : {}) })
   } catch (error) {
     const failure = error as { code?: string; meta?: { column?: string } }
     const missingUnifiedColumn = failure.code === "P2022" && /^(?:agent_conversations|AgentConversation)\.(?:target_type|target_id|status|agent_mode)$/.test(failure.meta?.column ?? "")

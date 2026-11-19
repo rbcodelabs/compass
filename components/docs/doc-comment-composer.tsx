@@ -54,6 +54,10 @@ interface DocCommentComposerProps {
   onBodyChange?: (body: string) => void
   /** Blocks posting (for example while the surrounding thread is still loading). */
   disabled?: boolean
+  /** Host hooks for the editor itself: the Conversations section keeps its own test id, Enter-to-send and compact look. */
+  editorTestId?: string
+  editorClassName?: string
+  submitOnEnter?: boolean
   onSubmit: (payload: ComposerPayload) => Promise<ComposerResult>
   onCancel?: () => void
 }
@@ -82,6 +86,7 @@ function chipClass(kind: "user" | "agent", outside: boolean) {
 export function DocCommentComposer({
   options, confirmedAgentIds, docTitle, targetNoun = "doc", anchorText, placeholder = "Add a comment…", ariaLabel = "Comment",
   idleLabel, compact, autoFocus, disabled, initialBody = "", onBodyChange, onSubmit, onCancel,
+  editorTestId = "doc-comment-editor", editorClassName, submitOnEnter,
 }: DocCommentComposerProps) {
   const [body, setBody] = useState(initialBody)
   const [taskOn, setTaskOn] = useState(true)
@@ -179,7 +184,10 @@ export function DocCommentComposer({
         onChange={value => { setBody(value); onBodyChange?.(value); setError(null); setConfirmingFor(null) }}
         onSubmitShortcut={submit}
         onEscape={onCancel}
-        testId="doc-comment-editor"
+        testId={editorTestId}
+        className={editorClassName}
+        // Enter must never create a task by accident: with a task about to be made the person sends with the button.
+        submitOnEnter={submitOnEnter && !willCreateTask}
       />
 
       {mentions.length > 0 && !confirmingAgent && (

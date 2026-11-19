@@ -20,6 +20,7 @@ import { resolveTaskAssignees } from "@/lib/task-assignment"
 import { getTasksLinkedToOrigin } from "@/lib/task-links-read"
 import { createWorkspaceTask } from "@/lib/task-create"
 import { runAfterCommit } from "@/lib/following-commit"
+import { removeCommentMirrorAfterCommit } from "@/lib/conversation-mirror"
 import { getFollowable, isSubjectTypeActive } from "@/lib/followable"
 import type { CommentTaskCardData } from "@/lib/comment-task-card"
 import type { TaskLinkedType } from "@/lib/types"
@@ -147,6 +148,12 @@ export async function postTargetCommentWithOptionalTask(input: PostTargetComment
     } catch (error) {
       // Do not leave a comment that promised a task but has none behind.
       await prisma.comment.deleteMany({ where: { id: created.id } }).catch(cleanupError => console.error("[comment-target-tasks] cleanup failed", cleanupError))
+      // The comment was mirrored into a conversation after it committed (TASK-195 S0): withdraw that too, or the failed post
+      // would leave a ghost conversation and message the list shows. A root takes its conversation with it (a pure mirror is
+      // the one hard delete S0 allows); a reply only loses its own message.
+      await removeCommentMirrorAfterCommit(created.parentId
+        ? { conversationId: created.parentId, commentIds: [created.id], threadDeleted: false }
+        : { conversationId: created.id, commentIds: [created.id], threadDeleted: true })
       return { ok: false, error: "TASK_FAILED", message: error instanceof Error ? error.message : "Could not create the task." }
     }
   }
