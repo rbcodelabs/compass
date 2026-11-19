@@ -33,3 +33,34 @@ describe("customFieldInheritanceTableExists", () => {
     await expect(probe()).rejects.toThrow("connection reset")
   })
 })
+
+describe("readIfInheritanceTableExists", () => {
+  it("returns undefined without reading when the table is absent", async () => {
+    prisma.customFieldInheritanceRule.findFirst.mockRejectedValue({ code: "P2021" })
+    const read = vi.fn(async () => ["rule"])
+    expect(await readIfInheritanceTableExists(prisma as never, read)).toBeUndefined()
+    expect(read).not.toHaveBeenCalled()
+  })
+
+  it("returns what the read produced when the table exists", async () => {
+    prisma.customFieldInheritanceRule.findFirst.mockResolvedValue(null)
+    expect(await readIfInheritanceTableExists(prisma as never, async () => ["rule"])).toEqual(["rule"])
+  })
+
+  it("reads a table dropped after a positive probe as absent, and forgets the stale positive", async () => {
+    // A long-lived server cached "exists", then the table went away (migration rolled back, restored database, a test dropping it).
+    prisma.customFieldInheritanceRule.findFirst.mockResolvedValue(null)
+    expect(await probe()).toBe(true)
+
+    expect(await readIfInheritanceTableExists(prisma as never, async () => { throw { code: "P2021" } })).toBeUndefined()
+
+    // The next probe asks the database again instead of trusting the stale positive, so recovery needs no restart either.
+    prisma.customFieldInheritanceRule.findFirst.mockRejectedValue({ code: "P2021" })
+    expect(await probe()).toBe(false)
+  })
+
+  it("propagates any other read error", async () => {
+    prisma.customFieldInheritanceRule.findFirst.mockResolvedValue(null)
+    await expect(readIfInheritanceTableExists(prisma as never, async () => { throw new Error("connection reset") })).rejects.toThrow("connection reset")
+  })
+})
