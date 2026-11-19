@@ -29,7 +29,11 @@ export const dockAwareCollisionDetection: CollisionDetection = (args) => {
 export const cardFirstCollisionDetection: CollisionDetection = (args) => {
   const onTab = pointerWithin(args).find((hit) => args.droppableContainers.find((c) => c.id === hit.id)?.data.current?.dockTab);
   if (onTab) return [onTab];
-  const overlappedCards = rectIntersection(args).filter((hit) => args.droppableContainers.find((c) => c.id === hit.id)?.data.current?.sortable);
+  // The dragged card's own slot is never a target: its rect stays where the card started, so while a cross-column drag still overlaps
+  // it, it would otherwise be the only "overlapped card" and pin the drag to the column it is trying to leave.
+  const overlappedCards = rectIntersection(args).filter(
+    (hit) => hit.id !== args.active.id && args.droppableContainers.find((c) => c.id === hit.id)?.data.current?.sortable,
+  );
   if (overlappedCards.length === 0) return closestCenter(args);
   const ids = new Set(overlappedCards.map((hit) => hit.id));
   return closestCenter({ ...args, droppableContainers: args.droppableContainers.filter((c) => ids.has(c.id)) });

@@ -15,6 +15,8 @@ import { CONVERSATION_ARCHIVE_CHANGED_EVENT, type ConversationArchiveChange } fr
 import { removeObjectConversationLink } from "@/app/[orgSlug]/[workspaceSlug]/links/conversation-actions"
 
 const BUILTIN_COMPASS_AGENT_ID = "00000000-0000-4000-8000-000000000001"
+/** A module constant, not an inline array: the composer memoizes on this prop, and a fresh array per render would rebuild its set on every keystroke. */
+const EXCLUDED_ASSIGNEE_IDS = [BUILTIN_COMPASS_AGENT_ID]
 
 async function acceptedConversationId(response: Response): Promise<string | null> {
   const type = response.headers.get("content-type") ?? ""
@@ -601,7 +603,7 @@ function ObjectConversationsContent({
                 // Task creation is opt-in here: a mention is a plain message until the person turns the task on, and the built-in
                 // agent (no task queue) is never an assignee candidate.
                 defaultTaskOn={false}
-                excludedAssigneeIds={[BUILTIN_COMPASS_AGENT_ID]}
+                excludedAssigneeIds={EXCLUDED_ASSIGNEE_IDS}
                 taskToggleHint="Leave off to send a plain message with this mention."
                 editorTestId="object-conversation-composer"
                 editorClassName="min-h-8 rounded-lg border-default bg-surface-card px-3 py-1.5 text-xs focus-visible:border-border-focus"

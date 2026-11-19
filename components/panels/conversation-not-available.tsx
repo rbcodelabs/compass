@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef } from "react"
+import { useLayoutEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { usePanelContext } from "@/components/panels/panel-context"
 
@@ -13,7 +13,8 @@ export function ConversationNotAvailable() {
   const { closePanel } = usePanelContext()
   const headingRef = useRef<HTMLHeadingElement>(null)
 
-  useEffect(() => {
+  // At commit time, before paint and before any later state change in the panel can move focus or re-render around it.
+  useLayoutEffect(() => {
     headingRef.current?.focus()
   }, [])
 
