@@ -44,6 +44,16 @@ function requireLocalE2eDatabase(): pg.Pool {
  * and the handle sits at the card's left edge. Tabs are found by pointer position instead (pointerWithin), so they are
  * targeted with the plain pointer.
  */
+
+// DIAG(TASK-199, temporary): what is under the pointer at mouse-down, and what dnd-kit has announced before mouse-up.
+async function diagSnapshot(page: Page, label: string, x: number, y: number) {
+  const info = await page.evaluate(([px, py]) => {
+    const el = document.elementFromPoint(px as number, py as number);
+    const status = Array.from(document.querySelectorAll("[role=status]")).map((n) => n.textContent ?? "").join(" | ");
+    return { under: el ? el.tagName + "[" + (el.getAttribute("aria-label") ?? "") + "]." + String(el.className).slice(0, 60) : null, status, scrollY: window.scrollY, fixedCount: Array.from(document.querySelectorAll("body *")).filter((n) => getComputedStyle(n).position === "fixed" && (n as HTMLElement).style.transform).length };
+  }, [x, y]);
+  console.log("DIAG-199 " + label + " " + JSON.stringify(info));
+}
 async function dragTo(page: Page, source: Locator, target: Locator, { alignCard }: { alignCard?: Locator } = {}) {
   await source.scrollIntoViewIfNeeded();
   const sourceBox = await source.boundingBox();
@@ -51,6 +61,7 @@ async function dragTo(page: Page, source: Locator, target: Locator, { alignCard 
   const startX = sourceBox.x + sourceBox.width / 2;
   const startY = sourceBox.y + sourceBox.height / 2;
   await page.mouse.move(startX, startY);
+  await diagSnapshot(page, "dock before-down", startX, startY);
   await page.mouse.down();
   await page.mouse.move(startX + 15, startY + 15, { steps: 10 });
   await target.waitFor({ state: "visible", timeout: 10_000 });
@@ -59,7 +70,10 @@ async function dragTo(page: Page, source: Locator, target: Locator, { alignCard 
   const cardBox = alignCard ? await alignCard.boundingBox() : null;
   const cardCentreOffset = cardBox ? startX - (cardBox.x + cardBox.width / 2) : 0;
   await page.mouse.move(targetBox.x + targetBox.width / 2 + cardCentreOffset, targetBox.y + targetBox.height / 2, { steps: 40 });
+  await diagSnapshot(page, "dock before-up", targetBox.x + targetBox.width / 2 + cardCentreOffset, targetBox.y + targetBox.height / 2);
   await page.mouse.up();
+  await page.waitForTimeout(300);
+  await diagSnapshot(page, "dock after-up", targetBox.x + targetBox.width / 2 + cardCentreOffset, targetBox.y + targetBox.height / 2);
 }
 
 const scroller = (page: Page) => page.getByRole("region", { name: "Opportunity board" });
