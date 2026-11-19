@@ -293,7 +293,7 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   // Postcondition pinned in REVIEWED_MIGRATION_CODE_SHA256. Digest recorded from the shipped SQL after reading it.
   "125_unified_conversations": "dc6968e7f3573b5bc5aa9982f59c2f147643c807764c7c2ad768b21182333faf",
   // External links (ADR-0028): one additive CREATE TABLE IF NOT EXISTS (external_links) plus two ASYNC indexes (one unique); no existing table altered, no backfill, no FK.
-  // SQL-only: no TypeScript hook or postcondition. Digest recorded from the shipped SQL after reading it.
+  // SQL plus the catalog postcondition hook pinned below. Original reviewed SQL is unchanged.
   "126_external_links": "2e89354af42a034258ac593b9327f2f51f9fd9da407d5515a1b944a4c6b940a7",
 };
 
@@ -517,6 +517,10 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
   // The 125 postcondition (twelve nullable columns across agent_conversations and agent_messages exist and carry expected types); editing it re-reviews the migration.
   "125_unified_conversations": {
     "lib/migrations/unified-conversations.ts": "5160ebc0955373c955f3c781c2d08089b9b2cd42730ad9a5d7a6e0e6f0ea85ef",
+  },
+  // Candidate pin: requires explicit code review before adoption.
+  "126_external_links": {
+    "lib/migrations/external-links.ts": "070ea4d5a971807d704eff074245a0ae87f1d30540728706a1602281855c13f4",
   },
 };
 
