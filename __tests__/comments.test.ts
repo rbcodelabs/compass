@@ -1,6 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
-const capture = vi.hoisted(() => ({ enabled: false, record: vi.fn() }))
-vi.mock("@/lib/workspace-updates-capture", () => ({ withWorkspaceUpdates: (db: unknown, _workspaceId: unknown, fn: (db: unknown, enabled: boolean) => unknown) => fn(db, capture.enabled), recordWorkspaceUpdate: capture.record }))
+const capture = vi.hoisted(() => ({ enabled: false, record: vi.fn(), inTransaction: false }))
+vi.mock("@/lib/workspace-updates-capture", () => ({
+  withWorkspaceUpdates: async (db: unknown, _workspaceId: unknown, fn: (db: unknown, enabled: boolean) => unknown) => {
+    capture.inTransaction = true
+    try { return await fn(db, capture.enabled) } finally { capture.inTransaction = false }
+  },
+  recordWorkspaceUpdate: capture.record,
+}))
+const mirror = vi.hoisted(() => ({
+  mirrorCommentAfterCommit: vi.fn(),
+  removeCommentMirrorAfterCommit: vi.fn(),
+}))
+vi.mock("@/lib/conversation-mirror", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/lib/conversation-mirror")>()), ...mirror }))
 vi.mock("@/lib/workspace-update-mutations", () => ({ workspaceMutationActor: async () => ({ actorType: "USER", actorId: "user-1" }) }))
 
 const prisma = {
@@ -22,7 +33,12 @@ const WS = "11111111-1111-1111-1111-111111111111"
 const TARGET = "22222222-2222-2222-2222-222222222222"
 const ROOT = "33333333-3333-3333-3333-333333333333"
 
-beforeEach(() => { vi.clearAllMocks(); capture.enabled = false })
+beforeEach(() => {
+  vi.clearAllMocks()
+  capture.enabled = false
+  mirror.mirrorCommentAfterCommit.mockResolvedValue(undefined)
+  mirror.removeCommentMirrorAfterCommit.mockResolvedValue(undefined)
+})
 
 describe("shared comment target registry", () => {
   it("resolves a nested Solution to its workspace", async () => {
@@ -73,7 +89,57 @@ describe("createComment", () => {
   })
 })
 
+describe("conversation mirror after commit", () => {
+  it("mirrors a new comment only after the comment transaction has finished, never inside it", async () => {
+    prisma.opportunity.findUnique.mockResolvedValue({ workspaceId: WS })
+    prisma.comment.create.mockResolvedValue({ id: ROOT })
+    let mirroredInsideTransaction: boolean | undefined
+    mirror.mirrorCommentAfterCommit.mockImplementation(async () => { mirroredInsideTransaction = capture.inTransaction })
+    await createComment({ workspaceId: WS, targetType: "OPPORTUNITY", targetId: TARGET, body: "Hello", authorName: "Human" })
+    expect(mirror.mirrorCommentAfterCommit).toHaveBeenCalledWith(ROOT)
+    expect(mirroredInsideTransaction).toBe(false)
+  })
+
+  it("does not fail the comment write when the mirror write fails", async () => {
+    prisma.opportunity.findUnique.mockResolvedValue({ workspaceId: WS })
+    prisma.comment.create.mockResolvedValue({ id: ROOT })
+    // The real wrapper runs here: the mirror's own first read throws, and the comment write must still succeed.
+    const actual = await vi.importActual<typeof import("@/lib/conversation-mirror")>("@/lib/conversation-mirror")
+    mirror.mirrorCommentAfterCommit.mockImplementation(actual.mirrorCommentAfterCommit)
+    prisma.comment.findUnique.mockRejectedValueOnce(new Error("mirror down"))
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {})
+    await expect(createComment({ workspaceId: WS, targetType: "OPPORTUNITY", targetId: TARGET, body: "Hello", authorName: "Human" })).resolves.toBeNull()
+    expect(prisma.comment.create).toHaveBeenCalledTimes(1)
+    expect(logged).toHaveBeenCalledWith(expect.stringContaining("conversation-mirror"), expect.any(Error))
+    logged.mockRestore()
+  })
+
+  it("does not mirror a comment whose transaction failed", async () => {
+    prisma.opportunity.findUnique.mockResolvedValue({ workspaceId: WS })
+    prisma.comment.create.mockRejectedValue(new Error("write conflict"))
+    await expect(createComment({ workspaceId: WS, targetType: "OPPORTUNITY", targetId: TARGET, body: "Hello", authorName: "Human" })).rejects.toThrow(/write conflict/)
+    expect(mirror.mirrorCommentAfterCommit).not.toHaveBeenCalled()
+  })
+})
+
 describe("deleteComment", () => {
+  it("removes the mirrored conversation for a deleted root and its replies (no ghost mirror)", async () => {
+    prisma.comment.findUnique.mockResolvedValue({ id: ROOT, parentId: null })
+    prisma.comment.findMany.mockResolvedValue([{ id: "reply-1" }])
+    for (const model of [prisma.docCommentAnchor, prisma.solutionPlanProposal, prisma.commentElementAnchor, prisma.commentExternalAuthor, prisma.comment]) model.deleteMany.mockResolvedValue({ count: 0 })
+    prisma.comment.delete.mockResolvedValue({ id: ROOT })
+    await deleteComment(ROOT)
+    expect(mirror.removeCommentMirrorAfterCommit).toHaveBeenCalledWith({ conversationId: ROOT, commentIds: ["reply-1", ROOT], threadDeleted: true })
+  })
+
+  it("removes only that reply's mirror message when a reply is deleted", async () => {
+    prisma.comment.findUnique.mockResolvedValue({ id: "reply-1", parentId: ROOT })
+    for (const model of [prisma.docCommentAnchor, prisma.solutionPlanProposal, prisma.commentElementAnchor, prisma.commentExternalAuthor]) model.deleteMany.mockResolvedValue({ count: 0 })
+    prisma.comment.delete.mockResolvedValue({ id: "reply-1" })
+    await deleteComment("reply-1")
+    expect(mirror.removeCommentMirrorAfterCommit).toHaveBeenCalledWith({ conversationId: ROOT, commentIds: ["reply-1"], threadDeleted: false })
+  })
+
   it("cleans extensions and replies before deleting a root", async () => {
     prisma.comment.findUnique.mockResolvedValue({ id: ROOT, parentId: null })
     prisma.comment.findMany.mockResolvedValue([{ id: "reply-1" }])
