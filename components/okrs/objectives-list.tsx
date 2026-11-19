@@ -91,6 +91,8 @@ export function ObjectivesList({
   const visibleObjectives = filterActive ? objectives.filter((o) => objectiveMatches(o, query)) : objectives;
   const shownCount = visibleObjectives.length;
   const totalCount = objectives.length;
+  const objectiveIds = visibleObjectives.map((o) => o.id);
+  const visibleIds = new Set(objectiveIds);
   useEffect(() => {
     setCounts({ shown: shownCount, total: totalCount });
   }, [shownCount, totalCount, setCounts]);
@@ -115,13 +117,13 @@ export function ObjectivesList({
           key: opt.value,
           label: opt.label,
           color: opt.color,
-          items: visibleObjectives.filter((o) => valueOf(o) === opt.value),
+          items: objectives.filter((o) => valueOf(o) === opt.value),
         })),
         {
           key: "__none__",
           label: `No ${groupField.name}`,
           color: undefined as string | undefined,
-          items: visibleObjectives.filter(
+          items: objectives.filter(
             (o) => !(groupField.options ?? []).some((opt) => opt.value === valueOf(o))
           ),
         },
@@ -139,6 +141,7 @@ export function ObjectivesList({
   function handleDragEnd(event: DragEndEvent) {
     const { active, over } = event;
     if (!over || active.id === over.id) return;
+    if (!visibleIds.has(String(active.id)) || !visibleIds.has(String(over.id))) return;
 
     const activeId = active.id as string;
     const overId = over.id as string;
@@ -159,8 +162,6 @@ export function ObjectivesList({
     }
   }
 
-  const objectiveIds = visibleObjectives.map((o) => o.id);
-
   function setCollapsed(id: string, collapsed: boolean) {
     setCollapsedIds((prev) => {
       const next = new Set(prev);
@@ -173,10 +174,12 @@ export function ObjectivesList({
   const allCollapsed = objectives.length > 0 && objectives.every((o) => collapsedIds.has(o.id));
   const toggleAllLabel = `${allCollapsed ? "Expand" : "Collapse"} all ${labels.objective.lowerPlural}`;
 
+  // Keep each row mounted so filtering preserves open forms and their draft inputs.
   const renderRow = (obj: ObjectiveData) => (
     <ObjectiveRow
       key={obj.id}
       objective={obj}
+      hidden={!visibleIds.has(obj.id)}
       orgSlug={orgSlug}
       workspaceSlug={workspaceSlug}
       revalidatePathStr={cyclePath}
@@ -216,23 +219,27 @@ export function ObjectivesList({
       onDragEnd={handleDragEnd}
     >
       {groups ? (
-        groups.map((g) => (
-          <section key={g.key} className="flex flex-col gap-3">
-            <h3 className="flex items-center gap-2 text-sm font-semibold">
-              {g.color && (
-                <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: g.color }} />
-              )}
-              {g.label}
-              <span className="text-xs font-normal text-text-subtle">{g.items.length}</span>
-            </h3>
-            <SortableContext items={g.items.map((o) => o.id)} strategy={verticalListSortingStrategy}>
-              {g.items.map(renderRow)}
-            </SortableContext>
-          </section>
-        ))
+        groups.map((g) => {
+          const visibleGroupIds = g.items.filter((o) => visibleIds.has(o.id)).map((o) => o.id);
+          const hidden = visibleGroupIds.length === 0;
+          return (
+            <section key={g.key} hidden={hidden} className={hidden ? "hidden" : "flex flex-col gap-3"}>
+              <h3 className="flex items-center gap-2 text-sm font-semibold">
+                {g.color && (
+                  <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: g.color }} />
+                )}
+                {g.label}
+                <span className="text-xs font-normal text-text-subtle">{visibleGroupIds.length}</span>
+              </h3>
+              <SortableContext items={visibleGroupIds} strategy={verticalListSortingStrategy}>
+                {g.items.map(renderRow)}
+              </SortableContext>
+            </section>
+          );
+        })
       ) : (
         <SortableContext items={objectiveIds} strategy={verticalListSortingStrategy}>
-          {visibleObjectives.map(renderRow)}
+          {objectives.map(renderRow)}
         </SortableContext>
       )}
     </DndContext>

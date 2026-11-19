@@ -100,6 +100,8 @@ interface ObjectiveRowProps {
   hideProgress?: boolean;
   /** Controlled collapsed state. Omit for an uncontrolled row that starts expanded. */
   collapsed?: boolean;
+  /** Hide a filtered row while preserving its mounted form state. */
+  hidden?: boolean;
   onCollapsedChange?: (collapsed: boolean) => void;
 }
 
@@ -114,6 +116,7 @@ export function ObjectiveRow({
   paceElapsed,
   hideProgress,
   collapsed: collapsedProp,
+  hidden = false,
   onCollapsedChange,
 }: ObjectiveRowProps) {
   const labels = useLabels();
@@ -148,7 +151,7 @@ export function ObjectiveRow({
     transform,
     transition,
     isDragging,
-  } = useSortable({ id: objective.id });
+  } = useSortable({ id: objective.id, disabled: { draggable: hidden, droppable: hidden } });
 
   const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
@@ -221,6 +224,7 @@ export function ObjectiveRow({
   return (
     <EntityCard
       ref={setNodeRef}
+      hidden={hidden}
       style={style}
       interactive
       selected={isPanelOpen(panel, "objective", objective.id)}
