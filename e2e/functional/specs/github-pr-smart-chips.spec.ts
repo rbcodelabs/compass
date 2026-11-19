@@ -119,11 +119,22 @@ test.describe("GitHub PR smart chips", () => {
       // 3. Collapse the selection after `Custom PR label` with ArrowRight, then paste an unapproved PR URL on a third line.
       // DIAG(TASK-198): what owns focus and what is selected at the instant ArrowRight is pressed
       console.log("DIAG-198 before ArrowRight " + JSON.stringify(await page.evaluate(() => ({ active: document.activeElement?.tagName + "." + (document.activeElement?.className ?? "").toString().slice(0, 40), sel: window.getSelection()?.toString() }))));
+      await page.evaluate(() => {
+        const ed = (document.querySelector(".ProseMirror") as unknown as { editor: { on: (n: string, f: (a: { transaction: { docChanged: boolean; steps: { toJSON: () => unknown }[]; meta: Record<string, unknown> } }) => void) => void } }).editor;
+        (window as unknown as { __tx: unknown[] }).__tx = [];
+        ed.on("transaction", ({ transaction }) => {
+          if (!transaction.docChanged) return;
+          (window as unknown as { __tx: unknown[] }).__tx.push({ t: Math.round(performance.now()), metaKeys: Object.keys(transaction.meta ?? {}), steps: transaction.steps.map((st) => JSON.stringify(st.toJSON()).slice(0, 300)), stack: (new Error().stack ?? "").split("\n").slice(2, 9).map((l) => l.trim().slice(0, 110)) });
+        });
+      });
       await page.keyboard.press("ArrowRight");
       console.log("DIAG-198 after ArrowRight " + JSON.stringify(await page.evaluate(() => ({ active: document.activeElement?.tagName, sel: window.getSelection()?.toString() }))));
       await page.keyboard.press("Enter");
       await page.keyboard.type("Unapproved: ");
       await pastePlainText(page, ".ProseMirror", UNAPPROVED_PR_URL);
+      await page.waitForTimeout(1500);
+      console.log("DIAG-198 tx " + JSON.stringify(await page.evaluate(() => (window as unknown as { __tx: unknown[] }).__tx)));
+      console.log("DIAG-198 text " + JSON.stringify(await editor.innerText()));
       const unapprovedLink = editor.locator(`a[href="${UNAPPROVED_PR_URL}"]`);
       await expect(unapprovedLink).toHaveText(UNAPPROVED_PR_URL);
       await expect(unapprovedLink).not.toHaveAttribute("data-github-pr-link", "ready");
