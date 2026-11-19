@@ -326,7 +326,7 @@ function ObjectConversationsContent({
 
   return (
     <div className="flex min-w-0 flex-col gap-3" data-testid="object-conversations-section">
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-2 gap-y-1.5">
         <div className="flex items-center gap-2">
           <h3 ref={headingRef} tabIndex={-1} className="text-xs font-semibold uppercase tracking-wider text-text-subtle">
             Conversations
@@ -337,7 +337,7 @@ function ObjectConversationsContent({
             </span>
           )}
         </div>
-        <div className="flex items-center gap-1.5">
+        <div className="flex min-w-0 flex-wrap items-center gap-1.5">
           <Button
             type="button"
             variant={showArchived ? "secondary" : "ghost"}
