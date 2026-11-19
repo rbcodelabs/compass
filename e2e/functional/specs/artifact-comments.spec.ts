@@ -213,8 +213,10 @@ test("Artifact inspector preserves preview and drafts, isolates cookies, and ada
       await page.setViewportSize({ width, height })
       const sheetDialog = page.getByRole("dialog", { name: "Artifact inspector" })
       const visibleSurface = (await inspector(page).count()) ? inspector(page) : sheetDialog
-      await expect(visibleSurface).toBeVisible()
-      await expect(visibleSurface).toHaveCSS("opacity", "1")
+      // The inspector flips between the docked column and the Sheet as the width changes; wait for exactly one surface to settle.
+      await expect.poll(async () => (await inspector(page).count()) + (await sheetDialog.count())).toBe(1)
+      await expect(inspectorSurface(page)).toBeVisible()
+      await expect(inspectorSurface(page)).toHaveCSS("opacity", "1")
       await expect(composer(page)).toBeVisible()
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
       if (await inspector(page).count()) {
