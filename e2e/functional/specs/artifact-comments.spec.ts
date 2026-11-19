@@ -54,6 +54,16 @@ async function createArtifact(page: Page, base: string, title = "Checkout protot
 
 const inspector = (page: Page) => page.getByRole("complementary", { name: "Artifact inspector" })
 
+// #593 replaced the artifact "Discussion" thread with the object Conversations section (ObjectConversationsSection): a list of
+// conversations plus a "Start a conversation" composer whose Send opens the new conversation in the Conversation panel.
+const conversations = (page: Page) => page.getByTestId("object-conversations-section")
+const composer = (page: Page) => page.getByTestId("object-conversation-composer")
+const conversationPanel = (page: Page) =>
+  page
+    .locator('[data-slot="pinned-panel"]')
+    .filter({ has: page.getByRole("heading", { name: "Conversation", exact: true }) })
+    .or(page.getByRole("dialog", { name: "Conversation", exact: true }))
+
 test("Artifact comments support the discussion lifecycle across tabs, revisions and archive", async ({ page, base }, testInfo) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await createArtifact(page, base)
@@ -71,30 +81,20 @@ test("Artifact comments support the discussion lifecycle across tabs, revisions 
   const openColWidth = (await page.locator('[data-slot="artifact-content-column"]').boundingBox())!.width
   expect(Math.abs(closedColWidth - openColWidth - 360)).toBeLessThanOrEqual(2)
 
-  await page.getByRole("textbox", { name: "Add comment" }).fill("Review the **delivery note**.")
-  await page.getByRole("button", { name: "Post comment", exact: true }).click()
-  await expect(inspector(page).locator("strong").filter({ hasText: "delivery note" })).toBeVisible()
-  await inspector(page).getByRole("button", { name: /^Reply to/ }).click()
-  await inspector(page).getByRole("textbox", { name: /^Reply to/ }).fill("Reply draft")
-  await inspector(page).getByRole("textbox", { name: /^Reply to/ }).press("Escape")
+  await composer(page).fill("Review the delivery note.")
+  await inspector(page).getByRole("button", { name: "Send", exact: true }).click()
+  await expect(conversations(page).getByRole("button", { name: /^Review the delivery note\./ })).toBeVisible()
+  // Send opens the new conversation in the Conversation panel; a follow-up there is a plain (passive) human turn.
+  await expect(conversationPanel(page)).toBeVisible()
+  await expect(conversationPanel(page).getByText("Review the delivery note.", { exact: true })).toBeVisible()
+  await conversationPanel(page).getByPlaceholder(/message the agent/i).fill("Looks good.")
+  await conversationPanel(page).getByRole("button", { name: "Send message" }).click()
+  await expect(conversationPanel(page).getByText("Looks good.", { exact: true })).toBeVisible()
   await expect(inspector(page)).toBeVisible()
-  await inspector(page).getByRole("button", { name: /^Reply to/ }).click()
-  await inspector(page).getByRole("textbox", { name: /^Reply to/ }).fill("Looks good.")
-  await inspector(page).getByRole("button", { name: "Post reply" }).click()
-  await expect(inspector(page).getByText("Looks good.", { exact: true })).toBeVisible()
   await page.screenshot({ path: testInfo.outputPath("sol-101-06-desktop-open-comments-light.png"), animations: "disabled" })
 
-  await inspector(page).getByRole("button", { name: /^Edit comment by/ }).first().click()
-  await inspector(page).getByRole("textbox", { name: /^Edit comment by/ }).fill("Reviewed delivery note.")
-  await inspector(page).getByRole("button", { name: "Save edit" }).click()
-  await expect(inspector(page).getByText("Reviewed delivery note.", { exact: true })).toBeVisible()
-  await inspector(page).getByRole("button", { name: /^Resolve thread/ }).click()
-  await inspector(page).getByRole("button", { name: /^Expand resolved thread/ }).click()
-  await expect(inspector(page).getByText("Looks good.", { exact: true })).toBeVisible()
-  await inspector(page).getByRole("button", { name: /^Reopen thread/ }).click()
-
   // 3. Draft survives switching across Details, Links, Share, History, and uploading Revision 2.
-  await page.getByRole("textbox", { name: "Add comment" }).fill("Draft survives revision refresh")
+  await composer(page).fill("Draft survives revision refresh")
 
   await inspector(page).getByRole("tab", { name: "Details", exact: true }).click()
   await expect(inspector(page).getByRole("button", { name: "Save details" })).toBeVisible()
@@ -125,18 +125,61 @@ test("Artifact comments support the discussion lifecycle across tabs, revisions 
   await page.screenshot({ path: testInfo.outputPath("sol-101-05-desktop-open-history.png"), animations: "disabled" })
 
   await inspector(page).getByRole("tab", { name: "Comments", exact: true }).click()
-  await expect(page.getByRole("textbox", { name: "Add comment" })).toHaveText("Draft survives revision refresh")
-  await expect(inspector(page).getByText("Reviewed delivery note.", { exact: true })).toBeVisible()
+  await expect(composer(page)).toHaveText("Draft survives revision refresh")
+  await expect(conversations(page).getByRole("button", { name: /^Review the delivery note\./ })).toBeVisible()
 
   await inspector(page).getByRole("tab", { name: "Details", exact: true }).click()
   await inspector(page).getByRole("button", { name: "Archive", exact: true }).click()
   await expect(page.getByText("This artifact is archived.")).toBeVisible()
 
   await inspector(page).getByRole("tab", { name: "Comments", exact: true }).click()
+  await expect(conversations(page).getByRole("button", { name: /^Review the delivery note\./ })).toBeVisible()
+})
+
+// TASK-195 slice 'edit/delete': the unified Conversation model has no UI yet for editing a message, resolving or reopening a
+// thread from the artifact inspector, deleting a thread, or replying inside a thread with Escape-to-cancel. The original steps are
+// kept verbatim (against the pre-#593 Discussion locators) so the coverage is not lost; re-point them once the UI lands.
+test.fixme("Artifact comments support edit, resolve/reopen, reply-draft Escape and thread delete (TASK-195 slice 'edit/delete')", async ({ page, base }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await createArtifact(page, base)
+  await page.getByRole("button", { name: "Comments", exact: true }).click()
+  await page.getByRole("textbox", { name: "Add comment" }).fill("Review the **delivery note**.")
+  await page.getByRole("button", { name: "Post comment", exact: true }).click()
+  await expect(inspector(page).locator("strong").filter({ hasText: "delivery note" })).toBeVisible()
+  await inspector(page).getByRole("button", { name: /^Reply to/ }).click()
+  await inspector(page).getByRole("textbox", { name: /^Reply to/ }).fill("Reply draft")
+  await inspector(page).getByRole("textbox", { name: /^Reply to/ }).press("Escape")
+  await expect(inspector(page)).toBeVisible()
+  await inspector(page).getByRole("button", { name: /^Reply to/ }).click()
+  await inspector(page).getByRole("textbox", { name: /^Reply to/ }).fill("Looks good.")
+  await inspector(page).getByRole("button", { name: "Post reply" }).click()
+  await expect(inspector(page).getByText("Looks good.", { exact: true })).toBeVisible()
+
+  await inspector(page).getByRole("button", { name: /^Edit comment by/ }).first().click()
+  await inspector(page).getByRole("textbox", { name: /^Edit comment by/ }).fill("Reviewed delivery note.")
+  await inspector(page).getByRole("button", { name: "Save edit" }).click()
+  await expect(inspector(page).getByText("Reviewed delivery note.", { exact: true })).toBeVisible()
+  await inspector(page).getByRole("button", { name: /^Resolve thread/ }).click()
+  await inspector(page).getByRole("button", { name: /^Expand resolved thread/ }).click()
+  await expect(inspector(page).getByText("Looks good.", { exact: true })).toBeVisible()
+  await inspector(page).getByRole("button", { name: /^Reopen thread/ }).click()
+
+  await inspector(page).getByRole("tab", { name: "Details", exact: true }).click()
+  await inspector(page).getByRole("button", { name: "Archive", exact: true }).click()
+  await expect(page.getByText("This artifact is archived.")).toBeVisible()
+  await inspector(page).getByRole("tab", { name: "Comments", exact: true }).click()
   await expect(inspector(page).getByText("Reviewed delivery note.", { exact: true })).toBeVisible()
   page.once("dialog", (dialog) => dialog.accept())
   await inspector(page).getByRole("button", { name: /^Delete thread by/ }).click()
   await expect(inspector(page).getByText("No comments yet.")).toBeVisible()
+
+  // Test 2's reply-Escape step at 390px: a reply editor's Escape closes just that editor, never the sheet.
+  await page.setViewportSize({ width: 390, height: 844 })
+  const sheet = page.getByRole("dialog", { name: "Artifact inspector" })
+  await sheet.getByRole("button", { name: /^Reply to/ }).click()
+  await sheet.getByRole("textbox", { name: /^Reply to/ }).press("Escape")
+  await expect(sheet).toBeVisible()
+  await expect(sheet.getByRole("textbox", { name: /^Reply to/ })).toHaveCount(0)
 })
 
 test("Artifact inspector preserves preview and drafts, isolates cookies, and adapts to small screens", async ({ page, base }, testInfo) => {
@@ -149,12 +192,9 @@ test("Artifact inspector preserves preview and drafts, isolates cookies, and ada
   ])
   await page.frameLocator("iframe").getByRole("textbox", { name: "Delivery note" }).fill("Preview stays mounted")
   await page.getByRole("button", { name: "Comments", exact: true }).click()
-  await page.getByRole("textbox", { name: "Add comment" }).fill("The delivery note is easy to find. Could we clarify when it will be shared?")
-  await page.getByRole("button", { name: "Post comment", exact: true }).click()
-  // The composer stays disabled, still holding the typed text, until the post lands and it remounts empty.
-  await expect(page.getByRole("textbox", { name: "Add comment" })).toHaveText("")
-  await expect(page.getByText("The delivery note is easy to find. Could we clarify when it will be shared?", { exact: true })).toBeVisible()
-  await page.getByRole("textbox", { name: "Add comment" }).fill("Keep this draft")
+  // Posting here (the old step) would open the Conversation panel and change the width this test measures; posting is covered
+  // by the first and third tests, so this one only exercises the drafted composer.
+  await composer(page).fill("Keep this draft")
   await page.frameLocator("iframe").getByRole("textbox", { name: "Delivery note" }).press("Escape")
   await expect(inspector(page)).toBeVisible()
   const handle = inspector(page).getByRole("separator", { name: "Resize panel" })
@@ -164,7 +204,7 @@ test("Artifact inspector preserves preview and drafts, isolates cookies, and ada
   await inspector(page).getByRole("button", { name: "Close panel" }).click()
   await expect(page.getByRole("button", { name: "Comments", exact: true })).toBeFocused()
   await page.getByRole("button", { name: "Comments", exact: true }).click()
-  await expect(page.getByRole("textbox", { name: "Add comment" })).toHaveText("Keep this draft")
+  await expect(composer(page)).toHaveText("Keep this draft")
   await expect(page.frameLocator("iframe").getByRole("textbox", { name: "Delivery note" })).toHaveValue("Preview stays mounted")
 
   for (const theme of ["light", "dark"]) {
@@ -176,7 +216,7 @@ test("Artifact inspector preserves preview and drafts, isolates cookies, and ada
       const visibleSurface = (await inspector(page).count()) ? inspector(page) : sheetDialog
       await expect(visibleSurface).toBeVisible()
       await expect(visibleSurface).toHaveCSS("opacity", "1")
-      await expect(page.getByRole("textbox", { name: "Add comment" })).toHaveText("Keep this draft")
+      await expect(composer(page)).toHaveText("Keep this draft")
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
       if (await inspector(page).count()) {
         expect((await page.locator('[data-slot="artifact-content-column"]').boundingBox())!.width).toBeGreaterThanOrEqual(479)
@@ -193,12 +233,8 @@ test("Artifact inspector preserves preview and drafts, isolates cookies, and ada
         await page.screenshot({ path: testInfo.outputPath("sol-101-08a-mobile-sheet-details.png"), animations: "disabled" })
         await visibleSurface.getByRole("tab", { name: "Comments", exact: true }).click()
       }
-      if (width === 390) {
-        await visibleSurface.getByRole("button", { name: /^Reply to/ }).click()
-        await visibleSurface.getByRole("textbox", { name: /^Reply to/ }).press("Escape")
-        await expect(visibleSurface).toBeVisible()
-        await expect(visibleSurface.getByRole("textbox", { name: /^Reply to/ })).toHaveCount(0)
-      }
+      // Dropped here: at 390px, opening a reply editor and pressing Escape must close only the editor, not the sheet. There is no
+      // reply editor in the Conversations section; the step lives in the test.fixme above (TASK-195 slice 'edit/delete').
     }
   }
 
@@ -232,7 +268,7 @@ test("Artifact inspector preserves preview and drafts, isolates cookies, and ada
   await expect(inspector(page)).toHaveCount(0)
   await page.getByRole("button", { name: "Comments", exact: true }).click()
   await expect(inspector(page).getByRole("separator")).toHaveAttribute("aria-valuenow", "336")
-  await expect(page.getByRole("textbox", { name: "Add comment" })).toHaveText("")
+  await expect(composer(page)).toHaveText("")
 })
 
 test("External Artifacts expose the same comments without embedding the external site", async ({ page, base }) => {
@@ -244,7 +280,7 @@ test("External Artifacts expose the same comments without embedding the external
   await page.waitForURL(/\/docs\/artifacts\/[0-9a-f-]+$/)
   await expect(page.locator("iframe")).toHaveCount(0)
   await page.getByRole("button", { name: "Comments", exact: true }).click()
-  await page.getByRole("textbox", { name: "Add comment" }).fill("Review the external reference.")
-  await page.getByRole("button", { name: "Post comment", exact: true }).click()
-  await expect(page.getByText("Review the external reference.", { exact: true })).toBeVisible()
+  await composer(page).fill("Review the external reference.")
+  await page.getByTestId("object-conversations-section").getByRole("button", { name: "Send", exact: true }).click()
+  await expect(conversations(page).getByRole("button", { name: /^Review the external reference\./ })).toBeVisible()
 })

@@ -4,7 +4,7 @@
  * Journey: a shared cloud agent is created with its own model -> the composer's Model chip names what Default resolves to and
  * follows the Agent chip -> an explicit pick is carried on the turn request and survives a reload -> a remembered model that is
  * no longer offered resets to Default -> the real turn route refuses an unlisted model with a 400 -> a 390px phone does not
- * overflow, and its pickers become bottom sheets with 44px rows. The docked agent rail (a narrow column) holds the same composer
+ * overflow, and its pickers become bottom sheets with 44px rows. The docked Conversation panel (a narrow column) holds the same composer
  * without overflow.
  *
  * The sandbox is stubbed at the browser: the turn request is intercepted and answered with a canned event stream, so the
@@ -135,11 +135,15 @@ test("the chat model picker shows the effective model, sends an explicit pick, r
     await page.keyboard.press("Escape");
     await expect(page.getByRole("listbox")).toHaveCount(0);
 
-    // The docked agent rail (a narrow column on a wide screen) holds the same composer without overflowing.
+    // The docked Conversation panel (a narrow column on a wide screen) holds the same composer without overflowing.
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto(`${base}/`);
     await page.keyboard.press("ControlOrMeta+j");
-    const rail = page.locator('[data-slot="agent-rail"]');
+    // #593 replaced the docked agent rail with the Conversation panel (⌘J), which docks as a pinned aside on a wide screen
+    // and hosts the same composer card.
+    const rail = page
+      .locator('[data-slot="pinned-panel"]')
+      .filter({ has: page.getByRole("heading", { name: "Conversation", exact: true }) });
     await expect(rail).toBeVisible({ timeout: 15_000 });
     const railModel = rail.getByRole("button", { name: /^Model:/ });
     await expect(railModel).toBeVisible({ timeout: 15_000 });

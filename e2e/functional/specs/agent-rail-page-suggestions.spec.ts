@@ -2,7 +2,13 @@ import { randomUUID } from "node:crypto";
 import type { Page } from "@playwright/test";
 import { test, expect } from "../fixtures/index";
 
-const rail = (page: Page) => page.locator('[data-slot="agent-rail"]');
+// #593 replaced the docked Agent Rail with the Conversation panel (Right PanelShell, opened by ⌘J as ?detail=conversation:new).
+// It docks as an <aside data-slot="pinned-panel"> on wide viewports and is a dialog (Sheet) below 1024px.
+const rail = (page: Page) =>
+  page
+    .locator('[data-slot="pinned-panel"]')
+    .filter({ has: page.getByRole("heading", { name: "Conversation", exact: true }) })
+    .or(page.getByRole("dialog", { name: "Conversation", exact: true }));
 
 test("blank Agent Rail surfaces screen-responsive starter questions, pins while typing, stages via ✎, and 1-click fires with pageUrl", async ({
   page,
@@ -91,8 +97,14 @@ test("blank Agent Rail surfaces screen-responsive starter questions, pins while 
   );
   expect(capturedTurnBody).toBeNull();
 
-  await nav.getByRole("link", { name: "OKRs", exact: true }).click();
+  // The panel is URL state (?detail=), so a sidebar link would close it. Navigate the way an in-panel link does: client-side,
+  // carrying the open panel across to the next page (this is the "background navigation" the pinned stack must survive).
+  await page.evaluate(() => {
+    const next = (window as unknown as { next: { router: { push: (href: string) => void } } }).next;
+    next.router.push(`${window.location.pathname.replace(/\/roadmap$/, "/okrs")}${window.location.search}`);
+  });
   await expect(page).toHaveURL(/\/okrs/);
+  await expect(rail(page)).toBeVisible();
   await expect(stack).toContainText("Viewing · Roadmap");
 
   // Clearing composer draft reconciles stack to OKRs

@@ -1,4 +1,5 @@
 import pg from "pg";
+import type { Locator, Page } from "@playwright/test";
 import { test, expect } from "../fixtures/index";
 import { openFullPage } from "../fixtures/full-page";
 import { isolatedE2EConnectionString } from "../fixtures/isolated-database";
@@ -25,7 +26,62 @@ async function seedOpportunity() {
   }
 }
 
-test("opportunity discussion persists between full page and panel", async ({ page, base }) => {
+// #593 replaced the opportunity "Discussion" region with the object Conversations section (ObjectConversationsSection).
+const conversationsSection = (scope: Page | Locator) => scope.getByTestId("object-conversations-section");
+const composerIn = (scope: Page | Locator) => scope.getByTestId("object-conversation-composer");
+const conversationPanel = (page: Page) =>
+  page
+    .locator('[data-slot="pinned-panel"]')
+    .filter({ has: page.getByRole("heading", { name: "Conversation", exact: true }) })
+    .or(page.getByRole("dialog", { name: "Conversation", exact: true }));
+
+/** An anchored, workspace-visible conversation on the opportunity: what a posted comment turned into after #593. */
+async function seedConversation(opportunityId: string, conversationTitle: string) {
+  const pool = new pg.Pool({ connectionString: isolatedE2EConnectionString() });
+  try {
+    await pool.query(
+      `INSERT INTO compass_dev.agent_conversations (id,workspace_id,user_id,title,target_type,target_id,visibility,status,agent_mode,source,created_at,updated_at)
+       SELECT gen_random_uuid(), o.workspace_id, (SELECT id FROM compass_dev.users WHERE email='dev@localhost.dev'), $2, 'OPPORTUNITY', o.id, 'WORKSPACE', 'OPEN', 'MENTION_ONLY', 'BROWSER', NOW(), NOW()
+         FROM compass_dev.opportunities o WHERE o.id=$1`,
+      [opportunityId, conversationTitle],
+    );
+  } finally {
+    await pool.end();
+  }
+}
+
+test("opportunity conversations persist between full page and panel", async ({ page, base }) => {
+  const id = await seedOpportunity();
+  await page.goto(`${base}/discovery/${id}`);
+  const conversations = conversationsSection(page);
+  await expect(conversations.getByText(/No conversations on this item yet/)).toBeVisible();
+  await composerIn(conversations).fill("Test the shared recap with new teams.");
+  await conversations.getByRole("button", { name: "Send", exact: true }).click();
+  await expect(conversations.getByRole("button", { name: /^Test the shared recap with new teams\./ })).toBeVisible();
+  // Send opens the new conversation in the Conversation panel; a follow-up there is the old "reply".
+  const thread = conversationPanel(page);
+  await expect(thread).toBeVisible();
+  await thread.getByPlaceholder(/message the agent/i).fill("Measure whether a second teammate participates.");
+  await thread.getByRole("button", { name: "Send message" }).click();
+  await expect(thread.getByText("Measure whether a second teammate participates.", { exact: true })).toBeVisible();
+  await page.getByRole("tab", { name: /Evidence/ }).click();
+  await expect(conversations.getByRole("button", { name: /^Test the shared recap with new teams\./ })).toBeVisible();
+  await page.reload();
+  await expect(conversationPanel(page).getByText("Measure whether a second teammate participates.", { exact: true })).toBeVisible();
+  await page.goto(`${base}/discovery?detail=opportunity:${id}`);
+  const panel = page.locator('[data-slot="sheet-content"]');
+  const panelConversations = conversationsSection(panel);
+  await expect(panel.getByRole("link", { name: "Open full page" })).toHaveCount(1);
+  await expect(panel.locator('[data-slot="sheet-header"]').getByRole("link", { name: "Open full page" })).toHaveAttribute("href", `${base}/discovery/${id}`);
+  await expect(panelConversations.getByRole("button", { name: /^Test the shared recap with new teams\./ })).toBeVisible();
+  expect(await openFullPage(page, panel)).toBe(`${base}/discovery/${id}`);
+  await expect(conversationsSection(page).getByRole("button", { name: /^Test the shared recap with new teams\./ })).toBeVisible();
+});
+
+// TASK-195 slice 'edit/delete': editing a message and resolving/reopening a thread from the opportunity's Discussion have no UI in
+// the unified Conversation model yet. The original test is kept verbatim (pre-#593 locators) so this coverage is not lost.
+test.fixme("opportunity discussion edit, resolve and reopen persist between full page and panel (TASK-195 slice 'edit/delete')", async ({ page, base }) => {
+
   const id = await seedOpportunity();
   await page.goto(`${base}/discovery/${id}`);
   const discussion = page.getByRole("region", { name: "Discussion", exact: true });
@@ -60,15 +116,18 @@ test("opportunity discussion persists between full page and panel", async ({ pag
   await expect(discussion.getByText("Measure whether a second teammate participates.", { exact: true })).toBeVisible();
 });
 
-test("opportunity layout responds to available width without losing comment drafts", async ({ page, base }) => {
+test("opportunity layout responds to available width without losing conversation drafts", async ({ page, base }) => {
   const id = await seedOpportunity();
+  const conversationTitle = "The interviews point to a gap in the handoff.";
   await page.setViewportSize({ width: 1600, height: 1000 });
   await page.goto(`${base}/discovery/${id}`);
-  const discussion = page.getByRole("region", { name: "Discussion", exact: true });
-  await expect(discussion.getByText("No comments yet.")).toBeVisible();
-  await discussion.getByLabel("Add comment", { exact: true }).fill("The interviews point to a gap in the handoff.");
-  await discussion.getByRole("button", { name: "Post comment", exact: true }).click();
-  await expect(discussion.getByText("The interviews point to a gap in the handoff.", { exact: true })).toBeVisible();
+  const discussion = conversationsSection(page);
+  await expect(discussion.getByText(/No conversations on this item yet/)).toBeVisible();
+  // Seed the conversation instead of sending it: sending opens the Conversation panel, which docks and changes the very width
+  // this test measures. Sending is covered by the first test.
+  await seedConversation(id, conversationTitle);
+  await page.reload();
+  await expect(discussion.getByRole("button", { name: new RegExp(`^${conversationTitle}`) })).toBeVisible();
   const tabs = page.getByRole("tablist");
   const wideTabs = await tabs.boundingBox();
   const wideDiscussion = await discussion.boundingBox();
@@ -80,24 +139,24 @@ test("opportunity layout responds to available width without losing comment draf
   await page.setViewportSize({ width: 1280, height: 800 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({ path: "public/screenshots/docs/opportunity-detail-page-1280.png", fullPage: true, animations: "disabled", style: "nextjs-portal { visibility: hidden; }" });
-  await discussion.getByLabel("Add comment", { exact: true }).fill("Unfinished observation");
+  await composerIn(discussion).fill("Unfinished observation");
   await page.setViewportSize({ width: 390, height: 844 });
-  await expect(discussion.getByLabel("Add comment", { exact: true })).toHaveText("Unfinished observation");
+  await expect(composerIn(discussion)).toHaveText("Unfinished observation");
   const mobileTabs = await tabs.boundingBox();
   const mobileDiscussion = await discussion.boundingBox();
   expect(mobileDiscussion!.y).toBeGreaterThan(mobileTabs!.y + mobileTabs!.height);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.getByRole("button", { name: title, exact: true }).scrollIntoViewIfNeeded();
   await page.screenshot({ path: "public/screenshots/docs/opportunity-detail-page-mobile.png", fullPage: true, animations: "disabled", style: "nextjs-portal { visibility: hidden; }" });
-  await discussion.getByLabel("Add comment", { exact: true }).scrollIntoViewIfNeeded();
+  await composerIn(discussion).scrollIntoViewIfNeeded();
   await page.screenshot({ path: "public/screenshots/docs/opportunity-detail-discussion-mobile.png", fullPage: true, animations: "disabled", style: "nextjs-portal { visibility: hidden; }" });
   await page.setViewportSize({ width: 320, height: 740 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  await expect(discussion.getByLabel("Add comment", { exact: true })).toHaveText("Unfinished observation");
+  await expect(composerIn(discussion)).toHaveText("Unfinished observation");
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(`${base}/discovery?detail=opportunity:${id}`);
   const panel = page.locator('[data-slot="sheet-content"]');
-  await expect(panel.getByRole("region", { name: "Discussion", exact: true }).getByText("The interviews point to a gap in the handoff.", { exact: true })).toBeVisible();
+  await expect(conversationsSection(panel).getByRole("button", { name: new RegExp(`^${conversationTitle}`) })).toBeVisible();
   await panel.getByRole("button", { name: title, exact: true }).scrollIntoViewIfNeeded();
   await page.screenshot({ path: "public/screenshots/docs/opportunity-detail-panel-mobile.png", fullPage: true, animations: "disabled", style: "nextjs-portal { visibility: hidden; }" });
   await page.setViewportSize({ width: 1280, height: 800 });
@@ -106,7 +165,7 @@ test("opportunity layout responds to available width without losing comment draf
   const pinned = page.locator('[data-slot="pinned-panel"]');
   await expect(pinned.getByRole("link", { name: "Open full page" })).toHaveCount(1);
   await expect(pinned.locator('[data-slot="opportunity-detail"]').getByRole("link", { name: "Open full page" })).toHaveCount(0);
-  await expect(pinned.getByRole("region", { name: "Discussion", exact: true }).getByText("The interviews point to a gap in the handoff.", { exact: true })).toBeVisible();
+  await expect(conversationsSection(pinned).getByRole("button", { name: new RegExp(`^${conversationTitle}`) })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await pinned.getByRole("button", { name: title, exact: true }).scrollIntoViewIfNeeded();
   await page.screenshot({ path: "public/screenshots/docs/opportunity-detail-pinned-desktop.png", fullPage: true, animations: "disabled", style: "nextjs-portal { visibility: hidden; }" });
@@ -114,7 +173,9 @@ test("opportunity layout responds to available width without losing comment draf
   await page.screenshot({ path: "public/screenshots/docs/opportunity-detail-pinned-dark.png", fullPage: true, animations: "disabled", style: "nextjs-portal { visibility: hidden; }" });
 });
 
-test("opportunity discussion retries a failed load and retains a failed post", async ({ page, base }) => {
+// Superseded by e2e/functional/specs/conversations-recovery.spec.ts (PR #617): it covers the failed-load Retry, the retained
+// draft after a failed send, and the uncertain-send Retry for the Conversations section. The Discussion UI this drove is gone.
+test.skip("opportunity discussion retries a failed load and retains a failed post (superseded by conversations-recovery.spec.ts)", async ({ page, base }) => {
   const id = await seedOpportunity();
   let rejectLoad = true;
   let rejectPost = false;

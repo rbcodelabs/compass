@@ -1,9 +1,9 @@
 /**
- * Solution Current Plan + shared Discussion functional spec.
+ * Solution Current Plan + shared Conversations functional spec.
  *
  * Journey: Create opportunity → navigate to detail → add solution →
- *          open the solution's sidebar panel → post an ordinary shared
- *          Discussion comment → post a specialized Plan update → verify the
+ *          open the solution's sidebar panel → seed an ordinary shared
+ *          Conversation (#593 replaced the Discussion comment composer) → post a specialized Plan update → verify the
  *          Plan is pinned as "Current Plan" without duplicating the ordinary
  *          comment → approve the plan → reject it (a
  *          decision can be changed at any time).
@@ -18,7 +18,7 @@ import pg from "pg";
 
 const S = process.env.PGSCHEMA ? `${process.env.PGSCHEMA}_dev` : "compass_dev";
 
-test.describe("Solution Current Plan + shared Discussion", () => {
+test.describe("Solution Current Plan + shared Conversations", () => {
   test(
     "ordinary discussion stays separate while the current plan remains pinnable and approvable",
     async ({ page, base }) => {
@@ -57,21 +57,34 @@ test.describe("Solution Current Plan + shared Discussion", () => {
       const panel = page.locator('[data-slot="sheet-content"]');
       await expect(panel).toBeVisible();
 
-      // Specialized plans and ordinary shared comments are distinct surfaces.
+      // Specialized plans and ordinary shared conversations are distinct surfaces. #593 replaced the Discussion region with the
+      // object Conversations section.
+      const conversations = panel.getByTestId("object-conversations-section");
+      await expect(conversations.getByRole("heading", { name: "Conversations", exact: true })).toBeVisible();
+      await expect(conversations.getByText(/No conversations on this item yet/)).toBeVisible();
+
+      // ── 6. An ordinary shared conversation on the solution ─────────────────
+      // Sending one from the composer opens it in the Conversation panel, replacing this solution panel (and the Plan under test),
+      // so seed what a send produces and reload: the panel stays on the solution and lists the conversation.
+      if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL is required for plan isolation verification");
+      const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+      await pool.query(
+        `INSERT INTO "${S}".agent_conversations (id, workspace_id, user_id, title, target_type, target_id, visibility, status, agent_mode, source, created_at, updated_at)
+         SELECT gen_random_uuid(), s.workspace_id, (SELECT id FROM "${S}".users WHERE email = 'dev@localhost.dev'), $2, 'SOLUTION', s.id, 'WORKSPACE', 'OPEN', 'MENTION_ONLY', 'BROWSER', NOW(), NOW()
+           FROM "${S}".solutions s WHERE s.title = $1`,
+        [solTitle, commentBody],
+      );
+      await page.reload();
+      await expect(panel).toBeVisible();
+
       await expect(panel.getByText("Current Plan", { exact: true })).toBeVisible();
       await panel.getByRole("button", { name: "Current Plan", exact: true }).click();
       await expect(panel.getByText("No plan yet.")).toBeVisible();
-      await expect(panel.getByRole("heading", { name: "Discussion" })).toBeVisible();
-      await expect(panel.getByText("No comments yet.")).toBeVisible();
 
-      // ── 6. Post an ordinary shared Discussion comment ──────────────────────
-      await panel.getByLabel("Add comment").fill(commentBody);
-      await panel.getByRole("button", { name: "Post comment" }).click();
-
-      // Comment appears exactly once and never enters the specialized plan list.
-      await expect(panel.getByText(commentBody)).toBeVisible({ timeout: 10_000 });
+      // The conversation appears exactly once and never enters the specialized plan list.
+      await expect(conversations.getByRole("button", { name: new RegExp(`^${commentBody}`) })).toBeVisible({ timeout: 10_000 });
       await expect(panel.getByText(commentBody)).toHaveCount(1);
-      await expect(panel.getByText("No comments yet.")).not.toBeVisible();
+      await expect(conversations.getByText(/No conversations on this item yet/)).not.toBeVisible();
       await expect(panel.getByText("No plan yet.")).toBeVisible();
       await expect(panel.getByTestId("current-plan")).not.toBeVisible();
 
@@ -90,8 +103,6 @@ test.describe("Solution Current Plan + shared Discussion", () => {
       await expect(panel.getByText(planBody).first()).toBeVisible();
 
       // Generic browser mutations must not touch the specialized plan row.
-      if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL is required for plan isolation verification");
-      const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
       const { rows: [persistedPlan] } = await pool.query<{ id: string; body: string }>(`
         SELECT c.id, c.body FROM "${S}".comments c
         JOIN "${S}".solution_plan_proposals p ON p.comment_id = c.id
