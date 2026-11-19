@@ -628,6 +628,14 @@ export function AgentChat({
 
   // Comment-origin deep link: scroll the linked message into view once it is rendered, once per (conversation, message).
   const focusDoneRef = useRef<string | null>(null)
+  // While the linked message is what the reader is looking at, the end-of-transcript scroll below must not pull the page
+  // away from it. Holds the message count at the time of the focus scroll; any new message (the reader sends or others post)
+  // releases it, and so does a different link or conversation.
+  const focusHoldRef = useRef<{ key: string; count: number } | null>(null)
+  const focusKeyRef = useRef<string | null>(null)
+  useEffect(() => {
+    focusKeyRef.current = focusMessageId && activeConversationId ? `${activeConversationId}:${focusMessageId}` : null
+  })
   const [focusAnnounced, setFocusAnnounced] = useState<string | null>(null)
   useEffect(() => {
     if (!focusMessageId || !activeConversationId) return
@@ -638,6 +646,7 @@ export function AgentChat({
     const target = rows ? Array.from(rows).find((row) => row.getAttribute("data-message-id") === focusMessageId) : undefined
     if (!target) return
     focusDoneRef.current = key
+    focusHoldRef.current = { key, count: messages.length }
     target.scrollIntoView?.({ block: "center" })
     setFocusAnnounced(key)
   }, [focusMessageId, activeConversationId, messages])
@@ -680,6 +689,12 @@ export function AgentChat({
     const instant = jumpToBottom.current
     jumpToBottom.current = false
     if (transcriptHostRef.current?.classList.contains("hidden")) return
+    // Declared after the focus effect, so on the commit that scrolled to a linked message this runs second: skip it.
+    const hold = focusHoldRef.current
+    if (hold) {
+      if (hold.key === focusKeyRef.current && messages.length <= hold.count) return
+      focusHoldRef.current = null
+    }
     bottomRef.current?.scrollIntoView({ behavior: instant ? "auto" : "smooth", block: "end" })
   }, [messages, streamingText, liveToolSteps, livePlan, liveSubagents, phase])
 
@@ -1616,8 +1631,11 @@ export function AgentChat({
               </div>
             )}
 
-            {focusAnnounced === `${activeConversationId}:${focusMessageId}` && (
-              <p role="status" aria-live="polite" className="sr-only">Showing the linked message.</p>
+            {/* Rendered empty first and filled later: a live region inserted together with its text is often not announced. */}
+            {focusMessageId && (
+              <p role="status" aria-live="polite" className="sr-only">
+                {focusAnnounced === `${activeConversationId}:${focusMessageId}` ? "Showing the linked message." : ""}
+              </p>
             )}
             {messages.map((m) => (
               <MessageRow key={m.id} focused={Boolean(focusMessageId) && m.id === focusMessageId} message={m} userInitials={userInitials} userId={userId} shared={shared} workspaceId={workspaceId} conversationId={activeConversationId} basePath={basePath} onInspectSubagent={selectChildRun} mentionOptions={mentionOptions} onOpenMentions={loadMentionOptions} onMessageEdited={applyMessageEdit} />

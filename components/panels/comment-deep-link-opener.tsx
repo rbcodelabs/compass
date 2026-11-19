@@ -9,20 +9,31 @@ import { canonicalCommentDeepLink, isCommentId, withoutCommentParam } from "@/li
 /**
  * Opens the Conversation panel for an old comment-origin link (`<object page>?comment=<id>`), TASK-195 S3.
  *
- * Mounted once inside ConversationPanelProvider. When the URL carries `comment=<id>` and no panel, it asks
+ * Mounted once inside ConversationPanelProvider. When the URL carries `comment=<id>` and no other panel, it asks
  * GET /api/agent/conversations/locate which conversation holds that id and rewrites the URL with `router.replace` (no
  * history entry) to `?detail=conversation:<cid>&comment=<messageId>`. The panel reads `comment` to highlight the message,
  * so a refresh or a shared link lands in the same place. Other parameters and the hash are kept.
  *
- *  - Idempotent and loop-free: a URL that already has a conversation panel is trusted and never looked up; an id is looked
- *    up once per page life. Another open panel is left alone.
+ *  - Loop-free: an id is looked up once per page life (a pair we wrote ourselves is remembered and never re-checked).
+ *    A canonical URL met cold (reload, shared link) is checked once, and nothing is rewritten when it already matches. A
+ *    `?comment=B` link followed while the panel shows conversation A looks B up and moves the panel to B's thread.
+ *  - Another panel (`detail=task:...`) wins and its `comment` is never acted on, not even after that panel closes.
+ *  - A legacy `rc` link is consumed by LegacyRailLinkRedirect first: while `rc` is in the URL this does nothing, so two
+ *    `router.replace` calls built from the same stale URL cannot fight.
  *  - Closing the panel leaves `comment` behind (closePanel only removes `detail`), so once an id this opener opened is no
  *    longer shown it is dropped from the URL instead of reopening the panel.
- *  - A Docs comment (targetType DOC) belongs to the Docs sidebar, which reads `?comment=` itself: left untouched.
+ *  - A Docs comment (targetType DOC) belongs to the Docs sidebar, which reads `?comment=` itself: left untouched, and on
+ *    `/docs` routes no lookup is made at all (every `comment` id there is a document comment).
  *  - An unknown, malformed or unreadable id gets one neutral note and the parameter is dropped. The note never says which
- *    of those it was. A failed lookup (offline, 5xx) changes nothing.
+ *    of those it was. A failed lookup (offline, 5xx) changes nothing and is retried a few times with a growing delay.
+ *
+ * Cost and abuse: the lookup is two primary-key reads for a member; the only write is the idempotent, insert-only repair of
+ * a missing mirror for a workspace member, so there is no per-user rate limit here. If locate ever becomes a probing target,
+ * add one at the route (the 404 body is already uniform).
  */
 const DETAIL_PREFIX = "conversation:"
+const MAX_ATTEMPTS = 3
+const RETRY_BASE_MS = 3000
 
 type Located = { conversationId: string; messageId: string; targetType: string | null }
 
@@ -40,38 +51,51 @@ export function CommentDeepLinkOpener() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const [notice, setNotice] = useState(false)
-  // Set once an id has been dealt with; `opened` means this opener (or a canonical link) put its thread in the panel.
+  const [retry, setRetry] = useState(0)
+  // Set once an id has been dealt with; `opened` means a conversation for it was put in the panel by this opener.
   const handled = useRef<{ id: string; opened: boolean } | null>(null)
+  // `<conversationId>|<commentId>` pairs known to be right (written by us, or confirmed by a lookup).
+  const confirmed = useRef<string | null>(null)
+  const attempts = useRef(0)
   const replaceRef = useRef(router.replace)
   replaceRef.current = router.replace
 
   const workspaceId = ctx?.workspaceId
   const comment = searchParams.get("comment")
   const detail = searchParams.get("detail")
+  const hasLegacyRail = searchParams.has("rc")
   const search = searchParams.toString()
 
   useEffect(() => {
     if (!workspaceId || !pathname) return
     if (!comment) {
       handled.current = null
+      confirmed.current = null
+      attempts.current = 0
       return
     }
-    // The full-page Conversations screen has its own `?c=` addressing.
-    if (pathname.endsWith("/conversations")) return
+    // The legacy `rc` redirect rewrites the URL first; acting on the same stale URL would leave `rc` behind.
+    if (hasLegacyRail) return
+    // The full-page Conversations screen has its own `?c=` addressing; Docs routes own their `comment` ids.
+    if (pathname.endsWith("/conversations") || /\/docs(\/|$)/.test(pathname)) return
     const parts = () => ({ pathname, search, hash: window.location.hash })
     const replace = (href: string) => replaceRef.current(href, { scroll: false })
 
-    if (detail?.startsWith(DETAIL_PREFIX)) {
-      // Already canonical (our own rewrite, a shared link or a reload): nothing to look up.
+    const openConversationId = detail?.startsWith(DETAIL_PREFIX) ? detail.slice(DETAIL_PREFIX.length) : null
+    if (detail && openConversationId === null) {
+      // Another panel is open; it wins, and this id is not reopened when that panel closes.
+      handled.current = { id: comment, opened: false }
+      return
+    }
+    if (openConversationId && confirmed.current === `${openConversationId}|${comment}`) {
       handled.current = { id: comment, opened: true }
       return
     }
-    if (detail) return // another panel is open; it wins
-
-    if (handled.current?.id === comment) {
+    if (!openConversationId && handled.current?.id === comment) {
       if (handled.current.opened) {
         // The panel was closed; do not let the stale parameter reopen it.
         handled.current = null
+        confirmed.current = null
         replace(withoutCommentParam(parts()))
       }
       return
@@ -85,9 +109,11 @@ export function CommentDeepLinkOpener() {
     }
 
     const controller = new AbortController()
+    let timer: ReturnType<typeof setTimeout> | undefined
     void (async () => {
       let located: Located | null = null
       let status = 0
+      let failed = false
       try {
         const response = await fetch(
           `/api/agent/conversations/locate?workspaceId=${encodeURIComponent(workspaceId)}&messageId=${encodeURIComponent(comment)}`,
@@ -95,22 +121,40 @@ export function CommentDeepLinkOpener() {
         )
         status = response.status
         if (response.ok) located = parseLocated(await response.json())
+        failed = status !== 404 && !located
       } catch {
-        // Offline or a transient failure: change nothing, do not retry in a loop.
+        failed = true
       }
       if (controller.signal.aborted) return
-      handled.current = { id: comment, opened: false }
       if (status === 404) {
+        handled.current = { id: comment, opened: false }
         setNotice(true)
         replace(withoutCommentParam(parts()))
         return
       }
-      if (!located || located.targetType === "DOC") return
+      if (failed || !located) {
+        // Offline or a transient failure: change nothing now, try again a few times.
+        if (attempts.current < MAX_ATTEMPTS) {
+          attempts.current += 1
+          timer = setTimeout(() => setRetry((count) => count + 1), RETRY_BASE_MS * attempts.current)
+        }
+        return
+      }
+      attempts.current = 0
+      if (located.targetType === "DOC") {
+        handled.current = { id: comment, opened: false }
+        return
+      }
       handled.current = { id: comment, opened: true }
+      confirmed.current = `${located.conversationId}|${comment}`
+      if (openConversationId === located.conversationId) return // already showing the right thread
       replace(canonicalCommentDeepLink({ ...parts(), conversationId: located.conversationId, messageId: located.messageId }))
     })()
-    return () => controller.abort()
-  }, [workspaceId, pathname, comment, detail, search])
+    return () => {
+      controller.abort()
+      if (timer) clearTimeout(timer)
+    }
+  }, [workspaceId, pathname, comment, detail, search, hasLegacyRail, retry])
 
   if (!notice) return null
   return (

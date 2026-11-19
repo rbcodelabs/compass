@@ -77,16 +77,59 @@ describe("CommentDeepLinkOpener", () => {
     expect(nav.replace).toHaveBeenCalledTimes(1)
   })
 
-  it("trusts an already-canonical URL (shared link, reload) without asking the server", async () => {
+  it("checks a cold canonical URL (reload, shared link) once and rewrites nothing when it already matches", async () => {
     nav.search = `?detail=${encodeURIComponent(`conversation:${CID}`)}&comment=${MID}`
+    reply(200, located)
+    render(<CommentDeepLinkOpener />)
+    await waitFor(() => expect(locateCalls()).toHaveLength(1))
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(nav.replace).not.toHaveBeenCalled()
+  })
+
+  it("moves the panel to the right thread when a ?comment link is followed while another conversation is open", async () => {
+    const OTHER = "11111111-2222-4333-8444-555555555555"
+    nav.search = `?detail=${encodeURIComponent(`conversation:${OTHER}`)}&comment=${MID}`
+    reply(200, located)
+    render(<CommentDeepLinkOpener />)
+    await waitFor(() => expect(nav.replace).toHaveBeenCalledTimes(1))
+    const href = new URL(nav.replace.mock.calls[0]![0] as string, "https://x.test")
+    expect(href.searchParams.get("detail")).toBe(`conversation:${CID}`)
+    expect(href.searchParams.get("comment")).toBe(MID)
+  })
+
+  it("leaves another open panel alone", async () => {
+    nav.search = `?detail=${encodeURIComponent("task:abc")}&comment=${MID}`
     render(<CommentDeepLinkOpener />)
     await new Promise((resolve) => setTimeout(resolve, 20))
     expect(fetchMock).not.toHaveBeenCalled()
     expect(nav.replace).not.toHaveBeenCalled()
   })
 
-  it("leaves another open panel alone", async () => {
+  it("never reopens a thread for a comment param left behind by another panel, even after that panel closes", async () => {
     nav.search = `?detail=${encodeURIComponent("task:abc")}&comment=${MID}`
+    const view = render(<CommentDeepLinkOpener />)
+    nav.search = `?comment=${MID}`
+    view.rerender(<CommentDeepLinkOpener />)
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(nav.replace).not.toHaveBeenCalled()
+  })
+
+  it("defers to the legacy rail redirect: with rc in the URL it does nothing, then proceeds once rc is gone", async () => {
+    nav.search = `?rc=${CID}&comment=${MID}`
+    reply(200, located)
+    const view = render(<CommentDeepLinkOpener />)
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(nav.replace).not.toHaveBeenCalled()
+    nav.search = `?comment=${MID}`
+    view.rerender(<CommentDeepLinkOpener />)
+    await waitFor(() => expect(nav.replace).toHaveBeenCalledTimes(1))
+    expect(new URL(nav.replace.mock.calls[0]![0] as string, "https://x.test").searchParams.has("rc")).toBe(false)
+  })
+
+  it("makes no lookup on a Docs route (document comments belong to the Docs sidebar)", async () => {
+    nav.pathname = "/acme/core/docs/DOC-1"
     render(<CommentDeepLinkOpener />)
     await new Promise((resolve) => setTimeout(resolve, 20))
     expect(fetchMock).not.toHaveBeenCalled()
@@ -132,13 +175,30 @@ describe("CommentDeepLinkOpener", () => {
     expect(screen.getByRole("status")).toBeInTheDocument()
   })
 
-  it("leaves the URL and the page alone when the lookup itself fails (offline, 500)", async () => {
-    fetchMock.mockRejectedValue(new Error("offline"))
+  it("leaves the URL and the page alone when the lookup itself fails (offline, 500), then retries and opens", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      fetchMock.mockRejectedValueOnce(new Error("offline"))
+      fetchMock.mockImplementation(async () => Response.json(located))
+      render(<CommentDeepLinkOpener />)
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+      expect(nav.replace).not.toHaveBeenCalled()
+      expect(screen.queryByRole("alert")).toBeNull()
+      await vi.advanceTimersByTimeAsync(3500)
+      await waitFor(() => expect(nav.replace).toHaveBeenCalledTimes(1))
+      expect(fetchMock).toHaveBeenCalledTimes(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("treats a 500 like a transient failure: no note, no URL change", async () => {
+    reply(500)
     render(<CommentDeepLinkOpener />)
     await waitFor(() => expect(fetchMock).toHaveBeenCalled())
     await new Promise((resolve) => setTimeout(resolve, 20))
     expect(nav.replace).not.toHaveBeenCalled()
-    expect(screen.queryByRole("alert")).toBeNull()
+    expect(screen.queryByRole("status")).toBeNull()
   })
 
   it("after the panel is closed (detail removed, comment kept) drops the stale comment param instead of reopening it", async () => {

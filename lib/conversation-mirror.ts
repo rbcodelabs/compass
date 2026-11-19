@@ -99,9 +99,9 @@ export type MirrorSourceComment = {
  */
 export async function mirrorCommentThread(
   prisma: AppPrismaClient,
-  thread: { root: MirrorSourceComment; replies: MirrorSourceComment[]; ownerUserId: string; onlyCommentId?: string },
+  thread: { root: MirrorSourceComment; replies: MirrorSourceComment[]; ownerUserId: string; onlyCommentId?: string; createOnly?: boolean },
 ): Promise<{ messagesPromoted: number; linkCreated: boolean }> {
-  const { root, replies, ownerUserId, onlyCommentId } = thread
+  const { root, replies, ownerUserId, onlyCommentId, createOnly } = thread
   const allMessages = [root, ...replies]
   const lastMessage = allMessages[allMessages.length - 1]!
   // Thread activity is when somebody last SAID something, not when text was last edited: a comment's updatedAt moves on
@@ -130,7 +130,14 @@ export async function mirrorCommentThread(
   })
 
   const items = onlyCommentId ? allMessages.filter((item) => item.id === onlyCommentId) : allMessages
-  if (onlyCommentId) {
+  if (createOnly) {
+    // Read-path repair (locate, TASK-195 S3): insert the header only if it is absent and never touch an existing one, so a
+    // writer that created the conversation a moment ago keeps its newer updatedAt, status and summary. Nothing here updates.
+    await prisma.agentConversation.createMany({
+      data: [createHeader(deriveConversationSummary(lastMessage.body) ?? title.slice(0, 140), threadUpdatedAt)],
+      skipDuplicates: true,
+    })
+  } else if (onlyCommentId) {
     const target = items[0]
     const existing = await prisma.agentConversation.findUnique({ where: { id: root.id }, select: { updatedAt: true } })
     const targetSummary = deriveConversationSummary(target?.body ?? "") ?? title.slice(0, 140)
@@ -209,12 +216,12 @@ export async function mirrorCommentThread(
  * Creates or repairs the mirror for the thread containing `commentId`. Idempotent: the ids are the
  * comment ids, so a second call returns the same pair and writes no new rows. Returns null when the
  * comment (or, for a reply, its root) no longer exists, or when no member can own the conversation.
- * `scope: "comment"` is the create path (see `mirrorCommentThread`); the default rewrites the thread.
+ * `scope: "comment"` is the create path (see `mirrorCommentThread`); `scope: "create-only"` is the read-path repair (whole thread, header inserted only if absent, never updated); the default rewrites the thread.
  */
 export async function ensureConversationForComment(
   prisma: AppPrismaClient,
   commentId: string,
-  options: { fallbackUserId?: string; scope?: "thread" | "comment" } = {},
+  options: { fallbackUserId?: string; scope?: "thread" | "comment" | "create-only" } = {},
 ): Promise<{ conversationId: string; messageId: string } | null> {
   const include = { solutionPlanProposal: { select: { commentId: true } } }
   const comment = await prisma.comment.findUnique({ where: { id: commentId }, include })
@@ -230,7 +237,7 @@ export async function ensureConversationForComment(
   if (!ownerUserId) return null
 
   const replies = await prisma.comment.findMany({ where: { parentId: root.id }, include, orderBy: [{ createdAt: "asc" }, { id: "asc" }] })
-  await mirrorCommentThread(prisma, { root, replies, ownerUserId, ...(options.scope === "comment" ? { onlyCommentId: comment.id } : {}) })
+  await mirrorCommentThread(prisma, { root, replies, ownerUserId, ...(options.scope === "comment" ? { onlyCommentId: comment.id } : {}), ...(options.scope === "create-only" ? { createOnly: true } : {}) })
 
   // Create-vs-delete race: if the comment (or its root) was deleted while we wrote, undo what we wrote so no ghost remains.
   const rootStillThere = await prisma.comment.findUnique({ where: { id: root.id }, select: { id: true } })
