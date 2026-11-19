@@ -58,29 +58,19 @@ async function shot(page: Page, state: string, locator?: Locator) {
   if (original) await page.setViewportSize(original);
 }
 
-
-// DIAG(TASK-199, temporary): what is under the pointer at mouse-down, and what dnd-kit has announced before mouse-up.
-async function diagSnapshot(page: Page, label: string, x: number, y: number) {
-  const info = await page.evaluate(([px, py]) => {
-    const el = document.elementFromPoint(px as number, py as number);
-    const status = Array.from(document.querySelectorAll("[role=status]")).map((n) => n.textContent ?? "").join(" | ");
-    return { under: el ? el.tagName + "[" + (el.getAttribute("aria-label") ?? "") + "]." + String(el.className).slice(0, 60) : null, status, scrollY: window.scrollY, t: Math.round(performance.now()), anims: document.getAnimations().length, fixedCount: Array.from(document.querySelectorAll("body *")).filter((n) => getComputedStyle(n).position === "fixed" && (n as HTMLElement).style.transform).length };
-  }, [x, y]);
-  console.log("DIAG-199 " + label + " " + JSON.stringify(info));
-}
 const dragTo = async (page: Page, source: Locator, target: Locator) => {
-  await source.scrollIntoViewIfNeeded();
+  // dnd-kit animates the dropped card into place for ~250ms, and during that time the drag handle is not where the layout says it is
+  // (a second drag started in that window put mouse-down on the card title and never activated). hover() waits until the handle is
+  // visible, has stopped moving and is the element that would receive the press, so the pointer is only pressed once it is reachable.
+  await source.hover();
   const from = (await source.boundingBox())!;
   await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
-  await diagSnapshot(page, "qa2 before-down", from.x + from.width / 2, from.y + from.height / 2);
   await page.mouse.down();
   await page.mouse.move(from.x + from.width / 2 + 15, from.y + from.height / 2 + 15, { steps: 10 });
   await target.scrollIntoViewIfNeeded();
   const to = (await target.boundingBox())!;
   await page.mouse.move(to.x + to.width / 2, to.y + to.height / 2, { steps: 20 });
-  await diagSnapshot(page, "qa2 before-up", to.x + to.width / 2, to.y + to.height / 2);
   await page.mouse.up();
-  await diagSnapshot(page, "qa2 after-up", to.x + to.width / 2, to.y + to.height / 2);
 };
 
 test.describe("Inheritance rules QA pass 2", () => {
