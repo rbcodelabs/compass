@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, renderHook } from "@testing-library/react";
 import type { CollisionDescriptor, CollisionDetection } from "@dnd-kit/core";
-import { useStableBoardCollision } from "@/components/patterns/board-dock-dnd";
+import { cardFirstCollisionDetection, dockAwareCollisionDetection, useStableBoardCollision } from "@/components/patterns/board-dock-dnd";
 
 /** A collision detection whose answer the test controls, standing in for closestCenter / pointerWithin. */
 function scripted() {
@@ -72,5 +72,64 @@ describe("useStableBoardCollision", () => {
     const first = result.current.collisionDetection;
     rerender();
     expect(result.current.collisionDetection).toBe(first);
+  });
+});
+
+describe("cardFirstCollisionDetection", () => {
+  type Rect = { left: number; top: number; width: number; height: number; right: number; bottom: number };
+  const rect = (left: number, top: number, width: number, height: number): Rect => ({ left, top, width, height, right: left + width, bottom: top + height });
+  const container = (id: string, data: Record<string, unknown>) => ({ id, key: id, data: { current: data }, disabled: false, node: { current: null }, rect: { current: null } });
+
+  /**
+   * One tall column (centre y=400) holding cards One (centre y=410) and Two (centre y=520), with a second, empty column to its right.
+   * The dragged card is Two; `top` places the dragged rect.
+   */
+  function scene(top: number, left = 20) {
+    const rects = new Map<string, Rect>([
+      ["column-EXPLORING", rect(0, 0, 300, 800)],
+      ["one", rect(20, 360, 260, 100)],
+      ["two", rect(20, 470, 260, 100)],
+      ["column-ACTIVE", rect(320, 0, 300, 800)],
+    ]);
+    const droppableContainers = [
+      container("column-EXPLORING", { status: "EXPLORING" }),
+      container("one", { sortable: { containerId: "x", index: 0, items: ["one", "two"] } }),
+      container("two", { sortable: { containerId: "x", index: 1, items: ["one", "two"] } }),
+      container("column-ACTIVE", { status: "ACTIVE" }),
+    ];
+    return {
+      active: { id: "two", data: { current: {} }, rect: { current: { initial: null, translated: null } } },
+      collisionRect: rect(left, top, 260, 100),
+      droppableRects: rects,
+      droppableContainers,
+      pointerCoordinates: null,
+    } as unknown as Parameters<CollisionDetection>[0];
+  }
+
+  it("documents the bug it fixes: closestCenter prefers the tall column over the card under the pointer", () => {
+    // Dragged centre y=330: 70 from the column's centre (400) but 80 from card One's (410).
+    expect(dockAwareCollisionDetection(scene(280))[0].id).toBe("column-EXPLORING");
+  });
+
+  it("answers the card the dragged rect overlaps, not the column that contains it", () => {
+    expect(cardFirstCollisionDetection(scene(280))[0].id).toBe("one");
+  });
+
+  it("picks the closest of several overlapped cards", () => {
+    // Dragged rect spans One (360-460) and Two (470-570); its centre (y=470) is 50 from Two's centre and 60 from One's.
+    expect(cardFirstCollisionDetection(scene(420))[0].id).toBe("two");
+  });
+
+  it("falls back to the nearest column when the dragged rect overlaps no card (empty column, gap below the cards)", () => {
+    expect(cardFirstCollisionDetection(scene(300, 330))[0].id).toBe("column-ACTIVE");
+  });
+
+  it("still lets a dock tab win when the pointer is on it", () => {
+    const args = scene(280);
+    const tab = container("tab-ACTIVE", { status: "ACTIVE", dockTab: true });
+    (args.droppableContainers as unknown[]).push(tab);
+    (args.droppableRects as Map<string, Rect>).set("tab-ACTIVE", rect(900, 10, 40, 100));
+    (args as { pointerCoordinates: { x: number; y: number } }).pointerCoordinates = { x: 910, y: 50 };
+    expect(cardFirstCollisionDetection(args)[0].id).toBe("tab-ACTIVE");
   });
 });

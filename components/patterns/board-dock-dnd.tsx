@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useRef, type ReactNode } from "react";
-import { closestCenter, pointerWithin, useDroppable, type CollisionDetection, type UniqueIdentifier } from "@dnd-kit/core";
+import { closestCenter, pointerWithin, rectIntersection, useDroppable, type CollisionDetection, type UniqueIdentifier } from "@dnd-kit/core";
 import { cn } from "@/lib/utils";
 
 /**
@@ -17,6 +17,22 @@ import { cn } from "@/lib/utils";
 export const dockAwareCollisionDetection: CollisionDetection = (args) => {
   const onTab = pointerWithin(args).find((hit) => args.droppableContainers.find((c) => c.id === hit.id)?.data.current?.dockTab);
   return onTab ? [onTab] : closestCenter(args);
+};
+
+/**
+ * For a board whose cards are sortable inside tall columns. closestCenter compares the dragged card with every droppable, columns
+ * included, and a column's centre is the middle of its whole height: a card near that middle (or any drop on the half of a card
+ * that faces away from it) loses to the column, so the drop reads as "dropped on the column" and an in-column reorder silently does
+ * nothing. Here a sortable card the dragged rect actually overlaps always beats its column; the nearest column (what a drop on empty
+ * space or an empty column needs) is only the answer when no card is overlapped. A dock tab under the pointer still wins first.
+ */
+export const cardFirstCollisionDetection: CollisionDetection = (args) => {
+  const onTab = pointerWithin(args).find((hit) => args.droppableContainers.find((c) => c.id === hit.id)?.data.current?.dockTab);
+  if (onTab) return [onTab];
+  const overlappedCards = rectIntersection(args).filter((hit) => args.droppableContainers.find((c) => c.id === hit.id)?.data.current?.sortable);
+  if (overlappedCards.length === 0) return closestCenter(args);
+  const ids = new Set(overlappedCards.map((hit) => hit.id));
+  return closestCenter({ ...args, droppableContainers: args.droppableContainers.filter((c) => ids.has(c.id)) });
 };
 
 /**
