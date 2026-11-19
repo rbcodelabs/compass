@@ -367,17 +367,19 @@ export async function reorderKeyResult(
   if (!moved) throw new Error("Key result not found");
   // Renumber every sibling so the stored order matches the move. Writing only the moved row's
   // index leaves ties (A0, B1, C0) that the page resolves by createdAt, not by the drop position.
-  const siblings = await prisma.keyResult.findMany({
-    where: { objectiveId: moved.objectiveId },
-    orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
-    select: { id: true, sortOrder: true },
+  // One transaction so a mid-failure or concurrent reorder cannot leave a partial order.
+  await prisma.$transaction(async (tx) => {
+    const siblings = await tx.keyResult.findMany({
+      where: { objectiveId: moved.objectiveId },
+      orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+      select: { id: true, sortOrder: true },
+    });
+    const order = siblings.filter((s) => s.id !== keyResultId);
+    order.splice(Math.max(0, Math.min(sortOrder, order.length)), 0, { id: keyResultId, sortOrder });
+    for (const [index, sibling] of order.entries()) {
+      if (siblings.find((s) => s.id === sibling.id)?.sortOrder === index) continue;
+      await tx.keyResult.update({ where: { id: sibling.id }, data: { sortOrder: index } });
+    }
   });
-  const order = siblings.filter((s) => s.id !== keyResultId);
-  order.splice(Math.max(0, Math.min(sortOrder, order.length)), 0, { id: keyResultId, sortOrder });
-  for (const [index, sibling] of order.entries()) {
-    const current = siblings.find((s) => s.id === sibling.id)?.sortOrder;
-    if (current === index) continue;
-    await prisma.keyResult.update({ where: { id: sibling.id }, data: { sortOrder: index } });
-  }
   revalidatePath(revalidatePathStr);
 }

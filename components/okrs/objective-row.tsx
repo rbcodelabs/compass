@@ -134,8 +134,9 @@ export function ObjectiveRow({
   const [isAddKROpen, setIsAddKROpen] = useState(false);
   const actionsRef = useRef<HTMLDivElement>(null);
   const { openPanel, panel } = usePanelContext();
-  const [localParentKRId, setLocalParentKRId] = useState<string | null>(
-    parentKeyResultId ?? null
+  // Follows the server (live refresh) but defers while a link save is in flight.
+  const { state: localParentKRId, setState: setLocalParentKRId } = useServerSyncedState<string | null, string | null>(
+    parentKeyResultId ?? null, (s) => s, isParentKRPending
   );
   const avgProgress = averageProgress(objective.keyResults);
   const badge = STATUS_BADGE[objective.status];

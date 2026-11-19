@@ -284,6 +284,8 @@ export default async function CyclePage({ params, searchParams }: CyclePageProps
       {/* Objectives list + inline add */}
       <div className="flex flex-col gap-4">
         <ObjectivesList
+          // Reset list-local state (collapsed rows, drafts) when switching cycle; never key on objective ids.
+          key={cycleId}
           objectives={objectivesWithData.map((obj) => ({
             ...obj,
             parentKeyResultId: obj.parentKeyResultId ?? null,
