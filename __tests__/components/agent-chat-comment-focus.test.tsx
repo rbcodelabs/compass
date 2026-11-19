@@ -29,11 +29,11 @@ function props(over: Record<string, unknown> = {}) {
   }
 }
 
-let scroll: ReturnType<typeof vi.fn>
+let scroll: ReturnType<typeof vi.fn<(arg?: boolean | ScrollIntoViewOptions) => void>>
 /** The transcript already scrolls its own end into view; only calls on a message row are the deep link's. */
 const scrolledRows = () => scroll.mock.contexts.filter((el) => el instanceof HTMLElement && el.getAttribute("data-testid") === "conversation-message") as HTMLElement[]
 beforeEach(() => {
-  scroll = vi.fn()
+  scroll = vi.fn<(arg?: boolean | ScrollIntoViewOptions) => void>()
   Element.prototype.scrollIntoView = scroll
   vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 200 })))
 })
