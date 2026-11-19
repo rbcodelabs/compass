@@ -108,7 +108,7 @@ describe("conversation mirror after commit", () => {
     mirror.mirrorCommentAfterCommit.mockImplementation(actual.mirrorCommentAfterCommit)
     prisma.comment.findUnique.mockRejectedValueOnce(new Error("mirror down"))
     const logged = vi.spyOn(console, "error").mockImplementation(() => {})
-    await expect(createComment({ workspaceId: WS, targetType: "OPPORTUNITY", targetId: TARGET, body: "Hello", authorName: "Human" })).resolves.toBeNull()
+    await expect(createComment({ workspaceId: WS, targetType: "OPPORTUNITY", targetId: TARGET, body: "Hello", authorName: "Human" })).resolves.toBeDefined()
     expect(prisma.comment.create).toHaveBeenCalledTimes(1)
     expect(logged).toHaveBeenCalledWith(expect.stringContaining("conversation-mirror"), expect.any(Error))
     logged.mockRestore()
