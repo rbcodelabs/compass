@@ -15,6 +15,7 @@ afterEach(cleanup)
 
 const ID = "0b7e3c9a-5d1f-4f6e-8a2b-9c4d5e6f7a8b"
 const tallyOf = (extra: Partial<DecisionTally> = {}, myVote: string | null = null): DecisionTally => ({
+  revisionId: "revision-1",
   state: "PENDING",
   open: true,
   questions: [{ question: "Advisory or binding?", myVote, options: [{ label: "Advisory", count: 3 }, { label: "Binding", count: 1 }] }],

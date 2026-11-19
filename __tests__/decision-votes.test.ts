@@ -9,6 +9,8 @@ const state = vi.hoisted(() => ({
   requests: [] as { id: string; workspaceId: string; state: string; currentRevisionId: string; packetJson: string }[],
   votes: [] as Vote[],
   users: [] as { id: string; name: string | null }[],
+  missingTable: false,
+  moveOnCount: false,
 }))
 
 vi.mock("@/lib/db", () => ({
@@ -20,8 +22,28 @@ vi.mock("@/lib/db", () => ({
       },
     },
     decisionVote: {
-      findMany: async ({ where }: { where: { workspaceId: string; requestId: string; revisionId: string } }) =>
-        state.votes.filter((v) => v.workspaceId === where.workspaceId && v.requestId === where.requestId && v.revisionId === where.revisionId),
+      findMany: async ({ where, take }: { where: Partial<Vote>; take?: number }) => {
+        if (state.missingTable) throw { code: "P2021" }
+        if (where.voterUserId === "") throw new Error("invalid UUID")
+        return state.votes.filter((v) => Object.entries(where).every(([key, value]) => v[key as keyof Vote] === value)).slice(0, take)
+      },
+      count: async ({ where }: { where: Partial<Vote> }) => {
+        const count = state.votes.filter((v) => Object.entries(where).every(([key, value]) => v[key as keyof Vote] === value)).length
+        if (state.moveOnCount) { state.moveOnCount = false; state.votes[0].chosenOption = "Binding" }
+        return count
+      },
+      groupBy: async ({ where }: { where: Partial<Vote> }) => {
+        if (state.missingTable) throw { code: "P2021" }
+        const grouped = new Map<string, { questionIndex: number; chosenOption: string; _count: { _all: number } }>()
+        for (const vote of state.votes.filter((v) => Object.entries(where).every(([key, value]) => v[key as keyof Vote] === value))) {
+          const key = JSON.stringify([vote.questionIndex, vote.chosenOption])
+          const item = grouped.get(key) ?? { questionIndex: vote.questionIndex, chosenOption: vote.chosenOption, _count: { _all: 0 } }
+          item._count._all++
+          grouped.set(key, item)
+        }
+        if (state.moveOnCount) { state.moveOnCount = false; state.votes[0].chosenOption = "Binding" }
+        return [...grouped.values()]
+      },
       upsert: async ({ where, create, update }: { where: { requestId_revisionId_questionIndex_voterUserId: Omit<Vote, "workspaceId" | "chosenOption"> }; create: Vote; update: { chosenOption: string } }) => {
         const k = where.requestId_revisionId_questionIndex_voterUserId
         const existing = state.votes.find((v) => v.requestId === k.requestId && v.revisionId === k.revisionId && v.questionIndex === k.questionIndex && v.voterUserId === k.voterUserId)
@@ -52,12 +74,14 @@ const multi = JSON.stringify({ questions: [{ question: "Weight?", options: [{ la
 function seed(packetJson = single, requestState = "PENDING") {
   state.requests = [{ id: REQ, workspaceId: WS, state: requestState, currentRevisionId: REV, packetJson }]
 }
-const cast = (voterUserId: string, option: string, questionIndex = 0, workspaceId = WS) => castDecisionVote({ workspaceId, requestId: REQ, voterUserId, questionIndex, option })
+const cast = (voterUserId: string, option: string, questionIndex = 0, workspaceId = WS) => castDecisionVote({ workspaceId, requestId: REQ, voterUserId, questionIndex, option, revisionId: REV })
 const tally = (viewerUserId = U1, workspaceId = WS) => getDecisionTally({ workspaceId, requestId: REQ, viewerUserId })
 
 beforeEach(() => {
   state.requests = []
   state.votes = []
+  state.missingTable = false
+  state.moveOnCount = false
   state.users = [{ id: U1, name: "Ada" }, { id: U2, name: "Grace" }, { id: U3, name: null }]
 })
 
@@ -77,6 +101,15 @@ describe("voteQuestionsOf", () => {
 })
 
 describe("castDecisionVote", () => {
+  it("rejects votes and retractions from a card showing an older revision", async () => {
+    seed()
+    await cast(U1, "Advisory")
+    const oldRevision = REV
+    state.requests[0].currentRevisionId = "eeeeeeee-0000-4000-8000-00000000000e"
+    await expect(castDecisionVote({ workspaceId: WS, requestId: REQ, voterUserId: U1, questionIndex: 0, option: "Advisory", revisionId: oldRevision } as never)).rejects.toMatchObject({ code: "STALE_REVISION" })
+    await expect(retractDecisionVote({ workspaceId: WS, requestId: REQ, voterUserId: U1, questionIndex: 0, revisionId: oldRevision } as never)).rejects.toMatchObject({ code: "STALE_REVISION" })
+    expect(state.votes).toHaveLength(1)
+  })
   it("records a vote and replaces it when the same person changes their mind", async () => {
     seed()
     await cast(U1, "Advisory")
@@ -128,6 +161,31 @@ describe("castDecisionVote", () => {
 })
 
 describe("getDecisionTally: anonymous until decided", () => {
+  it("returns a tally for a service actor without looking up an invalid voter UUID", async () => {
+    seed()
+    expect((await tally(""))?.questions[0].myVote).toBeNull()
+  })
+
+  it("takes one aggregate snapshot when a vote moves between options", async () => {
+    seed()
+    await cast(U1, "Advisory")
+    state.moveOnCount = true
+    const t = (await tally(U2))!
+    expect(t.questions[0].options.reduce((sum, option) => sum + option.count, 0)).toBe(1)
+  })
+  it("omits the tally when the vote table has not been migrated", async () => {
+    seed()
+    state.missingTable = true
+    expect(await tally()).toBeNull()
+  })
+
+  it("counts all votes and finds the viewer beyond 5000 rows", async () => {
+    seed()
+    state.votes = Array.from({ length: 5001 }, (_, i) => ({ workspaceId: WS, requestId: REQ, revisionId: REV, questionIndex: 0, chosenOption: "Advisory", voterUserId: i === 5000 ? U1 : `voter-${i}` }))
+    const t = (await tally())!
+    expect(t.questions[0].options[0].count).toBe(5001)
+    expect(t.questions[0].myVote).toBe("Advisory")
+  })
   it("shows counts and the own vote of the viewer, but no voters, while pending", async () => {
     seed()
     await cast(U1, "Advisory")
@@ -182,8 +240,8 @@ describe("retractDecisionVote", () => {
     seed()
     await cast(U1, "Advisory")
     await cast(U2, "Advisory")
-    await retractDecisionVote({ workspaceId: WS, requestId: REQ, voterUserId: U1, questionIndex: 0 })
-    await retractDecisionVote({ workspaceId: WS, requestId: REQ, voterUserId: U1, questionIndex: 0 })
+    await retractDecisionVote({ workspaceId: WS, requestId: REQ, voterUserId: U1, questionIndex: 0, revisionId: REV })
+    await retractDecisionVote({ workspaceId: WS, requestId: REQ, voterUserId: U1, questionIndex: 0, revisionId: REV })
     expect(state.votes.map((v) => v.voterUserId)).toEqual([U2])
   })
 
@@ -191,7 +249,7 @@ describe("retractDecisionVote", () => {
     seed()
     await cast(U1, "Advisory")
     state.requests[0].state = "DECIDED"
-    await expect(retractDecisionVote({ workspaceId: WS, requestId: REQ, voterUserId: U1, questionIndex: 0 })).rejects.toMatchObject({ code: "CLOSED" })
+    await expect(retractDecisionVote({ workspaceId: WS, requestId: REQ, voterUserId: U1, questionIndex: 0, revisionId: REV })).rejects.toMatchObject({ code: "CLOSED" })
     expect(state.votes).toHaveLength(1)
   })
 })

@@ -416,11 +416,12 @@ export async function setDecisionVote(
   requestId: string,
   questionIndex: number,
   option: string | null,
+  revisionId: string,
 ): Promise<{ ok: true } | { error: string }> {
   const { user, workspaceId } = await requireDocumentMember(docId);
   try {
-    if (option === null) await retractDecisionVote({ workspaceId, requestId, voterUserId: user.id as string, questionIndex });
-    else await castDecisionVote({ workspaceId, requestId, voterUserId: user.id as string, questionIndex, option });
+    if (option === null) await retractDecisionVote({ workspaceId, requestId, voterUserId: user.id as string, questionIndex, revisionId });
+    else await castDecisionVote({ workspaceId, requestId, voterUserId: user.id as string, questionIndex, option, revisionId });
     return { ok: true };
   } catch (error) {
     if (error instanceof DecisionVoteError) return { error: error.message };

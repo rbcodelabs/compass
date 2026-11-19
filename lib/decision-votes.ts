@@ -21,8 +21,6 @@ import { parsePacketQuestions } from "@/lib/tracked-decision-types"
 export const VOTABLE_STATE = "PENDING"
 /** The stored column width of chosen_option. */
 export const MAX_VOTE_OPTION_LENGTH = 120
-/** Hard bound on the votes read for one tally. */
-const MAX_VOTES_READ = 5000
 const MAX_VOTER_NAMES_PER_OPTION = 50
 
 export type VoteQuestion = { question: string; options: string[] }
@@ -32,9 +30,11 @@ export type DecisionTallyOption = {
   count: number
   /** Display names, only once the request is DECIDED. Absent while votes are anonymous. */
   voters?: string[]
+  remainingVoters?: number
 }
 export type DecisionTallyQuestion = { question: string; options: DecisionTallyOption[]; myVote: string | null }
 export type DecisionTally = {
+  revisionId: string
   state: string
   /** True while the request still accepts votes. The viewer may additionally need to be allowed to vote (the caller decides that). */
   open: boolean
@@ -42,7 +42,7 @@ export type DecisionTally = {
 }
 
 export class DecisionVoteError extends Error {
-  constructor(public readonly code: "NOT_FOUND" | "CLOSED" | "INVALID_QUESTION" | "INVALID_OPTION", message: string) {
+  constructor(public readonly code: "NOT_FOUND" | "CLOSED" | "INVALID_QUESTION" | "INVALID_OPTION" | "STALE_REVISION", message: string) {
     super(message)
     this.name = "DecisionVoteError"
   }
@@ -97,34 +97,45 @@ export async function getDecisionTally(input: { workspaceId: string; requestId: 
   const questions = voteQuestionsOf(request.currentRevision.packetJson)
   if (questions.length === 0) return null
   const db = getPrisma()
-  const votes = await db.decisionVote.findMany({
-    where: { workspaceId: input.workspaceId, requestId: request.id, revisionId: request.currentRevision.id },
-    take: MAX_VOTES_READ,
-    select: { questionIndex: true, chosenOption: true, voterUserId: true },
-  })
   const decided = request.state === "DECIDED"
-  const names: Map<string, string> = new Map()
-  if (decided && votes.length > 0) {
-    const ids = [...new Set(votes.map((v) => v.voterUserId))]
-    const users = await db.user.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } })
-    for (const u of users) names.set(u.id, u.name?.trim() || "Member")
+  const where = { workspaceId: input.workspaceId, requestId: request.id, revisionId: request.currentRevision.id }
+  const missingVoteTable = Symbol("missing vote table")
+  async function voteQuery<T>(query: () => Promise<T>): Promise<T> {
+    try { return await query() } catch (error) {
+      if (typeof error === "object" && error !== null && "code" in error && error.code === "P2021") throw missingVoteTable
+      throw error
+    }
+  }
+  let result: DecisionTallyQuestion[]
+  try {
+    const mine = isUuid(input.viewerUserId) ? await voteQuery(() => db.decisionVote.findMany({ where: { ...where, voterUserId: input.viewerUserId }, select: { questionIndex: true, chosenOption: true } })) : []
+    const counts = await voteQuery(() => db.decisionVote.groupBy({ by: ["questionIndex", "chosenOption"], where, _count: { _all: true } }))
+    result = await Promise.all(questions.map(async (q, questionIndex) => ({
+      question: q.question,
+      myVote: q.options.includes(mine.find((v) => v.questionIndex === questionIndex)?.chosenOption ?? "") ? mine.find((v) => v.questionIndex === questionIndex)!.chosenOption : null,
+      options: await Promise.all(q.options.map(async (label) => {
+        const optionWhere = { ...where, questionIndex, chosenOption: label }
+        const count = counts.find((row) => row.questionIndex === questionIndex && row.chosenOption === label)?._count._all ?? 0
+        const option: DecisionTallyOption = { label, count }
+        if (decided) {
+          const votes = await voteQuery(() => db.decisionVote.findMany({ where: optionWhere, take: MAX_VOTER_NAMES_PER_OPTION, orderBy: { id: "asc" }, select: { voterUserId: true } }))
+          const users = await db.user.findMany({ where: { id: { in: votes.map((v) => v.voterUserId) } }, select: { id: true, name: true } })
+          const names = new Map(users.map((u) => [u.id, u.name?.trim() || "Member"]))
+          option.voters = votes.map((v) => names.get(v.voterUserId) ?? "Member")
+          option.remainingVoters = count - votes.length
+        }
+        return option
+      })),
+    })))
+  } catch (error) {
+    if (error === missingVoteTable) return null
+    throw error
   }
   return {
+    revisionId: request.currentRevision.id,
     state: request.state,
     open: request.state === VOTABLE_STATE,
-    questions: questions.map((q, questionIndex) => {
-      const mine = votes.find((v) => v.questionIndex === questionIndex && v.voterUserId === input.viewerUserId)?.chosenOption ?? null
-      return {
-        question: q.question,
-        myVote: mine && q.options.includes(mine) ? mine : null,
-        options: q.options.map((label) => {
-          const forOption = votes.filter((v) => v.questionIndex === questionIndex && v.chosenOption === label)
-          const option: DecisionTallyOption = { label, count: forOption.length }
-          if (decided) option.voters = forOption.slice(0, MAX_VOTER_NAMES_PER_OPTION).map((v) => names.get(v.voterUserId) ?? "Member")
-          return option
-        }),
-      }
-    }),
+    questions: result,
   }
 }
 
@@ -133,9 +144,10 @@ export async function getDecisionTally(input: { workspaceId: string; requestId: 
  * workspace member); this function re-checks that the request belongs to that workspace, is still open, and that the option is one the
  * current revision offers. Replaces any earlier vote by the same person on the same question and revision.
  */
-export async function castDecisionVote(input: { workspaceId: string; requestId: string; voterUserId: string; questionIndex: number; option: string }): Promise<void> {
+export async function castDecisionVote(input: { workspaceId: string; requestId: string; voterUserId: string; questionIndex: number; option: string; revisionId: string }): Promise<void> {
   const request = await loadRequest(input.workspaceId, input.requestId)
   if (!request?.currentRevision) throw new DecisionVoteError("NOT_FOUND", "Decision not found.")
+  if (input.revisionId !== request.currentRevision.id) throw new DecisionVoteError("STALE_REVISION", "This decision has changed. Refresh the card before voting.")
   if (request.state !== VOTABLE_STATE) throw new DecisionVoteError("CLOSED", "Voting is closed for this decision.")
   const questions = voteQuestionsOf(request.currentRevision.packetJson)
   if (!Number.isInteger(input.questionIndex) || input.questionIndex < 0 || input.questionIndex >= questions.length) {
@@ -169,9 +181,10 @@ export async function castDecisionVote(input: { workspaceId: string; requestId: 
 }
 
 /** Remove the vote of the caller on one question. Idempotent. A closed request refuses, so a tally cannot be altered after the outcome. */
-export async function retractDecisionVote(input: { workspaceId: string; requestId: string; voterUserId: string; questionIndex: number }): Promise<void> {
+export async function retractDecisionVote(input: { workspaceId: string; requestId: string; voterUserId: string; questionIndex: number; revisionId: string }): Promise<void> {
   const request = await loadRequest(input.workspaceId, input.requestId)
   if (!request?.currentRevision) throw new DecisionVoteError("NOT_FOUND", "Decision not found.")
+  if (input.revisionId !== request.currentRevision.id) throw new DecisionVoteError("STALE_REVISION", "This decision has changed. Refresh the card before voting.")
   if (request.state !== VOTABLE_STATE) throw new DecisionVoteError("CLOSED", "Voting is closed for this decision.")
   if (!Number.isInteger(input.questionIndex) || input.questionIndex < 0) throw new DecisionVoteError("INVALID_QUESTION", "That question is not part of this decision.")
   await getPrisma().decisionVote.deleteMany({

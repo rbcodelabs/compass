@@ -57,7 +57,7 @@ export function DecisionTallyView({ tally, vote }: { tally: DecisionTally; vote:
                       <span className="relative shrink-0 tabular-nums text-text-secondary">{o.count}</span>
                     </button>
                     {decided && o.voters && o.voters.length > 0 ? (
-                      <p className="mt-0.5 px-1 text-xs text-text-subtle">{o.voters.join(", ")}</p>
+                      <p className="mt-0.5 px-1 text-xs text-text-subtle">{o.voters.join(", ")}{o.remainingVoters ? ` and ${o.remainingVoters} more` : ""}</p>
                     ) : null}
                   </li>
                 );

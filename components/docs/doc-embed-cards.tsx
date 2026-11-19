@@ -141,7 +141,7 @@ export type PatchRecordField = (type: CardEntityType, id: string, field: "title"
  * `canEdit` must also be true before any control shows. `patch` is how a record write is made.
  */
 /** Cast (option) or retract (null) the vote of the caller on one question of an embedded Decision. Resolves to an error message, or null on success. */
-export type CastDecisionVote = (requestId: string, questionIndex: number, option: string | null) => Promise<string | null>;
+export type CastDecisionVote = (requestId: string, questionIndex: number, option: string | null, revisionId: string) => Promise<string | null>;
 export type EmbedEditing = { editable: boolean; patch: PatchRecordField; vote?: CastDecisionVote };
 const EditingContext = createContext<EmbedEditing | null>(null);
 

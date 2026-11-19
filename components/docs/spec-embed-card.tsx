@@ -404,8 +404,11 @@ function SpecEmbedLive({ kind, id, onRemove }: { kind: DocEmbedKind; id: string;
   const vote: VoteFn | null =
     canEdit && castVote && store && kind === "decision" && ready?.state === "ok" && ready.tally
       ? async (questionIndex, option) => {
-          const failure = await castVote(id, questionIndex, option);
-          if (failure) return failure;
+          const failure = await castVote(id, questionIndex, option, ready.tally!.revisionId);
+          if (failure) {
+            try { await store.refresh({ kind, id }); } catch { /* Keep the actionable failure visible. */ }
+            return failure;
+          }
           try {
             await store.refresh({ kind, id });
           } catch {

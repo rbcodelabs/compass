@@ -424,8 +424,8 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
     () => ({
       editable: !readOnly,
       patch: patchRecordField ?? ((type, id, field, value) => patchEntityField(type, id, orgSlug, workspaceSlug, field, value)),
-      vote: castVote ?? (async (requestId, questionIndex, option) => {
-        const result = await setDecisionVote(docId, requestId, questionIndex, option);
+      vote: castVote ?? (async (requestId, questionIndex, option, revisionId) => {
+        const result = await setDecisionVote(docId, requestId, questionIndex, option, revisionId);
         return "error" in result ? result.error : null;
       }),
     }),
