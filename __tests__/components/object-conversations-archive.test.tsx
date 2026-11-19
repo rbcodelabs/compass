@@ -135,6 +135,6 @@ describe("the archived view's cap and row semantics", () => {
     render(<ObjectConversationsSection targetType="TASK" targetId="task" />)
     await screen.findByText("Live thread")
     fireEvent.click(screen.getByRole("button", { name: "Show archived" }))
-    expect(await screen.findByRole("button", { name: /^Archived\. Archived thread/ })).toBeInTheDocument()
+    expect(await screen.findByRole("button", { name: /^Archived\.\s*Archived thread/ })).toBeInTheDocument()
   })
 })

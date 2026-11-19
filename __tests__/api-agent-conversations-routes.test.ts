@@ -149,7 +149,7 @@ describe("GET /api/agent/conversations/:conversationId/messages", () => {
     expect(response.status).toBe(404)
     expect(mockPrisma.agentConversation.findFirst).toHaveBeenCalledWith({
       where: { id: CONVERSATION_ID, ...accessibleConversationsWhere(WORKSPACE_ID, "user-1") },
-      select: { userId: true, visibility: true, interviewProcessingJson: true, title: true, summary: true, updatedAt: true },
+      select: { userId: true, visibility: true, interviewProcessingJson: true, archivedAt: true, title: true, summary: true, updatedAt: true },
     })
     expect(mockPrisma.agentMessage.findMany).not.toHaveBeenCalled()
   })
@@ -162,7 +162,7 @@ describe("GET /api/agent/conversations/:conversationId/messages", () => {
     expect(response.status).toBe(404)
     expect(mockPrisma.agentConversation.findFirst).toHaveBeenCalledWith({
       where: { id: CONVERSATION_ID, ...accessibleConversationsWhere(WORKSPACE_ID, "user-2") },
-      select: { userId: true, visibility: true, interviewProcessingJson: true, title: true, summary: true, updatedAt: true },
+      select: { userId: true, visibility: true, interviewProcessingJson: true, archivedAt: true, title: true, summary: true, updatedAt: true },
     })
     expect(mockPrisma.agentMessage.findMany).not.toHaveBeenCalled()
   })

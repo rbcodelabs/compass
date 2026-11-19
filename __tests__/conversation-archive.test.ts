@@ -166,6 +166,7 @@ describe("setConversationArchived: audit row", () => {
 
   it("labels a restore and the starter role", async () => {
     mockPrisma.agentConversation.findFirst.mockResolvedValue(conversation({ archivedAt: new Date() }))
+    mockPrisma.agentConversation.findUnique.mockResolvedValue({ archivedAt: new Date(), updatedAt: UPDATED })
     await run("starter", false)
     const { data } = mockPrisma.agentAuditLog.create.mock.calls[0]![0]
     expect(data.toolName).toBe("conversation.restore")

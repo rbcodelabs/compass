@@ -4,6 +4,8 @@
  */
 import { describe, expect, it, vi } from "vitest"
 
+vi.mock("@/lib/db", () => ({ default: () => ({}) }))
+
 import { startConversationContinuationRun } from "@/lib/agent-continuation-run"
 import { fireScheduledWakeupById } from "@/lib/agent-scheduled-wakeups"
 
