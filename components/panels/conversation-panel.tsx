@@ -28,6 +28,7 @@ import { useLabels } from "@/components/thinking-model/thinking-model-provider"
 import { AgentChat } from "@/components/agent/agent-chat"
 import { CommentDeepLinkOpener } from "@/components/panels/comment-deep-link-opener"
 import { isCommentId } from "@/lib/comment-deep-link"
+import { LegacyRailLinkRedirect } from "@/components/panels/legacy-rail-link-redirect"
 import type {
   AgentParticipationMode,
   ConversationStatus,
@@ -363,6 +364,7 @@ export function ConversationPanelProvider({
   return (
     <ConversationPanelContext.Provider value={value}>
       <CommentDeepLinkOpener />
+      <LegacyRailLinkRedirect />
       {children}
     </ConversationPanelContext.Provider>
   )

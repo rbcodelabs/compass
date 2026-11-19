@@ -5,10 +5,12 @@ import pg from "pg";
 import { randomUUID } from "node:crypto";
 
 /**
- * A rail link (rc / rail=help&ra / rail=library) loaded on a phone and in dark
- * mode: the rail must render usably (below md it is the overlay drawer), the page
- * must not overflow sideways, and closing it must leave the page free and the
- * URL clean. Seeded conversation, no LLM.
+ * A rail link (rail=help&ra / rail=library) and an old ?rc= link (redirected to the
+ * Conversation panel) loaded on a phone and in dark mode: the rail or panel must
+ * render usably (below md the rail is the overlay drawer; the panel is a dialog below
+ * 1024px and a docked complementary region above), the page must not overflow
+ * sideways, and closing must leave the page free and the URL clean. Seeded
+ * conversation, no LLM.
  *
  * Writes screenshots when RAIL_URL_SHOTS=<dir> is set.
  */
@@ -17,6 +19,8 @@ const ORG = "e2e-test-org";
 const WORKSPACE = "e2e-workspace";
 
 const rail = (page: Page) => page.locator('[data-slot="agent-rail"]');
+const panel = (page: Page) =>
+  page.getByRole("dialog", { name: "Conversation", exact: true }).or(page.locator('[data-slot="pinned-panel"]'));
 
 const VIEWPORTS = [
   { name: "mobile-390-light", width: 390, height: 844, scheme: "light" as const },
@@ -49,9 +53,9 @@ test("rail links load usably on a phone and in dark mode, and close cleanly", as
     );
 
     const states = [
-      { name: "agent", query: `rc=${conversationId}`, ready: () => rail(page).getByText(seededReply) },
-      { name: "help-article", query: "rail=help&ra=01-okrs", ready: () => page.getByTestId("docs-article") },
-      { name: "library", query: "rail=library", ready: () => page.getByTestId("rail-library").getByText("Library", { exact: true }) },
+      { name: "conversation-panel", surface: "panel" as const, query: `rc=${conversationId}`, ready: () => panel(page).getByText(seededReply) },
+      { name: "help-article", surface: "rail" as const, query: "rail=help&ra=01-okrs", ready: () => page.getByTestId("docs-article") },
+      { name: "library", surface: "rail" as const, query: "rail=library", ready: () => page.getByTestId("rail-library").getByText("Library", { exact: true }) },
     ];
 
     for (const vp of VIEWPORTS) {
@@ -62,22 +66,28 @@ test("rail links load usably on a phone and in dark mode, and close cleanly", as
         // only carried state and a rail param must win over it either way.
         await page.context().clearCookies({ name: "compass_panel_agent" });
         await page.goto(`${base}/okrs?${state.query}`);
-        await expect(rail(page), `${vp.name}/${state.name}: rail opens from the link`).toBeVisible({ timeout: 30_000 });
+        const surface = state.surface === "panel" ? panel(page) : rail(page);
+        await expect(surface, `${vp.name}/${state.name}: opens from the link`).toBeVisible({ timeout: 30_000 });
         await expect(state.ready()).toBeVisible({ timeout: 30_000 });
         await expect(page.getByTestId("docs-home").getByText("Loading…")).toHaveCount(0);
 
-        const box = (await rail(page).boundingBox())!;
-        expect(box.x, `${vp.name}/${state.name}: rail starts on screen`).toBeGreaterThanOrEqual(0);
-        expect(box.x + box.width, `${vp.name}/${state.name}: rail ends on screen`).toBeLessThanOrEqual(vp.width + 1);
+        const box = (await surface.first().boundingBox())!;
+        expect(box.x, `${vp.name}/${state.name}: starts on screen`).toBeGreaterThanOrEqual(0);
+        expect(box.x + box.width, `${vp.name}/${state.name}: ends on screen`).toBeLessThanOrEqual(vp.width + 1);
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), "no sideways scroll").toBe(true);
-        console.log(`${vp.name}/${state.name}: mode=${await rail(page).getAttribute("data-mode")} box=${Math.round(box.x)},${Math.round(box.width)}`);
+        console.log(`${vp.name}/${state.name}: box=${Math.round(box.x)},${Math.round(box.width)}`);
         if (process.env.RAIL_URL_SHOTS) {
           await page.screenshot({ path: `${process.env.RAIL_URL_SHOTS}/${vp.name}-${state.name}.png` });
         }
 
         // Closing is not stuck: the rail goes, the params go, the page is usable.
-        await rail(page).getByRole("button", { name: "Close agent" }).click();
-        await expect(rail(page)).toHaveCount(0);
+        if (state.surface === "panel") {
+          await page.getByRole("button", { name: "Close panel" }).first().click();
+          await expect(panel(page)).toHaveCount(0);
+        } else {
+          await rail(page).getByRole("button", { name: "Close agent" }).click();
+          await expect(rail(page)).toHaveCount(0);
+        }
         await expect.poll(() => new URL(page.url()).search).toBe("");
         await expect(page.getByRole("heading", { name: "OKRs", exact: true })).toBeVisible();
       }
