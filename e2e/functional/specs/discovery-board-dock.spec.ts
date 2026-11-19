@@ -71,6 +71,13 @@ async function dragTo(page: Page, source: Locator, target: Locator, { alignCard 
   const cardCentreOffset = cardBox ? startX - (cardBox.x + cardBox.width / 2) : 0;
   await page.mouse.move(targetBox.x + targetBox.width / 2 + cardCentreOffset, targetBox.y + targetBox.height / 2, { steps: 40 });
   await diagSnapshot(page, "dock before-up", targetBox.x + targetBox.width / 2 + cardCentreOffset, targetBox.y + targetBox.height / 2);
+  console.log("DIAG-199 geom " + JSON.stringify(await page.evaluate(([tx, ty, tw, th]) => {
+    const c = (r: DOMRect) => [Math.round(r.x + r.width / 2), Math.round(r.y + r.height / 2), Math.round(r.width), Math.round(r.height)];
+    const overlay = Array.from(document.querySelectorAll("body *")).find((n) => getComputedStyle(n).position === "fixed" && (n as HTMLElement).style.transform && n.getBoundingClientRect().width > 100);
+    const cards = Array.from(document.querySelectorAll("[data-flip-id]")).map((n) => ({ t: (n.textContent ?? "").slice(0, 28), c: c(n.getBoundingClientRect()) }));
+    const cols = Array.from(document.querySelectorAll("[data-slot=opportunity-board-column]")).map((n) => ({ s: n.getAttribute("data-status"), c: c(n.getBoundingClientRect()) }));
+    return { overlay: overlay ? c(overlay.getBoundingClientRect()) : null, target: [tx, ty, tw, th], cards: cards.filter((k) => /Exploring|Prioritized|Active One|Active Two/.test(k.t)), cols, nCards: cards.length };
+  }, [targetBox.x, targetBox.y, targetBox.width, targetBox.height])));
   await page.mouse.up();
   await diagSnapshot(page, "dock after-up", targetBox.x + targetBox.width / 2 + cardCentreOffset, targetBox.y + targetBox.height / 2);
 }
