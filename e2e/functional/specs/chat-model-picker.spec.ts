@@ -150,7 +150,9 @@ test("the chat model picker shows the effective model, sends an explicit pick, r
     // The composer card itself fits the rail (the rail's own resize handle makes the <aside>'s scrollWidth a few px wider, so
     // measure the card and its chips, not the aside).
     const card = rail.locator('[data-slot="composer-card"]');
-    await expect.poll(() => card.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+    await expect.poll(() => card.evaluate((el) => el.scrollWidth <= el.clientWidth), {
+      message: JSON.stringify(await card.evaluate((el) => ({ scrollWidth: el.scrollWidth, clientWidth: el.clientWidth, overflowing: [...el.querySelectorAll("*")].filter((child) => child.getBoundingClientRect().right > el.getBoundingClientRect().right + 1).map((child) => `${child.tagName}:${child.getAttribute("aria-label") ?? child.textContent?.slice(0, 40)}`) }))),
+    }).toBe(true);
     const railBox = (await rail.boundingBox())!;
     const cardBox = (await card.boundingBox())!;
     expect(cardBox.x).toBeGreaterThanOrEqual(railBox.x);

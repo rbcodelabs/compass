@@ -289,13 +289,15 @@ test.describe("GitHub PR smart chips", () => {
         .locator('[data-slot="pinned-panel"]')
         .filter({ has: page.getByRole("heading", { name: "Conversation", exact: true }) })
         .or(page.getByRole("dialog", { name: "Conversation", exact: true }));
-      await expect(transcript.getByText("Shipped")).toBeVisible({ timeout: 10_000 });
-      const commentChips = transcript.locator('a[data-entity-card="pullRequest"]');
+      // Scope to the message itself: the conversation header also shows a chip for the last PR link it saw.
+      const shipped = transcript.getByText("Shipped");
+      await expect(shipped).toBeVisible({ timeout: 10_000 });
+      const commentChips = shipped.locator('a[data-entity-card="pullRequest"]');
       await expect(commentChips).toHaveCount(2, { timeout: 10_000 });
       await expect(commentChips.nth(0)).toContainText("#209 Support smart PR chips");
       await expect(commentChips.nth(1)).toHaveText("review link");
 
-      const fallbackLink = transcript.locator(`a[href="${UNAPPROVED_PR_URL}"]`);
+      const fallbackLink = shipped.locator(`a[href="${UNAPPROVED_PR_URL}"]`);
       await expect(fallbackLink).toHaveText(UNAPPROVED_PR_URL);
       await expect(fallbackLink).not.toHaveAttribute("data-entity-card", "pullRequest");
 
