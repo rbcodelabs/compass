@@ -316,9 +316,8 @@ test.describe("GitHub PR smart chips", () => {
       await prisma.task.deleteMany({ where: { id: task.id } }).catch(() => undefined);
     }
   });
-  // TASK-195 slice S1 (shared-message renderer): a PERSON's message renders as plain text (agent-chat.tsx), so markdown, bold and PR
-  // chips only appear on assistant messages (covered above). The old Discussion rendered them on people's comments too.
-  test.fixme("Conversation transcript renders PR chips and bold markdown in a person-authored message (TASK-195 slice S1 (shared-message renderer))", async ({
+  // Slice S1 (shared-message renderer) shipped: a PERSON's message renders markdown, bold and PR chips like the old Discussion did.
+  test("Conversation transcript renders PR chips and bold markdown in a person-authored message", async ({
     page,
     base,
     orgSlug,
