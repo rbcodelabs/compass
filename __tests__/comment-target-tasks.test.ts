@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => ({
   emit: vi.fn(),
   active: vi.fn(),
   resolveDisplay: vi.fn(),
+  removeMirror: vi.fn(),
 }))
 
 vi.mock("@/lib/db", () => ({ default: () => mocks.db }))
@@ -31,6 +32,7 @@ vi.mock("@/lib/comments", async () => ({
   createComment: mocks.createComment,
   getComment: vi.fn(),
 }))
+vi.mock("@/lib/conversation-mirror", () => ({ removeCommentMirrorAfterCommit: mocks.removeMirror }))
 vi.mock("@/lib/doc-comments", () => ({ createDocCommentCore: vi.fn(), deleteDocCommentCore: vi.fn() }))
 vi.mock("@/lib/task-create", () => ({ createWorkspaceTask: mocks.createTask }))
 vi.mock("@/lib/task-links-read", () => ({ getTasksLinkedToOrigin: mocks.linkedTo }))
@@ -165,6 +167,26 @@ describe("creating a task from a comment", () => {
     const result = await postTargetCommentWithOptionalTask({ ...base, body: quinn, task: withTask })
     expect(result).toEqual({ ok: false, error: "TASK_FAILED", message: "db down" })
     expect(mocks.db.comment.deleteMany).toHaveBeenCalledWith({ where: { id: COMMENT } })
+  })
+
+  // S0 mirrors every comment into a conversation after commit; a comment withdrawn because its task failed must not
+  // leave a ghost conversation (or a message) behind.
+  it("removes the mirrored conversation of a root comment withdrawn after a task failure", async () => {
+    mocks.createTask.mockRejectedValue(new Error("db down"))
+    await postTargetCommentWithOptionalTask({ ...base, body: quinn, task: withTask })
+    expect(mocks.removeMirror).toHaveBeenCalledWith({ conversationId: COMMENT, commentIds: [COMMENT], threadDeleted: true })
+  })
+
+  it("removes only the reply message when a reply is withdrawn", async () => {
+    mocks.createTask.mockRejectedValue(new Error("db down"))
+    mocks.createComment.mockImplementation(async (input: { body: string }) => ({ id: COMMENT, body: input.body, parentId: "00000000-0000-4000-8000-0000000000b1" }))
+    await postTargetCommentWithOptionalTask({ ...base, body: quinn, task: withTask, parentId: "00000000-0000-4000-8000-0000000000b1" })
+    expect(mocks.removeMirror).toHaveBeenCalledWith({ conversationId: "00000000-0000-4000-8000-0000000000b1", commentIds: [COMMENT], threadDeleted: false })
+  })
+
+  it("does not touch the mirror when the task was created", async () => {
+    await postTargetCommentWithOptionalTask({ ...base, body: quinn, task: withTask })
+    expect(mocks.removeMirror).not.toHaveBeenCalled()
   })
 })
 
