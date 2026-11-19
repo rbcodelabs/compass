@@ -246,6 +246,10 @@ two optional fields. Both default to the standard behaviour when absent.
 
 - `redirectPath` is a root-relative path used as the OAuth `redirect_uri` in place of
   `/api/connectors/<slug>/callback`, for a client whose allowed callback URLs cannot be changed.
+  It must be root-relative (start with a single `/`) and made only of letters, digits, `.`, `_`,
+  `~`, `-` and `/` segments: no query, fragment, percent-encoding, trailing slash, `.`/`..`
+  segment, backslash or absolute URL. Anything else is rejected, so the redirect cannot leave
+  the Compass origin.
   Whatever route serves that path must hand the request to the connector callback handler.
 - `omitResourceParameter` leaves the RFC 8707 `resource` parameter off the authorize, token
   exchange and refresh requests, for an authorization server that binds tokens another way

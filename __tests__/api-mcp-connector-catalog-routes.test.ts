@@ -255,3 +255,33 @@ describe("DELETE /api/connectors/[slug] — Vercel Connect-backed", () => {
     expect((await response.json()).code).toBe("CONNECT_MISCONFIGURED")
   })
 })
+
+describe("connector disconnect and listing — provider-controlled text never reaches the console", () => {
+  const SYNTH = "synthetic-private-note-Heron-41M jane.doe@private.example"
+  const consoleText = () => JSON.stringify([...vi.mocked(console.error).mock.calls, ...vi.spyOn(console, "warn").mock.calls])
+  const expectClean = () => {
+    expect(consoleText()).not.toContain("synthetic-private-note")
+    expect(consoleText()).not.toContain("jane.doe")
+  }
+
+  it("logs a failed Connect revoke by code only", async () => {
+    const { ConnectError } = await import("./helpers/mock-vercel-connect")
+    connectMocks.revokeToken.mockRejectedValue(new ConnectError(`not linked ${SYNTH}`, { code: "client_not_linked", status: 403 }))
+    await disconnect(request(), params("google-drive"))
+    expect(consoleText()).toContain("CONNECT_MISCONFIGURED")
+    expectClean()
+  })
+
+  it("logs an unreadable grant by class name only", async () => {
+    mockFindGrant.mockRejectedValue(new Error(`decrypt failed ${SYNTH}`))
+    await disconnect(request(), params())
+    expect(consoleText()).toContain("Error")
+    expectClean()
+  })
+
+  it("logs a failed Connect probe without the error's message", async () => {
+    connectMocks.getToken.mockRejectedValue(new Error(`probe failed ${SYNTH}`))
+    await listConnectors()
+    expectClean()
+  })
+})

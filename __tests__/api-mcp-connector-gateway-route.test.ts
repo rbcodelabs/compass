@@ -429,7 +429,7 @@ describe("MCP connector gateway — provider failures are logged without provide
     expect(await response.text()).toBe(providerBody)
     await vi.waitFor(() => expect(spy.mock.calls.some(call => call[0] === "[mcp-gateway] upstream non-2xx")).toBe(true))
     const entry = JSON.parse(spy.mock.calls.find(call => call[0] === "[mcp-gateway] upstream non-2xx")![1] as string)
-    expect(entry).toEqual({ slug: "v0", method: "POST", rpcMethod: "tools/list", status: 403, contentType: "application/json", errorCode: 403 })
+    expect(entry).toEqual({ slug: "v0", method: "POST", rpcMethod: "tools/list", status: 403, contentType: "application/json", errorCode: null })
   })
 
   it("does not log a success, or the routine 405 on a GET stream probe", async () => {
@@ -498,7 +498,7 @@ describe("MCP connector gateway — logs never carry provider text, request-supp
     await vi.waitFor(() => expect(spy.mock.calls.some(call => call[0] === "[mcp-gateway] upstream non-2xx")).toBe(true))
     const entry = JSON.parse(spy.mock.calls.find(call => call[0] === "[mcp-gateway] upstream non-2xx")![1] as string) as Record<string, unknown>
     expect(Object.keys(entry).sort()).toEqual(["contentType", "errorCode", "method", "rpcMethod", "slug", "status"])
-    expect(entry).toMatchObject({ slug: "v0", status: 403, errorCode: 403, rpcMethod: "tools/call" })
+    expect(entry).toMatchObject({ slug: "v0", status: 403, errorCode: null, rpcMethod: "tools/call" })
     expectNoLeak(spy)
   })
 

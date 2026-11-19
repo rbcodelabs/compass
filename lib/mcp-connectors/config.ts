@@ -405,6 +405,17 @@ export type McpConnectorErrorCode =
    */
   | "GATEWAY_TIMEOUT"
 
+/**
+ * The only description of a caught error that may be logged: our own code for a
+ * connector error, otherwise the class name. Never `message`, which can quote a
+ * provider response body.
+ */
+export function safeErrorLabel(error: unknown): string {
+  if (error instanceof McpConnectorError) return error.code
+  const name = error instanceof Error ? error.constructor?.name : undefined
+  return typeof name === "string" && /^[A-Za-z0-9_]{1,64}$/.test(name) ? name : "UnknownError"
+}
+
 export class McpConnectorError extends Error {
   readonly code: McpConnectorErrorCode
 

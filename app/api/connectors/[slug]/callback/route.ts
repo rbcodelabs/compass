@@ -16,8 +16,8 @@
 // Every outcome is a redirect rather than JSON, because a browser landed here
 // from a consent screen and a raw JSON body is a dead end. Failures carry a
 // short machine-readable code in the query string; the human-readable provider
-// text stays in the server log, since it is untrusted and would otherwise be
-// reflected into a page.
+// text is neither redirected nor logged, since it is untrusted and can carry
+// private data.
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { trustedCompassBaseUrl } from "@/lib/compass-url"
@@ -25,6 +25,7 @@ import {
   DEFAULT_CONNECTOR_RETURN_PATH,
   McpConnectorError,
   connectorDefinition,
+  safeErrorLabel,
   usesVercelConnect,
 } from "@/lib/mcp-connectors/config"
 import {
@@ -74,8 +75,10 @@ export async function GET(request: NextRequest, context: { params: Promise<{ slu
   // unauthenticated guess at a `state` value cancel somebody's live flow.
   const providerError = params.get("error")
   if (providerError) {
-    console.error("MCP connector authorization was refused", slug, providerError, params.get("error_description"))
-    return failure(slug, DEFAULT_CONNECTOR_RETURN_PATH, sanitizeProviderError(providerError))
+    // The provider's error_description is untrusted free text and is not logged.
+    const safeError = sanitizeProviderError(providerError)
+    console.error("MCP connector authorization was refused", slug, safeError)
+    return failure(slug, DEFAULT_CONNECTOR_RETURN_PATH, safeError)
   }
 
   const state = params.get("state")
@@ -122,9 +125,9 @@ export async function GET(request: NextRequest, context: { params: Promise<{ slu
     return redirectTo(returnTo, { [CONNECTOR_PARAM]: slug, [CONNECTOR_CONNECTED_PARAM]: "1" })
   } catch (error) {
     if (error instanceof McpConnectorError) {
-      // The message can quote a provider's response body, so it is logged, not
-      // redirected. Only our own error code travels in the URL.
-      console.error("MCP connector callback failed", slug, error.code, error.message)
+      // The message can quote a provider's response body, so it is neither
+      // redirected nor logged. Only our own error code is.
+      console.error("MCP connector callback failed", slug, error.code)
       return failure(slug, DEFAULT_CONNECTOR_RETURN_PATH, error.code)
     }
     throw error
@@ -162,7 +165,7 @@ async function landFromVercelConnect(request: NextRequest, slug: string, userId:
     return redirectTo(returnTo, { [CONNECTOR_PARAM]: slug, [CONNECTOR_CONNECTED_PARAM]: "1" })
   } catch (error) {
     const code = error instanceof McpConnectorError ? error.code : "AUTHORIZATION_FAILED"
-    console.error("Vercel Connect landing check failed", slug, code, error instanceof Error ? error.message : error)
+    console.error("Vercel Connect landing check failed", slug, safeErrorLabel(error))
     return failure(slug, returnTo, code)
   }
 }

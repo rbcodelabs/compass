@@ -113,6 +113,15 @@ export function pickHeaders(source: Headers, allowed: readonly string[]): Header
 
 /** The JSON-RPC methods the MCP spec defines. Anything else logs as "other". */
 const KNOWN_RPC_METHODS: ReadonlySet<string> = new Set([
+  "notifications/initialized",
+  "notifications/cancelled",
+  "notifications/progress",
+  "notifications/roots/list_changed",
+  "notifications/resources/updated",
+  "notifications/resources/list_changed",
+  "notifications/tools/list_changed",
+  "notifications/prompts/list_changed",
+  "notifications/message",
   "initialize",
   "ping",
   "tools/list",
@@ -132,7 +141,7 @@ function rpcMethodOfParsed(parsed: unknown): string | null {
   const first = Array.isArray(parsed) ? parsed[0] : parsed
   const method = (first as { method?: unknown } | null | undefined)?.method
   if (typeof method !== "string") return null
-  if (KNOWN_RPC_METHODS.has(method) || /^notifications\/[a-z_/]{1,40}$/.test(method)) return method
+  if (KNOWN_RPC_METHODS.has(method)) return method
   return "other"
 }
 
@@ -173,7 +182,8 @@ function signalOfMessage(message: JsonRpcMessage | null | undefined): UpstreamEr
   if (!message || typeof message !== "object") return null
   if (message.error && typeof message.error === "object") {
     const code = message.error.code
-    return { errorCode: typeof code === "number" && Number.isSafeInteger(code) ? code : null }
+    // Only the JSON-RPC reserved range: a provider-chosen number elsewhere could encode data.
+    return { errorCode: typeof code === "number" && Number.isInteger(code) && code >= -32768 && code <= -32000 ? code : null }
   }
   if (message.result?.isError === true) return { errorCode: null }
   return null

@@ -14,6 +14,13 @@ describe("jsonRpcMethodOf", () => {
     expect(jsonRpcMethodOf(bytes('{"method":"notifications/initialized"}'))).toBe("notifications/initialized")
   })
 
+  it("does not log a crafted notifications/<letters> method verbatim", () => {
+    const crafted = "notifications/" + "abcdefghijklmnopqrstuvwxyzabcdefghijklmn".slice(0, 40)
+    expect(jsonRpcMethodOf(bytes(JSON.stringify({ method: crafted })))).toBe("other")
+    for (const known of ["initialized", "cancelled", "progress", "roots/list_changed", "resources/updated", "resources/list_changed", "tools/list_changed", "prompts/list_changed", "message"])
+      expect(jsonRpcMethodOf(bytes(JSON.stringify({ method: "notifications/" + known })))).toBe("notifications/" + known)
+  })
+
   it("returns null for no body, garbage, or a non-string method", () => {
     expect(jsonRpcMethodOf(undefined)).toBeNull()
     expect(jsonRpcMethodOf(bytes("not json"))).toBeNull()
@@ -40,6 +47,11 @@ describe("upstreamErrorSignalOf", () => {
     expect(upstreamErrorSignalOf('{"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":"Method not found"}}')).toEqual({ errorCode: -32601 })
     expect(upstreamErrorSignalOf(`[{"result":{"content":[]}},${googleDenied}]`)).toEqual({ errorCode: null })
     expect(upstreamErrorSignalOf(`event: message\ndata: ${googleDenied}\n\n`)).toEqual({ errorCode: null })
+  })
+
+  it("logs only codes in the JSON-RPC reserved range -32768..-32000", () => {
+    for (const code of [-32768, -32602, -32000]) expect(upstreamErrorSignalOf(JSON.stringify({ error: { code } }))).toEqual({ errorCode: code })
+    for (const code of [403, 0, -31999, -32769, 123456789, 1.5]) expect(upstreamErrorSignalOf(JSON.stringify({ error: { code } }))).toEqual({ errorCode: null })
   })
 
   it("ignores a non-numeric error code", () => {
