@@ -61,11 +61,11 @@ test.describe("Roadmap Item shared Conversations", () => {
     await expect(thread.getByRole("button", { name: "Resolve", exact: true })).toBeVisible({ timeout: 10_000 });
     await expect(thread.getByText(replyBody, { exact: true })).toBeVisible();
 
-    // Persist: close, reopen the item, open the thread from its Conversations section.
+    // Persist: close (the row is now named by the edited text: the title follows the first message), reopen the item, open the thread from its Conversations section.
     await page.getByRole("button", { name: "Close panel" }).click();
     await expect(thread).not.toBeVisible();
     await card.getByRole("button", { name: itemTitle }).click();
-    await section().getByRole("button", { name: new RegExp(`^${rootBody}`) }).click();
+    await section().getByRole("button", { name: new RegExp(`^${editedRootBody}`) }).click();
     await expect(thread.getByText(editedRootBody, { exact: true })).toBeVisible({ timeout: 10_000 });
     await expect(thread.getByText(replyBody, { exact: true })).toBeVisible();
 
@@ -73,16 +73,17 @@ test.describe("Roadmap Item shared Conversations", () => {
     await thread.getByRole("button", { name: "Archive conversation" }).click();
     await page.getByRole("alertdialog", { name: "Archive this conversation?" }).getByRole("button", { name: "Archive", exact: true }).click();
     await expect(page.getByRole("alertdialog")).toHaveCount(0);
-    await page.getByRole("button", { name: "Close panel" }).click();
-    await card.getByRole("button", { name: itemTitle }).click();
+    // Archiving closes the Conversation panel itself (back to the item panel when that was the previous crumb).
+    await expect(thread).toHaveCount(0);
+    if (!(await itemPanel.isVisible())) await card.getByRole("button", { name: itemTitle }).click();
     await expect(section().getByRole("button", { name: /^Show archived/ })).toBeVisible({ timeout: 10_000 });
-    await expect(section().getByRole("button", { name: new RegExp(`^${rootBody}`) })).toHaveCount(0);
+    await expect(section().getByRole("button", { name: new RegExp(`^${editedRootBody}`) })).toHaveCount(0);
     await section().getByRole("button", { name: /^Show archived/ }).click();
-    const archivedRow = section().getByRole("listitem").filter({ hasText: rootBody });
+    const archivedRow = section().getByRole("listitem").filter({ hasText: editedRootBody });
     await expect(archivedRow).toBeVisible({ timeout: 10_000 });
     await archivedRow.getByRole("button", { name: "Restore", exact: true }).click();
     await expect(section().getByRole("status")).toContainText("Conversation restored.");
     await section().getByRole("button", { name: /^Show archived/ }).click();
-    await expect(section().getByRole("button", { name: new RegExp(`^${rootBody}`) })).toBeVisible({ timeout: 10_000 });
+    await expect(section().getByRole("button", { name: new RegExp(`^${editedRootBody}`) })).toBeVisible({ timeout: 10_000 });
   });
 });

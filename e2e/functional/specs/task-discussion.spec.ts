@@ -80,7 +80,8 @@ test.describe("Task shared Conversations", () => {
     ] as const) {
       await page.setViewportSize(viewport);
       // The title is an inline-editable control now, not a heading.
-      await page.getByRole("button", { name: title }).scrollIntoViewIfNeeded();
+      // The inline-editable title only: a linked-task chip shares the name.
+      await page.getByTitle("Click to edit").first().scrollIntoViewIfNeeded();
       await expect(section.getByTestId("object-conversation-composer")).toBeVisible();
       await page.screenshot({ path: testInfo.outputPath(`task-discussion-${name}.png`), fullPage: true });
       // Scroll the workspace container to include its bottom-nav safe padding.
@@ -104,7 +105,8 @@ test.describe("Task shared Conversations", () => {
     await thread.getByRole("button", { name: "Archive conversation" }).click();
     await page.getByRole("alertdialog", { name: "Archive this conversation?" }).getByRole("button", { name: "Archive", exact: true }).click();
     await expect(page.getByRole("alertdialog")).toHaveCount(0);
-    await page.getByRole("button", { name: "Close panel" }).click();
+    // Archiving closes the Conversation panel itself.
+    await expect(thread).toHaveCount(0);
     await page.reload();
     await expect(section.getByRole("button", { name: /Confirm scope/ }).first()).toBeVisible({ timeout: 15_000 });
     await expect(section.getByRole("button", { name: /^The support checklist is ready/ })).toHaveCount(0);

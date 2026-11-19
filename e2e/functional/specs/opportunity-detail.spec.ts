@@ -95,6 +95,7 @@ test("opportunity conversation: author edits a message, resolve/reopen, archive 
   await thread.getByRole("button", { name: "Save edit", exact: true }).click();
   await expect(thread.getByText("Test the shared recap this week.", { exact: true })).toBeVisible();
   await expect(thread.getByText("Edited", { exact: true })).toBeVisible();
+  // The thread title follows the first message, so after the edit the row is named by the edited text.
 
   await thread.getByRole("button", { name: "Resolve", exact: true }).click();
   await expect(thread.getByText("Resolved", { exact: true })).toBeVisible();
@@ -104,23 +105,24 @@ test("opportunity conversation: author edits a message, resolve/reopen, archive 
   // The edit and the thread persist across the panel and the full page.
   await page.goto(`${base}/discovery?detail=opportunity:${id}`);
   const panel = page.locator('[data-slot="sheet-content"]');
-  await expect(conversationsSection(panel).getByRole("button", { name: /^Test the shared recap with new teams\./ })).toBeVisible();
+  await expect(conversationsSection(panel).getByRole("button", { name: /^Test the shared recap this week\./ })).toBeVisible();
   expect(await openFullPage(page, panel)).toBe(`${base}/discovery/${id}`);
-  await conversationsSection(page).getByRole("button", { name: /^Test the shared recap with new teams\./ }).click();
+  await conversationsSection(page).getByRole("button", { name: /^Test the shared recap this week\./ }).click();
   await expect(conversationPanel(page).getByText("Test the shared recap this week.", { exact: true })).toBeVisible();
 
   // Archive, not delete: leaves the active list and returns on restore.
   await conversationPanel(page).getByRole("button", { name: "Archive conversation" }).click();
   await page.getByRole("alertdialog", { name: "Archive this conversation?" }).getByRole("button", { name: "Archive", exact: true }).click();
   await expect(page.getByRole("alertdialog")).toHaveCount(0);
-  await page.getByRole("button", { name: "Close panel" }).click();
-  await expect(conversationsSection(page).getByRole("button", { name: /^Test the shared recap with new teams\./ })).toHaveCount(0);
+  // Archiving closes the Conversation panel itself.
+  await expect(conversationPanel(page)).toHaveCount(0);
+  await expect(conversationsSection(page).getByRole("button", { name: /^Test the shared recap this week\./ })).toHaveCount(0);
   await conversationsSection(page).getByRole("button", { name: /^Show archived/ }).click();
-  const archivedRow = conversationsSection(page).getByRole("listitem").filter({ hasText: "Test the shared recap" });
+  const archivedRow = conversationsSection(page).getByRole("listitem").filter({ hasText: "Test the shared recap this week" });
   await archivedRow.getByRole("button", { name: "Restore", exact: true }).click();
   await expect(conversationsSection(page).getByRole("status")).toContainText("Conversation restored.");
   await conversationsSection(page).getByRole("button", { name: /^Show archived/ }).click();
-  await expect(conversationsSection(page).getByRole("button", { name: /^Test the shared recap/ })).toBeVisible();
+  await expect(conversationsSection(page).getByRole("button", { name: /^Test the shared recap this week/ })).toBeVisible();
 });
 
 // A workspace admin may edit another member's message (edit is author OR admin). The signed-in dev user is the workspace admin.
