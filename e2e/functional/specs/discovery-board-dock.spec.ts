@@ -72,7 +72,6 @@ async function dragTo(page: Page, source: Locator, target: Locator, { alignCard 
   await page.mouse.move(targetBox.x + targetBox.width / 2 + cardCentreOffset, targetBox.y + targetBox.height / 2, { steps: 40 });
   await diagSnapshot(page, "dock before-up", targetBox.x + targetBox.width / 2 + cardCentreOffset, targetBox.y + targetBox.height / 2);
   await page.mouse.up();
-  await page.waitForTimeout(300);
   await diagSnapshot(page, "dock after-up", targetBox.x + targetBox.width / 2 + cardCentreOffset, targetBox.y + targetBox.height / 2);
 }
 
