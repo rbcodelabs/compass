@@ -57,7 +57,7 @@ describe("task row in the section composer", () => {
     mount()
     await composeWith(`Can you draft this ${quinn}`)
     expect(screen.getByTestId("comment-task-box")).toHaveTextContent("Assign as task to @Quinn Morales")
-    expect(screen.getByRole("switch", { name: "Create task" })).toBeChecked()
+    expect(screen.getByTestId("create-task-toggle")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Comment & create task" })).toBeEnabled()
     expect(screen.getByTestId("object-conversation-composer")).toBeInTheDocument()
   })
@@ -93,7 +93,7 @@ describe("task row in the section composer", () => {
   it("keeps the old quick-start (a chat turn, no comment) when the task is switched off", async () => {
     mount()
     await composeWith(`FYI ${quinn}`)
-    fireEvent.click(screen.getByRole("switch", { name: "Create task" }))
+    fireEvent.click(screen.getByTestId("create-task-toggle"))
     fireEvent.click(screen.getByRole("button", { name: "Send" }))
     await waitFor(() => expect(mocks.open).toHaveBeenCalledWith("turn-conversation", expect.anything()))
     expect(postedTo("/api/comments")).toHaveLength(0)
