@@ -289,6 +289,7 @@ async function hasNonMirrorContent(
 ): Promise<boolean> {
   if (conversation.interviewProcessingJson) return true
   const conversationId = conversation.id
+  const { countNonMirrorConversationLinks } = await import("@/lib/links/conversation-links")
   const mirrorUsers = [...new Set([conversation.userId, ...commentAuthorIds])]
   const counts: Array<() => Promise<number>> = [
     () => db.agentMessage.count({ where: { conversationId } }),
@@ -305,15 +306,7 @@ async function hasNonMirrorContent(
     () => db.pMInterview.count({ where: { agentConversationId: conversationId } }),
     () => db.apiKey.count({ where: { scopeConversationId: conversationId } }),
     // The mirror's own CONVERSATION_MENTIONS link is not content; any other link (task origin, CREATED) is.
-    () =>
-      db.entityLink.count({
-        where: {
-          AND: [
-            { OR: [{ fromType: "AGENT_CONVERSATION", fromId: conversationId }, { toType: "AGENT_CONVERSATION", toId: conversationId }] },
-            { linkType: { not: "CONVERSATION_MENTIONS" } },
-          ],
-        },
-      }),
+    () => countNonMirrorConversationLinks(db, conversationId),
   ]
   for (const count of counts) if ((await tolerateMissingTable(count, 0)) > 0) return true
   return false

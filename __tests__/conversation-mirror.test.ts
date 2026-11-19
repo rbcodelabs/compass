@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-const links = vi.hoisted(() => ({ recordConversationLink: vi.fn(), deleteLinksForEntity: vi.fn() }))
+const links = vi.hoisted(() => ({ recordConversationLink: vi.fn(), deleteLinksForEntity: vi.fn(), originLinks: { count: 0 } }))
 vi.mock("@/lib/links/conversation-links", () => ({
   isConversationLinkTarget: (type: string) => type === "OPPORTUNITY",
   recordConversationLink: links.recordConversationLink,
+  countNonMirrorConversationLinks: async () => links.originLinks.count,
 }))
 vi.mock("@/lib/links/service", () => ({ deleteLinksForEntity: links.deleteLinksForEntity }))
 const dbHolder = vi.hoisted(() => ({ current: null as unknown }))
@@ -104,7 +105,6 @@ function fakeDb(comments: Row[], extra: Extra = {}) {
     agentWebFetch: { count: countOf("agentWebFetch") },
     pMInterview: { count: countOf("pMInterview") },
     apiKey: { count: countOf("apiKey") },
-    entityLink: { count: countOf("entityLink") },
     $transaction: vi.fn(async (fn: (tx: unknown) => unknown) => fn(db)),
   }
   return { db, conversations, messages }
@@ -125,6 +125,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   links.recordConversationLink.mockResolvedValue("created")
   links.deleteLinksForEntity.mockResolvedValue(0)
+  links.originLinks.count = 0
 })
 
 describe("messageKind is unified", () => {
@@ -297,6 +298,7 @@ describe("removeCommentMirror", () => {
     ["a panel-created message with no Comment row", { panelMessages: [{ id: "panel-1", conversationId: ROOT, role: "assistant", content: "agent answer", createdAt: t2 }] }],
   ] as [string, Extra][])("archives instead of purging a deleted thread that has %s, and blanks the deleted text", async (_label, extra) => {
     const { db, conversations, messages } = await seeded(extra)
+    links.originLinks.count = extra.counts?.entityLink ?? 0
     await deleteThread(db)
     expect(db.agentConversation.deleteMany).not.toHaveBeenCalled()
     const row = conversations.get(ROOT)!
