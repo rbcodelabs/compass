@@ -89,22 +89,66 @@ describe("Archive conversation action", () => {
   })
 })
 
+const quietFetch = (turn: () => Response) => async (url: string, init?: RequestInit) =>
+  url === "/api/agent/turn"
+    ? turn()
+    : init?.method === "PATCH"
+      ? Response.json({ archived: false, changed: true })
+      // No interview processing on this thread: a 404 there clears the composer block.
+      : String(url).includes("/processing")
+        ? new Response(null, { status: 404 })
+        : Response.json({ agents: [], defaultAgentId: null, run: null, available: false })
+
 describe("archived under another participant", () => {
-  it("shows the existing no-longer-available state, not an error banner, when their send is refused", async () => {
-    fetchMock.mockImplementation(async (url: string) =>
-      url === "/api/agent/turn"
-        ? new Response("Conversation not found or access denied.", { status: 404 })
-        // No interview processing on this thread: a 404 there clears the composer block.
-        : String(url).includes("/processing")
-          ? new Response(null, { status: 404 })
-          : Response.json({ agents: [], defaultAgentId: null, run: null, available: false }))
+  it("turns into a read-only archived state, not the removed-access wording, when the server says archived", async () => {
+    fetchMock.mockImplementation(quietFetch(() => new Response("Conversation archived.", { status: 404, headers: { "x-conversation-state": "archived" } })))
     render(<AgentChat {...props({ canArchive: false })} />)
     const box = await screen.findByRole("textbox")
     fireEvent.change(box, { target: { value: "still there?" } })
     fireEvent.keyDown(box, { key: "Enter" })
-    const alert = await screen.findByRole("alert")
-    expect(alert).toHaveTextContent(/no longer have access to this conversation/i)
-    expect(screen.queryByText(/access denied/i)).toBeNull()
+    expect(await screen.findByText(/archived and read-only/i)).toBeInTheDocument()
+    expect(screen.queryByText(/no longer have access/i)).toBeNull()
     expect(screen.getByRole("textbox")).toBeDisabled()
+  })
+
+  it("does not mistake an ordinary 404 (workspace gone, deploy skew) for an archive", async () => {
+    fetchMock.mockImplementation(quietFetch(() => new Response("Workspace not found or access denied.", { status: 404 })))
+    render(<AgentChat {...props({ canArchive: false })} />)
+    const box = await screen.findByRole("textbox")
+    fireEvent.change(box, { target: { value: "hello" } })
+    fireEvent.keyDown(box, { key: "Enter" })
+    expect(await screen.findByText(/Workspace not found or access denied/)).toBeInTheDocument()
+    expect(screen.queryByText(/archived and read-only/i)).toBeNull()
+  })
+})
+
+describe("an archived thread opened by id", () => {
+  it("is read-only: no Archive action, a neutral banner, a disabled composer, and a Restore action for those who may", async () => {
+    fetchMock.mockImplementation(quietFetch(() => new Response("", { status: 200 })))
+    render(<AgentChat {...props({ initialArchived: true, canArchive: false, canRestore: true })} />)
+    expect(await screen.findByText(/archived and read-only/i)).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Archive conversation" })).toBeNull()
+    expect(screen.getByRole("textbox")).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Restore" })).toBeInTheDocument()
+    expect(screen.queryByText(/no longer have access/i)).toBeNull()
+  })
+
+  it("offers no Restore to someone without the right", async () => {
+    fetchMock.mockImplementation(quietFetch(() => new Response("", { status: 200 })))
+    render(<AgentChat {...props({ initialArchived: true, canArchive: false, canRestore: false })} />)
+    await screen.findByText(/archived and read-only/i)
+    expect(screen.queryByRole("button", { name: "Restore" })).toBeNull()
+  })
+
+  it("Restore re-enables the thread, tells the section, and brings Archive back", async () => {
+    fetchMock.mockImplementation(quietFetch(() => new Response("", { status: 200 })))
+    const heard: unknown[] = []
+    window.addEventListener(CONVERSATION_ARCHIVE_CHANGED_EVENT, (e) => heard.push((e as CustomEvent).detail), { once: true })
+    render(<AgentChat {...props({ initialArchived: true, canArchive: true, canRestore: true })} />)
+    fireEvent.click(await screen.findByRole("button", { name: "Restore" }))
+    await waitFor(() => expect(screen.queryByText(/archived and read-only/i)).toBeNull())
+    expect(JSON.parse((patches(fetchMock)[0]![1] as RequestInit).body as string)).toEqual({ archived: false })
+    expect(heard).toEqual([{ conversationId: CONV, archived: false }])
+    expect(screen.getByRole("textbox")).toBeEnabled()
   })
 })

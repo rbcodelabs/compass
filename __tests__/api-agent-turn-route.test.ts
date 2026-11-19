@@ -264,6 +264,7 @@ describe("agent turn route — guards", () => {
     mockPrisma.agentConversation.findFirst.mockResolvedValue(null)
     const res = await POST(req({ workspaceId: "ws-1", message: "hi", conversationId: "c-999" }))
     expect(res.status).toBe(404)
+    expect(res.headers.get("x-conversation-state")).toBeNull()
     expect(mockPrisma.agentConversation.findFirst).toHaveBeenCalledWith({
       where: { id: "c-999", ...accessibleConversationsWhere("ws-1", "user-1") },
       select: { userId: true, visibility: true, archivedAt: true },
@@ -274,6 +275,8 @@ describe("agent turn route — guards", () => {
     mockPrisma.agentConversation.findFirst.mockResolvedValue({ userId: "owner", visibility: "WORKSPACE", archivedAt: new Date() })
     const res = await POST(req({ workspaceId: "ws-1", message: "hi", conversationId: "c-1" }))
     expect(res.status).toBe(404)
+    // Distinguishable from "workspace not found" and deploy-skew 404s, so the client can show the archived state.
+    expect(res.headers.get("x-conversation-state")).toBe("archived")
     expect(mockPrisma.agentMessage.create).not.toHaveBeenCalled()
     expect(mockPrisma.agentConversation.create).not.toHaveBeenCalled()
   })

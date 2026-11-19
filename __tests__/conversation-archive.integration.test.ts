@@ -19,6 +19,7 @@ const connection = vi.hoisted(() => ({ prisma: null as AppPrismaClient | null })
 vi.mock("@/lib/db", () => ({ default: () => connection.prisma }))
 
 import { listRestorableArchivedConversations, setConversationArchived } from "@/lib/conversation-archive"
+import { editConversationMessage } from "@/lib/conversation-messages"
 import { getAgentConversationMessages } from "@/lib/agent-conversations"
 import { integrationDatabaseUrl } from "@/__tests__/helpers/integration-database"
 
@@ -33,7 +34,7 @@ describe.skipIf(!databaseUrl)("conversation archive (real PostgreSQL)", () => {
   let created = false
   let workspaceId: string
   let taskId: string
-  const u = {} as Record<"starter" | "member" | "wsAdmin" | "orgAdmin" | "stranger", string>
+  const u = {} as Record<"starter" | "member" | "wsAdmin" | "orgAdmin" | "orgOnly" | "stranger", string>
 
   async function makeThread(updatedAt = T0) {
     const id = randomUUID()
@@ -46,6 +47,16 @@ describe.skipIf(!databaseUrl)("conversation archive (real PostgreSQL)", () => {
         { id: randomUUID(), conversationId: id, role: "user", content: "a reply", authorUserId: u.member, authorType: "HUMAN", messageKind: "MESSAGE", createdAt: new Date(T0.getTime() + 2000) },
       ],
     })
+    return id
+  }
+  /** An archived thread started by `author`, `updatedAt` minutes after T0 (so ordering is by recency). */
+  async function makeArchived(author: string, minutes: number, taskForRow = taskId) {
+    const id = randomUUID()
+    const at = new Date(T0.getTime() + minutes * 60_000)
+    await prisma.agentConversation.create({
+      data: { id, workspaceId, userId: author, title: `T${minutes}`, visibility: "WORKSPACE", targetType: "TASK", targetId: taskForRow, createdAt: at, updatedAt: at, archivedAt: at },
+    })
+    await prisma.agentMessage.create({ data: { id: randomUUID(), conversationId: id, role: "user", content: "x", authorUserId: author, authorType: "HUMAN", messageKind: "MESSAGE", createdAt: at } })
     return id
   }
   const set = (conversationId: string, userId: string, archived: boolean) => setConversationArchived({ conversationId, workspaceId, userId, archived })
@@ -67,13 +78,15 @@ describe.skipIf(!databaseUrl)("conversation archive (real PostgreSQL)", () => {
     connection.prisma = prisma
     const org = await prisma.organization.create({ data: { slug: `ca-${randomUUID().slice(0, 8)}`, name: "Conversation Archive" } })
     workspaceId = (await prisma.workspace.create({ data: { organizationId: org.id, slug: "ca", name: "CA" } })).id
-    for (const key of ["starter", "member", "wsAdmin", "orgAdmin", "stranger"] as const) {
+    for (const key of ["starter", "member", "wsAdmin", "orgAdmin", "orgOnly", "stranger"] as const) {
       u[key] = (await prisma.user.create({ data: { email: `${key}-${randomUUID().slice(0, 6)}@localhost.dev`, name: key } })).id
     }
     for (const key of ["starter", "member", "wsAdmin", "orgAdmin"] as const) {
       await prisma.workspaceMember.create({ data: { workspaceId, userId: u[key], role: key === "wsAdmin" ? "ADMIN" : "MEMBER" } })
     }
     await prisma.organizationMember.create({ data: { organizationId: org.id, userId: u.orgAdmin, role: "OWNER" } })
+    // An org owner who is NOT a workspace member: reads (and so archive) require workspace membership.
+    await prisma.organizationMember.create({ data: { organizationId: org.id, userId: u.orgOnly, role: "OWNER" } })
     taskId = (await prisma.task.create({ data: { workspaceId, title: "Anchor task" } })).id
   }, 240_000)
 
@@ -144,11 +157,73 @@ describe.skipIf(!databaseUrl)("conversation archive (real PostgreSQL)", () => {
   it("lists archived rows only for people who may restore them", async () => {
     const mine = await makeThread()
     await set(mine, u.starter, true)
-    const ids = (userId: string) => listRestorableArchivedConversations({ workspaceId, userId, targetType: "TASK", targetId: taskId, linkedIds: [] }).then((rows) => rows.map((r) => r.id))
+    const ids = (userId: string) => listRestorableArchivedConversations({ workspaceId, userId, targetType: "TASK", targetId: taskId, linkedIds: [] }).then(({ rows }) => rows.map((r) => r.id))
     expect(await ids(u.starter)).toContain(mine)
     expect(await ids(u.wsAdmin)).toContain(mine)
     expect(await ids(u.orgAdmin)).toContain(mine)
     expect(await ids(u.member)).not.toContain(mine)
     expect(await ids(u.stranger)).not.toContain(mine)
+  })
+
+  it("B1: a non-admin with an older own thread still finds it behind more than 50 newer archived threads by others", async () => {
+    const target = (await prisma.task.create({ data: { workspaceId, title: "Busy anchor" } })).id
+    const own = await makeArchived(u.starter, 1, target)
+    for (let i = 0; i < 55; i++) await makeArchived(u.member, 10 + i, target)
+    const list = (userId: string) => listRestorableArchivedConversations({ workspaceId, userId, targetType: "TASK", targetId: target, linkedIds: [] })
+    const mine = await list(u.starter)
+    expect(mine.rows.map((r) => r.id)).toEqual([own])
+    expect(mine.capped).toBe(false)
+    // An admin sees the 50 most recent and is told there are more.
+    const admin = await list(u.wsAdmin)
+    expect(admin.rows).toHaveLength(50)
+    expect(admin.capped).toBe(true)
+    expect(admin.rows.map((r) => r.id)).not.toContain(own)
+  })
+
+  it("an org owner who is not a workspace member gets 404 (reads require workspace membership)", async () => {
+    const id = await makeThread()
+    expect(await set(id, u.orgOnly, true)).toEqual({ ok: false, status: 404 })
+    expect((await row(id)).archivedAt).toBeNull()
+  })
+
+  it("never reverts a newer updatedAt: a message that bumped the thread is the value archive and restore keep", async () => {
+    const id = await makeThread()
+    const bumped = new Date(T0.getTime() + 3_600_000)
+    await prisma.agentConversation.update({ where: { id }, data: { updatedAt: bumped } })
+    await set(id, u.starter, true)
+    expect((await row(id)).updatedAt.toISOString()).toBe(bumped.toISOString())
+    await set(id, u.starter, false)
+    expect((await row(id)).updatedAt.toISOString()).toBe(bumped.toISOString())
+  })
+
+  it("private chat: archive keeps updatedAt and is idempotent; a participant gets 404", async () => {
+    const id = randomUUID()
+    await prisma.agentConversation.create({ data: { id, workspaceId, userId: u.starter, title: "Mine", visibility: "PRIVATE", createdAt: T0, updatedAt: T0 } })
+    expect(await set(id, u.starter, true)).toEqual({ ok: true, archived: true, changed: true })
+    expect((await row(id)).updatedAt.toISOString()).toBe(T0.toISOString())
+    expect(await set(id, u.starter, true)).toEqual({ ok: true, archived: true, changed: false })
+    expect(await set(id, u.member, true)).toEqual({ ok: false, status: 404 })
+  })
+
+  it("archiving cancels pending wake-ups; restoring does not resurrect them", async () => {
+    const id = await makeThread()
+    const wake = await prisma.agentScheduledWakeup.create({
+      data: { workspaceId, conversationId: id, userId: u.starter, fireAt: new Date(Date.now() + 60_000), delaySeconds: 60, prompt: "later", status: "PENDING" },
+    })
+    await set(id, u.starter, true)
+    expect((await prisma.agentScheduledWakeup.findUniqueOrThrow({ where: { id: wake.id } })).status).toBe("CANCELED")
+    await set(id, u.starter, false)
+    expect((await prisma.agentScheduledWakeup.findUniqueOrThrow({ where: { id: wake.id } })).status).toBe("CANCELED")
+  })
+
+  it("an archived thread rejects edits (409) and accepts them again once restored", async () => {
+    const id = await makeThread()
+    const message = await prisma.agentMessage.findFirstOrThrow({ where: { conversationId: id }, orderBy: { createdAt: "asc" } })
+    await set(id, u.starter, true)
+    const edit = () => editConversationMessage({ conversationId: id, messageId: message.id, workspaceId, userId: u.starter, content: "changed" })
+    expect(await edit()).toMatchObject({ ok: false, status: 409 })
+    expect((await prisma.agentMessage.findUniqueOrThrow({ where: { id: message.id } })).content).toBe(SECRET)
+    await set(id, u.starter, false)
+    expect((await edit()).ok).toBe(true)
   })
 })

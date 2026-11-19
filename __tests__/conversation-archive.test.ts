@@ -8,7 +8,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const mockPrisma = {
-  agentConversation: { findFirst: vi.fn(), updateMany: vi.fn(), update: vi.fn(), delete: vi.fn(), deleteMany: vi.fn() },
+  agentConversation: { findFirst: vi.fn(), findUnique: vi.fn(), updateMany: vi.fn(), update: vi.fn(), delete: vi.fn(), deleteMany: vi.fn() },
+  agentScheduledWakeup: { updateMany: vi.fn() },
   agentMessage: { findFirst: vi.fn(), count: vi.fn(), update: vi.fn(), delete: vi.fn(), deleteMany: vi.fn() },
   agentAuditLog: { create: vi.fn() },
   agentRun: { create: vi.fn() },
@@ -19,7 +20,7 @@ const mockPrisma = {
 vi.mock("@/lib/db", () => ({ default: () => mockPrisma }))
 
 import { accessibleConversationsWhere } from "@/lib/agent-conversation-access"
-import { canArchiveConversation, setConversationArchived } from "@/lib/conversation-archive"
+import { archiveCapabilities, canArchiveConversation, setConversationArchived } from "@/lib/conversation-archive"
 
 const WS = "0b6f3c9e-6a1d-4c1e-9d3a-2f0c8e7b5a41"
 const CONV = "5d2a7e14-3b9c-4f60-8a21-c7e9d0f4b312"
@@ -49,6 +50,9 @@ beforeEach(() => {
   mockPrisma.agentMessage.findFirst.mockResolvedValue({ authorUserId: "starter", content: SECRET_TEXT })
   mockPrisma.agentMessage.count.mockResolvedValue(3)
   mockPrisma.agentConversation.updateMany.mockResolvedValue({ count: 1 })
+  // Re-read INSIDE the transaction; the stamp is compare-and-set on this value.
+  mockPrisma.agentConversation.findUnique.mockResolvedValue({ archivedAt: null, updatedAt: UPDATED })
+  mockPrisma.agentScheduledWakeup.updateMany.mockResolvedValue({ count: 0 })
   mockPrisma.agentAuditLog.create.mockResolvedValue({})
   mockPrisma.workspace.findUnique.mockResolvedValue(noAdmin)
   mockPrisma.$transaction.mockImplementation(async (fn: (tx: typeof mockPrisma) => unknown) => fn(mockPrisma))
@@ -108,7 +112,8 @@ describe("setConversationArchived: effect", () => {
   it("archives by stamping archivedAt only when it is still null, and never touches a message, a run or a comment", async () => {
     await run("starter")
     expect(mockPrisma.agentConversation.updateMany).toHaveBeenCalledWith({
-      where: { id: CONV, workspaceId: WS, archivedAt: null },
+      // Compare-and-set on updatedAt: a message that lands between the read and the write is never reverted.
+      where: { id: CONV, workspaceId: WS, updatedAt: UPDATED, archivedAt: null },
       // Prisma's updatedAt extension stamps `now` on any update that omits it; archiving must not reorder the list.
       data: { archivedAt: expect.any(Date), updatedAt: UPDATED },
     })
@@ -124,21 +129,23 @@ describe("setConversationArchived: effect", () => {
 
   it("restores by clearing archivedAt only on an archived row", async () => {
     mockPrisma.agentConversation.findFirst.mockResolvedValue(conversation({ archivedAt: new Date() }))
+    mockPrisma.agentConversation.findUnique.mockResolvedValue({ archivedAt: new Date(), updatedAt: UPDATED })
     expect(await run("starter", false)).toEqual({ ok: true, archived: false, changed: true })
     expect(mockPrisma.agentConversation.updateMany).toHaveBeenCalledWith({
-      where: { id: CONV, workspaceId: WS, archivedAt: { not: null } },
+      where: { id: CONV, workspaceId: WS, updatedAt: UPDATED, archivedAt: { not: null } },
       data: { archivedAt: null, updatedAt: UPDATED },
     })
   })
 
   it("is idempotent: archiving an archived thread succeeds, changes nothing and writes no second audit row", async () => {
-    mockPrisma.agentConversation.updateMany.mockResolvedValue({ count: 0 })
+    mockPrisma.agentConversation.findUnique.mockResolvedValue({ archivedAt: new Date(), updatedAt: UPDATED })
     expect(await run("starter")).toEqual({ ok: true, archived: true, changed: false })
+    expect(mockPrisma.agentConversation.updateMany).not.toHaveBeenCalled()
     expect(mockPrisma.agentAuditLog.create).not.toHaveBeenCalled()
+    expect(mockPrisma.agentScheduledWakeup.updateMany).not.toHaveBeenCalled()
   })
 
   it("is idempotent for restore of a thread that is not archived", async () => {
-    mockPrisma.agentConversation.updateMany.mockResolvedValue({ count: 0 })
     expect(await run("starter", false)).toEqual({ ok: true, archived: false, changed: false })
     expect(mockPrisma.agentAuditLog.create).not.toHaveBeenCalled()
   })
@@ -175,7 +182,59 @@ describe("setConversationArchived on a private chat", () => {
   it("keeps the owner-only rule: the owner may, anyone else gets 404", async () => {
     mockPrisma.agentConversation.findFirst.mockResolvedValue(conversation({ visibility: "PRIVATE" }))
     expect(await run("owner")).toMatchObject({ ok: true, changed: true })
+    expect(mockPrisma.agentConversation.updateMany).toHaveBeenCalledWith(expect.objectContaining({ data: { archivedAt: expect.any(Date), updatedAt: UPDATED } }))
     expect(await run("participant")).toEqual({ ok: false, status: 404 })
     expect(mockPrisma.agentAuditLog.create).not.toHaveBeenCalled()
+  })
+
+  it("is idempotent too: archiving an archived private chat reports changed false", async () => {
+    mockPrisma.agentConversation.findFirst.mockResolvedValue(conversation({ visibility: "PRIVATE" }))
+    mockPrisma.agentConversation.findUnique.mockResolvedValue({ archivedAt: new Date(), updatedAt: UPDATED })
+    expect(await run("owner")).toEqual({ ok: true, archived: true, changed: false })
+  })
+})
+
+describe("setConversationArchived: concurrency, wakeups, read-only", () => {
+  it("re-reads updatedAt and retries when a message bumped it between the read and the write", async () => {
+    const BUMPED = new Date("2026-11-02T10:00:00.000Z")
+    mockPrisma.agentConversation.findUnique
+      .mockResolvedValueOnce({ archivedAt: null, updatedAt: UPDATED })
+      .mockResolvedValueOnce({ archivedAt: null, updatedAt: BUMPED })
+    mockPrisma.agentConversation.updateMany.mockResolvedValueOnce({ count: 0 }).mockResolvedValueOnce({ count: 1 })
+    expect(await run("starter")).toMatchObject({ ok: true, changed: true })
+    expect(mockPrisma.agentConversation.updateMany).toHaveBeenLastCalledWith({
+      where: { id: CONV, workspaceId: WS, updatedAt: BUMPED, archivedAt: null },
+      data: { archivedAt: expect.any(Date), updatedAt: BUMPED },
+    })
+  })
+
+  it("cancels every pending scheduled wake-up when archiving, in the same transaction, and not when restoring", async () => {
+    await run("starter")
+    expect(mockPrisma.agentScheduledWakeup.updateMany).toHaveBeenCalledWith({
+      where: { conversationId: CONV, status: "PENDING" },
+      data: expect.objectContaining({ status: "CANCELED" }),
+    })
+    vi.clearAllMocks()
+    mockPrisma.agentConversation.findFirst.mockResolvedValue(conversation({ archivedAt: new Date() }))
+    mockPrisma.agentConversation.findUnique.mockResolvedValue({ archivedAt: new Date(), updatedAt: UPDATED })
+    mockPrisma.agentConversation.updateMany.mockResolvedValue({ count: 1 })
+    mockPrisma.agentMessage.findFirst.mockResolvedValue({ authorUserId: "starter" })
+    mockPrisma.agentMessage.count.mockResolvedValue(1)
+    mockPrisma.$transaction.mockImplementation(async (fn: (tx: typeof mockPrisma) => unknown) => fn(mockPrisma))
+    await run("starter", false)
+    expect(mockPrisma.agentScheduledWakeup.updateMany).not.toHaveBeenCalled()
+  })
+})
+
+describe("archiveCapabilities", () => {
+  it("offers archive on a live shared thread and restore on an archived one, never both", async () => {
+    expect(await archiveCapabilities({ conversationId: CONV, workspaceId: WS, userId: "starter" })).toEqual({ archived: false, canArchive: true, canRestore: false })
+    mockPrisma.agentConversation.findFirst.mockResolvedValue(conversation({ archivedAt: new Date() }))
+    expect(await archiveCapabilities({ conversationId: CONV, workspaceId: WS, userId: "starter" })).toEqual({ archived: true, canArchive: false, canRestore: true })
+  })
+  it("grants nothing to a member without the right, and nothing for a private chat", async () => {
+    expect(await archiveCapabilities({ conversationId: CONV, workspaceId: WS, userId: "other-member" })).toMatchObject({ canArchive: false, canRestore: false })
+    mockPrisma.agentConversation.findFirst.mockResolvedValue(conversation({ visibility: "PRIVATE", archivedAt: new Date() }))
+    expect(await archiveCapabilities({ conversationId: CONV, workspaceId: WS, userId: "owner" })).toEqual({ archived: true, canArchive: false, canRestore: false })
   })
 })

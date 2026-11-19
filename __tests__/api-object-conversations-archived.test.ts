@@ -23,7 +23,7 @@ beforeEach(() => {
   mocks.links.mockResolvedValue([])
   mocks.rows.mockResolvedValue([])
   mocks.backfill.mockResolvedValue(undefined)
-  mocks.restorable.mockResolvedValue([])
+  mocks.restorable.mockResolvedValue({ rows: [], capped: false })
 })
 
 describe("by-target archived rows", () => {
@@ -34,14 +34,22 @@ describe("by-target archived rows", () => {
   })
 
   it("returns archived rows on request, flagged archived and restorable", async () => {
-    mocks.restorable.mockResolvedValue([archivedRow("a1")])
+    mocks.restorable.mockResolvedValue({ rows: [archivedRow("a1")], capped: false })
     const body = await (await GET(request("&archived=1"))).json()
     expect(mocks.restorable).toHaveBeenCalledWith(expect.objectContaining({ workspaceId: "workspace", userId: "user", targetType: "TASK", targetId: "task" }))
-    expect(body.items).toMatchObject([{ id: "a1", archived: true, canRestore: true, canArchive: true }])
+    expect(body.items).toMatchObject([{ id: "a1", archived: true, canRestore: true }])
+    // An already-archived thread cannot be archived again.
+    expect(body.items[0]).not.toHaveProperty("canArchive")
+    expect(body.archivedCapped).toBe(false)
+  })
+
+  it("tells the client when the 50-row cap was reached", async () => {
+    mocks.restorable.mockResolvedValue({ rows: [archivedRow("a1")], capped: true })
+    expect((await (await GET(request("&archived=1"))).json()).archivedCapped).toBe(true)
   })
 
   it("does not leak archived titles or summaries when the caller may not restore any (empty listing)", async () => {
-    mocks.restorable.mockResolvedValue([])
+    mocks.restorable.mockResolvedValue({ rows: [], capped: false })
     const response = await GET(request("&archived=1"))
     const text = await response.text()
     expect(JSON.parse(text).items).toEqual([])

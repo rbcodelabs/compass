@@ -161,6 +161,25 @@ describe("editConversationMessage authorization matrix", () => {
   })
 })
 
+describe("an archived shared thread is read-only (TASK-195 S2)", () => {
+  it("canEditMessage is false for everyone, author and admin included, while archived", () => {
+    const m = { role: "user", content: "x", authorUserId: "author", authorType: "HUMAN", messageKind: "COMMENT" }
+    const ctx = { ownerUserId: "owner", visibility: "WORKSPACE", isInterview: false, userId: "author", isAdmin: false }
+    expect(canEditMessage(m, ctx)).toBe(true)
+    expect(canEditMessage(m, { ...ctx, archived: true })).toBe(false)
+    expect(canEditMessage(m, { ...ctx, userId: "boss", isAdmin: true, archived: true })).toBe(false)
+  })
+
+  it("409s an edit of an archived thread's message and writes nothing; restoring re-enables it", async () => {
+    mockPrisma.agentConversation.findFirst.mockResolvedValue(conversation({ archivedAt: new Date() }))
+    expect(await edit("author")).toMatchObject({ ok: false, status: 409 })
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled()
+    expect(mockPrisma.agentMessage.update).not.toHaveBeenCalled()
+    mockPrisma.agentConversation.findFirst.mockResolvedValue(conversation({ archivedAt: null }))
+    expect((await edit("author")).ok).toBe(true)
+  })
+})
+
 describe("editConversationMessage writes", () => {
   it("updates the message only when there is no mirrored comment row", async () => {
     await edit("author")
