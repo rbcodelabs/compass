@@ -51,7 +51,7 @@ function endOfDay(day: string) { return new Date(`${day}T23:59:59.999Z`) }
  * item's [start, end] with [dateFrom, dateTo]; a one-sided item (only a start or
  * only an end) counts as that single day; an undated item never matches a date filter.
  */
-export function buildRoadmapWhere(workspaceIds: readonly string[], filters: RoadmapViewFilters, itemIds?: readonly string[]): Prisma.RoadmapItemWhereInput {
+export function buildRoadmapWhere(workspaceIds: readonly string[], filters: RoadmapViewFilters): Prisma.RoadmapItemWhereInput {
   const and: Prisma.RoadmapItemWhereInput[] = []
   if (filters.dateFrom) {
     const from = startOfDay(filters.dateFrom)
@@ -68,7 +68,6 @@ export function buildRoadmapWhere(workspaceIds: readonly string[], filters: Road
     ...(filters.squadIds.length ? { squadId: { in: filters.squadIds } } : {}),
     ...(filters.keyResult ? { keyResultId: filters.keyResult === "linked" ? { not: null } : null } : {}),
     ...(filters.solution ? { solutionId: filters.solution === "linked" ? { not: null } : null } : {}),
-    ...(itemIds ? { id: { in: [...itemIds] } } : {}),
     ...(and.length ? { AND: and } : {}),
   }
 }
@@ -105,34 +104,75 @@ export async function loadRoadmapFacets(readableIds: readonly string[], db: Db =
   return { workspaces, squads, fields: buildFieldFacets(definitions) }
 }
 
+const FIELD_SEARCH_BATCH_SIZE = 250
+const MAX_FIELD_SEARCH_CANDIDATES = 5_000
+const MAX_FIELD_SEARCH_VALUES = 20_000
+
 /**
- * Ids of the items that satisfy EVERY field filter (ANDed across fields, ORed within
- * one field's labels). Evaluated in application code, like the workspace roadmap's
- * custom-field filter, so it behaves identically on local PostgreSQL and Aurora DSQL.
- * Returns null when there are no field filters (no restriction).
+ * Scan ordered, already scoped candidates so custom-field filters run before the
+ * display cap. Keep both the per-query candidate list and the total search bounded.
+ * Report an incomplete search when either budget prevents a complete scan.
  */
 async function matchingItemIds(
-  definitions: readonly FieldDefinitionInput[], filters: RoadmapViewFilters["fields"], db: Db,
-): Promise<Set<string> | null> {
-  if (filters.length === 0) return null
-  const matchedPerFilter: Array<Set<string>> = []
-  for (const filter of filters) {
-    const defs = definitions.filter((d) => makeRoadmapFieldKey(d.fieldType, d.name) === filter.key)
-    const byId = new Map(defs.map((d) => [d.id, d]))
-    const matched = new Set<string>()
-    if (defs.length > 0) {
-      const rows = await db.customFieldValue.findMany({ where: { fieldId: { in: defs.map((d) => d.id) } }, select: { fieldId: true, objectId: true, value: true } })
-      for (const row of rows) {
-        const def = byId.get(row.fieldId)
-        if (def && cellsMatchLabels(toCellValues(def, row.value), filter.values)) matched.add(row.objectId)
-      }
-    }
-    matchedPerFilter.push(matched)
+  where: Prisma.RoadmapItemWhereInput,
+  orderBy: Prisma.RoadmapItemOrderByWithRelationInput[],
+  definitions: readonly FieldDefinitionInput[],
+  filters: RoadmapViewFilters["fields"],
+  db: Db,
+): Promise<{ ids: Set<string>; incomplete: boolean }> {
+  const ids = new Set<string>()
+  const definitionsById = new Map<string, { field: FieldDefinitionInput; filterIndexes: number[] }>()
+  const supportedFilters = new Set<number>()
+  for (const field of definitions) {
+    const key = makeRoadmapFieldKey(field.fieldType, field.name)
+    const filterIndexes = filters.flatMap((filter, index) => filter.key === key ? [index] : [])
+    if (filterIndexes.length === 0) continue
+    definitionsById.set(field.id, { field, filterIndexes })
+    for (const index of filterIndexes) supportedFilters.add(index)
   }
-  // Intersect: an item must satisfy every field filter.
-  const [first, ...rest] = matchedPerFilter
-  const ids: string[] = [...first].filter((id: string) => rest.every((set) => set.has(id)))
-  return new Set<string>(ids)
+  if (supportedFilters.size < filters.length) return { ids, incomplete: false }
+
+  let remainingValues = MAX_FIELD_SEARCH_VALUES
+  for (let offset = 0; offset < MAX_FIELD_SEARCH_CANDIDATES; offset += FIELD_SEARCH_BATCH_SIZE) {
+    const batchSize = Math.min(FIELD_SEARCH_BATCH_SIZE, MAX_FIELD_SEARCH_CANDIDATES - offset)
+    const lastBatch = offset + batchSize === MAX_FIELD_SEARCH_CANDIDATES
+    const candidates = await db.roadmapItem.findMany({
+      where, orderBy, skip: offset, take: batchSize + (lastBatch ? 1 : 0), select: { id: true, workspaceId: true },
+    })
+    const batch = candidates.slice(0, batchSize)
+    if (batch.length === 0) return { ids, incomplete: false }
+    const workspaceOf = new Map(batch.map((item) => [item.id, item.workspaceId]))
+
+    const rows = await db.customFieldValue.findMany({
+      where: { fieldId: { in: [...definitionsById.keys()] }, objectId: { in: [...workspaceOf.keys()] } },
+      select: { fieldId: true, objectId: true, value: true },
+      take: remainingValues + 1,
+    })
+    // A partial batch can omit matching rows earlier in the sort order, so only
+    // return the matches from completed batches.
+    if (rows.length > remainingValues) return { ids, incomplete: true }
+    remainingValues -= rows.length
+
+    const matches = new Map<string, Set<number>>()
+    for (const row of rows) {
+      const definition = definitionsById.get(row.fieldId)
+      if (!definition || workspaceOf.get(row.objectId) !== definition.field.workspaceId) continue
+      const matchedFilters = matches.get(row.objectId) ?? new Set<number>()
+      const cells = toCellValues(definition.field, row.value)
+      for (const index of definition.filterIndexes) {
+        if (cellsMatchLabels(cells, filters[index].values)) matchedFilters.add(index)
+      }
+      matches.set(row.objectId, matchedFilters)
+    }
+
+    for (const item of batch) {
+      if (matches.get(item.id)?.size !== filters.length) continue
+      ids.add(item.id)
+      if (ids.size > MAX_ROADMAP_ITEMS) return { ids, incomplete: false }
+    }
+    if (candidates.length < batchSize || (lastBatch && candidates.length === batchSize)) return { ids, incomplete: false }
+  }
+  return { ids, incomplete: true }
 }
 
 /** Cells for the shown fields, per item. One query for all shown fields' values across the page. */
@@ -171,19 +211,24 @@ export async function loadCrossWorkspaceRoadmap(
   filters: RoadmapViewFilters,
   display: RoadmapViewDisplay,
   db: Db = getPrisma(),
-): Promise<{ items: CrossWorkspaceRoadmapItem[]; truncated: boolean }> {
+): Promise<{ items: CrossWorkspaceRoadmapItem[]; truncated: boolean; fieldSearchIncomplete?: true }> {
   const workspaceIds = effectiveWorkspaceIds(readableIds, filters.workspaceIds)
   if (workspaceIds.length === 0) return { items: [], truncated: false }
 
   const shownKeys = [...new Set([...display.fields, ...(display.groupByField ? [display.groupByField] : [])])]
   const definitions = shownKeys.length > 0 || filters.fields.length > 0 ? await loadFieldDefinitions(workspaceIds, db) : []
 
-  const allowedIds = await matchingItemIds(definitions, filters.fields, db)
-  if (allowedIds && allowedIds.size === 0) return { items: [], truncated: false }
+  const where = buildRoadmapWhere(workspaceIds, filters)
+  const orderBy = buildRoadmapOrderBy(display.sort)
+  // The same order is used to scan candidates and hydrate the final page.
+  if (filters.fields.length > 0) orderBy.push({ id: "asc" })
+  const match = filters.fields.length > 0 ? await matchingItemIds(where, orderBy, definitions, filters.fields, db) : null
+  const fieldSearchState = match?.incomplete ? { fieldSearchIncomplete: true as const } : {}
+  if (match?.ids.size === 0) return { items: [], truncated: false, ...fieldSearchState }
 
   const rows = await db.roadmapItem.findMany({
-    where: buildRoadmapWhere(workspaceIds, filters, allowedIds ? [...allowedIds] : undefined),
-    orderBy: buildRoadmapOrderBy(display.sort),
+    where: match ? { ...where, id: { in: [...match.ids] } } : where,
+    orderBy,
     include: { ...ROADMAP_CARD_INCLUDE, workspace: { select: { id: true, name: true, slug: true } } },
     take: MAX_ROADMAP_ITEMS + 1,
   })
@@ -209,5 +254,5 @@ export async function loadCrossWorkspaceRoadmap(
     const wanted = new Set<string>(filters.deliveryStatuses)
     items = items.filter((item) => wanted.has(item.deliveryStatus))
   }
-  return { items, truncated }
+  return { items, truncated, ...fieldSearchState }
 }

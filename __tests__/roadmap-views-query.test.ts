@@ -92,31 +92,112 @@ describe("loadCrossWorkspaceRoadmap", () => {
     expect(out.items).toHaveLength(MAX_ROADMAP_ITEMS)
   })
 
-  it("filters by a field label across workspaces whose option values differ, then loads shown values for the page", async () => {
+  const riskFilters = {
+    ...DEFAULT_ROADMAP_FILTERS,
+    fields: [{ key: "SELECT:status", values: ["at risk"] }],
+  }
+  const fieldFilterDb = (rows: ReturnType<typeof row>[], stored: { fieldId: string; objectId: string; value: string }[]) => {
     const defs = [
-      { id: "d1", workspaceId: "a", name: "Status", fieldType: "SELECT", order: 0, options: [{ label: "At risk", value: "risk" }], sharedOptionSet: null },
+      { id: "d1", workspaceId: "a", name: "Status", fieldType: "SELECT", order: 0, options: [{ label: "At risk", value: "risk" }, { label: "On track", value: "ok" }], sharedOptionSet: null },
       { id: "d2", workspaceId: "b", name: "status", fieldType: "SELECT", order: 0, options: [{ label: "At Risk", value: "at_risk" }], sharedOptionSet: null },
+      { id: "d3", workspaceId: "a", name: "Priority", fieldType: "SELECT", order: 1, options: [{ label: "High", value: "p1" }], sharedOptionSet: null },
     ]
-    const stored = [
-      { fieldId: "d1", objectId: "r1", value: "risk" },
-      { fieldId: "d2", objectId: "r2", value: "at_risk" },
-      { fieldId: "d1", objectId: "r3", value: "other" },
-    ]
-    const seen: { where?: { id?: unknown } } = {}
+    const findItems = vi.fn(async (args: {
+      where: { id?: { in: string[] }; workspaceId: { in: string[] } }; skip?: number; take: number;
+    }) => rows
+      .filter((item) => args.where.workspaceId.in.includes(item.workspaceId) && (!args.where.id || args.where.id.in.includes(item.id)))
+      .slice(args.skip ?? 0, (args.skip ?? 0) + args.take))
+    const findValues = vi.fn(async (args: {
+      where: { fieldId: { in: string[] }; objectId?: { in: string[] } }; take?: number;
+    }) => stored.filter((value) =>
+      args.where.fieldId.in.includes(value.fieldId) && (!args.where.objectId || args.where.objectId.in.includes(value.objectId)),
+    ).slice(0, args.take))
+    tasksLinkedTo.mockResolvedValue([])
     const db = {
       customFieldDefinition: { findMany: async () => defs },
-      customFieldValue: { findMany: async (args: { where: { objectId?: { in: string[] } } }) => (args.where.objectId ? stored.filter((v) => args.where.objectId!.in.includes(v.objectId)) : stored) },
-      roadmapItem: { findMany: async (args: { where: { id?: unknown } }) => { seen.where = args.where; return [row("r1", "a"), row("r2", "b")] } },
+      customFieldValue: { findMany: findValues },
+      roadmapItem: { findMany: findItems },
     } as never
-    tasksLinkedTo.mockResolvedValue([])
+    return { db, findItems, findValues }
+  }
+
+  it("matches labels across readable workspaces while ignoring mismatched field and item workspaces", async () => {
+    const { db } = fieldFilterDb([row("r1", "a"), row("r2", "b"), row("r3", "a"), row("r4", "private")], [
+      { fieldId: "d1", objectId: "r1", value: "risk" },
+      { fieldId: "d2", objectId: "r2", value: "at_risk" },
+      { fieldId: "d2", objectId: "r3", value: "at_risk" },
+      { fieldId: "d1", objectId: "r4", value: "risk" },
+    ])
     const out = await loadCrossWorkspaceRoadmap(
-      ["a", "b"],
-      { ...DEFAULT_ROADMAP_FILTERS, fields: [{ key: "SELECT:status", values: ["at risk"] }] },
-      { ...DEFAULT_ROADMAP_DISPLAY, fields: ["SELECT:status"] },
-      db,
+      ["a", "b"], riskFilters,
+      { ...DEFAULT_ROADMAP_DISPLAY, fields: ["SELECT:status"] }, db,
     )
-    expect((seen.where!.id as { in: string[] }).in.sort()).toEqual(["r1", "r2"])
-    expect(out.items.map((i) => i.fieldValues["SELECT:status"]?.[0].label)).toEqual(["At risk", "At Risk"])
+    expect(out.items.map((item) => [item.id, item.fieldValues["SELECT:status"]?.[0].label])).toEqual([
+      ["r1", "At risk"], ["r2", "At Risk"],
+    ])
+  })
+
+  it("scopes and limits value reads while finding matches beyond the first 1,000 candidates", async () => {
+    const rows = Array.from({ length: MAX_ROADMAP_ITEMS + 2 }, (_, i) => row(`r${i}`))
+    const match = rows.at(-1)!.id
+    const { db, findItems, findValues } = fieldFilterDb(rows, [{ fieldId: "d1", objectId: match, value: "risk" }])
+    const out = await loadCrossWorkspaceRoadmap(["a"], riskFilters, DEFAULT_ROADMAP_DISPLAY, db)
+    expect(out.items.map((item) => item.id)).toEqual([match])
+    expect(findValues.mock.calls.length).toBeGreaterThan(1)
+    for (const [args] of findValues.mock.calls) {
+      expect(args.where.objectId?.in.length).toBeLessThan(MAX_ROADMAP_ITEMS)
+      expect(args.take).toBeGreaterThan(0)
+    }
+    expect(findItems.mock.calls[0][0].where).toEqual({ workspaceId: { in: ["a"] }, status: "ACTIVE" })
+  })
+
+  it("accepts either label within one field and requires a match in the other field", async () => {
+    const { db } = fieldFilterDb([row("r1"), row("r2"), row("r3"), row("r4")], [
+      { fieldId: "d1", objectId: "r1", value: "risk" },
+      { fieldId: "d1", objectId: "r2", value: "ok" },
+      { fieldId: "d1", objectId: "r3", value: "risk" },
+      { fieldId: "d3", objectId: "r1", value: "p1" },
+      { fieldId: "d3", objectId: "r2", value: "p1" },
+      { fieldId: "d3", objectId: "r4", value: "p1" },
+    ])
+    const filters = {
+      ...DEFAULT_ROADMAP_FILTERS,
+      fields: [{ key: "SELECT:status", values: ["At Risk", "On track"] }, { key: "SELECT:priority", values: ["High"] }],
+    }
+    const out = await loadCrossWorkspaceRoadmap(["a"], filters, DEFAULT_ROADMAP_DISPLAY, db)
+    expect(out.items.map((item) => item.id)).toEqual(["r1", "r2"])
+  })
+
+  it("reports the display cap when more than 1,000 field matches are confirmed", async () => {
+    const rows = Array.from({ length: 5_001 }, (_, i) => row(`r${i}`))
+    const { db, findItems } = fieldFilterDb(rows, rows.map(({ id }) => ({ fieldId: "d1", objectId: id, value: "risk" })))
+    const out = await loadCrossWorkspaceRoadmap(["a"], riskFilters, DEFAULT_ROADMAP_DISPLAY, db)
+    expect(out.items).toHaveLength(MAX_ROADMAP_ITEMS)
+    expect(out.truncated).toBe(true)
+    expect(out.fieldSearchIncomplete).toBeUndefined()
+    const hydration = findItems.mock.calls.at(-1)![0]
+    expect(hydration.where.id?.in).toHaveLength(MAX_ROADMAP_ITEMS + 1)
+    expect(findItems.mock.calls).toHaveLength(6)
+  })
+
+  it("reports an incomplete search when the candidate budget is exhausted", async () => {
+    const rows = Array.from({ length: 5_001 }, (_, i) => row(`r${i}`))
+    const { db, findItems } = fieldFilterDb(rows, [])
+    const out = await loadCrossWorkspaceRoadmap(["a"], riskFilters, DEFAULT_ROADMAP_DISPLAY, db)
+    expect(out).toEqual({ items: [], truncated: false, fieldSearchIncomplete: true })
+    expect(findItems.mock.calls.length).toBeGreaterThan(1)
+    expect(findItems.mock.calls.every(([args]) => (args.skip ?? 0) + args.take <= 5_001)).toBe(true)
+  })
+
+  it("reports an incomplete search instead of treating a partial field-value batch as complete", async () => {
+    const { db, findValues } = fieldFilterDb([row("r")], [])
+    findValues.mockImplementation(async ({ take }) => Array.from({ length: take ?? 20_001 }, (_, i) => ({
+      fieldId: `definition-${i}`, objectId: "r", value: "risk",
+    })))
+    const out = await loadCrossWorkspaceRoadmap(["a"], riskFilters, DEFAULT_ROADMAP_DISPLAY, db)
+    expect(out).toEqual({ items: [], truncated: false, fieldSearchIncomplete: true })
+    expect(findValues).toHaveBeenCalledTimes(1)
+    expect(findValues.mock.calls[0][0].take).toBe(20_001)
   })
 
   it("returns nothing, without querying items, when a field filter matches no item", async () => {

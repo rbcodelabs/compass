@@ -48,7 +48,7 @@ export default async function OrgRoadmapPage({ params, searchParams }: OrgRoadma
   const state = withoutGalleryOnlyDisplay(resolveRoadmapState(query, savedView));
   const readableIds = actor.workspaces.map((w) => w.id);
 
-  const [facets, { items, truncated }] = await Promise.all([
+  const [facets, { items, truncated, fieldSearchIncomplete }] = await Promise.all([
     loadRoadmapFacets(readableIds),
     loadCrossWorkspaceRoadmap(readableIds, state.filters, state.display),
   ]);
@@ -85,10 +85,16 @@ export default async function OrgRoadmapPage({ params, searchParams }: OrgRoadma
         </p>
       )}
 
+      {fieldSearchIncomplete && (
+        <p role="status" className="mx-4 mt-4 rounded-lg border border-status-warning/30 bg-status-warning-surface px-3 py-2 text-sm text-status-warning md:mx-6">
+          Custom field search reached its limit. Narrow by workspace or other filters to see complete results.
+        </p>
+      )}
+
       {items.length === 0 ? (
         <div className="p-6">
           <p data-testid="cross-roadmap-empty" className="rounded-lg border border-dashed border-border-default p-6 text-sm text-text-secondary">
-            No roadmap items match these filters.
+            {fieldSearchIncomplete ? "No matches among the items searched." : "No roadmap items match these filters."}
           </p>
         </div>
       ) : state.display.view === "timeline" ? (
