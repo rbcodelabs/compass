@@ -10,7 +10,8 @@ import type { AppPrismaClient } from "@/lib/db"
 import { agentParticipantsAvailable } from "@/lib/agent-conversation-participants"
 import { sanitizeAuthorLabel } from "@/lib/agent-author-label"
 import { accessibleConversationsWhere, ownedConversationsWhere } from "@/lib/agent-conversation-access"
-import { canEditMessage, isWorkspaceAdmin, loadAccessibleConversation } from "@/lib/conversation-messages"
+import { canEditMessage, effectiveAuthorId, isWorkspaceAdmin, loadAccessibleConversation } from "@/lib/conversation-messages"
+import { withConflictRetry } from "@/lib/transaction-conflict"
 
 export type ConversationSummary = {
   id: string
@@ -175,7 +176,9 @@ export async function getAgentConversationMessages(
   type Extra = { authorType?: string | null; messageKind?: string | null; editedAt?: Date | null }
   // The admin lookup is only needed when somebody else's words are in play, so a plain own-messages read costs nothing extra.
   const editContext = { ownerUserId: conversation.userId, visibility: conversation.visibility, isInterview: conversation.interviewProcessingJson != null, userId, archived: conversation.archivedAt != null }
-  const needsAdmin = authored.some(({ row, authorUserId }) => row.role === "user" && authorUserId !== userId)
+  // Rights use the RAW stored author (null stays null for a mirror-origin comment whose author is unknown); `authorUserId` above is only the display fallback.
+  const storedAuthor = (row: unknown) => (row as { authorUserId?: string | null }).authorUserId ?? null
+  const needsAdmin = authored.some(({ row }) => row.role === "user" && effectiveAuthorId({ authorUserId: storedAuthor(row), messageKind: (row as Extra).messageKind ?? null }, conversation.userId) !== userId)
   const isAdmin = needsAdmin && conversation.visibility === "WORKSPACE" ? await isWorkspaceAdmin(prisma, workspaceId, userId) : false
 
   return authored.map(({ row, authorUserId }) => {
@@ -193,9 +196,11 @@ export async function getAgentConversationMessages(
       authorType,
       messageKind,
       canEdit: canEditMessage(
-        { role: row.role, content: row.content, authorUserId, authorType, messageKind },
+        { role: row.role, content: row.content, authorUserId: storedAuthor(row), authorType, messageKind },
         { ...editContext, isAdmin },
       ),
+      // There is no per-message delete in the shared-conversation model (archive is the only removal, see lib/conversation-archive.ts).
+      // The field stays, always false, because it is part of the wire contract the panel and /conversations page already parse.
       canDelete: false,
     }
   })
@@ -250,6 +255,6 @@ export async function setAgentConversationArchived(
     select: { id: true },
   })
   if (!owned) return false
-  await stampConversationArchived(prisma, { conversationId, workspaceId, archived })
+  await withConflictRetry(() => stampConversationArchived(prisma, { conversationId, workspaceId, archived }))
   return true
 }

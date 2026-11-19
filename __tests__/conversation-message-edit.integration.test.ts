@@ -195,9 +195,10 @@ describe.skipIf(!databaseUrl)("conversation message edit (real PostgreSQL)", () 
     await prisma.comment.create({
       data: { id: rootId, workspaceId, targetType: "OPPORTUNITY", targetId: opportunityId, parentId: null, body: "Words from a deleted user", authorId: null, authorName: "Former member", authorType: "HUMAN", source: "UI", status: "OPEN", createdAt: at(1200), updatedAt: at(1200) },
     })
-    await ensureConversationForComment(prisma, rootId)
-    // The mirror had to pick some member as the conversation owner; it must not turn that member into the author.
+    // With no author the mirror has to name SOME member as the conversation owner (here the caller's fallback); it must not turn that member into the author.
+    await ensureConversationForComment(prisma, rootId, { fallbackUserId: u.owner })
     const ownerId = (await prisma.agentConversation.findUniqueOrThrow({ where: { id: rootId } })).userId
+    expect(ownerId).toBe(u.owner)
     expect((await prisma.agentMessage.findUniqueOrThrow({ where: { id: rootId } })).authorUserId).toBeNull()
     const canEditAs = async (userId: string) => (await getAgentConversationMessages(rootId, workspaceId, userId))!.find((m) => m.id === rootId)!.canEdit
 

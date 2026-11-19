@@ -11,7 +11,8 @@
  * thread. If someone needs a message gone for legal reasons, that is a separate, audited, operator-run action.
  *
  * Who may archive or restore a shared (WORKSPACE) thread: the thread starter (author of its first message, falling
- * back to the conversation owner for rows that predate author tracking), a workspace admin, or an organization
+ * back to the conversation owner for rows that predate author tracking; a comment-origin thread whose author is
+ * unknown has NO starter, because its conversation owner is only a placeholder member, so only an admin may act), a workspace admin, or an organization
  * owner/admin WHO IS ALSO A WORKSPACE MEMBER: every read goes through `accessibleConversationsWhere`, which requires
  * workspace membership, so an org owner outside the workspace gets 404 (covered by the real-database tests). The same rule is used to decide who is shown an archived thread in the "Show archived" list, so a
  * person who cannot restore it never learns its title or summary. A conversation the caller cannot see is a 404
@@ -41,7 +42,8 @@
 import getPrisma from "@/lib/db"
 import type { AppPrismaClient } from "@/lib/db"
 import { accessibleConversationsWhere } from "@/lib/agent-conversation-access"
-import { isWorkspaceAdmin } from "@/lib/conversation-messages"
+import { effectiveAuthorId, isWorkspaceAdmin } from "@/lib/conversation-messages"
+import { withConflictRetry } from "@/lib/transaction-conflict"
 import { stampConversationArchived } from "@/lib/agent-conversations"
 import { cancelAllPendingConversationWakeups } from "@/lib/agent-scheduled-wakeups"
 
@@ -50,22 +52,22 @@ export type ArchiveResult =
   | { ok: false; status: 403 | 404 }
 
 /** Pure policy: may this user archive or restore a thread started by `rootAuthorId`? */
-export function canArchiveConversation(input: { rootAuthorId: string; userId: string; isAdmin: boolean }): boolean {
-  return input.rootAuthorId === input.userId || input.isAdmin
+export function canArchiveConversation(input: { rootAuthorId: string | null; userId: string; isAdmin: boolean }): boolean {
+  return (input.rootAuthorId !== null && input.rootAuthorId === input.userId) || input.isAdmin
 }
 
-/** The thread starter: whoever wrote its first message, else the conversation owner. */
+/** The thread starter: whoever wrote its first message, else the conversation owner; null when nobody can be named (see effectiveAuthorId). */
 async function rootAuthorOf(
   prisma: Pick<AppPrismaClient, "agentMessage">,
   conversationId: string,
   ownerUserId: string,
-): Promise<string> {
+): Promise<string | null> {
   const first = await prisma.agentMessage.findFirst({
     where: { conversationId },
     orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-    select: { authorUserId: true },
+    select: { authorUserId: true, messageKind: true },
   })
-  return first?.authorUserId ?? ownerUserId
+  return first ? effectiveAuthorId({ authorUserId: first.authorUserId ?? null, messageKind: first.messageKind ?? null }, ownerUserId) : ownerUserId
 }
 
 export type ArchiveCapabilities = { archived: boolean; canArchive: boolean; canRestore: boolean }
@@ -115,7 +117,7 @@ export async function setConversationArchived(input: {
   // Private chats and interview conversations: unchanged owner-only behaviour, 404 for everyone else.
   if (conversation.visibility !== "WORKSPACE" || conversation.interviewProcessingJson != null) {
     if (conversation.userId !== userId) return { ok: false, status: 404 }
-    const changedPrivate = await prisma.$transaction((tx) => stampConversationArchived(tx, { conversationId, workspaceId, archived }))
+    const changedPrivate = await withConflictRetry(() => prisma.$transaction((tx) => stampConversationArchived(tx, { conversationId, workspaceId, archived })))
     return { ok: true, archived, changed: changedPrivate }
   }
 
@@ -124,7 +126,9 @@ export async function setConversationArchived(input: {
   const isAdmin = isStarter ? false : await isWorkspaceAdmin(prisma, workspaceId, userId)
   if (!canArchiveConversation({ rootAuthorId, userId, isAdmin })) return { ok: false, status: 403 }
 
-  const changed = await prisma.$transaction(async (tx) => {
+  // A message appended while this runs can make the transaction lose a write conflict (Repeatable Read / DSQL); the work is
+  // idempotent (compare-and-set stamp, audit row only on a real change, all inside the transaction), so run it again.
+  const changed = await withConflictRetry(() => prisma.$transaction(async (tx) => {
     // Compare-and-set on the current state, so a repeat is a no-op (and a double click cannot write two audit rows).
     const stamped = await stampConversationArchived(tx, { conversationId, workspaceId, archived })
     if (!stamped) return false
@@ -148,7 +152,7 @@ export async function setConversationArchived(input: {
       },
     })
     return true
-  })
+  }))
   return { ok: true, archived, changed }
 }
 
@@ -219,10 +223,13 @@ export async function listRestorableArchivedConversations(input: {
         where: { conversationId: { in: batch.map((row) => row.id) } },
         orderBy: [{ createdAt: "asc" }, { id: "asc" }],
         distinct: ["conversationId"],
-        select: { conversationId: true, authorUserId: true },
+        select: { conversationId: true, authorUserId: true, messageKind: true },
       })
-      const starter = new Map(firsts.map((first) => [first.conversationId, first.authorUserId]))
-      allowed = batch.filter((row) => (starter.get(row.id) ?? row.userId) === userId)
+      const starter = new Map(firsts.map((first) => [first.conversationId, first]))
+      allowed = batch.filter((row) => {
+        const first = starter.get(row.id)
+        return (first ? effectiveAuthorId({ authorUserId: first.authorUserId ?? null, messageKind: first.messageKind ?? null }, row.userId) : row.userId) === userId
+      })
     }
     collected.push(...allowed)
     if (batch.length < ARCHIVED_PAGE) { exhausted = true; break }
