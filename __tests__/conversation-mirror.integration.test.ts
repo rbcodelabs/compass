@@ -56,7 +56,11 @@ describe.skipIf(!databaseUrl)("conversation mirror (real PostgreSQL)", () => {
   const remove = (thread: Thread, extra: { ids?: string[]; threadDeleted?: boolean } = {}) =>
     removeCommentMirror(prisma, { conversationId: thread.rootId, commentIds: extra.ids ?? [thread.rootId, ...thread.replyIds], threadDeleted: extra.threadDeleted ?? true })
   /** Deletes the comments the way a legacy delete would, then removes the mirror. */
-  const deleteComments = (ids: string[]) => prisma.comment.deleteMany({ where: { id: { in: ids } } })
+  const deleteComments = async (ids: string[]) => {
+    // Replies first: relationMode="prisma" emulates Restrict on the self-relation.
+    await prisma.comment.deleteMany({ where: { id: { in: ids }, parentId: { not: null } } })
+    await prisma.comment.deleteMany({ where: { id: { in: ids } } })
+  }
 
   beforeAll(async () => {
     const url = new URL(databaseUrl!)

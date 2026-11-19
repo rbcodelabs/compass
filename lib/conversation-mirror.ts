@@ -133,11 +133,17 @@ export async function mirrorCommentThread(
     const existing = await prisma.agentConversation.findUnique({ where: { id: root.id }, select: { updatedAt: true } })
     const targetSummary = deriveConversationSummary(target?.body ?? "") ?? title.slice(0, 140)
     const newer = Boolean(target && existing && target.updatedAt > existing.updatedAt)
-    await prisma.agentConversation.upsert({
-      where: { id: root.id },
-      create: createHeader(deriveConversationSummary(lastMessage.body) ?? title.slice(0, 140), threadUpdatedAt),
-      update: newer && target ? { summary: targetSummary, updatedAt: target.updatedAt } : {},
-    })
+    // The updatedAt write extension bumps `updatedAt` to now on any upsert/update that omits it, so an "empty" update
+    // would silently reorder the conversation. Write only when there is something to change, and always say updatedAt.
+    if (!existing) {
+      await prisma.agentConversation.upsert({
+        where: { id: root.id },
+        create: createHeader(deriveConversationSummary(lastMessage.body) ?? title.slice(0, 140), threadUpdatedAt),
+        update: { updatedAt: threadUpdatedAt },
+      })
+    } else if (newer && target) {
+      await prisma.agentConversation.updateMany({ where: { id: root.id }, data: { summary: targetSummary, updatedAt: target.updatedAt } })
+    }
   } else {
     const summary = deriveConversationSummary(lastMessage.body) ?? title.slice(0, 140)
     await prisma.agentConversation.upsert({
@@ -147,7 +153,8 @@ export async function mirrorCommentThread(
       update: { status, summary, updatedAt: threadUpdatedAt, ...(status === "OPEN" ? { resolvedAt: null, resolvedById: null } : {}) },
     })
     if (status === "RESOLVED") {
-      await prisma.agentConversation.updateMany({ where: { id: root.id, resolvedAt: null }, data: { resolvedAt } })
+      // updatedAt is restated: the write extension would otherwise bump it to now.
+      await prisma.agentConversation.updateMany({ where: { id: root.id, resolvedAt: null }, data: { resolvedAt, updatedAt: threadUpdatedAt } })
     }
   }
 
@@ -368,7 +375,7 @@ async function removeDeletedThread(tx: AppTransactionClient, conversationId: str
   if (await hasNonMirrorContent(tx, conversation, authorIds)) {
     await tx.agentConversation.updateMany({
       where: { id: conversationId },
-      data: { archivedAt: conversation.archivedAt ?? new Date(), title: ARCHIVED_MIRROR_TITLE, summary: null },
+      data: { archivedAt: conversation.archivedAt ?? new Date(), title: ARCHIVED_MIRROR_TITLE, summary: null, updatedAt: conversation.updatedAt },
     })
     return
   }
