@@ -25,6 +25,7 @@ import { isComposerPanelType } from "@/components/panels/composer-panel-types"
 import { panelTitles } from "@/components/panels/panel-titles"
 import { useLabels } from "@/components/thinking-model/thinking-model-provider"
 import { AgentChat } from "@/components/agent/agent-chat"
+import { ConversationNotAvailable } from "@/components/panels/conversation-not-available"
 import { LegacyRailLinkRedirect } from "@/components/panels/legacy-rail-link-redirect"
 import type {
   AgentParticipationMode,
@@ -476,6 +477,9 @@ export function ConversationPanel({ conversationId }: { conversationId: string }
     messages: LoadedMessage[]
   }>({ id: conversationId, messages: EMPTY_MESSAGES })
 
+  // Set when either read answers 404: unknown and unreadable ids are indistinguishable by design.
+  const [unavailableId, setUnavailableId] = useState<string | null>(null)
+
   const [settingsState, setSettingsState] = useState<{
     id: string
     agentMode: AgentParticipationMode
@@ -495,6 +499,10 @@ export function ConversationPanel({ conversationId }: { conversationId: string }
         signal: controller.signal,
       })
         .then(async (res) => {
+          if (res.status === 404) {
+            setUnavailableId(conversationId)
+            return
+          }
           if (!res.ok) return
           const body = (await res.json()) as { messages?: Record<string, unknown>[] }
           if (!Array.isArray(body.messages)) return
@@ -518,6 +526,10 @@ export function ConversationPanel({ conversationId }: { conversationId: string }
         signal: controller.signal,
       })
         .then(async (res) => {
+          if (res.status === 404) {
+            setUnavailableId(conversationId)
+            return
+          }
           if (!res.ok) return
           const body = (await res.json()) as {
             agentMode?: AgentParticipationMode
@@ -543,6 +555,7 @@ export function ConversationPanel({ conversationId }: { conversationId: string }
   }, [ctx, conversationId, isNew])
 
   if (!ctx) return null
+  if (!isNew && unavailableId === conversationId) return <ConversationNotAvailable />
 
   const initialMessages =
     !isNew && messagesState.id === conversationId ? messagesState.messages : EMPTY_MESSAGES

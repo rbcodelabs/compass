@@ -10,6 +10,7 @@ import { z } from "zod"
 
 import { auth } from "@/auth"
 import { getAgentConversationMessages } from "@/lib/agent-conversations"
+import { conversationNotFound, NO_STORE_HEADERS } from "@/lib/agent-conversation-not-found"
 
 // `AgentConversation.id` is `@db.Uuid`. A malformed id would otherwise reach
 // Postgres as a failed cast and surface as a Prisma 500; it names no
@@ -27,9 +28,7 @@ export async function GET(
   if (!workspaceId) return new Response("Workspace required", { status: 400 })
 
   const { conversationId } = await params
-  if (!conversationIdSchema.safeParse(conversationId).success) {
-    return new Response("Not found", { status: 404 })
-  }
+  if (!conversationIdSchema.safeParse(conversationId).success) return conversationNotFound()
 
   // Access is proven before any message is read, and a conversation the caller
   // may not see is reported as 404 rather than 403 (null here) so existence is
@@ -44,7 +43,7 @@ export async function GET(
     if (Number.isNaN(after.getTime())) return new Response("Invalid after cursor", { status: 400 })
   }
   const messages = await getAgentConversationMessages(conversationId, workspaceId, session.user.id, { after })
-  if (!messages) return new Response("Not found", { status: 404 })
+  if (!messages) return conversationNotFound()
 
-  return Response.json({ messages })
+  return Response.json({ messages }, { headers: NO_STORE_HEADERS })
 }

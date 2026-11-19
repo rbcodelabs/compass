@@ -150,13 +150,26 @@ test("old rail links (?rc=) redirect to the Conversation panel, and the rail's H
   }
 });
 
-// Not-available state for an id the viewer cannot read. conversation-panel.tsx
-// fetches /messages and /settings with no visible error handling today, so there
-// is no such state to assert on; adding one is a product decision, not S5's.
-test.fixme("TASK-195 S5: not-available state for non-member id", async ({ page, base }) => {
-  await page.goto(`${base}/okrs?rc=${randomUUID()}`);
-  await expect.poll(() => params(page).get("detail")).toMatch(/^conversation:/);
-  await expect(panel(page).getByText(/not available/i)).toBeVisible();
+// An id the viewer cannot read (unknown, or exists but not theirs) shows one neutral
+// state: no title, summary or author, and no error banner. The server-side sameness
+// of the 404s is covered by __tests__/conversation-access.integration.test.ts.
+test("TASK-195 S5: not-available state for non-member id", async ({ page, base }) => {
+  const unknownId = randomUUID();
+  await page.goto(`${base}/okrs?rc=${unknownId}`);
+  await expect.poll(() => params(page).get("detail"), { timeout: 30_000 }).toBe(`conversation:${unknownId}`);
+  const state = panel(page).getByTestId("conversation-not-available");
+  await expect(state).toBeVisible({ timeout: 30_000 });
+  await expect(state.getByRole("heading", { name: "Not available" })).toBeFocused();
+  await expect(state).toContainText(/not available/i);
+  await expect(panel(page).getByRole("alert")).toHaveCount(0);
+  await expect(panel(page).getByPlaceholder(/message the agent/i)).toHaveCount(0);
+  const settled = page.url();
+  await page.waitForTimeout(2_000);
+  expect(page.url(), "no redirect loop").toBe(settled);
+
+  await state.getByRole("button", { name: "Close panel" }).click();
+  await expect(state).toHaveCount(0);
+  await expect.poll(() => new URL(page.url()).search).toBe("");
 });
 
 // These steps existed only for the removed rail agent view. Whether the panel
