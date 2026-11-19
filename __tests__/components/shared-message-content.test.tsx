@@ -103,7 +103,9 @@ describe("SharedMessageContent", () => {
   })
 
   it("edits in place: Save PATCHes the trimmed text to the message route and reports it", async () => {
-    const fetchMock = vi.fn(async () => Response.json({ message: { id: "m-1", content: "better words", editedAt: "2026-11-19T10:00:00.000Z" } }))
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) =>
+      Response.json({ message: { id: "m-1", content: "better words", editedAt: "2026-11-19T10:00:00.000Z" } }),
+    )
     vi.stubGlobal("fetch", fetchMock)
     const { onEdited } = renderContent()
     fireEvent.click(screen.getByRole("button", { name: "Edit comment by Dana" }))
@@ -112,10 +114,10 @@ describe("SharedMessageContent", () => {
     fireEvent.input(editor)
     fireEvent.click(screen.getByRole("button", { name: "Save edit" }))
     await waitFor(() => expect(onEdited).toHaveBeenCalledWith({ id: "m-1", content: "better words", editedAt: "2026-11-19T10:00:00.000Z" }))
-    const [url, init] = fetchMock.mock.calls.find(([u]) => String(u).includes("/messages/m-1"))! as unknown as [string, RequestInit]
+    const [url, init] = fetchMock.mock.calls.find(([u]) => String(u).includes("/messages/m-1"))!
     expect(url).toBe("/api/agent/conversations/c-1/messages/m-1?workspaceId=ws-1")
-    expect(init.method).toBe("PATCH")
-    expect(JSON.parse(String(init.body))).toEqual({ content: "better words" })
+    expect(init?.method).toBe("PATCH")
+    expect(JSON.parse(String(init?.body))).toEqual({ content: "better words" })
     expect(screen.queryByTestId("message-edit-form")).toBeNull()
   })
 
