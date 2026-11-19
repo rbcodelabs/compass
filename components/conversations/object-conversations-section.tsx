@@ -307,6 +307,11 @@ function ObjectConversationsContent({
       const result: unknown = await res.json().catch(() => null)
       if (!res.ok) {
         const failure = typeof result === "object" && result ? result as { error?: unknown; code?: unknown } : {}
+        // The server does not know this agent yet: forget it locally so the composer shows its scope step again.
+        if (failure.code === "AGENT_SCOPE_CONFIRMATION_REQUIRED" && payload.assignee) {
+          const agentId = payload.assignee.id
+          setConfirmedAgentIds((ids) => ids.filter((id) => id !== agentId))
+        }
         return {
           ok: false,
           error: typeof failure.code === "string" ? failure.code : "ERROR",
@@ -536,7 +541,7 @@ function ObjectConversationsContent({
                 )}
               </button>
               {item.taskCard && panelCtx && (
-                <CommentTaskCard card={item.taskCard} taskHref={`/${panelCtx.orgSlug}/${panelCtx.workspaceSlug}/tasks/${item.taskCard.taskId}`} />
+                <CommentTaskCard card={item.taskCard} startsRun={false} taskHref={`/${panelCtx.orgSlug}/${panelCtx.workspaceSlug}/tasks/${item.taskCard.taskId}`} />
               )}
               {item.canRestore && (
                 <div className="flex flex-wrap items-center gap-2 pt-1 text-xs text-text-subtle">
@@ -593,6 +598,11 @@ function ObjectConversationsContent({
                 autoFocus={autoFocusEditor}
                 disabled={submitting}
                 submitOnEnter
+                // Task creation is opt-in here: a mention is a plain message until the person turns the task on, and the built-in
+                // agent (no task queue) is never an assignee candidate.
+                defaultTaskOn={false}
+                excludedAssigneeIds={[BUILTIN_COMPASS_AGENT_ID]}
+                taskToggleHint="Leave off to send a plain message with this mention."
                 editorTestId="object-conversation-composer"
                 editorClassName="min-h-8 rounded-lg border-default bg-surface-card px-3 py-1.5 text-xs focus-visible:border-border-focus"
                 onSubmit={submitComposer}

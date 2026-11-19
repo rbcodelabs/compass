@@ -64,7 +64,8 @@ export type PostTargetCommentResult =
 /** Agents that already hold a task made from a comment on this target (the scope-confirm step is skipped for them). */
 export async function agentIdsAssignedOnTarget(workspaceId: string, targetType: CommentTargetType, targetId: string): Promise<string[]> {
   const prisma = getPrisma()
-  const commentIds = (await prisma.comment.findMany({ where: { workspaceId, targetType, targetId }, select: { id: true } })).map(c => c.id)
+  // Bounded: the newest 1000 comments on the item. Missing an older agent only means one more scope confirmation, never a skipped one.
+  const commentIds = (await prisma.comment.findMany({ where: { workspaceId, targetType, targetId }, select: { id: true }, orderBy: { createdAt: "desc" }, take: 1000 })).map(c => c.id)
   if (commentIds.length === 0) return []
   const linkedTaskIds = [...new Set((await getTasksLinkedToOrigin(prisma, { workspaceId, linkedType: "COMMENT", linkedIds: commentIds })).map(link => link.taskId))]
   if (linkedTaskIds.length === 0) return []
@@ -131,10 +132,11 @@ export async function postTargetCommentWithOptionalTask(input: PostTargetComment
   let card: CommentTaskCardData | null = null
   let taskId: string | null = null
   if (input.task && assignee) {
+    let task: Awaited<ReturnType<typeof createWorkspaceTask>>
     try {
       const title = await targetTitle(input.workspaceId, input.targetType, input.targetId)
       const linkType = TASK_LINK_TYPE_FOR_TARGET[input.targetType]
-      const task = await createWorkspaceTask(input.workspaceId, {
+      task = await createWorkspaceTask(input.workspaceId, {
         title: input.task.title.trim().slice(0, 255),
         description: `From a comment on the ${noun(input.targetType)}${title ? ` “${title}”` : ""}.`,
         priority: input.task.priority ?? "MEDIUM",
@@ -142,19 +144,37 @@ export async function postTargetCommentWithOptionalTask(input: PostTargetComment
         assignee,
         links: [{ linkedType: "COMMENT", linkedId: created.id }, ...(linkType ? [{ linkedType: linkType, linkedId: input.targetId }] : [])],
       })
-      taskId = task.id
+    } catch (error) {
+      // Only a task that was NOT created withdraws the comment. Log the error name and code, never its message (it can carry
+      // column names or values), and answer with a fixed message.
+      console.error("[comment-target-tasks] task creation failed", error instanceof Error ? error.name : "unknown", (error as { code?: unknown })?.code ?? "")
+      // Do not leave a comment that promised a task but has none behind.
+      let commentDeleted = false
+      try {
+        await prisma.comment.deleteMany({ where: { id: created.id } })
+        commentDeleted = true
+      } catch (cleanupError) {
+        console.error("[comment-target-tasks] cleanup failed", cleanupError instanceof Error ? cleanupError.name : "unknown")
+      }
+      // The comment was mirrored into a conversation after it committed (TASK-195 S0): withdraw that too, or the failed post
+      // would leave a ghost conversation and message the list shows. Only after the comment itself is gone, so a mirror is
+      // never removed from under a comment that still exists. A root takes its conversation with it when it is a pure mirror
+      // (the one named hard delete in lib/conversation-mirror.ts; archived blank if a panel message landed meanwhile); a
+      // reply only loses its own message.
+      if (commentDeleted) {
+        await removeCommentMirrorAfterCommit(created.parentId
+          ? { conversationId: created.parentId, commentIds: [created.id], threadDeleted: false }
+          : { conversationId: created.id, commentIds: [created.id], threadDeleted: true })
+      }
+      return { ok: false, error: "TASK_FAILED", message: "Could not create the task." }
+    }
+    // The task is committed from here on. Nothing below may withdraw the comment: a failure only costs the card.
+    taskId = task.id
+    try {
       const [resolved] = await resolveTaskAssignees(input.workspaceId, [task])
       card = toCard({ ...task, assignee: resolved.assignee ? { type: resolved.assignee.type, id: resolved.assignee.id, displayName: resolved.assignee.displayName, available: resolved.assignee.available } : null })
     } catch (error) {
-      // Do not leave a comment that promised a task but has none behind.
-      await prisma.comment.deleteMany({ where: { id: created.id } }).catch(cleanupError => console.error("[comment-target-tasks] cleanup failed", cleanupError))
-      // The comment was mirrored into a conversation after it committed (TASK-195 S0): withdraw that too, or the failed post
-      // would leave a ghost conversation and message the list shows. A root takes its conversation with it (a pure mirror is
-      // the one hard delete S0 allows); a reply only loses its own message.
-      await removeCommentMirrorAfterCommit(created.parentId
-        ? { conversationId: created.parentId, commentIds: [created.id], threadDeleted: false }
-        : { conversationId: created.id, commentIds: [created.id], threadDeleted: true })
-      return { ok: false, error: "TASK_FAILED", message: error instanceof Error ? error.message : "Could not create the task." }
+      console.error("[comment-target-tasks] task card failed", error instanceof Error ? error.name : "unknown")
     }
   }
 

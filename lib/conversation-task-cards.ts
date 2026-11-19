@@ -36,10 +36,15 @@ const isTaskTarget = (targetType: string): targetType is CommentTargetType =>
  */
 export async function loadTaskComposerContext(workspaceId: string, targetType: string, targetId: string): Promise<TaskComposerContext> {
   if (!isTaskTarget(targetType)) return { confirmedAgentIds: [], targetTitle: null }
-  const { agentIdsAssignedOnTarget, targetTitle } = await import("@/lib/comment-target-tasks")
-  const [confirmedAgentIds, title] = await Promise.all([
-    agentIdsAssignedOnTarget(workspaceId, targetType, targetId).catch((error) => { logFailure("known agent lookup", error); return [] as string[] }),
-    targetTitle(workspaceId, targetType, targetId).catch((error) => { logFailure("target title lookup", error); return null }),
-  ])
-  return { confirmedAgentIds, targetTitle: title }
+  try {
+    const { agentIdsAssignedOnTarget, targetTitle } = await import("@/lib/comment-target-tasks")
+    const [confirmedAgentIds, title] = await Promise.all([
+      agentIdsAssignedOnTarget(workspaceId, targetType, targetId).catch((error) => { logFailure("known agent lookup", error); return [] as string[] }),
+      targetTitle(workspaceId, targetType, targetId).catch((error) => { logFailure("target title lookup", error); return null }),
+    ])
+    return { confirmedAgentIds, targetTitle: title }
+  } catch (error) {
+    logFailure("task composer context", error)
+    return { confirmedAgentIds: [], targetTitle: null }
+  }
 }

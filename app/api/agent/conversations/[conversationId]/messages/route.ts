@@ -17,6 +17,8 @@ import { loadConversationTaskCards } from "@/lib/conversation-task-cards"
 // conversation the caller could own, so it gets the same 404 as any other.
 const conversationIdSchema = z.string().uuid()
 
+const MAX_CARD_LOOKUPS = 500
+
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ conversationId: string }> }
@@ -52,6 +54,12 @@ export async function GET(
 
   // A task made from a root post is keyed by the post's comment id, which is the message id (the mirror reuses it). Access
   // was proven above, so cards are only ever read for a conversation this caller may see.
-  const taskCards = await loadConversationTaskCards(workspaceId, messages.map((message) => message.id))
+  // Only person-authored comment-kind messages can carry a task (agent replies, plan proposals and system rows never do), and
+  // only the newest 500 are looked up, so a very long thread cannot turn one read into an unbounded IN list.
+  const cardable = messages
+    .filter((message) => message.role === "user" && (!message.messageKind || message.messageKind === "COMMENT" || message.messageKind === "MESSAGE"))
+    .map((message) => message.id)
+    .slice(-MAX_CARD_LOOKUPS)
+  const taskCards = await loadConversationTaskCards(workspaceId, cardable)
   return Response.json({ messages, taskCards })
 }

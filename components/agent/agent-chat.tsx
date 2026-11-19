@@ -1088,9 +1088,18 @@ export function AgentChat({
     }
     if (!res.ok) return
     const body = await res.json() as { messages?: Message[]; taskCards?: unknown }
-    // Cards ride along with every read; a poll only returns new messages, so its cards are added, never replaced.
+    // Cards ride along with every read; a poll only returns new (and edited) messages, so cards are replaced per returned message.
     const polledCards = parseTaskCards(body.taskCards)
-    if (Object.keys(polledCards).length > 0) setTaskCards((current) => ({ ...current, ...polledCards }))
+    const returnedIds = (body.messages ?? []).flatMap((m) => (m && typeof m.id === "string" ? [m.id] : []))
+    if (returnedIds.length > 0 || Object.keys(polledCards).length > 0) {
+      // For every message the server just returned, its card is whatever the server says now (changed, or gone). Messages
+      // the poll did not return keep the card they have.
+      setTaskCards((current) => {
+        const next = { ...current }
+        for (const id of returnedIds) delete next[id]
+        return { ...next, ...polledCards }
+      })
+    }
     const incoming = (body.messages ?? []).flatMap((m) =>
       m && typeof m.id === "string" && typeof m.content === "string"
         ? [{ ...m, role: m.role === "assistant" ? ("assistant" as const) : ("user" as const) }]
@@ -2072,7 +2081,7 @@ function MessageRow({
             <p className="text-text-subtle">…</p>
           )}
         </div>
-        {taskCard && stored && <CommentTaskCard card={taskCard} taskHref={`${basePath}/tasks/${taskCard.taskId}`} />}
+        {taskCard && stored && <CommentTaskCard card={taskCard} startsRun={false} taskHref={`${basePath}/tasks/${taskCard.taskId}`} />}
       </div>
     </Row>
   )

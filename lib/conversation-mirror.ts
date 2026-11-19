@@ -20,7 +20,8 @@
  * `removeCommentMirror` hard-deletes a conversation, but only when every row in it is a mirror of a
  * comment that the legacy API has itself just hard-deleted, so there is no user content to lose.
  * Archiving such a mirror would keep the deleted text readable, which is worse. It is a data-hygiene
- * path for legacy comment deletes ONLY. It must never be reused by the new-model Delete/Archive
+ * path for two callers ONLY: legacy comment deletes, and the compensating delete in lib/comment-target-tasks.ts that withdraws a
+ * comment whose task could not be created (the comment is deleted first; only then is its mirror removed). It must never be reused by the new-model Delete/Archive
  * action (slice S2), which archives. Anything that is not a pure mirror is archived here too, with
  * its title and summary blanked so the deleted comment's text is not visible on the row.
  *
