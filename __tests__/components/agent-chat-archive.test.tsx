@@ -92,7 +92,9 @@ describe("Archive conversation action", () => {
 describe("archived under another participant", () => {
   it("shows the existing no-longer-available state, not an error banner, when their send is refused", async () => {
     fetchMock.mockImplementation(async (url: string) =>
-      url === "/api/agent/turn" ? new Response("Conversation not found or access denied.", { status: 404 }) : new Response("{}", { status: 200 }))
+      url === "/api/agent/turn"
+        ? new Response("Conversation not found or access denied.", { status: 404 })
+        : Response.json({ agents: [], defaultAgentId: null, run: null, available: false }))
     render(<AgentChat {...props({ canArchive: false })} />)
     const box = await screen.findByRole("textbox")
     fireEvent.change(box, { target: { value: "still there?" } })

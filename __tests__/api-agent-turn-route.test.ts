@@ -266,8 +266,16 @@ describe("agent turn route — guards", () => {
     expect(res.status).toBe(404)
     expect(mockPrisma.agentConversation.findFirst).toHaveBeenCalledWith({
       where: { id: "c-999", ...accessibleConversationsWhere("ws-1", "user-1") },
-      select: { userId: true },
+      select: { userId: true, visibility: true, archivedAt: true },
     })
+  })
+
+  it("404 (no run, no message) when the shared conversation was archived under the sender", async () => {
+    mockPrisma.agentConversation.findFirst.mockResolvedValue({ userId: "owner", visibility: "WORKSPACE", archivedAt: new Date() })
+    const res = await POST(req({ workspaceId: "ws-1", message: "hi", conversationId: "c-1" }))
+    expect(res.status).toBe(404)
+    expect(mockPrisma.agentMessage.create).not.toHaveBeenCalled()
+    expect(mockPrisma.agentConversation.create).not.toHaveBeenCalled()
   })
 
   it("503 when no golden snapshot has been built", async () => {
