@@ -364,7 +364,7 @@ export async function reorderKeyResult(
   await requireProductEntity("keyResult", keyResultId);
   const prisma = getPrisma();
   const moved = await prisma.keyResult.findUnique({ where: { id: keyResultId }, select: { objectiveId: true } });
-  if (!moved) throw new Error("Key result not found");
+  if (!moved) throw new Error("Not found");
   // Renumber every sibling so the stored order matches the move. Writing only the moved row's
   // index leaves ties (A0, B1, C0) that the page resolves by createdAt, not by the drop position.
   // One transaction so a mid-failure or concurrent reorder cannot leave a partial order.
