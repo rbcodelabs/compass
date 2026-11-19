@@ -10,6 +10,7 @@ import { execFileSync } from "node:child_process"
 import { PrismaClient } from "@prisma/client"
 import { PrismaPg } from "@prisma/adapter-pg"
 import { Pool } from "pg"
+import { NextRequest } from "next/server"
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest"
 import type { AppPrismaClient } from "@/lib/db"
 import { injectUpdatedAtExtension } from "@/lib/prisma-updated-at"
@@ -39,7 +40,7 @@ describe.skipIf(!databaseUrl)("agent conversation read access: member, non-membe
   const read = async (route: typeof messagesRoute, userId: string, conversationId: string, workspaceId: string): Promise<Snapshot> => {
     connection.userId = userId
     const res = await route(
-      new Request(`http://x/api?workspaceId=${workspaceId}`) as never,
+      new NextRequest(`http://x/api?workspaceId=${workspaceId}`) as never,
       { params: Promise.resolve({ conversationId }) } as never,
     )
     return {
