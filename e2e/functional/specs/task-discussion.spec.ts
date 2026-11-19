@@ -27,13 +27,15 @@ test.describe("Task shared Conversations", () => {
     const section = page.getByTestId("object-conversations-section");
     await expect(section.getByText(/No conversations on this item yet/)).toBeVisible();
     const thread = conversationPanel(page);
+    // Message bodies only: the panel's history breadcrumb repeats a conversation title as a button.
+    const messages = thread.getByTestId("conversation-message");
     async function expectHistoricalComment() {
       await expect(thread.locator("li").filter({ hasText: "Confirm scope" })).toBeVisible();
       await expect(thread.getByRole("checkbox")).toBeChecked();
       await expect(thread.locator("del")).toHaveText("Old estimate");
       await expect(thread.locator("code")).toHaveText("handoff");
       await expect(thread.getByRole("link", { name: "notes" })).toHaveAttribute("href", "https://example.com/notes");
-      await expect(thread.getByText("Ready for review.", { exact: true })).toBeVisible();
+      await expect(messages.getByText("Ready for review.", { exact: true })).toBeVisible();
     }
 
     // Existing API history (a comment made through the API) must appear on the same task as a conversation with source text intact.
@@ -53,7 +55,7 @@ test.describe("Task shared Conversations", () => {
 
     await section.getByTestId("object-conversation-composer").fill("The support checklist is ready.");
     await section.getByRole("button", { name: "Send", exact: true }).click();
-    await expect(thread.getByText("The support checklist is ready.", { exact: true })).toBeVisible({ timeout: 15_000 });
+    await expect(messages.getByText("The support checklist is ready.", { exact: true })).toBeVisible({ timeout: 15_000 });
     const root = thread.getByTestId("conversation-message").filter({ hasText: "The support checklist is ready" });
     await root.getByRole("button", { name: /Edit comment by/ }).click();
     await thread.getByRole("textbox", { name: /Edit comment by/ }).fill("The support checklist is ready for review.");
@@ -61,7 +63,7 @@ test.describe("Task shared Conversations", () => {
     await expect(thread.getByText("Edited", { exact: true })).toBeVisible();
     await thread.getByPlaceholder(/message the agent/i).fill("Reviewed. Ready for the next step.");
     await thread.getByRole("button", { name: "Send message" }).click();
-    await expect(thread.getByText("Reviewed. Ready for the next step.")).toBeVisible();
+    await expect(messages.getByText("Reviewed. Ready for the next step.")).toBeVisible();
 
     // The detail's other sections and the Conversations are stacked on one surface, so assert they coexist.
     await page.getByRole("button", { name: "More properties", exact: true }).click();
@@ -69,8 +71,8 @@ test.describe("Task shared Conversations", () => {
     await expect(page.getByRole("button", { name: "Add link" })).toBeVisible();
     await expect(section).toBeVisible();
     await page.reload();
-    await expect(thread.getByText("The support checklist is ready for review.")).toBeVisible();
-    await expect(thread.getByText("Reviewed. Ready for the next step.")).toBeVisible();
+    await expect(messages.getByText("The support checklist is ready for review.")).toBeVisible();
+    await expect(messages.getByText("Reviewed. Ready for the next step.")).toBeVisible();
 
     // Close the panel so the section composer is measured on its own at each width.
     await page.getByRole("button", { name: "Close panel" }).click();
@@ -99,7 +101,7 @@ test.describe("Task shared Conversations", () => {
     await thread.getByRole("button", { name: "Resolve", exact: true }).click();
     await expect(thread.getByText("Resolved", { exact: true })).toBeVisible();
     await thread.getByRole("button", { name: "Reopen", exact: true }).click();
-    await expect(thread.getByText("Reviewed. Ready for the next step.")).toBeVisible();
+    await expect(messages.getByText("Reviewed. Ready for the next step.")).toBeVisible();
 
     // No per-message delete: a thread leaves the list by being archived, and returns on restore. The API history thread is untouched.
     await thread.getByRole("button", { name: "Archive conversation" }).click();
