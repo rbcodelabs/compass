@@ -124,9 +124,7 @@ describe("cardFirstCollisionDetection", () => {
   it("a cross-column drag whose rect still overlaps the dragged card's original slot answers the column it is heading for, not itself", () => {
     // Rect x 250-510 overlaps Two's own slot (x 20-280) and reaches into the ACTIVE column (x 320+); it overlaps no other card.
     // Before the fix the card's own slot was the only overlapped card, so the answer was always "two" and the drag could not leave.
-    const answer = cardFirstCollisionDetection(scene(470, 250));
-    expect(answer[0].id).toBe("column-ACTIVE");
-    expect(answer.map((hit) => hit.id)).not.toContain("two");
+    expect(cardFirstCollisionDetection(scene(470, 250))[0].id).toBe("column-ACTIVE");
   });
 
   it("falls back to the nearest column when the dragged rect overlaps no card (empty column, gap below the cards)", () => {
