@@ -46,5 +46,6 @@ export async function GET(
   const messages = await getAgentConversationMessages(conversationId, workspaceId, session.user.id, { after })
   if (!messages) return new Response("Not found", { status: 404 })
 
-  return Response.json({ messages })
+  // `taskCards` is a stub until task rows land (TASK-195 S4); it is keyed by message id, so the shape will not change.
+  return Response.json({ messages, taskCards: {} })
 }

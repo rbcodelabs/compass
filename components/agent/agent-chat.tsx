@@ -61,6 +61,7 @@ import { Markdown } from "@/components/agent/markdown"
 import { RecentMentions } from "@/components/agent/recent-mentions"
 import type { MentionOptions } from "@/components/docs/mention-editor"
 import { plainTextOf } from "@/lib/comment-mentions"
+import { SharedMessageContent } from "@/components/conversations/message-actions"
 import { AttachMenu, uploadAgentFiles, type AttachedItem, type AttachedUpload } from "@/components/agent/composer/attach-menu"
 import { SeedContextChip } from "@/components/agent/seed-context-chip"
 import { AgentParticipantsPanel, type Roster } from "@/components/agent/agent-participants"
@@ -98,6 +99,13 @@ type Message = {
   /** Who sent a user message. Absent on a message this tab has only optimistically shown. */
   authorUserId?: string | null
   authorName?: string | null
+  /** ISO instant a person last changed the text; drives the "Edited" marker. */
+  editedAt?: string | null
+  authorType?: string | null
+  messageKind?: string | null
+  /** Computed by the server for the signed-in user (author or workspace admin). Never inferred here. */
+  canEdit?: boolean
+  canDelete?: boolean
 }
 type ConversationSummary = AgentListConversation
 type SeedEntity = { entityType: string; entityId: string; label: string; summary: string; sourceUrl: string }
@@ -959,6 +967,13 @@ export function AgentChat({
     }
   }, [activeConversationId, workspaceId, attachToRun])
 
+  // A saved edit replaces the text in place. Order, ids and everything else about the row are untouched.
+  const applyMessageEdit = useCallback((edit: { id: string; content: string; editedAt: string }) => {
+    setMessages((current) =>
+      current.map((m) => (m.id === edit.id ? { ...m, content: edit.content, editedAt: edit.editedAt } : m)),
+    )
+  }, [])
+
   // Shared conversations: what other participants say, and the runs
   // they start, arrive by polling. There is no server push in v1, so this is the
   // whole of "live" — a few seconds behind, by design.
@@ -1009,12 +1024,21 @@ export function AgentChat({
     if (incoming.length === 0) return
     setMessages((current) => {
       const known = new Set(current.map((m) => m.id))
+      // The inclusive cursor re-sends the newest message, which is how somebody else's edit to it reaches this tab.
+      const changed = new Map(incoming.filter((m) => known.has(m.id)).map((m) => [m.id, m]))
+      const refreshed = current.map((m) => {
+        const next = changed.get(m.id)
+        return next && next.editedAt && next.editedAt !== m.editedAt
+          ? { ...m, content: next.content, editedAt: next.editedAt, canEdit: next.canEdit }
+          : m
+      })
+      const base = refreshed.some((m, i) => m !== current[i]) ? refreshed : current
       const fresh = incoming.filter((m) => !known.has(m.id))
-      if (fresh.length === 0) return current
+      if (fresh.length === 0) return base
       // The cursor is inclusive, so the last message comes back every time and is
       // skipped above. A provisional copy of a message the server now reports is
       // dropped rather than shown twice.
-      const kept = current.filter(
+      const kept = base.filter(
         (m) => !(isLocalMessageId(m.id) && fresh.some((f) => f.role === m.role && f.content === m.content)),
       )
       return [...kept, ...fresh]
@@ -1464,7 +1488,7 @@ export function AgentChat({
             )}
 
             {messages.map((m) => (
-              <MessageRow key={m.id} message={m} userInitials={userInitials} userId={userId} shared={shared} workspaceId={workspaceId} conversationId={activeConversationId} basePath={basePath} onInspectSubagent={selectChildRun} />
+              <MessageRow key={m.id} message={m} userInitials={userInitials} userId={userId} shared={shared} workspaceId={workspaceId} conversationId={activeConversationId} basePath={basePath} onInspectSubagent={selectChildRun} mentionOptions={mentionOptions} onOpenMentions={loadMentionOptions} onMessageEdited={applyMessageEdit} />
             ))}
 
             {isStreaming && (
@@ -1478,6 +1502,7 @@ export function AgentChat({
                 conversationId={activeConversationId}
                 basePath={basePath}
                 onInspectSubagent={selectChildRun}
+                mentionOptions={mentionOptions}
               />
             )}
 
@@ -1822,6 +1847,9 @@ function MessageRow({
   conversationId,
   basePath,
   onInspectSubagent,
+  mentionOptions,
+  onOpenMentions,
+  onMessageEdited,
 }: {
   message: Message
   userInitials: string
@@ -1832,6 +1860,9 @@ function MessageRow({
   conversationId: string | null
   basePath: string
   onInspectSubagent?: (subagentId: string) => void
+  mentionOptions: MentionOptions
+  onOpenMentions?: () => void
+  onMessageEdited?: (edit: { id: string; content: string; editedAt: string }) => void
 }) {
   const isUser = message.role === "user"
   // A message with no recorded author is this tab's own, not yet reported back.
@@ -1843,8 +1874,15 @@ function MessageRow({
   const persistedDecisionIds = !isUser && workspaceId && message.content
     ? trackedDecisionIdsFromText(message.content, basePath).filter((id) => !stepDecisionIds.includes(id))
     : []
+  // Stored messages are articles with stable hooks (deep links and E2E target them); the streaming and
+  // optimistic copies have no durable id, so they stay plain containers.
+  const stored = message.id !== "streaming" && !isLocalMessageId(message.id)
+  const Row = stored ? "article" : "div"
   return (
-    <div className={`flex gap-3 ${isUser && !fromOther ? "flex-row-reverse" : "flex-row"}`}>
+    <Row
+      {...(stored ? { id: `message-${message.id}`, "data-testid": "conversation-message", "data-message-id": message.id } : {})}
+      className={`flex gap-3 ${isUser && !fromOther ? "flex-row-reverse" : "flex-row"}`}
+    >
       <Avatar className="size-7 shrink-0">
         <AvatarFallback className={isUser ? "bg-surface-interactive text-text-secondary" : "bg-primary text-primary-foreground"}>
           {isUser ? (fromOther ? initialsOf(authorName) : userInitials) : <Sparkles className="size-4" aria-hidden="true" />}
@@ -1874,6 +1912,20 @@ function MessageRow({
               <p className="mb-1 text-xs font-medium text-text-subtle">Approval update (system-generated)</p>
               <p className="whitespace-pre-wrap break-words">{message.content.slice(APPROVAL_UPDATE_PREFIX.length)}</p>
             </div>
+          ) : isUser && shared ? (
+            // People's words in a shared conversation render like the old Discussion did: markdown, mention chips,
+            // PR chips. Private chats keep plain text (see the module doc of message-actions).
+            <SharedMessageContent
+              message={message}
+              authorLabel={message.authorName ?? (fromOther ? "Participant" : "you")}
+              workspaceId={workspaceId}
+              conversationId={conversationId}
+              mentionOptions={mentionOptions}
+              onOpenMentions={onOpenMentions}
+              onEdited={(edit) => onMessageEdited?.(edit)}
+              onPrimary={!fromOther}
+              bodyClassName={fromOther ? undefined : "[&_a]:text-primary-foreground [&_code]:text-text-primary"}
+            />
           ) : isUser ? (
             <p className="whitespace-pre-wrap break-words">{plainTextOf(message.content)}</p>
           ) : message.content ? (
@@ -1888,7 +1940,7 @@ function MessageRow({
           )}
         </div>
       </div>
-    </div>
+    </Row>
   )
 }
 

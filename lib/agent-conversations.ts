@@ -8,7 +8,8 @@
 import getPrisma from "@/lib/db"
 import { agentParticipantsAvailable } from "@/lib/agent-conversation-participants"
 import { sanitizeAuthorLabel } from "@/lib/agent-author-label"
-import { accessibleConversationsWhere, ownedConversationsWhere, resolveConversationAccess } from "@/lib/agent-conversation-access"
+import { accessibleConversationsWhere, ownedConversationsWhere } from "@/lib/agent-conversation-access"
+import { canEditMessage, isWorkspaceAdmin, loadAccessibleConversation } from "@/lib/conversation-messages"
 
 export type ConversationSummary = {
   id: string
@@ -28,6 +29,16 @@ export type ChatMessage = {
    */
   authorUserId: string | null
   authorName: string | null
+  /** When a person last changed the text, or null if never. Drives the "Edited" marker. */
+  editedAt: Date | null
+  /** "HUMAN" | "AGENT" | "EXTERNAL" | "SYSTEM"; null on rows that predate migration 124. */
+  authorType: string | null
+  /** "MESSAGE" | "COMMENT" | "PLAN_PROPOSAL" | "SYSTEM_RESOLUTION"; null on older rows. */
+  messageKind: string | null
+  /** Computed on the server for the caller (author, or workspace admin); the client never infers it. */
+  canEdit: boolean
+  /** Always false until messages can be archived (TASK-195 S2). */
+  canDelete: boolean
 }
 
 /**
@@ -125,14 +136,15 @@ export async function getAgentConversationMessages(
   } = {}
 ): Promise<ChatMessage[] | null> {
   const prisma = getPrisma()
-  const access = await resolveConversationAccess(prisma, { conversationId, workspaceId, userId })
-  if (!access) return null
+  const conversation = await loadAccessibleConversation(prisma, { conversationId, workspaceId, userId })
+  if (!conversation) return null
+  const access = { ownerUserId: conversation.userId }
   const withAuthor = await agentParticipantsAvailable(prisma)
   const rows = await prisma.agentMessage.findMany({
     where: { conversationId, ...(options.after ? { createdAt: { gte: options.after } } : {}) },
     orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     select: withAuthor
-      ? { id: true, role: true, content: true, createdAt: true, authorUserId: true }
+      ? { id: true, role: true, content: true, createdAt: true, authorUserId: true, authorType: true, messageKind: true, editedAt: true }
       : { id: true, role: true, content: true, createdAt: true },
   })
 
@@ -147,14 +159,33 @@ export async function getAgentConversationMessages(
     : []
   const names = new Map(users.map((u) => [u.id, sanitizeAuthorLabel(u.name, u.email)]))
 
-  return authored.map(({ row, authorUserId }) => ({
-    id: row.id,
-    role: row.role,
-    content: row.content,
-    createdAt: row.createdAt,
-    authorUserId,
-    authorName: authorUserId ? (names.get(authorUserId) ?? null) : null,
-  }))
+  type Extra = { authorType?: string | null; messageKind?: string | null; editedAt?: Date | null }
+  // The admin lookup is only needed when somebody else's words are in play, so a plain own-messages read costs nothing extra.
+  const editContext = { ownerUserId: conversation.userId, visibility: conversation.visibility, isInterview: conversation.interviewProcessingJson != null, userId }
+  const needsAdmin = authored.some(({ row, authorUserId }) => row.role === "user" && authorUserId !== userId)
+  const isAdmin = needsAdmin && conversation.visibility === "WORKSPACE" ? await isWorkspaceAdmin(prisma, workspaceId, userId) : false
+
+  return authored.map(({ row, authorUserId }) => {
+    const extra = row as Extra
+    const authorType = extra.authorType ?? null
+    const messageKind = extra.messageKind ?? null
+    return {
+      id: row.id,
+      role: row.role,
+      content: row.content,
+      createdAt: row.createdAt,
+      authorUserId,
+      authorName: authorUserId ? (names.get(authorUserId) ?? null) : null,
+      editedAt: extra.editedAt ?? null,
+      authorType,
+      messageKind,
+      canEdit: canEditMessage(
+        { role: row.role, content: row.content, authorUserId, authorType, messageKind },
+        { ...editContext, isAdmin },
+      ),
+      canDelete: false,
+    }
+  })
 }
 
 /**
