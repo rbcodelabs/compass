@@ -94,7 +94,10 @@ describe("archived under another participant", () => {
     fetchMock.mockImplementation(async (url: string) =>
       url === "/api/agent/turn"
         ? new Response("Conversation not found or access denied.", { status: 404 })
-        : Response.json({ agents: [], defaultAgentId: null, run: null, available: false }))
+        // No interview processing on this thread: a 404 there clears the composer block.
+        : String(url).includes("/processing")
+          ? new Response(null, { status: 404 })
+          : Response.json({ agents: [], defaultAgentId: null, run: null, available: false }))
     render(<AgentChat {...props({ canArchive: false })} />)
     const box = await screen.findByRole("textbox")
     fireEvent.change(box, { target: { value: "still there?" } })
