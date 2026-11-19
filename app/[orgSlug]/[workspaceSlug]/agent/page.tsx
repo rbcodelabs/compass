@@ -45,6 +45,11 @@ export default async function AgentPage({ params, searchParams }: AgentPageProps
     createdAt: string
     authorUserId: string | null
     authorName: string | null
+    editedAt: string | null
+    authorType: string | null
+    messageKind: string | null
+    canEdit: boolean
+    canDelete: boolean
   }[] = []
   if (conversationId) {
     const msgs = await getAgentConversationMessages(conversationId, workspace.id, userId)
@@ -57,6 +62,12 @@ export default async function AgentPage({ params, searchParams }: AgentPageProps
         createdAt: m.createdAt.toISOString(),
         authorUserId: m.authorUserId,
         authorName: m.authorName,
+        // What the server computed for this person; the client never infers it.
+        editedAt: m.editedAt ? m.editedAt.toISOString() : null,
+        authorType: m.authorType,
+        messageKind: m.messageKind,
+        canEdit: m.canEdit,
+        canDelete: m.canDelete,
       }))
     }
   }
