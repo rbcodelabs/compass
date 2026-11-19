@@ -38,15 +38,16 @@ const conversationPanel = (page: Page) =>
     .or(page.getByRole("dialog", { name: "Conversation", exact: true }));
 
 /** An anchored, workspace-visible conversation on the opportunity: what a posted comment turned into after #593. */
-async function seedConversation(opportunityId: string, conversationTitle: string) {
+async function seedConversation(opportunityId: string, conversationTitle: string): Promise<string> {
   const pool = new pg.Pool({ connectionString: isolatedE2EConnectionString() });
   try {
-    await pool.query(
+    const { rows: [row] } = await pool.query<{ id: string }>(
       `INSERT INTO compass_dev.agent_conversations (id,workspace_id,user_id,title,target_type,target_id,visibility,status,agent_mode,source,created_at,updated_at)
        SELECT gen_random_uuid(), o.workspace_id, (SELECT id FROM compass_dev.users WHERE email=$3), $2, 'OPPORTUNITY', o.id, 'WORKSPACE', 'OPEN', 'MENTION_ONLY', 'BROWSER', NOW(), NOW()
-         FROM compass_dev.opportunities o WHERE o.id=$1`,
+         FROM compass_dev.opportunities o WHERE o.id=$1 RETURNING id`,
       [opportunityId, conversationTitle, E2E_USER_EMAIL],
     );
+    return row.id;
   } finally {
     await pool.end();
   }
@@ -80,10 +81,7 @@ test("opportunity conversations persist between full page and panel", async ({ p
   await expect(conversationsSection(page).getByRole("button", { name: /^Test the shared recap with new teams\./ })).toBeVisible();
 });
 
-// TASK-195 slice S1/S2 (message actions: Edit / Archive). Rick's binding answers (design section 10): a message can be edited by its
-// author OR a workspace admin, and "delete thread" becomes ARCHIVE (the thread leaves the active list and is restorable).
-// Selectors below are the ones the message actions are expected to expose; adjust names when the UI lands.
-test.fixme("opportunity conversation: author or admin edits a message, archive removes then restores the thread (TASK-195 slice S1/S2)", async ({ page, base }) => {
+test("opportunity conversation: author edits a message, resolve/reopen, archive then restore (no delete)", async ({ page, base }) => {
   const id = await seedOpportunity();
   await page.goto(`${base}/discovery/${id}`);
   const conversations = conversationsSection(page);
@@ -92,33 +90,65 @@ test.fixme("opportunity conversation: author or admin edits a message, archive r
   const thread = conversationPanel(page);
   await expect(thread.getByText("Test the shared recap with new teams.", { exact: true })).toBeVisible();
 
-  // Author edits their own message; it shows as edited and survives the full-page/panel hop.
-  await thread.getByRole("button", { name: "Edit", exact: true }).first().click();
-  await thread.getByRole("textbox", { name: /^Edit message/ }).fill("Test the shared recap this week.");
+  await thread.getByRole("button", { name: /^Edit comment by/ }).first().click();
+  await thread.getByRole("textbox", { name: /^Edit comment by/ }).fill("Test the shared recap this week.");
   await thread.getByRole("button", { name: "Save edit", exact: true }).click();
   await expect(thread.getByText("Test the shared recap this week.", { exact: true })).toBeVisible();
   await expect(thread.getByText("Edited", { exact: true })).toBeVisible();
+
+  await thread.getByRole("button", { name: "Resolve", exact: true }).click();
+  await expect(thread.getByText("Resolved", { exact: true })).toBeVisible();
+  await thread.getByRole("button", { name: "Reopen", exact: true }).click();
+  await expect(thread.getByRole("button", { name: "Resolve", exact: true })).toBeVisible();
+
+  // The edit and the thread persist across the panel and the full page.
   await page.goto(`${base}/discovery?detail=opportunity:${id}`);
   const panel = page.locator('[data-slot="sheet-content"]');
-  await expect(conversationsSection(panel).getByRole("button", { name: /^Test the shared recap this week\./ })).toBeVisible();
+  await expect(conversationsSection(panel).getByRole("button", { name: /^Test the shared recap with new teams\./ })).toBeVisible();
   expect(await openFullPage(page, panel)).toBe(`${base}/discovery/${id}`);
+  await conversationsSection(page).getByRole("button", { name: /^Test the shared recap with new teams\./ }).click();
+  await expect(conversationPanel(page).getByText("Test the shared recap this week.", { exact: true })).toBeVisible();
 
-  // Admin edit of another user's message (seed a second member's message, sign in as workspace admin, edit it).
-  // TODO(TASK-195 S2): seed message authored by another workspace member via compass_dev.agent_messages (author_user_id).
-  await conversationsSection(page).getByRole("button", { name: /^Test the shared recap this week\./ }).click();
-  await conversationPanel(page).getByRole("button", { name: "Edit", exact: true }).last().click();
-  await conversationPanel(page).getByRole("textbox", { name: /^Edit message/ }).fill("Edited by an admin.");
-  await conversationPanel(page).getByRole("button", { name: "Save edit", exact: true }).click();
-  await expect(conversationPanel(page).getByText("Edited by an admin.", { exact: true })).toBeVisible();
+  // Archive, not delete: leaves the active list and returns on restore.
+  await conversationPanel(page).getByRole("button", { name: "Archive conversation" }).click();
+  await page.getByRole("alertdialog", { name: "Archive this conversation?" }).getByRole("button", { name: "Archive", exact: true }).click();
+  await expect(page.getByRole("alertdialog")).toHaveCount(0);
+  await page.getByRole("button", { name: "Close panel" }).click();
+  await expect(conversationsSection(page).getByRole("button", { name: /^Test the shared recap with new teams\./ })).toHaveCount(0);
+  await conversationsSection(page).getByRole("button", { name: /^Show archived/ }).click();
+  const archivedRow = conversationsSection(page).getByRole("listitem").filter({ hasText: "Test the shared recap" });
+  await archivedRow.getByRole("button", { name: "Restore", exact: true }).click();
+  await expect(conversationsSection(page).getByRole("status")).toContainText("Conversation restored.");
+  await conversationsSection(page).getByRole("button", { name: /^Show archived/ }).click();
+  await expect(conversationsSection(page).getByRole("button", { name: /^Test the shared recap/ })).toBeVisible();
+});
 
-  // Archive (not delete): leaves the active list, is restorable.
-  await conversationPanel(page).getByRole("button", { name: "Archive", exact: true }).click();
-  await expect(conversationsSection(page).getByRole("button", { name: /^Test the shared recap this week\./ })).toHaveCount(0);
-  await page.reload();
-  await expect(conversationsSection(page).getByRole("button", { name: /^Test the shared recap this week\./ })).toHaveCount(0);
-  await conversationsSection(page).getByRole("button", { name: "Show archived", exact: true }).click();
-  await conversationsSection(page).getByRole("button", { name: "Restore", exact: true }).click();
-  await expect(conversationsSection(page).getByRole("button", { name: /^Test the shared recap this week\./ })).toBeVisible();
+// A workspace admin may edit another member's message (edit is author OR admin). The signed-in dev user is the workspace admin.
+test("opportunity conversation: a workspace admin can edit another member's message", async ({ page, base }) => {
+  const id = await seedOpportunity();
+  const conversationId = await seedConversation(id, "Member thread for admin edit");
+  const pool = new pg.Pool({ connectionString: isolatedE2EConnectionString() });
+  const memberEmail = `admin-edit-${conversationId.slice(0, 8)}@localhost.dev`;
+  try {
+    await pool.query(
+      `WITH member AS (INSERT INTO compass_dev.users (id,email,name) VALUES (gen_random_uuid(),$2,'Casey Member') RETURNING id),
+            ws AS (SELECT workspace_id FROM compass_dev.agent_conversations WHERE id=$1),
+            wm AS (INSERT INTO compass_dev.workspace_members (id,workspace_id,user_id,role,created_at) SELECT gen_random_uuid(), ws.workspace_id, member.id, 'MEMBER', NOW() FROM ws, member)
+       INSERT INTO compass_dev.agent_messages (id,conversation_id,role,content,author_user_id,author_name,author_type,message_kind,created_at)
+       SELECT gen_random_uuid(), $1, 'user', 'Member says ship it.', member.id, 'Casey Member', 'HUMAN', 'COMMENT', NOW() FROM member`,
+      [conversationId, memberEmail],
+    );
+  } finally {
+    await pool.end();
+  }
+  await page.goto(`${base}/discovery/${id}?detail=conversation:${conversationId}`);
+  const thread = conversationPanel(page);
+  await expect(thread.getByText("Member says ship it.", { exact: true })).toBeVisible({ timeout: 15_000 });
+  await thread.getByRole("button", { name: "Edit comment by Casey Member" }).click();
+  await thread.getByRole("textbox", { name: "Edit comment by Casey Member" }).fill("Admin corrected this.");
+  await thread.getByRole("button", { name: "Save edit", exact: true }).click();
+  await expect(thread.getByText("Admin corrected this.", { exact: true })).toBeVisible();
+  await expect(thread.getByText("Edited", { exact: true })).toBeVisible();
 });
 
 test("opportunity layout responds to available width without losing conversation drafts", async ({ page, base }) => {
