@@ -1,18 +1,28 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import "@testing-library/jest-dom/vitest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const closePanel = vi.fn();
+// Stable identities: the provider effects depend on these, and a fresh object per render would loop.
+const stable = vi.hoisted(() => ({
+  panelContext: null as unknown,
+  labels: {},
+  titles: {},
+}));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace: vi.fn(), push: vi.fn() }),
   usePathname: () => "/acme/main/okrs",
   useSearchParams: () => new URLSearchParams(),
 }));
 vi.mock("@/components/panels/panel-context", () => ({
-  usePanelContext: () => ({ panel: { type: "conversation", id: "c1" }, openPanel: vi.fn(), closePanel }),
+  usePanelContext: () => {
+    stable.panelContext ??= { panel: { type: "conversation", id: "c1" }, openPanel: () => undefined, closePanel };
+    return stable.panelContext;
+  },
 }));
-vi.mock("@/components/panels/panel-titles", () => ({ panelTitles: () => ({}) }));
-vi.mock("@/components/thinking-model/thinking-model-provider", () => ({ useLabels: () => ({}) }));
+vi.mock("@/components/panels/panel-titles", () => ({ panelTitles: () => stable.titles }));
+vi.mock("@/components/thinking-model/thinking-model-provider", () => ({ useLabels: () => stable.labels }));
 vi.mock("@/components/agent/agent-chat", () => ({
   AgentChat: (props: { initialMessages: { content: string }[]; initialStatus: string }) => (
     <div data-testid="agent-chat" data-status={props.initialStatus}>
