@@ -1,0 +1,81 @@
+/**
+ * Finds the conversation that holds a message or a comment id: the lookup behind old `?comment=<id>` links (TASK-195 S3).
+ *
+ * Ids line up for comment-origin threads (root comment id == conversation id == root message id; reply comment id ==
+ * message id), but a mirror can be missing (a swallowed dual-write), so a comment id is also accepted and the mirror is
+ * repaired on demand with `ensureConversationForComment`.
+ *
+ * Rules this module keeps:
+ *  - Reads go through `accessibleConversationsWhere`, the one answer to "may this user see this conversation". Archived
+ *    threads stay locatable (they stay readable by id for the people who could read them before).
+ *  - "No access" and "does not exist" are the same `null`, so a caller can never learn that something exists.
+ *  - Nothing is written for a caller who may not read the thread. A missing conversation is only repaired for a member of
+ *    the workspace (the repaired row is workspace-visible, exactly what the dual-write would have made); an existing one
+ *    is only touched after the read check passes.
+ *  - Locate never moves `updatedAt`. The repo's Prisma write extension sets `updatedAt = now` on any update that omits it,
+ *    so the repair paths are the S0 ones that state it explicitly: a whole-thread repair creates the conversation with
+ *    the thread's own time, and a one-message repair into an existing conversation (scope "comment") never lowers the
+ *    time or overwrites a newer summary. A plain hit writes nothing.
+ */
+
+import { accessibleConversationsWhere } from "@/lib/agent-conversation-access"
+import type { AppPrismaClient } from "@/lib/db"
+import { ensureConversationForComment } from "@/lib/conversation-mirror"
+
+export type LocatedConversation = {
+  conversationId: string
+  messageId: string
+  /** True when the message is the first one of its conversation (the root comment for a comment-origin thread). */
+  isRoot: boolean
+  targetType: string | null
+  targetId: string | null
+  status: string
+  archived: boolean
+}
+
+export async function locateConversationMessage(
+  prisma: AppPrismaClient,
+  { workspaceId, userId, messageId }: { workspaceId: string; userId: string; messageId: string },
+): Promise<LocatedConversation | null> {
+  const readable = (conversationId: string) =>
+    prisma.agentConversation.findFirst({
+      where: { id: conversationId, ...accessibleConversationsWhere(workspaceId, userId) },
+      select: { id: true, targetType: true, targetId: true, status: true, archivedAt: true },
+    })
+
+  const describe = async (conversationId: string, resolvedMessageId: string): Promise<LocatedConversation | null> => {
+    const conversation = await readable(conversationId)
+    if (!conversation) return null
+    const first = await prisma.agentMessage.findFirst({ where: { conversationId }, orderBy: [{ createdAt: "asc" }, { id: "asc" }], select: { id: true } })
+    return {
+      conversationId,
+      messageId: resolvedMessageId,
+      isRoot: resolvedMessageId === conversationId || first?.id === resolvedMessageId,
+      targetType: conversation.targetType,
+      targetId: conversation.targetId,
+      status: conversation.status ?? "OPEN",
+      archived: conversation.archivedAt != null,
+    }
+  }
+
+  const message = await prisma.agentMessage.findUnique({ where: { id: messageId }, select: { id: true, conversationId: true } })
+  if (message) return describe(message.conversationId, message.id)
+
+  const comment = await prisma.comment.findUnique({ where: { id: messageId }, select: { id: true, workspaceId: true, parentId: true } })
+  if (!comment || comment.workspaceId !== workspaceId) return null
+  const rootId = comment.parentId ?? comment.id
+
+  const existing = await prisma.agentConversation.findUnique({ where: { id: rootId }, select: { id: true } })
+  if (existing) {
+    // The conversation is there but this message is not: repair that one message, after the read check.
+    if (!(await readable(rootId))) return null
+    const repaired = await ensureConversationForComment(prisma, comment.id, { scope: "comment" })
+    return repaired ? describe(repaired.conversationId, repaired.messageId) : null
+  }
+
+  // No conversation at all: only a workspace member may cause one to be created, and the viewer does not become its owner.
+  const membership = await prisma.workspaceMember.findFirst({ where: { workspaceId, userId }, select: { userId: true } })
+  if (!membership) return null
+  const repaired = await ensureConversationForComment(prisma, comment.id)
+  return repaired ? describe(repaired.conversationId, repaired.messageId) : null
+}

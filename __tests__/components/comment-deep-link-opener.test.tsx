@@ -22,7 +22,8 @@ const located = { conversationId: CID, messageId: MID, isRoot: false, targetType
 
 let fetchMock: ReturnType<typeof vi.fn>
 function reply(status: number, body?: unknown) {
-  fetchMock.mockResolvedValue(status === 200 ? Response.json(body) : new Response("Not found", { status }))
+  // A fresh Response per call: the same one cannot be read twice (strict mode runs the lookup twice).
+  fetchMock.mockImplementation(async () => (status === 200 ? Response.json(body) : new Response("Not found", { status })))
 }
 const locateCalls = () => fetchMock.mock.calls.map(([url]) => String(url)).filter((url) => url.includes("/conversations/locate"))
 

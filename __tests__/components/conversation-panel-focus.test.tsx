@@ -15,7 +15,11 @@ vi.mock("next/navigation", () => ({
 vi.mock("@/components/panels/panel-context", () => ({
   usePanelContext: () => ({ panel: { type: "conversation", id: "c1" }, openPanel: vi.fn(), closePanel: vi.fn() }),
 }))
-vi.mock("@/components/thinking-model/thinking-model-provider", () => ({ useLabels: () => ({}) }))
+vi.mock("@/components/thinking-model/thinking-model-provider", () => {
+  const entity = { singular: "Item", lower: "item" }
+  const labels = { objective: entity, keyResult: entity, opportunity: entity, solution: entity }
+  return { useLabels: () => labels }
+})
 vi.mock("@/components/agent/agent-chat", () => ({
   AgentChat: (props: Record<string, unknown>) => {
     state.chatProps.push(props)

@@ -30,6 +30,8 @@ function props(over: Record<string, unknown> = {}) {
 }
 
 let scroll: ReturnType<typeof vi.fn>
+/** The transcript already scrolls its own end into view; only calls on a message row are the deep link's. */
+const scrolledRows = () => scroll.mock.contexts.filter((el) => el instanceof HTMLElement && el.getAttribute("data-testid") === "conversation-message") as HTMLElement[]
 beforeEach(() => {
   scroll = vi.fn()
   Element.prototype.scrollIntoView = scroll
@@ -47,8 +49,7 @@ describe("AgentChat focusMessageId", () => {
     expect(rows[1]).toHaveAttribute("data-comment-focused", "true")
     expect(rows[1]!.className).toMatch(/ring-2/)
     expect(rows[0]).not.toHaveAttribute("data-comment-focused")
-    expect(scroll).toHaveBeenCalledTimes(1)
-    expect(scroll.mock.contexts[0]).toBe(rows[1])
+    expect(scrolledRows()).toEqual([rows[1]])
   })
 
   it("announces the focus politely, once", async () => {
@@ -63,31 +64,31 @@ describe("AgentChat focusMessageId", () => {
     render(<AgentChat {...props({ focusMessageId: "someone-elses" })} />)
     const rows = await screen.findAllByTestId("conversation-message")
     expect(rows.some((row) => row.hasAttribute("data-comment-focused"))).toBe(false)
-    expect(scroll).not.toHaveBeenCalled()
+    expect(scrolledRows()).toEqual([])
     expect(screen.queryByText(/linked message/i)).toBeNull()
   })
 
   it("scrolls once messages arrive after the first render (slow /messages)", async () => {
     const view = render(<AgentChat {...props({ initialMessages: [], focusMessageId: "m-reply" })} />)
-    expect(scroll).not.toHaveBeenCalled()
+    expect(scrolledRows()).toEqual([])
     view.rerender(<AgentChat {...props({ focusMessageId: "m-reply" })} />)
     const rows = await screen.findAllByTestId("conversation-message")
     expect(within(rows[1]!).getByText("second")).toBeInTheDocument()
     expect(rows[1]).toHaveAttribute("data-comment-focused", "true")
-    expect(scroll).toHaveBeenCalledTimes(1)
+    expect(scrolledRows()).toEqual([rows[1]])
   })
 
   it("does not re-scroll on later renders (polling) for the same link", async () => {
     const view = render(<AgentChat {...props({ focusMessageId: "m-reply" })} />)
     await screen.findAllByTestId("conversation-message")
     view.rerender(<AgentChat {...props({ focusMessageId: "m-reply", initialMessages: [...MESSAGES] })} />)
-    expect(scroll).toHaveBeenCalledTimes(1)
+    expect(scrolledRows()).toHaveLength(1)
   })
 
   it("has no focused message without a link", async () => {
     render(<AgentChat {...props()} />)
     const rows = await screen.findAllByTestId("conversation-message")
     expect(rows.some((row) => row.hasAttribute("data-comment-focused"))).toBe(false)
-    expect(scroll).not.toHaveBeenCalled()
+    expect(scrolledRows()).toEqual([])
   })
 })
