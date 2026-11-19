@@ -246,7 +246,7 @@ describe("agent scope confirmation", () => {
     mocks.linkedTo.mockResolvedValue([{ linkedId: "c0", taskId: "t0" }, { linkedId: "c1", taskId: "t1" }])
     mocks.db.task.findMany.mockResolvedValue([{ assigneeAgentId: BOT }, { assigneeAgentId: BOT }])
     expect(await agentIdsAssignedOnTarget(WS, "ROADMAP_ITEM", TARGET)).toEqual([BOT])
-    expect(mocks.db.comment.findMany).toHaveBeenCalledWith({ where: { workspaceId: WS, targetType: "ROADMAP_ITEM", targetId: TARGET }, select: { id: true } })
+    expect(mocks.db.comment.findMany).toHaveBeenCalledWith({ where: { workspaceId: WS, targetType: "ROADMAP_ITEM", targetId: TARGET }, select: { id: true }, orderBy: { createdAt: "desc" }, take: 1000 })
     expect(mocks.linkedTo).toHaveBeenCalledWith(mocks.db, { workspaceId: WS, linkedType: "COMMENT", linkedIds: ["c0", "c1"] })
     expect(mocks.db.task.findMany.mock.calls[0][0].where).toMatchObject({ workspaceId: WS, id: { in: ["t0", "t1"] } })
   })
