@@ -59,6 +59,8 @@ describe("backfillUnifiedConversations", () => {
         upsert: conversationUpsert,
       },
       agentMessage: {
+        // The mirror reads which of these messages already exist (to leave editedAt alone when the text is unchanged).
+        findMany: vi.fn().mockResolvedValue([]),
         upsert: messageUpsert,
       },
     } as never
