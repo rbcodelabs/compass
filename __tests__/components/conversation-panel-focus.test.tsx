@@ -12,9 +12,11 @@ vi.mock("next/navigation", () => ({
   usePathname: () => "/acme/core/discovery/OPP-3",
   useSearchParams: () => new URLSearchParams(state.search),
 }))
-vi.mock("@/components/panels/panel-context", () => ({
-  usePanelContext: () => ({ panel: { type: "conversation", id: "c1" }, openPanel: vi.fn(), closePanel: vi.fn() }),
-}))
+// Stable references: the provider's effects depend on `panel`, so a new object per render would re-run them forever.
+vi.mock("@/components/panels/panel-context", () => {
+  const value = { panel: { type: "conversation", id: "5d2a7e14-3b9c-4f60-8a21-c7e9d0f4b312" }, openPanel: vi.fn(), closePanel: vi.fn() }
+  return { usePanelContext: () => value }
+})
 vi.mock("@/components/thinking-model/thinking-model-provider", () => {
   const entity = { singular: "Item", lower: "item" }
   const labels = { objective: entity, keyResult: entity, opportunity: entity, solution: entity }

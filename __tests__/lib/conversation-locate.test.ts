@@ -99,9 +99,10 @@ describe("locateConversationMessage: comment ids (the mirror may be missing)", (
     prisma.agentConversation.findFirst.mockResolvedValue(readable)
     expect(await locate()).toMatchObject({ conversationId: CONV, messageId: MSG })
     expect(mocks.ensure).toHaveBeenCalledTimes(1)
-    expect(mocks.ensure).toHaveBeenCalledWith(prisma, MSG, expect.not.objectContaining({ scope: "comment" }))
+    const options = (mocks.ensure.mock.calls[0]![2] ?? {}) as { scope?: string; fallbackUserId?: string }
+    expect(options.scope).not.toBe("comment")
     // The viewer must not become the owner of a conversation they did not start.
-    expect(mocks.ensure).toHaveBeenCalledWith(prisma, MSG, expect.not.objectContaining({ fallbackUserId: expect.anything() }))
+    expect(options.fallbackUserId).toBeUndefined()
   })
 
   it("is null when the repair finds the comment gone", async () => {
