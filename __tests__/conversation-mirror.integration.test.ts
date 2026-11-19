@@ -102,6 +102,33 @@ describe.skipIf(!databaseUrl)("conversation mirror (real PostgreSQL)", () => {
     expect(await prisma.agentConversation.count({ where: { id: thread.rootId } })).toBe(1)
   })
 
+  it("resolving and reopening a thread never marks the root message edited, but a real body edit does", async () => {
+    const thread = await makeThread({ replies: 1 })
+    await ensureConversationForComment(prisma, thread.rootId)
+    const editedAt = async () => (await prisma.agentMessage.findUniqueOrThrow({ where: { id: thread.rootId } })).editedAt
+    // What setCommentStatus does: the status changes and Comment.updatedAt moves, the text does not.
+    await prisma.comment.update({ where: { id: thread.rootId }, data: { status: "RESOLVED", updatedAt: at(40) } })
+    await ensureConversationForComment(prisma, thread.rootId)
+    expect(await editedAt()).toBeNull()
+    await prisma.comment.update({ where: { id: thread.rootId }, data: { status: "OPEN", updatedAt: at(41) } })
+    await ensureConversationForComment(prisma, thread.rootId)
+    expect(await editedAt()).toBeNull()
+    // A message that is re-created from a resolved root is unedited as well.
+    await prisma.comment.update({ where: { id: thread.rootId }, data: { status: "RESOLVED", updatedAt: at(42) } })
+    await prisma.agentMessage.delete({ where: { id: thread.rootId } })
+    await ensureConversationForComment(prisma, thread.rootId)
+    expect(await editedAt()).toBeNull()
+    // A real change of the text is still an edit, stamped with the comment's update time.
+    await prisma.comment.update({ where: { id: thread.rootId }, data: { body: "Reworded root", updatedAt: at(50) } })
+    await ensureConversationForComment(prisma, thread.rootId)
+    expect((await prisma.agentMessage.findUniqueOrThrow({ where: { id: thread.rootId } })).content).toBe("Reworded root")
+    expect((await editedAt())?.getTime()).toBe(at(50).getTime())
+    // The edit survives a later resolve.
+    await prisma.comment.update({ where: { id: thread.rootId }, data: { status: "OPEN", updatedAt: at(60) } })
+    await ensureConversationForComment(prisma, thread.rootId)
+    expect((await editedAt())?.getTime()).toBe(at(50).getTime())
+  })
+
   it("the create path writes only the new comment and never lowers updatedAt or overwrites a newer summary", async () => {
     const thread = await makeThread({ replies: 1 })
     await prisma.comment.delete({ where: { id: thread.replyIds[0]! } })

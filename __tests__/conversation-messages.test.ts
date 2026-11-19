@@ -71,9 +71,15 @@ describe("canEditMessage", () => {
     expect(canEditMessage(message(), ctx({ userId: "boss", isAdmin: true }))).toBe(true)
     expect(canEditMessage(message(), ctx({ userId: "other" }))).toBe(false)
   })
-  it("treats a message with no recorded author as the conversation owner's", () => {
-    expect(canEditMessage(message({ authorUserId: null }), ctx({ userId: "owner" }))).toBe(true)
-    expect(canEditMessage(message({ authorUserId: null }), ctx({ userId: "author" }))).toBe(false)
+  it("treats a message that predates sharing (no author, no kind) as the conversation owner's", () => {
+    expect(canEditMessage(message({ authorUserId: null, messageKind: null }), ctx({ userId: "owner" }))).toBe(true)
+    expect(canEditMessage(message({ authorUserId: null, messageKind: null }), ctx({ userId: "author" }))).toBe(false)
+  })
+  it("treats a mirror-origin comment with no recorded author as admin-only, never the arbitrary owner's", () => {
+    const orphan = message({ authorUserId: null, messageKind: "COMMENT" })
+    expect(canEditMessage(orphan, ctx({ userId: "owner" }))).toBe(false)
+    expect(canEditMessage(orphan, ctx({ userId: "author" }))).toBe(false)
+    expect(canEditMessage(orphan, ctx({ userId: "boss", isAdmin: true }))).toBe(true)
   })
   it.each([
     ["assistant role", { role: "assistant" }],
@@ -177,6 +183,51 @@ describe("an archived shared thread is read-only (TASK-195 S2)", () => {
     expect(mockPrisma.agentMessage.update).not.toHaveBeenCalled()
     mockPrisma.agentConversation.findFirst.mockResolvedValue(conversation({ archivedAt: null }))
     expect((await edit("author")).ok).toBe(true)
+  })
+})
+
+describe("editing a mirror-origin comment whose author is unknown", () => {
+  beforeEach(() => {
+    mockPrisma.agentMessage.findFirst.mockImplementation(async (args: { orderBy?: { createdAt: string } }) =>
+      args?.orderBy ? { id: MSG } : message({ authorUserId: null, messageKind: "COMMENT" }),
+    )
+  })
+  it("403s the conversation owner, who is only a placeholder for the missing author", async () => {
+    expect(await edit("owner")).toMatchObject({ ok: false, status: 403 })
+    expect(mockPrisma.agentMessage.update).not.toHaveBeenCalled()
+  })
+  it("lets a workspace admin edit it", async () => {
+    mockPrisma.workspace.findUnique.mockResolvedValue(wsAdmin)
+    expect((await edit("boss")).ok).toBe(true)
+  })
+})
+
+describe("archive-vs-edit race: the archived state is re-read inside the transaction", () => {
+  const archivedRow = () => ({ title: "Original words", summary: "Original words", updatedAt: CONV_UPDATED, archivedAt: new Date("2026-11-19T10:00:00.000Z"), visibility: "WORKSPACE" })
+
+  it("409s, and writes nothing, when the thread was archived after the first read but before the write", async () => {
+    mockPrisma.agentConversation.findUnique.mockResolvedValueOnce(archivedRow())
+    expect(await edit("author")).toMatchObject({ ok: false, status: 409 })
+    expect(mockPrisma.agentMessage.update).not.toHaveBeenCalled()
+    expect(mockPrisma.comment.update).not.toHaveBeenCalled()
+  })
+
+  it("409s when the archive lands mid-transaction: the conflicting write is retried and the re-read sees the archive", async () => {
+    mockPrisma.agentConversation.findUnique
+      .mockResolvedValueOnce({ title: "Original words", summary: "Original words", updatedAt: CONV_UPDATED, archivedAt: null, visibility: "WORKSPACE" })
+      .mockResolvedValueOnce(archivedRow())
+    mockPrisma.agentConversation.updateMany.mockRejectedValueOnce(Object.assign(new Error("OC000 conflict"), { code: "P2034" }))
+    expect(await edit("author")).toMatchObject({ ok: false, status: 409 })
+    expect(mockPrisma.$transaction).toHaveBeenCalledTimes(2)
+  })
+
+  it("always writes the conversation row inside the transaction, so a concurrent archive conflicts with the edit", async () => {
+    // A middle message: neither the title nor the summary changes, yet the row is still written (restating updatedAt).
+    mockPrisma.agentMessage.findFirst.mockImplementation(async (args: { orderBy?: { createdAt: string } }) => (args?.orderBy ? { id: "some-other-message" } : message()))
+    await edit("author", "Same opening")
+    expect(mockPrisma.agentConversation.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: CONV, updatedAt: CONV_UPDATED }, data: expect.objectContaining({ updatedAt: CONV_UPDATED }) }),
+    )
   })
 })
 

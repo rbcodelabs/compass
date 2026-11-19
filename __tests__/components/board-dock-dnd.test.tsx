@@ -115,9 +115,18 @@ describe("cardFirstCollisionDetection", () => {
     expect(cardFirstCollisionDetection(scene(280))[0].id).toBe("one");
   });
 
-  it("picks the closest of several overlapped cards", () => {
-    // Dragged rect spans One (360-460) and Two (470-570); its centre (y=470) is 50 from Two's centre and 60 from One's.
-    expect(cardFirstCollisionDetection(scene(420))[0].id).toBe("two");
+  it("picks the closest of several overlapped cards, never the dragged card itself", () => {
+    // Dragged rect (card Two) spans One (360-460) and its own slot (470-570); its centre (y=470) is closer to its own centre
+    // (50) than to One's (60), but the card being dragged is not a drop target for itself, so One answers.
+    expect(cardFirstCollisionDetection(scene(420))[0].id).toBe("one");
+  });
+
+  it("a cross-column drag whose rect still overlaps the dragged card's original slot answers the column it is heading for, not itself", () => {
+    // Rect x 250-510 overlaps Two's own slot (x 20-280) and reaches into the ACTIVE column (x 320+); it overlaps no other card.
+    // Before the fix the card's own slot was the only overlapped card, so the answer was always "two" and the drag could not leave.
+    const answer = cardFirstCollisionDetection(scene(470, 250));
+    expect(answer[0].id).toBe("column-ACTIVE");
+    expect(answer.map((hit) => hit.id)).not.toContain("two");
   });
 
   it("falls back to the nearest column when the dragged rect overlaps no card (empty column, gap below the cards)", () => {

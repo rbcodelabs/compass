@@ -75,8 +75,8 @@ describe("ConversationPanel not-available state", () => {
     responses.settings = { status: 404, body: null };
     mount();
     await waitFor(() => expect(notAvailable()).not.toBeNull());
-    const heading = screen.getByRole("heading", { name: "Not available" });
-    expect(heading).toHaveFocus();
+    // Focus is asserted as an eventual state: the panel swaps its content in a later commit than the one the first waitFor saw.
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Not available" })).toHaveFocus());
     expect(notAvailable()).toHaveAttribute("role", "status");
     expect(screen.queryByTestId("agent-chat")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Close panel" }));

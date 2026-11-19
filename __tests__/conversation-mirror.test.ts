@@ -38,6 +38,8 @@ type Extra = {
   interview?: string | null
   /** conversationId filter value other participants appear under. */
   onUpsert?: () => void
+  /** What the next conversation `findUnique` calls report, in order, regardless of the map: a read that went stale before the write. */
+  staleConversationReads?: Array<Row | null>
 }
 
 /** In-memory stand-in for the delegates the mirror touches. Filters on conversationId / id lists are honoured. */
@@ -62,13 +64,23 @@ function fakeDb(comments: Row[], extra: Extra = {}) {
         conversations.set(where.id, existing ? { ...existing, ...update } : { ...create })
         return conversations.get(where.id)
       }),
+      createMany: vi.fn(async ({ data }: { data: Row[]; skipDuplicates?: boolean }) => {
+        let count = 0
+        for (const row of data) if (!conversations.has(row.id as string)) { conversations.set(row.id as string, { ...row }); count++ }
+        return { count }
+      }),
       findUnique: vi.fn(async ({ where }: { where: { id: string } }) => {
+        if (extra.staleConversationReads?.length) {
+          const stale = extra.staleConversationReads.shift()!
+          return stale ? { ...stale, interviewProcessingJson: null } : null
+        }
         const found = conversations.get(where.id)
         return found ? { ...found, interviewProcessingJson: extra.interview ?? null } : null
       }),
-      updateMany: vi.fn(async ({ where, data }: { where: { id: string; resolvedAt?: null }; data: Row }) => {
+      updateMany: vi.fn(async ({ where, data }: { where: { id: string; resolvedAt?: null; updatedAt?: { lt?: Date } }; data: Row }) => {
         const found = conversations.get(where.id)
         if (!found) return { count: 0 }
+        if (where.updatedAt?.lt && !((found.updatedAt as Date) < where.updatedAt.lt)) return { count: 0 }
         if (where.resolvedAt === null && found.resolvedAt != null) return { count: 0 }
         conversations.set(where.id, { ...found, ...data })
         return { count: 1 }
@@ -353,5 +365,50 @@ describe("removeCommentMirror", () => {
     await expect(removeCommentMirrorAfterCommit({ conversationId: ROOT, commentIds: [REPLY], threadDeleted: false })).resolves.toBeUndefined()
     expect(error).toHaveBeenCalledWith(expect.stringContaining("conversation-mirror"), expect.any(Error))
     error.mockRestore()
+  })
+})
+
+describe("the one-message (comment scope) repair never clobbers a newer panel write", () => {
+  it("a conversation that appears between the read and the write keeps its newer updatedAt and summary", async () => {
+    const { db, conversations } = fakeDb([root(), reply()], { staleConversationReads: [null] })
+    conversations.set(ROOT, { id: ROOT, status: "OPEN", summary: "Newer agent answer", updatedAt: t2 })
+    await ensureConversationForComment(db as never, REPLY, { scope: "comment" })
+    expect(conversations.get(ROOT)).toMatchObject({ updatedAt: t2, summary: "Newer agent answer" })
+  })
+
+  it("an updatedAt that moved after the read is not lowered or overwritten by the summary update", async () => {
+    const { db, conversations } = fakeDb([root(), reply()], { staleConversationReads: [{ id: ROOT, updatedAt: t0, summary: "stale" }] })
+    conversations.set(ROOT, { id: ROOT, status: "OPEN", summary: "Newer agent answer", updatedAt: t2 })
+    await ensureConversationForComment(db as never, REPLY, { scope: "comment" })
+    expect(conversations.get(ROOT)).toMatchObject({ updatedAt: t2, summary: "Newer agent answer" })
+  })
+})
+
+describe("editedAt follows content, not updatedAt (resolve and reopen bump the root's updatedAt)", () => {
+  it("a resolved root is mirrored unedited, on create and on every repair", async () => {
+    const { db, messages } = fakeDb([root({ status: "RESOLVED", updatedAt: t2 }), reply()])
+    await ensureConversationForComment(db as never, ROOT)
+    expect(messages.get(ROOT)!.editedAt).toBeNull()
+    await ensureConversationForComment(db as never, ROOT)
+    expect(messages.get(ROOT)!.editedAt).toBeNull()
+  })
+
+  it("keeps an editedAt the message already carries when the content has not changed (a resolve bumps updatedAt only)", async () => {
+    const comments = [root(), reply()]
+    const { db, messages } = fakeDb(comments)
+    await ensureConversationForComment(db as never, ROOT)
+    messages.set(ROOT, { ...messages.get(ROOT)!, editedAt: t1 })
+    comments[0] = root({ status: "RESOLVED", updatedAt: t2 })
+    await ensureConversationForComment(db as never, ROOT)
+    expect(messages.get(ROOT)!.editedAt).toEqual(t1)
+  })
+
+  it("a real body change on a root marks the message edited with the comment's update time", async () => {
+    const comments = [root(), reply()]
+    const { db, messages } = fakeDb(comments)
+    await ensureConversationForComment(db as never, ROOT)
+    comments[0] = root({ body: "Changed text", updatedAt: t2 })
+    await ensureConversationForComment(db as never, ROOT)
+    expect(messages.get(ROOT)).toMatchObject({ content: "Changed text", editedAt: t2 })
   })
 })

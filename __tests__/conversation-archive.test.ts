@@ -239,3 +239,70 @@ describe("archiveCapabilities", () => {
     expect(await archiveCapabilities({ conversationId: CONV, workspaceId: WS, userId: "owner" })).toEqual({ archived: true, canArchive: false, canRestore: false })
   })
 })
+
+describe("archive and restore retry a transaction conflict (concurrent append + archive must not 500)", () => {
+  const conflict = () => Object.assign(new Error("OC000 conflict"), { code: "P2034" })
+  const failFirst = (times: number, error: () => Error) => {
+    let calls = 0
+    mockPrisma.$transaction.mockImplementation(async (fn: (tx: typeof mockPrisma) => unknown) => {
+      calls += 1
+      if (calls <= times) throw error()
+      return fn(mockPrisma)
+    })
+  }
+
+  it("retries a shared archive after a conflict and writes exactly one audit row", async () => {
+    failFirst(1, conflict)
+    expect(await run("starter")).toEqual({ ok: true, archived: true, changed: true })
+    expect(mockPrisma.$transaction).toHaveBeenCalledTimes(2)
+    expect(mockPrisma.agentAuditLog.create).toHaveBeenCalledTimes(1)
+  })
+
+  it("retries a private archive after a conflict too", async () => {
+    mockPrisma.agentConversation.findFirst.mockResolvedValue(conversation({ visibility: "PRIVATE" }))
+    failFirst(1, () => Object.assign(new Error("serialization failure"), { meta: { code: "40001" } }))
+    expect(await run("owner")).toEqual({ ok: true, archived: true, changed: true })
+    expect(mockPrisma.$transaction).toHaveBeenCalledTimes(2)
+  })
+
+  it("gives up after three attempts and surfaces the conflict", async () => {
+    failFirst(10, conflict)
+    await expect(run("starter")).rejects.toThrow("OC000")
+    expect(mockPrisma.$transaction).toHaveBeenCalledTimes(3)
+    expect(mockPrisma.agentAuditLog.create).not.toHaveBeenCalled()
+  })
+
+  it("does not retry an ordinary failure", async () => {
+    failFirst(10, () => new Error("boom"))
+    await expect(run("starter")).rejects.toThrow("boom")
+    expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("a comment-origin thread whose author is unknown has no starter (admin-only)", () => {
+  const unknownStarter = { authorUserId: null, messageKind: "COMMENT" }
+
+  it("the pure policy never matches a null author to a user", () => {
+    expect(canArchiveConversation({ rootAuthorId: null, userId: "owner", isAdmin: false })).toBe(false)
+    expect(canArchiveConversation({ rootAuthorId: null, userId: "admin", isAdmin: true })).toBe(true)
+  })
+
+  it("403s the conversation owner (an arbitrary member the mirror picked) and lets an admin through", async () => {
+    mockPrisma.agentMessage.findFirst.mockResolvedValue(unknownStarter)
+    expect(await run("owner")).toEqual({ ok: false, status: 403 })
+    mockPrisma.workspace.findUnique.mockResolvedValue(wsAdmin)
+    expect(await run("admin")).toMatchObject({ ok: true, changed: true })
+  })
+
+  it("offers the owner neither archive nor restore, and an admin both rights", async () => {
+    mockPrisma.agentMessage.findFirst.mockResolvedValue(unknownStarter)
+    expect(await archiveCapabilities({ conversationId: CONV, workspaceId: WS, userId: "owner" })).toEqual({ archived: false, canArchive: false, canRestore: false })
+    mockPrisma.workspace.findUnique.mockResolvedValue(wsAdmin)
+    expect(await archiveCapabilities({ conversationId: CONV, workspaceId: WS, userId: "admin" })).toEqual({ archived: false, canArchive: true, canRestore: false })
+  })
+
+  it("still treats an author-less message that predates sharing (no mirror kind) as the owner's", async () => {
+    mockPrisma.agentMessage.findFirst.mockResolvedValue({ authorUserId: null, messageKind: null })
+    expect(await run("owner")).toMatchObject({ ok: true })
+  })
+})

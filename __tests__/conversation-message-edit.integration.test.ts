@@ -189,5 +189,23 @@ describe.skipIf(!databaseUrl)("conversation message edit (real PostgreSQL)", () 
     expect((await edit(u.owner, thread.rootId, thread.rootId, "Asked, rephrased")).ok).toBe(true)
     expect(await counts()).toEqual(before)
   })
-})
 
+  it("a mirror-origin comment with no author is admin-only: the arbitrary owner the mirror picked cannot edit it and is not shown the edit control", async () => {
+    const rootId = randomUUID()
+    await prisma.comment.create({
+      data: { id: rootId, workspaceId, targetType: "OPPORTUNITY", targetId: opportunityId, parentId: null, body: "Words from a deleted user", authorId: null, authorName: "Former member", authorType: "HUMAN", source: "UI", status: "OPEN", createdAt: at(1200), updatedAt: at(1200) },
+    })
+    await ensureConversationForComment(prisma, rootId)
+    // The mirror had to pick some member as the conversation owner; it must not turn that member into the author.
+    const ownerId = (await prisma.agentConversation.findUniqueOrThrow({ where: { id: rootId } })).userId
+    expect((await prisma.agentMessage.findUniqueOrThrow({ where: { id: rootId } })).authorUserId).toBeNull()
+    const canEditAs = async (userId: string) => (await getAgentConversationMessages(rootId, workspaceId, userId))!.find((m) => m.id === rootId)!.canEdit
+
+    expect(await canEditAs(ownerId)).toBe(false)
+    expect(await edit(ownerId, rootId, rootId, "Hijacked")).toMatchObject({ ok: false, status: 403 })
+    expect((await prisma.agentMessage.findUniqueOrThrow({ where: { id: rootId } })).content).toBe("Words from a deleted user")
+
+    expect(await canEditAs(u.admin)).toBe(true)
+    expect((await edit(u.admin, rootId, rootId, "Moderated by an admin")).ok).toBe(true)
+  })
+})

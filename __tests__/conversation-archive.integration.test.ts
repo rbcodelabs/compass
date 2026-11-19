@@ -165,6 +165,23 @@ describe.skipIf(!databaseUrl)("conversation archive (real PostgreSQL)", () => {
     expect(await ids(u.stranger)).not.toContain(mine)
   })
 
+  it("a comment-origin thread whose author is unknown: nobody is its starter, so only an admin may archive, restore or list it for restore", async () => {
+    const id = randomUUID()
+    await prisma.agentConversation.create({
+      data: { id, workspaceId, userId: u.starter, title: "Orphan thread", visibility: "WORKSPACE", targetType: "TASK", targetId: taskId, createdAt: T0, updatedAt: T0 },
+    })
+    await prisma.agentMessage.create({ data: { id, conversationId: id, role: "user", content: "from a deleted user", authorUserId: null, authorType: "HUMAN", messageKind: "COMMENT", createdAt: T0 } })
+    // u.starter is only the placeholder owner the mirror picked.
+    expect(await set(id, u.starter, true)).toEqual({ ok: false, status: 403 })
+    expect(await set(id, u.member, true)).toEqual({ ok: false, status: 403 })
+    expect(await set(id, u.wsAdmin, true)).toMatchObject({ ok: true, changed: true })
+    const ids = (userId: string) => listRestorableArchivedConversations({ workspaceId, userId, targetType: "TASK", targetId: taskId, linkedIds: [] }).then(({ rows }) => rows.map((r) => r.id))
+    expect(await ids(u.starter)).not.toContain(id)
+    expect(await ids(u.wsAdmin)).toContain(id)
+    expect(await set(id, u.starter, false)).toEqual({ ok: false, status: 403 })
+    expect(await set(id, u.wsAdmin, false)).toMatchObject({ ok: true, changed: true })
+  })
+
   it("B1: a non-admin with an older own thread still finds it behind more than 50 newer archived threads by others", async () => {
     const target = (await prisma.task.create({ data: { workspaceId, title: "Busy anchor" } })).id
     const own = await makeArchived(u.starter, 1, target)

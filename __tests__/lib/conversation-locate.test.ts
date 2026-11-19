@@ -5,8 +5,9 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-const mocks = vi.hoisted(() => ({ ensure: vi.fn() }))
+const mocks = vi.hoisted(() => ({ ensure: vi.fn(), resolveTarget: vi.fn() }))
 vi.mock("@/lib/conversation-mirror", () => ({ ensureConversationForComment: mocks.ensure }))
+vi.mock("@/lib/comments", () => ({ COMMENT_TARGET_TYPES: ["OPPORTUNITY", "DOC", "TASK"], resolveCommentTarget: mocks.resolveTarget }))
 
 import { locateConversationMessage } from "@/lib/conversation-locate"
 import type { AppPrismaClient } from "@/lib/db"
@@ -33,6 +34,8 @@ beforeEach(() => {
   vi.resetAllMocks()
   prisma = fake()
   prisma.agentMessage.findFirst.mockResolvedValue({ id: CONV })
+  // The comment's target exists in this workspace unless a test says otherwise.
+  mocks.resolveTarget.mockResolvedValue({ workspaceId: WS })
 })
 
 describe("locateConversationMessage: message ids", () => {
@@ -78,13 +81,13 @@ describe("locateConversationMessage: comment ids (the mirror may be missing)", (
   })
 
   it("is null for a comment in another workspace, without repairing anything", async () => {
-    prisma.comment.findUnique.mockResolvedValue({ id: MSG, workspaceId: "other-ws", parentId: CONV })
+    prisma.comment.findUnique.mockResolvedValue({ id: MSG, workspaceId: "other-ws", parentId: CONV, targetType: "OPPORTUNITY", targetId: "opp-1" })
     expect(await locate()).toBeNull()
     expect(mocks.ensure).not.toHaveBeenCalled()
   })
 
   it("never repairs a mirror for someone who is not a member of the workspace", async () => {
-    prisma.comment.findUnique.mockResolvedValue({ id: MSG, workspaceId: WS, parentId: CONV })
+    prisma.comment.findUnique.mockResolvedValue({ id: MSG, workspaceId: WS, parentId: CONV, targetType: "OPPORTUNITY", targetId: "opp-1" })
     prisma.agentConversation.findUnique.mockResolvedValue(null)
     prisma.workspaceMember.findFirst.mockResolvedValue(null)
     expect(await locate()).toBeNull()
@@ -92,7 +95,7 @@ describe("locateConversationMessage: comment ids (the mirror may be missing)", (
   })
 
   it("repairs a missing conversation for a member (whole thread), then answers from the shared read predicate", async () => {
-    prisma.comment.findUnique.mockResolvedValue({ id: MSG, workspaceId: WS, parentId: CONV })
+    prisma.comment.findUnique.mockResolvedValue({ id: MSG, workspaceId: WS, parentId: CONV, targetType: "OPPORTUNITY", targetId: "opp-1" })
     prisma.agentConversation.findUnique.mockResolvedValue(null)
     prisma.workspaceMember.findFirst.mockResolvedValue({ userId: USER })
     mocks.ensure.mockResolvedValue({ conversationId: CONV, messageId: MSG })
@@ -106,7 +109,7 @@ describe("locateConversationMessage: comment ids (the mirror may be missing)", (
   })
 
   it("is null when the repair finds the comment gone", async () => {
-    prisma.comment.findUnique.mockResolvedValue({ id: MSG, workspaceId: WS, parentId: CONV })
+    prisma.comment.findUnique.mockResolvedValue({ id: MSG, workspaceId: WS, parentId: CONV, targetType: "OPPORTUNITY", targetId: "opp-1" })
     prisma.agentConversation.findUnique.mockResolvedValue(null)
     prisma.workspaceMember.findFirst.mockResolvedValue({ userId: USER })
     mocks.ensure.mockResolvedValue(null)
@@ -114,7 +117,7 @@ describe("locateConversationMessage: comment ids (the mirror may be missing)", (
   })
 
   it("repairs only the one message (comment scope, never lowering updatedAt) when the conversation exists and is readable", async () => {
-    prisma.comment.findUnique.mockResolvedValue({ id: MSG, workspaceId: WS, parentId: CONV })
+    prisma.comment.findUnique.mockResolvedValue({ id: MSG, workspaceId: WS, parentId: CONV, targetType: "OPPORTUNITY", targetId: "opp-1" })
     prisma.agentConversation.findUnique.mockResolvedValue({ id: CONV })
     prisma.agentConversation.findFirst.mockResolvedValue(readable)
     mocks.ensure.mockResolvedValue({ conversationId: CONV, messageId: MSG })
@@ -123,7 +126,7 @@ describe("locateConversationMessage: comment ids (the mirror may be missing)", (
   })
 
   it("writes nothing when the conversation exists but the caller cannot read it", async () => {
-    prisma.comment.findUnique.mockResolvedValue({ id: MSG, workspaceId: WS, parentId: CONV })
+    prisma.comment.findUnique.mockResolvedValue({ id: MSG, workspaceId: WS, parentId: CONV, targetType: "OPPORTUNITY", targetId: "opp-1" })
     prisma.agentConversation.findUnique.mockResolvedValue({ id: CONV })
     prisma.agentConversation.findFirst.mockResolvedValue(null)
     expect(await locate()).toBeNull()
@@ -131,11 +134,50 @@ describe("locateConversationMessage: comment ids (the mirror may be missing)", (
   })
 
   it("uses the comment's own id as the thread when it is a root", async () => {
-    prisma.comment.findUnique.mockResolvedValue({ id: MSG, workspaceId: WS, parentId: null })
+    prisma.comment.findUnique.mockResolvedValue({ id: MSG, workspaceId: WS, parentId: null, targetType: "OPPORTUNITY", targetId: "opp-1" })
     prisma.agentConversation.findUnique.mockResolvedValue({ id: MSG })
     prisma.agentConversation.findFirst.mockResolvedValue({ ...readable, id: MSG })
     mocks.ensure.mockResolvedValue({ conversationId: MSG, messageId: MSG })
     expect(await locate()).toMatchObject({ conversationId: MSG, messageId: MSG, isRoot: true })
     expect(prisma.agentConversation.findUnique).toHaveBeenCalledWith(expect.objectContaining({ where: { id: MSG } }))
+  })
+})
+
+describe("locateConversationMessage: a repair never surfaces a comment on a target the caller cannot read", () => {
+  const comment = { id: MSG, workspaceId: WS, parentId: CONV, targetType: "OPPORTUNITY", targetId: "opp-1" }
+  beforeEach(() => {
+    prisma.agentMessage.findUnique.mockResolvedValue(null)
+    prisma.comment.findUnique.mockResolvedValue(comment)
+    prisma.workspaceMember.findFirst.mockResolvedValue({ userId: USER })
+  })
+
+  it("is null, and creates nothing, when the target no longer resolves (the legacy comments route answers 404 there)", async () => {
+    prisma.agentConversation.findUnique.mockResolvedValue(null)
+    mocks.resolveTarget.mockResolvedValue(null)
+    expect(await locate()).toBeNull()
+    expect(mocks.ensure).not.toHaveBeenCalled()
+  })
+
+  it("is null when the target belongs to a different workspace than the one asked about", async () => {
+    prisma.agentConversation.findUnique.mockResolvedValue(null)
+    mocks.resolveTarget.mockResolvedValue({ workspaceId: "other-ws" })
+    expect(await locate()).toBeNull()
+    expect(mocks.ensure).not.toHaveBeenCalled()
+  })
+
+  it("is null for a comment whose target type is not one the comments API knows", async () => {
+    prisma.agentConversation.findUnique.mockResolvedValue(null)
+    prisma.comment.findUnique.mockResolvedValue({ ...comment, targetType: "SOMETHING_ELSE" })
+    expect(await locate()).toBeNull()
+    expect(mocks.resolveTarget).not.toHaveBeenCalled()
+    expect(mocks.ensure).not.toHaveBeenCalled()
+  })
+
+  it("applies the same check before repairing one message into an existing readable conversation", async () => {
+    prisma.agentConversation.findUnique.mockResolvedValue({ id: CONV })
+    prisma.agentConversation.findFirst.mockResolvedValue(readable)
+    mocks.resolveTarget.mockResolvedValue(null)
+    expect(await locate()).toBeNull()
+    expect(mocks.ensure).not.toHaveBeenCalled()
   })
 })

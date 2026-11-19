@@ -226,8 +226,46 @@ describe.skipIf(!databaseUrl)("comment-origin deep link locate (real PostgreSQL)
   })
 
   it("a document comment is located like any other (the client leaves it to the Docs sidebar)", async () => {
-    const docId = randomUUID()
+    const docId = (await prisma.doc.create({ data: { workspaceId, title: "Locate doc", content: "" } })).id
     const thread = await makeCommentThread({ targetType: "DOC", targetId: docId })
     expect(await locate(thread.rootId)).toMatchObject({ conversationId: thread.rootId, targetType: "DOC", targetId: docId })
+  })
+
+  describe("the GET repair is bounded and never reaches a comment the caller could not read through the comments API", () => {
+    it("a comment on a target that does not exist is not repaired, created or revealed (the comments route answers 404 there)", async () => {
+      const orphan = await makeCommentThread({ targetId: randomUUID() })
+      const before = await conversationCount()
+      expect(await locate(orphan.rootId)).toBeNull()
+      expect(await locate(orphan.replyIds[0]!)).toBeNull()
+      expect(await conversationCount()).toBe(before)
+      expect(await conversation(orphan.rootId)).toBeNull()
+      expect(await messageIds(orphan.rootId)).toEqual([])
+    })
+
+    it("a comment whose target lives in another workspace is not repaired for a member of this one", async () => {
+      const otherOpportunity = (await prisma.opportunity.create({ data: { workspaceId: otherWorkspaceId, title: "Elsewhere" } })).id
+      const crossed = await makeCommentThread({ targetId: otherOpportunity })
+      expect(await locate(crossed.rootId)).toBeNull()
+      expect(await conversation(crossed.rootId)).toBeNull()
+    })
+
+    it("a comment on a review-request target that does not resolve is not repaired", async () => {
+      const crossed = await makeCommentThread({ targetType: "REVIEW_REQUEST", targetId: randomUUID() })
+      expect(await locate(crossed.rootId)).toBeNull()
+      expect(await conversation(crossed.rootId)).toBeNull()
+    })
+
+    it("a huge thread is repaired up to a cap, always including the requested message", async () => {
+      const thread = await makeCommentThread({ replies: 130 })
+      const first = await locate(thread.replyIds[0]!)
+      expect(first).toMatchObject({ conversationId: thread.rootId, messageId: thread.replyIds[0] })
+      const count = (await messageIds(thread.rootId)).length
+      expect(count).toBeLessThanOrEqual(1 + 100)
+      expect(count).toBeGreaterThan(50)
+      // Asking for a reply that sits beyond the cap still finds it (the repair adds that one message).
+      const last = thread.replyIds[129]!
+      expect(await locate(last)).toMatchObject({ conversationId: thread.rootId, messageId: last })
+      expect(await messageIds(thread.rootId)).toContain(last)
+    })
   })
 })
