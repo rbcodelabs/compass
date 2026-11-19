@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 vi.unmock("@/lib/feature-tables")
 
-import { customFieldInheritanceTableExists, resetFeatureTablesCache } from "@/lib/feature-tables"
+import { customFieldInheritanceTableExists, readIfInheritanceTableExists, resetFeatureTablesCache } from "@/lib/feature-tables"
 
 const prisma = { customFieldInheritanceRule: { findFirst: vi.fn() } }
 const probe = () => customFieldInheritanceTableExists(prisma as never)
