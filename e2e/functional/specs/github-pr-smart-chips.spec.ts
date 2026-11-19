@@ -117,7 +117,10 @@ test.describe("GitHub PR smart chips", () => {
       await expect(customChip).toHaveText("Custom PR label");
 
       // 3. Collapse the selection after `Custom PR label` with ArrowRight, then paste an unapproved PR URL on a third line.
+      // DIAG(TASK-198): what owns focus and what is selected at the instant ArrowRight is pressed
+      console.log("DIAG-198 before ArrowRight " + JSON.stringify(await page.evaluate(() => ({ active: document.activeElement?.tagName + "." + (document.activeElement?.className ?? "").toString().slice(0, 40), sel: window.getSelection()?.toString() }))));
       await page.keyboard.press("ArrowRight");
+      console.log("DIAG-198 after ArrowRight " + JSON.stringify(await page.evaluate(() => ({ active: document.activeElement?.tagName, sel: window.getSelection()?.toString() }))));
       await page.keyboard.press("Enter");
       await page.keyboard.type("Unapproved: ");
       await pastePlainText(page, ".ProseMirror", UNAPPROVED_PR_URL);
