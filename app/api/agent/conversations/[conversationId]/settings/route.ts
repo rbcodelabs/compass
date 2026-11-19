@@ -2,6 +2,7 @@ import { NextRequest } from "next/server"
 import { auth } from "@/auth"
 import getPrisma, { type AppPrismaClient } from "@/lib/db"
 import { resolveConversationAccess } from "@/lib/agent-conversation-access"
+import { canArchiveSharedConversation } from "@/lib/conversation-archive"
 import {
   defaultAgentModeForVisibility,
   isAgentParticipationMode,
@@ -121,7 +122,11 @@ export async function GET(request: NextRequest, { params }: Params) {
       defaultAgentModeForVisibility(visibility, Boolean(row.targetType && row.targetId)),
     )
     const targetLabel = await resolveTargetLabel(prisma, workspaceId, row.targetType ?? null, row.targetId ?? null)
+    // Server-computed (starter, workspace admin or org admin of a shared conversation); archive and restore share the rule.
+    const canArchive = await canArchiveSharedConversation({ conversationId, workspaceId, userId: session.user.id }).catch(() => false)
     return Response.json({
+      canArchive,
+      canRestore: canArchive,
       id: row.id,
       title: row.title,
       visibility,

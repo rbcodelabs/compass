@@ -1,13 +1,14 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { AtSign, Bot, CheckCircle2, MessageSquare, Plus, Send } from "lucide-react"
+import { Archive, AtSign, Bot, CheckCircle2, MessageSquare, Plus, Send } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { MentionEditor, type MentionOptions } from "@/components/docs/mention-editor"
 import { useConversationPanelOptional } from "@/components/panels/conversation-panel"
 import type { ObjectConversationSummary } from "@/app/api/agent/conversations/by-target/route"
 import { formatRelativeTime } from "@/lib/agent-board"
 import { plainTextOf, serializeMention } from "@/lib/comment-mentions"
+import { CONVERSATION_ARCHIVE_CHANGED_EVENT, type ConversationArchiveChange } from "@/components/conversations/archive-events"
 import { removeObjectConversationLink } from "@/app/[orgSlug]/[workspaceSlug]/links/conversation-actions"
 
 const BUILTIN_COMPASS_AGENT_ID = "00000000-0000-4000-8000-000000000001"
@@ -90,6 +91,11 @@ function ObjectConversationsContent({
   const [confirmLink, setConfirmLink] = useState<string | null>(null)
   const [removing, setRemoving] = useState<string[]>([])
   const [removeErrors, setRemoveErrors] = useState<Record<string, string>>({})
+  // Archive is the only way a conversation leaves the list, and it is reversible: "Show archived" swaps the list for the
+  // archived threads this person may restore (the server decides; nothing else is ever returned).
+  const [showArchived, setShowArchived] = useState(false)
+  const [restoring, setRestoring] = useState<string[]>([])
+  const [restoreErrors, setRestoreErrors] = useState<Record<string, string>>({})
   const mounted = useRef(false)
   const lifetime = useRef(0)
   const loadGeneration = useRef(0)
@@ -118,6 +124,7 @@ function ObjectConversationsContent({
         workspaceId,
         targetType: normalizedTargetType,
         targetId,
+        ...(showArchived ? { archived: "1" } : {}),
       })
       const res = await fetch(`/api/agent/conversations/by-target?${qs.toString()}`)
       if (!res.ok) throw new Error("List request failed")
@@ -136,12 +143,56 @@ function ObjectConversationsContent({
     } finally {
       if (current()) setLoading(false)
     }
-  }, [workspaceId, normalizedTargetType, targetId])
+  }, [workspaceId, normalizedTargetType, targetId, showArchived])
 
   useEffect(() => {
     setLoading(true)
     void load()
   }, [load])
+
+  // A conversation archived from the panel: drop its row at once (a refresh that started earlier must not bring it
+  // back), say so, and put focus where the row was, on the section heading.
+  useEffect(() => {
+    const onChange = (event: Event) => {
+      const { conversationId, archived } = (event as CustomEvent<ConversationArchiveChange>).detail
+      if (archived && !showArchived) {
+        loadGeneration.current++
+        setLoading(false)
+        setItems((previous) => previous.filter((row) => row.id !== conversationId))
+        setStatus("Conversation archived.")
+        headingRef.current?.focus()
+      }
+      void load()
+    }
+    window.addEventListener(CONVERSATION_ARCHIVE_CHANGED_EVENT, onChange)
+    return () => window.removeEventListener(CONVERSATION_ARCHIVE_CHANGED_EVENT, onChange)
+  }, [load, showArchived])
+
+  async function restoreConversation(item: ObjectConversationSummary) {
+    if (!workspaceId || restoring.includes(item.id)) return
+    const generation = lifetime.current
+    const current = () => mounted.current && lifetime.current === generation
+    setRestoring((previous) => [...previous, item.id])
+    setRestoreErrors((previous) => { const next = { ...previous }; delete next[item.id]; return next })
+    try {
+      const res = await fetch(`/api/agent/conversations/${item.id}?workspaceId=${encodeURIComponent(workspaceId)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ archived: false }),
+      })
+      if (!current()) return
+      if (!res.ok) throw new Error("restore failed")
+      loadGeneration.current++
+      setLoading(false)
+      setItems((previous) => previous.filter((row) => row.id !== item.id))
+      setStatus("Conversation restored.")
+      headingRef.current?.focus()
+    } catch {
+      if (current()) setRestoreErrors((previous) => ({ ...previous, [item.id]: "We couldn’t restore this conversation. Please try again." }))
+    } finally {
+      if (current()) setRestoring((previous) => previous.filter((id) => id !== item.id))
+    }
+  }
 
   const submitQuickStart = useCallback(async () => {
     const text = draft
@@ -277,26 +328,45 @@ function ObjectConversationsContent({
             </span>
           )}
         </div>
-        {panelCtx && (
+        <div className="flex items-center gap-1.5">
           <Button
             type="button"
-            variant="outline"
+            variant={showArchived ? "secondary" : "ghost"}
             size="xs"
             className="gap-1"
-            onClick={() =>
-              panelCtx.startNewConversationInPanel({
-                targetType: normalizedTargetType,
-                targetId,
-                targetLabel: targetLabel ?? null,
-                visibility: "WORKSPACE",
-                agentMode: "MENTION_ONLY",
-              })
-            }
+            aria-pressed={showArchived}
+            onClick={() => {
+              loadGeneration.current++
+              setItems([])
+              setLoadError(null)
+              setStatus("")
+              setShowArchived((value) => !value)
+            }}
           >
-            <Plus className="size-3" aria-hidden="true" />
-            New conversation
+            <Archive className="size-3" aria-hidden="true" />
+            Show archived
           </Button>
-        )}
+          {panelCtx && (
+            <Button
+              type="button"
+              variant="outline"
+              size="xs"
+              className="gap-1"
+              onClick={() =>
+                panelCtx.startNewConversationInPanel({
+                  targetType: normalizedTargetType,
+                  targetId,
+                  targetLabel: targetLabel ?? null,
+                  visibility: "WORKSPACE",
+                  agentMode: "MENTION_ONLY",
+                })
+              }
+            >
+              <Plus className="size-3" aria-hidden="true" />
+              New conversation
+            </Button>
+          )}
+        </div>
       </div>
 
       {loadError && <div role="alert" className="flex flex-wrap items-center gap-2 rounded-lg border border-status-danger/30 bg-status-danger-surface p-3 text-sm text-status-danger">
@@ -306,10 +376,14 @@ function ObjectConversationsContent({
       {loading && items.length === 0 ? (
         <p className="text-xs text-text-subtle">Loading conversations…</p>
       ) : items.length === 0 && !loadError ? (
+        showArchived ? (
+          <p className="text-xs text-text-subtle">No archived conversations that you can restore.</p>
+        ) : (
         <p className="text-xs text-text-subtle">
           No conversations on this item yet. Start a thread with teammates or mention{" "}
           <span className="font-medium text-text-secondary">@Compass Agent</span> to pull in AI.
         </p>
+        )
       ) : (
         <ul className="flex flex-col gap-2">
           {items.map((item) => (
@@ -368,6 +442,15 @@ function ObjectConversationsContent({
                   <p className="truncate pl-5 text-xs text-text-subtle">{item.summary}</p>
                 )}
               </button>
+              {item.canRestore && (
+                <div className="flex flex-wrap items-center gap-2 pt-1 text-xs text-text-subtle">
+                  <span>Archived</span>
+                  <Button type="button" variant="outline" size="xs" disabled={restoring.includes(item.id)} onClick={() => void restoreConversation(item)}>
+                    Restore
+                  </Button>
+                  {restoreErrors[item.id] && <p role="alert" className="basis-full text-status-danger">{restoreErrors[item.id]}</p>}
+                </div>
+              )}
               <div className="flex flex-wrap items-center gap-2 pt-1 text-xs text-text-subtle">
                 {item.anchored && <span>On this item</span>}
                 {item.links?.map(link => <div key={link.linkId} className="flex flex-wrap items-center gap-2">

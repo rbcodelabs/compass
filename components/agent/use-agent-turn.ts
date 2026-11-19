@@ -80,6 +80,11 @@ type Options = {
   onConversationCreated?: (conversationId: string, info: { detached: boolean }) => void
   /** A turn finished and its reply is ready. Not called for turns that errored or were abandoned. */
   onSettled?: (settlement: TurnSettlement) => void
+  /**
+   * The server answered 404 to a turn aimed at an existing conversation: it was archived, or the sender lost access.
+   * Both look identical on purpose. The caller shows its "no longer available" state; no error banner is raised.
+   */
+  onConversationUnavailable?: () => void
 }
 
 /**
@@ -94,7 +99,7 @@ export function readTurnErrorMessage(body: string): string {
   return body
 }
 
-export function useAgentTurn({ workspaceId, onConversationCreated, onSettled }: Options) {
+export function useAgentTurn({ workspaceId, onConversationCreated, onSettled, onConversationUnavailable }: Options) {
   const [phase, setPhase] = useState<StreamPhase>("idle")
   const [streamingText, setStreamingText] = useState("")
   const [liveToolSteps, setLiveToolSteps] = useState<ToolStep[]>([])
@@ -131,9 +136,11 @@ export function useAgentTurn({ workspaceId, onConversationCreated, onSettled }: 
   // precisely because churn there is how you get a double dispatch).
   const onConversationCreatedRef = useRef(onConversationCreated)
   const onSettledRef = useRef(onSettled)
+  const onUnavailableRef = useRef(onConversationUnavailable)
   useEffect(() => {
     onConversationCreatedRef.current = onConversationCreated
     onSettledRef.current = onSettled
+    onUnavailableRef.current = onConversationUnavailable
   }, [onConversationCreated, onSettled])
 
   // Unmount only. A genuine thread switch calls `reset()` instead, which is the
@@ -371,6 +378,7 @@ export function useAgentTurn({ workspaceId, onConversationCreated, onSettled }: 
     let turn: AgentTurnState = emptyAgentTurnState
     let assembled = ""
     let newConversationId: string | null = null
+    let conversationUnavailable = false
     try {
       const res = await fetch("/api/agent/turn", {
         method: "POST",
@@ -395,6 +403,10 @@ export function useAgentTurn({ workspaceId, onConversationCreated, onSettled }: 
         }),
       })
       if (controller.signal.aborted) return true
+      if (res.status === 404 && params.conversationId) {
+        conversationUnavailable = true
+        throw new Error("Conversation not found or access denied.")
+      }
       if (!res.ok || !res.body) {
         const serverMsg = readTurnErrorMessage(await res.text().catch(() => ""))
         throw new Error(
@@ -495,6 +507,11 @@ export function useAgentTurn({ workspaceId, onConversationCreated, onSettled }: 
       onSettledRef.current?.({ assistant, detached: false })
     } catch (err) {
       if (controller.signal.aborted) return true
+      if (conversationUnavailable) {
+        clearLive()
+        onUnavailableRef.current?.()
+        return true
+      }
       setError(err instanceof Error ? err.message : "Something went wrong.")
       clearLive()
     } finally {

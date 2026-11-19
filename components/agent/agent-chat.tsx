@@ -25,6 +25,10 @@ import Link from "next/link"
 import { Archive, ArchiveRestore, CheckCircle2, Clock, FileText, GitPullRequest, Loader2, RotateCcw, Search, Sparkles, X as XIcon } from "lucide-react"
 import { fetchArchivedConversations, setConversationArchived, type ArchivedConversation } from "@/lib/agent-archive-client"
 import { Button } from "@/components/ui/button"
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
+import { announceConversationArchiveChange } from "@/components/conversations/archive-events"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { APPROVAL_UPDATE_PREFIX, isApprovalUpdateMessage } from "@/lib/tool-approval/messages"
@@ -105,12 +109,20 @@ type Message = {
   messageKind?: string | null
   /** Computed by the server for the signed-in user (author or workspace admin). Never inferred here. */
   canEdit?: boolean
+  /** Always false: there is no per-message removal (TASK-195 S2). The whole thread is archived instead. */
   canDelete?: boolean
 }
 type ConversationSummary = AgentListConversation
 type SeedEntity = { entityType: string; entityId: string; label: string; summary: string; sourceUrl: string }
 
 type Props = {
+  /**
+   * Server-computed (thread starter, workspace admin or org admin of a shared conversation): offer "Archive conversation"
+   * in the header. Never inferred from the user id on the client.
+   */
+  canArchive?: boolean
+  /** The conversation was archived from this header; the host leaves it (the panel goes back one crumb). */
+  onConversationArchived?: () => void
   workspaceId: string
   basePath: string // `/${orgSlug}/${workspaceSlug}`
   conversations: ConversationSummary[]
@@ -220,6 +232,8 @@ const isLocalMessageId = (id: string) => /^(local|run|a)-/.test(id)
 const SHARED_POLL_MS = 4_000
 
 export function AgentChat({
+  canArchive = false,
+  onConversationArchived,
   workspaceId,
   basePath,
   conversations,
@@ -366,6 +380,33 @@ export function AgentChat({
     }
   }, [activeConversationId, threadStatus, workspaceId])
 
+  // Archive the whole thread (there is no per-message delete). Reversible: it is restored from the section's Archived view.
+  const [archiveOpen, setArchiveOpen] = useState(false)
+  const [archiving, setArchiving] = useState(false)
+  const [archiveFailed, setArchiveFailed] = useState(false)
+  const onConversationArchivedRef = useRef(onConversationArchived)
+  useEffect(() => { onConversationArchivedRef.current = onConversationArchived }, [onConversationArchived])
+  const handleArchiveConversation = useCallback(async () => {
+    if (!activeConversationId || archiving) return
+    setArchiving(true)
+    setArchiveFailed(false)
+    try {
+      const res = await fetch(`/api/agent/conversations/${activeConversationId}?workspaceId=${encodeURIComponent(workspaceId)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ archived: true }),
+      })
+      if (!res.ok) { setArchiveFailed(true); return }
+      setArchiveOpen(false)
+      announceConversationArchiveChange({ conversationId: activeConversationId, archived: true })
+      onConversationArchivedRef.current?.()
+    } catch {
+      setArchiveFailed(true)
+    } finally {
+      setArchiving(false)
+    }
+  }, [activeConversationId, archiving, workspaceId])
+
   const [listQuery, setListQuery] = useState("")
   const [listGroupBy, setListGroupBy] = useState<BoardGroupBy>("status")
   // Archive: the page list shows active chats; "Archived" swaps it for the archived ones.
@@ -443,6 +484,9 @@ export function AgentChat({
   const modelPick = useModelPick({ userId, workspaceId, choices: agentChoices, agentSelection })
   const turn = useAgentTurn({
     workspaceId,
+    // Archived (or access lost) while this tab was open: the next send answers 404. Show the same state a removed
+    // participant sees, not an error banner.
+    onConversationUnavailable: () => setAccessLost("removed"),
     onConversationCreated: (createdId) => {
       selfCreated.current.add(createdId)
       onConversationCreatedRef.current?.(createdId)
@@ -1411,28 +1455,61 @@ export function AgentChat({
               )}
             </div>
             {activeConversationId && (
-              <Button
-                type="button"
-                variant="ghost"
-                size="xs"
-                onClick={handleToggleThreadStatus}
-                className="h-6 gap-1 px-2 text-xs text-text-secondary hover:text-text-primary"
-              >
-                {threadStatus === "RESOLVED" ? (
-                  <>
-                    <RotateCcw className="size-3" aria-hidden="true" />
-                    Reopen
-                  </>
-                ) : (
-                  <>
-                    <CheckCircle2 className="size-3" aria-hidden="true" />
-                    Resolve
-                  </>
+              <div className="flex items-center gap-1">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="xs"
+                  onClick={handleToggleThreadStatus}
+                  className="h-6 gap-1 px-2 text-xs text-text-secondary hover:text-text-primary"
+                >
+                  {threadStatus === "RESOLVED" ? (
+                    <>
+                      <RotateCcw className="size-3" aria-hidden="true" />
+                      Reopen
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 className="size-3" aria-hidden="true" />
+                      Resolve
+                    </>
+                  )}
+                </Button>
+                {canArchive && shared && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="xs"
+                    onClick={() => { setArchiveFailed(false); setArchiveOpen(true) }}
+                    className="h-6 gap-1 px-2 text-xs text-text-secondary hover:text-text-primary"
+                  >
+                    <Archive className="size-3" aria-hidden="true" />
+                    Archive conversation
+                  </Button>
                 )}
-              </Button>
+              </div>
             )}
           </div>
         )}
+        <AlertDialog open={archiveOpen} onOpenChange={(open) => { if (!archiving) setArchiveOpen(open) }}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Archive this conversation?</AlertDialogTitle>
+              <AlertDialogDescription>
+                It leaves the list for everyone and takes no new replies while archived. Every message is kept, and you can restore it from Archived.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            {archiveFailed && (
+              <p role="alert" className="text-sm text-status-danger">We couldn’t archive this conversation. Please try again.</p>
+            )}
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={archiving}>Cancel</AlertDialogCancel>
+              <AlertDialogAction type="button" disabled={archiving} onClick={() => void handleArchiveConversation()}>
+                {archiving ? "Archiving…" : "Archive"}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
         {activeConversationId && !accessLost && (
           <AgentParticipantsPanel
             conversationId={activeConversationId}

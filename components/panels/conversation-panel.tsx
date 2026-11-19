@@ -21,6 +21,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { usePanelContext, type PanelType } from "@/components/panels/panel-context"
+import { leaveArchivedConversation } from "@/components/panels/leave-archived-conversation"
 import { isComposerPanelType } from "@/components/panels/composer-panel-types"
 import { panelTitles } from "@/components/panels/panel-titles"
 import { useLabels } from "@/components/thinking-model/thinking-model-provider"
@@ -465,7 +466,7 @@ function targetTypeToPanelType(targetType: string): PanelType | null {
 
 export function ConversationPanel({ conversationId }: { conversationId: string }) {
   const ctx = useConversationPanelOptional()
-  const { openPanel } = usePanelContext()
+  const { openPanel, closePanel } = usePanelContext()
   const isNew = conversationId === "new"
   const activeConversationId = isNew ? null : conversationId
 
@@ -482,6 +483,7 @@ export function ConversationPanel({ conversationId }: { conversationId: string }
     targetType: string | null
     targetId: string | null
     targetLabel: string | null
+    canArchive: boolean
   } | null>(null)
 
   useEffect(() => {
@@ -524,6 +526,7 @@ export function ConversationPanel({ conversationId }: { conversationId: string }
             targetType?: string | null
             targetId?: string | null
             targetLabel?: string | null
+            canArchive?: boolean
           }
           setSettingsState({
             id: conversationId,
@@ -533,6 +536,7 @@ export function ConversationPanel({ conversationId }: { conversationId: string }
             targetType: body.targetType ?? null,
             targetId: body.targetId ?? null,
             targetLabel: body.targetLabel ?? null,
+            canArchive: body.canArchive === true,
           })
         })
         .catch(() => {}),
@@ -578,6 +582,10 @@ export function ConversationPanel({ conversationId }: { conversationId: string }
       initialTargetType={initialTargetType}
       initialTargetId={initialTargetId}
       initialTargetLabel={initialTargetLabel}
+      canArchive={currentSettings?.canArchive === true}
+      onConversationArchived={() =>
+        leaveArchivedConversation({ historyStack: ctx.historyStack, jumpToCrumb: ctx.jumpToCrumb, closePanel })
+      }
       onConversationCreated={(createdId) => {
         ctx.adoptCreatedConversationId(createdId)
       }}
