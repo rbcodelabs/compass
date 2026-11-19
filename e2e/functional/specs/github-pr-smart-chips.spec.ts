@@ -115,47 +115,23 @@ test.describe("GitHub PR smart chips", () => {
       const customChip = editor.locator('a[data-github-pr-link="ready"]').filter({ hasText: "Custom PR label" });
       await expect(customChip).toBeVisible({ timeout: 10_000 });
       await expect(customChip).toHaveText("Custom PR label");
+      // Applying the link starts an autosave and the editor host re-renders as it settles; ProseMirror re-asserts its own selection onto the
+      // DOM whenever the view updates, which would undo a native caret move made in that window (observed: DOM collapsed, ProseMirror
+      // still on the old range). Let the save settle before touching the selection.
+      await expect(page.getByTestId("doc-save-status")).toHaveAttribute("data-state", "saved", { timeout: 15_000 });
 
       // 3. Collapse the selection after `Custom PR label` with ArrowRight, then paste an unapproved PR URL on a third line.
-      // DIAG(TASK-198): what owns focus and what is selected at the instant ArrowRight is pressed
-      console.log("DIAG-198 before ArrowRight " + JSON.stringify(await page.evaluate(() => ({ active: document.activeElement?.tagName + "." + (document.activeElement?.className ?? "").toString().slice(0, 40), sel: window.getSelection()?.toString() }))));
-      await page.evaluate(() => {
-        const ed = (document.querySelector(".ProseMirror") as unknown as { editor: { on: (n: string, f: (a: { transaction: { docChanged: boolean; steps: { toJSON: () => unknown }[]; meta: Record<string, unknown> } }) => void) => void } }).editor;
-        (window as unknown as { __tx: unknown[] }).__tx = [];
-        ed.on("transaction", ({ transaction }) => {
-          if (!transaction.docChanged) return;
-          (window as unknown as { __tx: unknown[] }).__tx.push({ t: Math.round(performance.now()), metaKeys: Object.keys(transaction.meta ?? {}), steps: transaction.steps.map((st) => JSON.stringify(st.toJSON()).slice(0, 300)), stack: (new Error().stack ?? "").split("\n").slice(2, 9).map((l) => l.trim().slice(0, 110)) });
-        });
-      });
       await page.keyboard.press("ArrowRight");
-      const readSel = await (async () => {
-        const read = () => page.evaluate(() => {
-          const ed = (document.querySelector(".ProseMirror") as unknown as { editor: { state: { selection: { from: number; to: number } } } }).editor;
-          const sel = window.getSelection();
-          const node = sel?.anchorNode ?? null;
-          const describe = (n: Node | null) => (n ? (n.nodeType === 3 ? "#text(" + (n.textContent ?? "").slice(0, 20) + ")<" + (n.parentElement?.tagName ?? "") + "." + (n.parentElement?.className ?? "").toString().slice(0, 25) : (n as Element).tagName + "." + ((n as Element).className ?? "").toString().slice(0, 25)) : null);
-          return { pm: ed.state.selection.from + "-" + ed.state.selection.to, domCollapsed: sel?.isCollapsed, anchor: describe(node), off: sel?.anchorOffset, bubble: !!document.querySelector("[data-testid=doc-bubble-menu]"), focus: document.hasFocus() };
-        });
-        return read;
-      })();
-      console.log("DIAG-198 t0 " + JSON.stringify(await readSel()));
-      await page.waitForTimeout(60);
-      console.log("DIAG-198 t60 " + JSON.stringify(await readSel()));
+      // The bubble menu shows only for a non-empty ProseMirror selection, so it hiding proves the editor itself (not just the DOM) has
+      // collapsed. Enter on a still-ranged selection would replace `Custom PR label` with the new paragraph.
+      await expect(bubble).toBeHidden({ timeout: 5_000 });
       await page.keyboard.press("Enter");
       await page.keyboard.type("Unapproved: ");
       await pastePlainText(page, ".ProseMirror", UNAPPROVED_PR_URL);
-      console.log("DIAG-198 tx " + JSON.stringify(await page.evaluate(() => (window as unknown as { __tx: unknown[] }).__tx)));
-      console.log("DIAG-198 text " + JSON.stringify(await editor.innerText()));
       const unapprovedLink = editor.locator(`a[href="${UNAPPROVED_PR_URL}"]`);
       await expect(unapprovedLink).toHaveText(UNAPPROVED_PR_URL);
       await expect(unapprovedLink).not.toHaveAttribute("data-github-pr-link", "ready");
-      try {
-        await expect(customChip).toHaveText("Custom PR label");
-      } catch (error) {
-        console.log("DIAG-198 FAIL html " + JSON.stringify(await editor.innerHTML()));
-        console.log("DIAG-198 FAIL tx " + JSON.stringify(await page.evaluate(() => (window as unknown as { __tx: unknown[] }).__tx)).slice(0, 6000));
-        throw error;
-      }
+      await expect(customChip).toHaveText("Custom PR label");
 
       // Hover preview card displays branch & author metadata, then closes cleanly when moving away.
       fs.mkdirSync(SHOT_DIR, { recursive: true });
