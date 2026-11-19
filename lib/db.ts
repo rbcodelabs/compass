@@ -168,6 +168,9 @@ export function createPrismaClient() {
   //
   // DSQL only: the retry exists for DSQL's dropped/stalled connections. Plain
   // Postgres (DATABASE_URL / POSTGRES_URL) keeps its previous behavior.
+  // Deliberately keyed on getRuntimeDatabaseUrl, not usesPlainPostgres():
+  // the latter follows the migration URL, so it can disagree with the pool
+  // createBasePrismaClient actually built from the runtime URL.
   if (getRuntimeDatabaseUrl(process.env)) return extended;
   return extended.$extends(retryReadsExtension) as unknown as typeof extended;
 }

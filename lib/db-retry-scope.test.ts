@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 // Replace PrismaClient with a recorder so no engine or connection is created.
 // Everything else (Prisma.defineExtension, error classes) stays real.
@@ -20,6 +20,10 @@ import { retryReadsExtension } from "./db-retry"
 const extensionsOf = () => (createPrismaClient() as unknown as { extensions: unknown[] }).extensions
 
 describe("read retry is DSQL-only", () => {
+  beforeEach(() => {
+    // Hermetic: automation previews forbid DATABASE_URL and would throw in the plain-Postgres cases.
+    vi.stubEnv("PREVIEW_AUTOMATION_ENABLED", "")
+  })
   afterEach(() => vi.unstubAllEnvs())
 
   it("does not attach the retry extension on plain Postgres (DATABASE_URL)", () => {
