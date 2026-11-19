@@ -1,6 +1,7 @@
 import pg from "pg"
 import { test, expect } from "../fixtures/index"
 import { isolatedE2EConnectionString } from "../fixtures/isolated-database"
+import { E2E_ORG_SLUG, E2E_WORKSPACE_SLUG } from "../fixtures/seed-e2e"
 
 // #593 replaced roadmap-item "Discussion" comments with Conversations. A person's own turns do not show their name in the
 // transcript, so "the rename reaches past and future comments" is asserted where the author name is served: the conversation's
@@ -32,7 +33,8 @@ test("Profile updates past and future conversation author names and account navi
   }
   try {
     const { rows: [scope] } = await pool.query<{ id: string }>(
-      "SELECT w.id FROM compass_dev.workspaces w JOIN compass_dev.organizations o ON o.id=w.organization_id WHERE o.slug='e2e-test-org' AND w.slug='e2e-workspace'",
+      "SELECT w.id FROM compass_dev.workspaces w JOIN compass_dev.organizations o ON o.id=w.organization_id WHERE o.slug=$1 AND w.slug=$2",
+      [E2E_ORG_SLUG, E2E_WORKSPACE_SLUG],
     )
     const workspaceId = scope.id
     await page.goto(`${base}/roadmap`)

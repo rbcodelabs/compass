@@ -3,6 +3,7 @@ import type { Locator, Page } from "@playwright/test";
 import { test, expect } from "../fixtures/index";
 import { openFullPage } from "../fixtures/full-page";
 import { isolatedE2EConnectionString } from "../fixtures/isolated-database";
+import { E2E_ORG_SLUG, E2E_USER_EMAIL, E2E_WORKSPACE_SLUG } from "../fixtures/seed-e2e";
 
 const title = "New teams struggle to reach their first shared insight";
 
@@ -10,7 +11,8 @@ async function seedOpportunity() {
   const pool = new pg.Pool({ connectionString: isolatedE2EConnectionString() });
   try {
     const { rows: [workspace] } = await pool.query(
-      "SELECT w.id FROM compass_dev.workspaces w JOIN compass_dev.organizations o ON o.id=w.organization_id WHERE o.slug='e2e-test-org' AND w.slug='e2e-workspace'",
+      "SELECT w.id FROM compass_dev.workspaces w JOIN compass_dev.organizations o ON o.id=w.organization_id WHERE o.slug=$1 AND w.slug=$2",
+      [E2E_ORG_SLUG, E2E_WORKSPACE_SLUG],
     );
     const { rows: [opportunity] } = await pool.query(
       "INSERT INTO compass_dev.opportunities (id,workspace_id,title,description,status,customer_segment) VALUES (gen_random_uuid(),$1,$2,$3,'EXPLORING','New teams') RETURNING id",
@@ -41,9 +43,9 @@ async function seedConversation(opportunityId: string, conversationTitle: string
   try {
     await pool.query(
       `INSERT INTO compass_dev.agent_conversations (id,workspace_id,user_id,title,target_type,target_id,visibility,status,agent_mode,source,created_at,updated_at)
-       SELECT gen_random_uuid(), o.workspace_id, (SELECT id FROM compass_dev.users WHERE email='dev@localhost.dev'), $2, 'OPPORTUNITY', o.id, 'WORKSPACE', 'OPEN', 'MENTION_ONLY', 'BROWSER', NOW(), NOW()
+       SELECT gen_random_uuid(), o.workspace_id, (SELECT id FROM compass_dev.users WHERE email=$3), $2, 'OPPORTUNITY', o.id, 'WORKSPACE', 'OPEN', 'MENTION_ONLY', 'BROWSER', NOW(), NOW()
          FROM compass_dev.opportunities o WHERE o.id=$1`,
-      [opportunityId, conversationTitle],
+      [opportunityId, conversationTitle, E2E_USER_EMAIL],
     );
   } finally {
     await pool.end();
@@ -78,42 +80,45 @@ test("opportunity conversations persist between full page and panel", async ({ p
   await expect(conversationsSection(page).getByRole("button", { name: /^Test the shared recap with new teams\./ })).toBeVisible();
 });
 
-// TASK-195 slice 'edit/delete': editing a message and resolving/reopening a thread from the opportunity's Discussion have no UI in
-// the unified Conversation model yet. The original test is kept verbatim (pre-#593 locators) so this coverage is not lost.
-test.fixme("opportunity discussion edit, resolve and reopen persist between full page and panel (TASK-195 slice 'edit/delete')", async ({ page, base }) => {
-
+// TASK-195 slice S1/S2 (message actions: Edit / Archive). Rick's binding answers (design section 10): a message can be edited by its
+// author OR a workspace admin, and "delete thread" becomes ARCHIVE (the thread leaves the active list and is restorable).
+// Selectors below are the ones the message actions are expected to expose; adjust names when the UI lands.
+test.fixme("opportunity conversation: author or admin edits a message, archive removes then restores the thread (TASK-195 slice S1/S2)", async ({ page, base }) => {
   const id = await seedOpportunity();
   await page.goto(`${base}/discovery/${id}`);
-  const discussion = page.getByRole("region", { name: "Discussion", exact: true });
-  await expect(discussion.getByText("No comments yet.")).toBeVisible();
-  await discussion.getByLabel("Add comment", { exact: true }).fill("Test the shared recap with new teams.");
-  await discussion.getByRole("button", { name: "Post comment", exact: true }).click();
-  await expect(discussion.getByText("Test the shared recap with new teams.", { exact: true })).toBeVisible();
-  await discussion.getByRole("button", { name: /Reply to / }).click();
-  await discussion.getByRole("textbox", { name: /Reply to / }).fill("Measure whether a second teammate participates.");
-  await discussion.getByRole("button", { name: "Post reply", exact: true }).click();
-  await expect(discussion.getByText("Measure whether a second teammate participates.", { exact: true })).toBeVisible();
-  await page.getByRole("tab", { name: /Evidence/ }).click();
-  await expect(discussion.getByText("Test the shared recap with new teams.", { exact: true })).toBeVisible();
-  await page.reload();
-  await expect(discussion.getByText("Measure whether a second teammate participates.", { exact: true })).toBeVisible();
+  const conversations = conversationsSection(page);
+  await composerIn(conversations).fill("Test the shared recap with new teams.");
+  await conversations.getByRole("button", { name: "Send", exact: true }).click();
+  const thread = conversationPanel(page);
+  await expect(thread.getByText("Test the shared recap with new teams.", { exact: true })).toBeVisible();
+
+  // Author edits their own message; it shows as edited and survives the full-page/panel hop.
+  await thread.getByRole("button", { name: "Edit", exact: true }).first().click();
+  await thread.getByRole("textbox", { name: /^Edit message/ }).fill("Test the shared recap this week.");
+  await thread.getByRole("button", { name: "Save edit", exact: true }).click();
+  await expect(thread.getByText("Test the shared recap this week.", { exact: true })).toBeVisible();
+  await expect(thread.getByText("Edited", { exact: true })).toBeVisible();
   await page.goto(`${base}/discovery?detail=opportunity:${id}`);
   const panel = page.locator('[data-slot="sheet-content"]');
-  const panelDiscussion = panel.getByRole("region", { name: "Discussion", exact: true });
-  await expect(panel.getByRole("link", { name: "Open full page" })).toHaveCount(1);
-  await expect(panel.locator('[data-slot="sheet-header"]').getByRole("link", { name: "Open full page" })).toHaveAttribute("href", `${base}/discovery/${id}`);
-  await expect(panelDiscussion.getByText("Test the shared recap with new teams.", { exact: true })).toBeVisible();
-  await panelDiscussion.getByRole("button", { name: /Edit comment by / }).first().click();
-  await panelDiscussion.getByRole("textbox", { name: /Edit comment by / }).fill("Test the shared recap this week.");
-  await panelDiscussion.getByRole("button", { name: "Save edit", exact: true }).click();
-  await expect(panelDiscussion.getByText("Test the shared recap this week.", { exact: true })).toBeVisible();
-  await panelDiscussion.getByRole("button", { name: /Resolve thread by / }).click();
-  await expect(panelDiscussion.getByRole("button", { name: /Expand resolved thread by / })).toBeVisible();
+  await expect(conversationsSection(panel).getByRole("button", { name: /^Test the shared recap this week\./ })).toBeVisible();
   expect(await openFullPage(page, panel)).toBe(`${base}/discovery/${id}`);
-  await expect(discussion.getByRole("button", { name: /Expand resolved thread by / })).toBeVisible();
-  await discussion.getByRole("button", { name: /Reopen thread by / }).click();
-  await expect(discussion.getByText("Test the shared recap this week.", { exact: true })).toBeVisible();
-  await expect(discussion.getByText("Measure whether a second teammate participates.", { exact: true })).toBeVisible();
+
+  // Admin edit of another user's message (seed a second member's message, sign in as workspace admin, edit it).
+  // TODO(TASK-195 S2): seed message authored by another workspace member via compass_dev.agent_messages (author_user_id).
+  await conversationsSection(page).getByRole("button", { name: /^Test the shared recap this week\./ }).click();
+  await conversationPanel(page).getByRole("button", { name: "Edit", exact: true }).last().click();
+  await conversationPanel(page).getByRole("textbox", { name: /^Edit message/ }).fill("Edited by an admin.");
+  await conversationPanel(page).getByRole("button", { name: "Save edit", exact: true }).click();
+  await expect(conversationPanel(page).getByText("Edited by an admin.", { exact: true })).toBeVisible();
+
+  // Archive (not delete): leaves the active list, is restorable.
+  await conversationPanel(page).getByRole("button", { name: "Archive", exact: true }).click();
+  await expect(conversationsSection(page).getByRole("button", { name: /^Test the shared recap this week\./ })).toHaveCount(0);
+  await page.reload();
+  await expect(conversationsSection(page).getByRole("button", { name: /^Test the shared recap this week\./ })).toHaveCount(0);
+  await conversationsSection(page).getByRole("button", { name: "Show archived", exact: true }).click();
+  await conversationsSection(page).getByRole("button", { name: "Restore", exact: true }).click();
+  await expect(conversationsSection(page).getByRole("button", { name: /^Test the shared recap this week\./ })).toBeVisible();
 });
 
 test("opportunity layout responds to available width without losing conversation drafts", async ({ page, base }) => {
@@ -171,35 +176,4 @@ test("opportunity layout responds to available width without losing conversation
   await page.screenshot({ path: "public/screenshots/docs/opportunity-detail-pinned-desktop.png", fullPage: true, animations: "disabled", style: "nextjs-portal { visibility: hidden; }" });
   await page.evaluate(() => document.documentElement.classList.add("dark"));
   await page.screenshot({ path: "public/screenshots/docs/opportunity-detail-pinned-dark.png", fullPage: true, animations: "disabled", style: "nextjs-portal { visibility: hidden; }" });
-});
-
-// Superseded by e2e/functional/specs/conversations-recovery.spec.ts (PR #617): it covers the failed-load Retry, the retained
-// draft after a failed send, and the uncertain-send Retry for the Conversations section. The Discussion UI this drove is gone.
-test.skip("opportunity discussion retries a failed load and retains a failed post (superseded by conversations-recovery.spec.ts)", async ({ page, base }) => {
-  const id = await seedOpportunity();
-  let rejectLoad = true;
-  let rejectPost = false;
-  await page.route("**/api/comments**", async route => {
-    if (route.request().method() === "GET" && rejectLoad) {
-      await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "Discussion temporarily unavailable" }) });
-    } else if (route.request().method() === "POST" && rejectPost) {
-      await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "Please retry your comment" }) });
-    } else {
-      await route.continue();
-    }
-  });
-  await page.goto(`${base}/discovery/${id}`);
-  const discussion = page.getByRole("region", { name: "Discussion", exact: true });
-  await expect(discussion.getByRole("alert")).toHaveText("Discussion temporarily unavailable");
-  rejectLoad = false;
-  await discussion.getByRole("button", { name: "Retry discussion" }).click();
-  await expect(discussion.getByText("No comments yet.")).toBeVisible();
-  rejectPost = true;
-  await discussion.getByLabel("Add comment", { exact: true }).fill("Preserve this observation.");
-  await discussion.getByRole("button", { name: "Post comment", exact: true }).click();
-  await expect(discussion.getByRole("alert")).toHaveText("Please retry your comment");
-  await expect(discussion.getByLabel("Add comment", { exact: true })).toHaveText("Preserve this observation.");
-  rejectPost = false;
-  await discussion.getByRole("button", { name: "Post comment", exact: true }).click();
-  await expect(discussion.getByText("Preserve this observation.", { exact: true })).toBeVisible();
 });

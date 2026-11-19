@@ -316,6 +316,57 @@ test.describe("GitHub PR smart chips", () => {
       await prisma.task.deleteMany({ where: { id: task.id } }).catch(() => undefined);
     }
   });
+  // TASK-195 slice S1 (shared-message renderer): a PERSON's message renders as plain text (agent-chat.tsx), so markdown, bold and PR
+  // chips only appear on assistant messages (covered above). The old Discussion rendered them on people's comments too.
+  test.fixme("Conversation transcript renders PR chips and bold markdown in a person-authored message (TASK-195 slice S1 (shared-message renderer))", async ({
+    page,
+    base,
+    orgSlug,
+    workspaceSlug,
+  }) => {
+    await stubPullRequestApi(page);
+    const prisma = getPrisma();
+    const workspace = await prisma.workspace.findFirstOrThrow({ where: { slug: workspaceSlug, organization: { slug: orgSlug } } });
+    const ts = Date.now();
+    const task = await prisma.task.create({ data: { workspaceId: workspace.id, title: `E2E PR Chip Person Task ${ts}`, status: "TODO", priority: "MEDIUM" } });
+    const user = await prisma.user.findFirstOrThrow({ where: { email: E2E_USER_EMAIL } });
+    let conversationId: string | null = null;
+    try {
+      const conversation = await prisma.agentConversation.create({
+        data: { workspaceId: workspace.id, userId: user.id, title: `Person PR chip thread ${ts}`, targetType: "TASK", targetId: task.id, visibility: "WORKSPACE", status: "OPEN", agentMode: "MENTION_ONLY", source: "BROWSER" },
+      });
+      conversationId = conversation.id;
+      await prisma.agentMessage.create({
+        data: {
+          conversationId: conversation.id,
+          role: "user",
+          authorUserId: user.id,
+          content: `**Shipped** ${APPROVED_PR_URL} ([review link](${APPROVED_PR_URL})) vs ${UNAPPROVED_PR_URL}`,
+        },
+      });
+      await page.goto(`${base}/tasks/${task.id}`);
+      await page.getByTestId("object-conversations-section").getByRole("button", { name: new RegExp(`^Person PR chip thread ${ts}`) }).click();
+      const transcript = page
+        .locator('[data-slot="pinned-panel"]')
+        .filter({ has: page.getByRole("heading", { name: "Conversation", exact: true }) })
+        .or(page.getByRole("dialog", { name: "Conversation", exact: true }));
+      const message = transcript.getByText("Shipped").first();
+      await expect(message).toBeVisible({ timeout: 10_000 });
+      await expect(transcript.locator("strong").filter({ hasText: "Shipped" })).toBeVisible();
+      const chips = transcript.locator('a[data-entity-card="pullRequest"]');
+      await expect(chips).toHaveCount(2);
+      await expect(chips.nth(0)).toContainText("#209 Support smart PR chips");
+      await expect(chips.nth(1)).toHaveText("review link");
+      const fallback = transcript.locator(`a[href="${UNAPPROVED_PR_URL}"]:not([data-entity-card])`).first();
+      await expect(fallback).toHaveText(UNAPPROVED_PR_URL);
+    } finally {
+      if (conversationId) {
+        await prisma.agentMessage.deleteMany({ where: { conversationId } }).catch(() => undefined);
+        await prisma.agentConversation.deleteMany({ where: { id: conversationId } }).catch(() => undefined);
+      }
+      await prisma.task.deleteMany({ where: { id: task.id } }).catch(() => undefined);
+    }
+  });
 });
 
 function publishUrlMatchOf(rawUrl: string): string {

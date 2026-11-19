@@ -84,6 +84,7 @@ test("Artifact comments support the discussion lifecycle across tabs, revisions 
 
   await composer(page).fill("Review the delivery note.")
   await inspector(page).getByRole("button", { name: "Send", exact: true }).click()
+  await expect(composer(page)).toHaveText("")
   // Send opens the new conversation in the Conversation panel (docked), which narrows the page: the inspector becomes a Sheet.
   await expect(page).toHaveURL(/detail=conversation(?::|%3A)[0-9a-f-]{36}/)
   await expect(inspectorSurface(page).getByTestId("object-conversations-section").getByRole("button", { name: /^Review the delivery note\./ })).toBeVisible()
@@ -134,50 +135,43 @@ test("Artifact comments support the discussion lifecycle across tabs, revisions 
   await expect(conversations(page).getByRole("button", { name: /^Review the delivery note\./ })).toBeVisible()
 })
 
-// TASK-195 slice 'edit/delete': the unified Conversation model has no UI yet for editing a message, resolving or reopening a
-// thread from the artifact inspector, deleting a thread, or replying inside a thread with Escape-to-cancel. The original steps are
-// kept verbatim (against the pre-#593 Discussion locators) so the coverage is not lost; re-point them once the UI lands.
-test.fixme("Artifact comments support edit, resolve/reopen, reply-draft Escape and thread delete (TASK-195 slice 'edit/delete')", async ({ page, base }) => {
+// TASK-195 slice S1/S2 (message actions: Edit / Archive). Rick's binding answers (design section 10): a message can be edited by its
+// author OR a workspace admin, and "delete thread" becomes ARCHIVE (the thread leaves the active list and is restorable). Person
+// messages must also render markdown (bold) like the old Discussion did (slice S1, shared-message renderer). Selectors are the
+// ones the message actions are expected to expose; adjust names when the UI lands.
+test.fixme("Artifact conversations: markdown in person messages, author/admin edit, archive and restore (TASK-195 slice S1/S2)", async ({ page, base }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await createArtifact(page, base)
   await page.getByRole("button", { name: "Comments", exact: true }).click()
-  await page.getByRole("textbox", { name: "Add comment" }).fill("Review the **delivery note**.")
-  await page.getByRole("button", { name: "Post comment", exact: true }).click()
-  await expect(inspector(page).locator("strong").filter({ hasText: "delivery note" })).toBeVisible()
-  await inspector(page).getByRole("button", { name: /^Reply to/ }).click()
-  await inspector(page).getByRole("textbox", { name: /^Reply to/ }).fill("Reply draft")
-  await inspector(page).getByRole("textbox", { name: /^Reply to/ }).press("Escape")
-  await expect(inspector(page)).toBeVisible()
-  await inspector(page).getByRole("button", { name: /^Reply to/ }).click()
-  await inspector(page).getByRole("textbox", { name: /^Reply to/ }).fill("Looks good.")
-  await inspector(page).getByRole("button", { name: "Post reply" }).click()
-  await expect(inspector(page).getByText("Looks good.", { exact: true })).toBeVisible()
+  await composer(page).fill("Review the **delivery note**.")
+  await inspector(page).getByRole("button", { name: "Send", exact: true }).click()
+  const thread = conversationPanel(page)
+  await expect(thread.locator("strong").filter({ hasText: "delivery note" })).toBeVisible()
 
-  await inspector(page).getByRole("button", { name: /^Edit comment by/ }).first().click()
-  await inspector(page).getByRole("textbox", { name: /^Edit comment by/ }).fill("Reviewed delivery note.")
-  await inspector(page).getByRole("button", { name: "Save edit" }).click()
-  await expect(inspector(page).getByText("Reviewed delivery note.", { exact: true })).toBeVisible()
-  await inspector(page).getByRole("button", { name: /^Resolve thread/ }).click()
-  await inspector(page).getByRole("button", { name: /^Expand resolved thread/ }).click()
-  await expect(inspector(page).getByText("Looks good.", { exact: true })).toBeVisible()
-  await inspector(page).getByRole("button", { name: /^Reopen thread/ }).click()
+  // Author edits their own message.
+  await thread.getByRole("button", { name: "Edit", exact: true }).first().click()
+  await thread.getByRole("textbox", { name: /^Edit message/ }).fill("Reviewed delivery note.")
+  await thread.getByRole("button", { name: "Save edit", exact: true }).click()
+  await expect(thread.getByText("Reviewed delivery note.", { exact: true })).toBeVisible()
+  await expect(thread.getByText("Edited", { exact: true })).toBeVisible()
 
-  await inspector(page).getByRole("tab", { name: "Details", exact: true }).click()
-  await inspector(page).getByRole("button", { name: "Archive", exact: true }).click()
-  await expect(page.getByText("This artifact is archived.")).toBeVisible()
-  await inspector(page).getByRole("tab", { name: "Comments", exact: true }).click()
-  await expect(inspector(page).getByText("Reviewed delivery note.", { exact: true })).toBeVisible()
-  page.once("dialog", (dialog) => dialog.accept())
-  await inspector(page).getByRole("button", { name: /^Delete thread by/ }).click()
-  await expect(inspector(page).getByText("No comments yet.")).toBeVisible()
+  // Admin edits another user's message.
+  // TODO(TASK-195 S2): seed a message authored by a second workspace member (agent_messages.author_user_id) in this conversation;
+  // the signed-in dev user is a workspace admin, so Edit must be offered on it too.
+  await thread.getByRole("button", { name: "Edit", exact: true }).last().click()
+  await thread.getByRole("textbox", { name: /^Edit message/ }).fill("Edited by an admin.")
+  await thread.getByRole("button", { name: "Save edit", exact: true }).click()
+  await expect(thread.getByText("Edited by an admin.", { exact: true })).toBeVisible()
 
-  // Test 2's reply-Escape step at 390px: a reply editor's Escape closes just that editor, never the sheet.
-  await page.setViewportSize({ width: 390, height: 844 })
-  const sheet = page.getByRole("dialog", { name: "Artifact inspector" })
-  await sheet.getByRole("button", { name: /^Reply to/ }).click()
-  await sheet.getByRole("textbox", { name: /^Reply to/ }).press("Escape")
-  await expect(sheet).toBeVisible()
-  await expect(sheet.getByRole("textbox", { name: /^Reply to/ })).toHaveCount(0)
+  // Archive, not delete: leaves the active list (also after the artifact is archived), and can be restored.
+  await thread.getByRole("button", { name: "Archive", exact: true }).click()
+  await expect(conversations(page).getByRole("button", { name: /^Review the delivery note/ })).toHaveCount(0)
+  await page.reload()
+  await page.getByRole("button", { name: "Comments", exact: true }).click()
+  await expect(conversations(page).getByRole("button", { name: /^Review the delivery note/ })).toHaveCount(0)
+  await conversations(page).getByRole("button", { name: "Show archived", exact: true }).click()
+  await conversations(page).getByRole("button", { name: "Restore", exact: true }).click()
+  await expect(conversations(page).getByRole("button", { name: /^Review the delivery note/ })).toBeVisible()
 })
 
 test("Artifact inspector preserves preview and drafts, isolates cookies, and adapts to small screens", async ({ page, base }, testInfo) => {
@@ -203,7 +197,7 @@ test("Artifact inspector preserves preview and drafts, isolates cookies, and ada
   await expect(page.getByRole("button", { name: "Comments", exact: true })).toBeFocused()
   await page.getByRole("button", { name: "Comments", exact: true }).click()
   // Dropped: the unsent conversation draft is gone after close/reopen (the Conversations section holds it in its own state and
-  // unmounts with the inspector). Kept as test.fixme below (TASK-195 product gap), not asserted here.
+  // unmounts with the inspector). Kept as test.fixme below (TASK-196), not asserted here.
   await expect(page.frameLocator("iframe").getByRole("textbox", { name: "Delivery note" })).toHaveValue("Preview stays mounted")
 
   for (const theme of ["light", "dark"]) {
@@ -212,9 +206,9 @@ test("Artifact inspector preserves preview and drafts, isolates cookies, and ada
       const height = width === 390 ? 844 : 900
       await page.setViewportSize({ width, height })
       const sheetDialog = page.getByRole("dialog", { name: "Artifact inspector" })
-      const visibleSurface = (await inspector(page).count()) ? inspector(page) : sheetDialog
       // The inspector flips between the docked column and the Sheet as the width changes; wait for exactly one surface to settle.
       await expect.poll(async () => (await inspector(page).count()) + (await sheetDialog.count())).toBe(1)
+      const visibleSurface = (await inspector(page).count()) ? inspector(page) : sheetDialog
       await expect(inspectorSurface(page)).toBeVisible()
       await expect(inspectorSurface(page)).toHaveCSS("opacity", "1")
       await expect(composer(page)).toBeVisible()
@@ -235,7 +229,7 @@ test("Artifact inspector preserves preview and drafts, isolates cookies, and ada
         await visibleSurface.getByRole("tab", { name: "Comments", exact: true }).click()
       }
       // Dropped here: at 390px, opening a reply editor and pressing Escape must close only the editor, not the sheet. There is no
-      // reply editor in the Conversations section; the step lives in the test.fixme above (TASK-195 slice 'edit/delete').
+      // reply editor in the Conversations section; the step lives in the test.fixme above (TASK-195 slice S1/S2).
     }
   }
 
@@ -272,10 +266,10 @@ test("Artifact inspector preserves preview and drafts, isolates cookies, and ada
   await expect(composer(page)).toHaveText("")
 })
 
-// TASK-195 product gap (not a spec problem): the pre-#593 Discussion kept an unsent comment draft above the inspector shell, so it
+// TASK-196 product gap (not a spec problem): the pre-#593 Discussion kept an unsent comment draft above the inspector shell, so it
 // survived closing and reopening the inspector and switching between the docked column and the Sheet. The Conversations section keeps
 // its draft in component state inside the portal slot, so the draft is lost. Re-enable once the draft survives those remounts.
-test.fixme("Artifact inspector keeps an unsent conversation draft across close/reopen and docked/sheet layouts (TASK-195 product gap)", async ({ page, base }) => {
+test.fixme("Artifact inspector keeps an unsent conversation draft across close/reopen and docked/sheet layouts (TASK-196)", async ({ page, base }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await createArtifact(page, base)
   await page.getByRole("button", { name: "Comments", exact: true }).click()

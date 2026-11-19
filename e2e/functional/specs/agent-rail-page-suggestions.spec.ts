@@ -99,6 +99,8 @@ test("blank Agent Rail surfaces screen-responsive starter questions, pins while 
 
   // The panel is URL state (?detail=), so a sidebar link would close it. Navigate the way an in-panel link does: client-side,
   // carrying the open panel across to the next page (this is the "background navigation" the pinned stack must survive).
+  // No real in-panel link carries ?detail= across pages today; if panel persistence across navigation is added (separate
+  // panel-persistence task), replace this router push with a click on that link.
   await page.evaluate(() => {
     const next = (window as unknown as { next: { router: { push: (href: string) => void } } }).next;
     next.router.push(`${window.location.pathname.replace(/\/roadmap$/, "/okrs")}${window.location.search}`);

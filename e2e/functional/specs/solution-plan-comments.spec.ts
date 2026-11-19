@@ -15,6 +15,7 @@
 import { test, expect } from "../fixtures/index";
 import { createOpportunityFromBoard } from "../fixtures/opportunity-composer";
 import pg from "pg";
+import { E2E_USER_EMAIL } from "../fixtures/seed-e2e";
 
 const S = process.env.PGSCHEMA ? `${process.env.PGSCHEMA}_dev` : "compass_dev";
 
@@ -27,6 +28,8 @@ test.describe("Solution Current Plan + shared Conversations", () => {
       const solTitle = `E2E Solution ${ts}`;
       const commentBody = `E2E first thoughts on this ${ts}`;
       const planBody = `E2E proposed plan: ship behind a flag ${ts}`;
+      let pool: pg.Pool | undefined;
+      try {
 
       // ── 1. Navigate to Discovery board ────────────────────────────────────
       await page.goto(`${base}/discovery`);
@@ -67,12 +70,12 @@ test.describe("Solution Current Plan + shared Conversations", () => {
       // Sending one from the composer opens it in the Conversation panel, replacing this solution panel (and the Plan under test),
       // so seed what a send produces and reload: the panel stays on the solution and lists the conversation.
       if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL is required for plan isolation verification");
-      const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+      pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
       await pool.query(
         `INSERT INTO "${S}".agent_conversations (id, workspace_id, user_id, title, target_type, target_id, visibility, status, agent_mode, source, created_at, updated_at)
-         SELECT gen_random_uuid(), s.workspace_id, (SELECT id FROM "${S}".users WHERE email = 'dev@localhost.dev'), $2, 'SOLUTION', s.id, 'WORKSPACE', 'OPEN', 'MENTION_ONLY', 'BROWSER', NOW(), NOW()
+         SELECT gen_random_uuid(), s.workspace_id, (SELECT id FROM "${S}".users WHERE email = $3), $2, 'SOLUTION', s.id, 'WORKSPACE', 'OPEN', 'MENTION_ONLY', 'BROWSER', NOW(), NOW()
            FROM "${S}".solutions s WHERE s.title = $1`,
-        [solTitle, commentBody],
+        [solTitle, commentBody, E2E_USER_EMAIL],
       );
       await page.reload();
       await expect(panel).toBeVisible();
@@ -114,7 +117,6 @@ test.describe("Solution Current Plan + shared Conversations", () => {
       expect(genericPatch.status()).toBe(404);
       expect(genericDelete.status()).toBe(404);
       expect((await pool.query<{ body: string }>(`SELECT body FROM "${S}".comments WHERE id = $1`, [persistedPlan.id])).rows[0].body).toBe(planBody);
-      await pool.end();
 
       // ── 9. New plans start Pending ──────────────────────────────────────────
       const planStatusBadge = panel.getByTestId("plan-status-badge");
@@ -132,6 +134,9 @@ test.describe("Solution Current Plan + shared Conversations", () => {
       await expect(planStatusBadge).toHaveText("Rejected", { timeout: 10_000 });
       await expect(pinnedPlan.getByRole("button", { name: "Reject" })).toBeDisabled();
       await expect(pinnedPlan.getByRole("button", { name: "Approve" })).toBeEnabled();
+      } finally {
+        await pool?.end();
+      }
     }
   );
 });
