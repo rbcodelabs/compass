@@ -46,6 +46,24 @@ import { safeCallbackUrl } from "@/lib/safe-callback-url"
 export const runtime = "nodejs"
 export const maxDuration = 60
 
+/**
+ * The error codes of RFC 6749 §4.1.2.1 and RFC 6750, plus the OpenID Connect ones. The
+ * query string is attacker-controllable, so only these exact values are ever logged;
+ * anything else logs as AUTHORIZATION_FAILED.
+ */
+const KNOWN_PROVIDER_ERRORS: ReadonlySet<string> = new Set([
+  "access_denied",
+  "invalid_request",
+  "unauthorized_client",
+  "unsupported_response_type",
+  "invalid_scope",
+  "server_error",
+  "temporarily_unavailable",
+  "interaction_required",
+  "login_required",
+  "consent_required",
+])
+
 /** Provider-supplied error codes are echoed into a URL, so they are clamped to the OAuth charset. */
 const PROVIDER_ERROR_PATTERN = /^[A-Za-z0-9_-]{1,64}$/
 
@@ -76,9 +94,12 @@ export async function GET(request: NextRequest, context: { params: Promise<{ slu
   const providerError = params.get("error")
   if (providerError) {
     // The provider's error_description is untrusted free text and is not logged.
-    const safeError = sanitizeProviderError(providerError)
-    console.error("MCP connector authorization was refused", slug, safeError)
-    return failure(slug, DEFAULT_CONNECTOR_RETURN_PATH, safeError)
+    console.error(
+      "MCP connector authorization was refused",
+      slug,
+      KNOWN_PROVIDER_ERRORS.has(providerError) ? providerError : "AUTHORIZATION_FAILED",
+    )
+    return failure(slug, DEFAULT_CONNECTOR_RETURN_PATH, sanitizeProviderError(providerError))
   }
 
   const state = params.get("state")

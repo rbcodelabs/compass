@@ -23,6 +23,7 @@ import {
   connectorDefinition,
   connectorGuidance,
   connectorRedirectUri,
+  safeErrorLabel,
   connectorEncryptionKey,
   isConnectorConfigured,
   staticClientCredentials,
@@ -1455,5 +1456,27 @@ describe("redirectPath validation and resource opt-out collisions", () => {
     const record: ConnectorRecord = { ...connector, slug: "google-drive", authorizationEndpoint: "https://idp.example/authorize?resource=https%3A%2F%2Fendpoint.example" }
     const url = new URL(buildAuthorizeUrl(record, { state: "s", codeVerifier: "v", redirectUri: "https://compass.example/cb" }))
     expect(url.searchParams.has("resource")).toBe(false)
+  })
+})
+
+describe("safeErrorLabel", () => {
+  it("returns a connector error's code, never its message", () => {
+    expect(safeErrorLabel(new McpConnectorError("REFRESH_FAILED", "private provider text"))).toBe("REFRESH_FAILED")
+  })
+
+  it("returns the class name of a plain error or subclass, not its message", () => {
+    class CustomProviderError extends Error {}
+    expect(safeErrorLabel(new Error("private"))).toBe("Error")
+    expect(safeErrorLabel(new TypeError("private"))).toBe("TypeError")
+    expect(safeErrorLabel(new CustomProviderError("private"))).toBe("CustomProviderError")
+  })
+
+  it("returns UnknownError for a non-Error throw or an unsafe class name", () => {
+    expect(safeErrorLabel("a string with private text")).toBe("UnknownError")
+    expect(safeErrorLabel({ message: "private" })).toBe("UnknownError")
+    expect(safeErrorLabel(null)).toBe("UnknownError")
+    const Odd = class extends Error {}
+    Object.defineProperty(Odd, "name", { value: "bad name with spaces & private" })
+    expect(safeErrorLabel(new Odd("x"))).toBe("UnknownError")
   })
 })

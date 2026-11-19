@@ -423,8 +423,34 @@ describe("callback route", () => {
 
 describe("connector browser routes — provider-controlled text never reaches the console", () => {
   const SYNTH = "synthetic-private-note-Heron-41M jane.doe@private.example"
-  const consoleText = () =>
-    JSON.stringify([...vi.mocked(console.error).mock.calls, ...vi.spyOn(console, "warn").mock.calls, ...vi.spyOn(console, "log").mock.calls])
+  // Spied before the route runs, so everything it writes is captured.
+  let warnSpy: ReturnType<typeof vi.spyOn>
+  let logSpy: ReturnType<typeof vi.spyOn>
+  beforeEach(() => {
+    warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+    logSpy = vi.spyOn(console, "log").mockImplementation(() => {})
+  })
+  const consoleText = () => JSON.stringify([...vi.mocked(console.error).mock.calls, ...warnSpy.mock.calls, ...logSpy.mock.calls])
+
+  it("captures error, warn and log output, so the clean assertions below can fail", () => {
+    console.error(SYNTH)
+    console.warn(SYNTH)
+    console.log(SYNTH)
+    expect(consoleText().split("synthetic-private-note").length - 1).toBe(3)
+  })
+
+  it("does not log a crafted ?error= value verbatim, only an allowlisted OAuth code or AUTHORIZATION_FAILED", async () => {
+    const smuggled = "c2VjcmV0LWRhdGEtZXhmaWx0cmF0ZWQ_-Zm9v"
+    const response = await callback(get(`/api/connectors/v0/callback?error=${smuggled}`), params())
+    expect(response.status).toBe(307)
+    expect(consoleText()).not.toContain(smuggled)
+    expect(consoleText()).toContain("AUTHORIZATION_FAILED")
+    for (const code of ["access_denied", "temporarily_unavailable", "consent_required"]) {
+      vi.mocked(console.error).mockClear()
+      await callback(get(`/api/connectors/v0/callback?error=${code}`), params())
+      expect(consoleText()).toContain(code)
+    }
+  })
   const expectClean = () => {
     expect(consoleText()).not.toContain("synthetic-private-note")
     expect(consoleText()).not.toContain("jane.doe")

@@ -258,7 +258,21 @@ describe("DELETE /api/connectors/[slug] — Vercel Connect-backed", () => {
 
 describe("connector disconnect and listing — provider-controlled text never reaches the console", () => {
   const SYNTH = "synthetic-private-note-Heron-41M jane.doe@private.example"
-  const consoleText = () => JSON.stringify([...vi.mocked(console.error).mock.calls, ...vi.spyOn(console, "warn").mock.calls])
+  // Spied before the route runs, so everything it writes is captured.
+  let warnSpy: ReturnType<typeof vi.spyOn>
+  let logSpy: ReturnType<typeof vi.spyOn>
+  beforeEach(() => {
+    warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+    logSpy = vi.spyOn(console, "log").mockImplementation(() => {})
+  })
+  const consoleText = () => JSON.stringify([...vi.mocked(console.error).mock.calls, ...warnSpy.mock.calls, ...logSpy.mock.calls])
+
+  it("captures error, warn and log output, so the clean assertions below can fail", () => {
+    console.error(SYNTH)
+    console.warn(SYNTH)
+    console.log(SYNTH)
+    expect(consoleText().split("synthetic-private-note").length - 1).toBe(3)
+  })
   const expectClean = () => {
     expect(consoleText()).not.toContain("synthetic-private-note")
     expect(consoleText()).not.toContain("jane.doe")
@@ -282,6 +296,8 @@ describe("connector disconnect and listing — provider-controlled text never re
   it("logs a failed Connect probe without the error's message", async () => {
     connectMocks.getToken.mockRejectedValue(new Error(`probe failed ${SYNTH}`))
     await listConnectors()
+    // The label that replaced the message (Connect failures are wrapped as GATEWAY_FAILED), so the log is not silent.
+    expect(consoleText()).toContain("GATEWAY_FAILED")
     expectClean()
   })
 })
