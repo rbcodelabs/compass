@@ -42,7 +42,8 @@ test.describe("Task shared Conversations", () => {
     expect(created.ok()).toBe(true);
     const historicalComment = await created.json();
     await page.reload();
-    const historyRow = section.getByRole("button", { name: /Confirm scope/ });
+    // .first(): the row button, not the "Remove Mentioned link to …" button that shares the title.
+    const historyRow = section.getByRole("button", { name: /Confirm scope/ }).first();
     await expect(historyRow).toBeVisible({ timeout: 15_000 });
     await historyRow.click();
     await expectHistoricalComment();
@@ -105,7 +106,7 @@ test.describe("Task shared Conversations", () => {
     await expect(page.getByRole("alertdialog")).toHaveCount(0);
     await page.getByRole("button", { name: "Close panel" }).click();
     await page.reload();
-    await expect(section.getByRole("button", { name: /Confirm scope/ })).toBeVisible({ timeout: 15_000 });
+    await expect(section.getByRole("button", { name: /Confirm scope/ }).first()).toBeVisible({ timeout: 15_000 });
     await expect(section.getByRole("button", { name: /^The support checklist is ready/ })).toHaveCount(0);
     await section.getByRole("button", { name: /^Show archived/ }).click();
     const archivedRow = section.getByRole("listitem").filter({ hasText: "The support checklist is ready" });
