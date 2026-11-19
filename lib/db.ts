@@ -165,6 +165,10 @@ export function createPrismaClient() {
   // surface. Keep the previous client type so this extra $extends layer does
   // not re-expand every model type across the project (it pushed a default-heap
   // `tsc --noEmit` out of memory).
+  //
+  // DSQL only: the retry exists for DSQL's dropped/stalled connections. Plain
+  // Postgres (DATABASE_URL / POSTGRES_URL) keeps its previous behavior.
+  if (getRuntimeDatabaseUrl(process.env)) return extended;
   return extended.$extends(retryReadsExtension) as unknown as typeof extended;
 }
 
