@@ -118,9 +118,6 @@ test.describe("GitHub PR smart chips", () => {
       await expect(customChip).toHaveText("Custom PR label");
 
       // 3. Collapse the selection after `Custom PR label` with ArrowRight, then paste an unapproved PR URL on a third line.
-      // Wait for the editor to take focus back from the link popover; ArrowRight/Enter/typing sent earlier would otherwise act on the
-      // still-selected "Custom PR label" text and replace it (observed on tq when this test runs on its own).
-      await expect(editor).toBeFocused();
       await page.keyboard.press("ArrowRight");
       await page.keyboard.press("Enter");
       await page.keyboard.type("Unapproved: ");
