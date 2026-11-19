@@ -1428,3 +1428,32 @@ describe("redirectPath, omitResourceParameter and static-client revocation (fixt
     expect(publicClient.has("client_secret")).toBe(false)
   })
 })
+
+describe("redirectPath validation and resource opt-out collisions", () => {
+  const catalog = CONNECTOR_DEFINITIONS as ConnectorDefinition[]
+  const shipped = catalog.find(definition => definition.slug === "google-drive")!
+  const index = catalog.indexOf(shipped)
+  afterEach(() => {
+    catalog[index] = shipped
+  })
+
+  it.each(["//evil.example/cb", "/\\evil.example/cb", "https://evil.example/cb", "cb", "/cb?x=1", "/cb#frag", "/a/../../b", ""])(
+    "rejects the hostile or unsupported redirectPath %j",
+    redirectPath => {
+      catalog[index] = { ...shipped, redirectPath }
+      expect(() => connectorRedirectUri("google-drive", "https://compass.example")).toThrow(McpConnectorError)
+    },
+  )
+
+  it("still accepts a plain root-relative path on the trusted origin", () => {
+    catalog[index] = { ...shipped, redirectPath: "/auth/custom-callback" }
+    expect(connectorRedirectUri("google-drive", "https://compass.example")).toBe("https://compass.example/auth/custom-callback")
+  })
+
+  it("removes a resource parameter that came from the endpoint query or authorizeParams when opted out", () => {
+    catalog[index] = { ...shipped, omitResourceParameter: true, staticClient: { clientIdEnv: "A", clientSecretEnv: "B", authorizeParams: { resource: "https://extra.example" } } }
+    const record: ConnectorRecord = { ...connector, slug: "google-drive", authorizationEndpoint: "https://idp.example/authorize?resource=https%3A%2F%2Fendpoint.example" }
+    const url = new URL(buildAuthorizeUrl(record, { state: "s", codeVerifier: "v", redirectUri: "https://compass.example/cb" }))
+    expect(url.searchParams.has("resource")).toBe(false)
+  })
+})

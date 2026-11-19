@@ -353,8 +353,17 @@ export function isConnectorConfigured(definition: ConnectorDefinition): boolean 
  * `origin` must come from `trustedCompassBaseUrl()` rather than a request header.
  */
 export function connectorRedirectUri(slug: string, origin: string): string {
-  const path = connectorDefinition(slug)?.redirectPath ?? `/api/connectors/${encodeURIComponent(slug)}/callback`
-  return new URL(path, origin).toString()
+  const configured = connectorDefinition(slug)?.redirectPath
+  if (configured === undefined) return new URL(`/api/connectors/${encodeURIComponent(slug)}/callback`, origin).toString()
+  // Root-relative path segments only: no protocol-relative (`//host`), backslash,
+  // absolute-URL, query, fragment or dot-segment forms, so the result cannot leave
+  // the trusted origin. The origin is re-checked as a second line of defence.
+  if (!/^\/(?:[A-Za-z0-9._~-]+\/)*[A-Za-z0-9._~-]+$/.test(configured) || configured.split("/").some(segment => segment === "." || segment === ".."))
+    throw new McpConnectorError("INVALID_AUTH_REQUEST", `Connector "${slug}" has an unsupported redirectPath.`)
+  const resolved = new URL(configured, origin)
+  if (resolved.origin !== new URL(origin).origin)
+    throw new McpConnectorError("INVALID_AUTH_REQUEST", `Connector "${slug}" redirectPath leaves the Compass origin.`)
+  return resolved.toString()
 }
 
 /**

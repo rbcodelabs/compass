@@ -84,6 +84,9 @@ export function buildAuthorizeUrl(
   // Appended rather than assigned, so a provider whose authorization endpoint
   // already carries query parameters keeps them.
   for (const [key, value] of params) url.searchParams.set(key, value)
+  // The opt-out must hold even when the endpoint's own query or a catalog extra
+  // already carries `resource`.
+  if (connectorDefinition(connector.slug)?.omitResourceParameter) url.searchParams.delete("resource")
   return url.toString()
 }
 

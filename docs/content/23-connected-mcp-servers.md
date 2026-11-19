@@ -259,6 +259,8 @@ confidential client.
 
 When a provider answers through the MCP gateway with a non-2xx status (other than the routine
 405 on a stream probe), or reports a tool error inside a 2xx response (`isError` or a JSON-RPC
-`error`), Compass writes one log line with the connector slug, JSON-RPC method, status and up to
-500 characters of the provider's message. Bearer tokens and common credential shapes are
-redacted before the text is cut. The response the agent receives is not changed.
+`error`), Compass writes one log line. It holds only the connector slug, HTTP method, status, a
+content type and JSON-RPC method taken from fixed lists, and the numeric JSON-RPC error code when
+there is one. Provider error text, tool names and request contents are never logged, because they
+can contain private data that no redaction can reliably recognise. The response the agent receives
+is not changed.

@@ -29,9 +29,8 @@ import {
   UPSTREAM_RESULT_SCAN_BYTES,
   jsonRpcMethodOf,
   pickHeaders,
-  redactUpstreamExcerpt,
-  toolErrorTextOf,
-  toolNameOf,
+  safeContentType,
+  upstreamErrorSignalOf,
 } from "@/lib/mcp-connectors/gateway"
 import { requireHttpsUrl } from "@/lib/mcp-connectors/http"
 import { mcpConnectorsAvailable } from "@/lib/mcp-connectors/store"
@@ -127,8 +126,8 @@ async function proxy(request: NextRequest, context: { params: Promise<{ slug: st
     }
 
     if (!upstream.ok && !(request.method === "GET" && upstream.status === 405))
-      logUpstreamFailure(slug, request.method, jsonRpcMethodOf(body), upstream, [bearer])
-    else if (request.method === "POST" && upstream.ok) logUpstreamToolError(slug, jsonRpcMethodOf(body), toolNameOf(body), upstream, [bearer])
+      logUpstreamFailure(slug, request.method, jsonRpcMethodOf(body), upstream)
+    else if (request.method === "POST" && upstream.ok) logUpstreamToolError(slug, jsonRpcMethodOf(body), upstream)
 
     // Streamed rather than buffered: an SSE response has no end until the server
     // closes it, and buffering would both stall the agent and hold the whole
@@ -140,9 +139,10 @@ async function proxy(request: NextRequest, context: { params: Promise<{ slug: st
   } catch (error) {
     if (error instanceof McpConnectorError) {
       const displayName = connectorDefinition(slug)?.displayName ?? slug
-      // The message can quote a provider response body, so it is logged rather
-      // than returned. The agent gets the code and an instruction it can act on.
-      console.error("MCP connector gateway failed", slug, error.code, error.message)
+      // The message can quote a provider response body, so it is neither returned
+      // nor logged: only the slug and code are. The agent gets the code and an
+      // instruction it can act on.
+      console.error("MCP connector gateway failed", slug, error.code)
       // A timeout is not a failure report about the provider, and saying so cost a
       // real user: the first long v0 generation was aborted here, the agent read
       // `GATEWAY_FAILED` as "v0 is unreachable", and told the user to go rebuild by
@@ -165,74 +165,82 @@ async function proxy(request: NextRequest, context: { params: Promise<{ slug: st
 /**
  * Writes a provider's non-2xx answer to the log, because the sandbox only ever sees
  * the status: without this a 403 from the provider is indistinguishable from any
- * other and the real reason (API not enabled, scope refused) is lost. Reads a clone,
- * so the response the agent gets is untouched; fire-and-forget, so it cannot delay it.
- * Only the first part of the body is read, and it is redacted before it is logged.
+ * other. Only allowlisted fields are logged (see "Logging policy" in
+ * lib/mcp-connectors/gateway.ts): never the provider's text. Reads a clone, so the
+ * response the agent gets is untouched; fire-and-forget, so it cannot delay it.
  */
-function logUpstreamFailure(slug: string, method: string, rpcMethod: string | null, upstream: Response, secrets: readonly string[]): void {
-  const contentType = upstream.headers.get("content-type")
+function logUpstreamFailure(slug: string, method: string, rpcMethod: string | null, upstream: Response): void {
+  const contentType = safeContentType(upstream.headers.get("content-type"))
   void (async () => {
-    let excerpt = ""
-    try {
-      const reader = upstream.clone().body?.getReader()
-      const decoder = new TextDecoder()
-      let received = 0
-      while (reader && received < 8192) {
-        const { done, value } = await reader.read()
-        if (done || !value) break
-        received += value.byteLength
-        excerpt += decoder.decode(value, { stream: true })
-      }
-      await reader?.cancel().catch(() => {})
-    } catch {
-      excerpt = "(body unreadable)"
-    }
-    console.error(
-      "[mcp-gateway] upstream non-2xx",
-      JSON.stringify({ slug, method, rpcMethod, status: upstream.status, contentType, body: redactUpstreamExcerpt(excerpt, secrets) }),
-    )
+    const text = await readUpstreamPrefix(upstream, 8192)
+    const errorCode = text === null ? null : (upstreamErrorSignalOf(text)?.errorCode ?? null)
+    console.error("[mcp-gateway] upstream non-2xx", JSON.stringify({ slug, method, rpcMethod, status: upstream.status, contentType, errorCode }))
   })()
 }
 
 /**
  * Logs a tool failure that arrived inside a successful (2xx) response. Google's Drive
  * MCP server answers "The caller does not have permission" with HTTP 200 and
- * `result.isError`, so `logUpstreamFailure` never sees it and the only trace is a
- * small response size. Same constraints: reads a clone in the background, so the
- * response the agent gets is untouched and not delayed, and only the first
- * {@link UPSTREAM_RESULT_SCAN_BYTES} are read. A body that does not end inside the cap
- * is a document, not an error, and is skipped. The text is redacted before it is cut.
+ * `result.isError`, so `logUpstreamFailure` never sees it. Same constraints: reads a
+ * clone in the background, only the first {@link UPSTREAM_RESULT_SCAN_BYTES}, and logs
+ * only the slug, method, status and numeric error code. The scan stops at the first
+ * complete error, so an error event on a stream that stays open is still logged.
  */
-function logUpstreamToolError(slug: string, rpcMethod: string | null, toolName: string | null, upstream: Response, secrets: readonly string[]): void {
+function logUpstreamToolError(slug: string, rpcMethod: string | null, upstream: Response): void {
   void (async () => {
-    let text = ""
-    let complete = false
-    try {
-      const reader = upstream.clone().body?.getReader()
-      const decoder = new TextDecoder()
-      let received = 0
-      while (reader) {
-        const { done, value } = await reader.read()
-        if (done) {
-          complete = true
-          break
-        }
-        received += value.byteLength
-        text += decoder.decode(value, { stream: true })
-        if (received >= UPSTREAM_RESULT_SCAN_BYTES) break
-      }
-      await reader?.cancel().catch(() => {})
-    } catch {
-      return
-    }
-    if (!complete) return
-    const errorText = toolErrorTextOf(text)
-    if (errorText === null) return
-    console.error(
-      "[mcp-gateway] upstream tool error",
-      JSON.stringify({ slug, rpcMethod, toolName, status: upstream.status, error: redactUpstreamExcerpt(errorText, secrets) }),
-    )
+    const signal = await scanForUpstreamError(upstream)
+    if (!signal) return
+    console.error("[mcp-gateway] upstream tool error", JSON.stringify({ slug, rpcMethod, status: upstream.status, errorCode: signal.errorCode }))
   })()
+}
+
+/** Up to `limit` bytes of a clone of the response, or null if it cannot be read. */
+async function readUpstreamPrefix(upstream: Response, limit: number): Promise<string | null> {
+  try {
+    const reader = upstream.clone().body?.getReader()
+    const decoder = new TextDecoder()
+    let received = 0
+    let text = ""
+    while (reader && received < limit) {
+      const { done, value } = await reader.read()
+      if (done || !value) break
+      received += value.byteLength
+      text += decoder.decode(value, { stream: true })
+    }
+    cancelQuietly(reader)
+    return text
+  } catch {
+    return null
+  }
+}
+
+async function scanForUpstreamError(upstream: Response) {
+  try {
+    const reader = upstream.clone().body?.getReader()
+    if (!reader) return null
+    const decoder = new TextDecoder()
+    let received = 0
+    let text = ""
+    while (received < UPSTREAM_RESULT_SCAN_BYTES) {
+      const { done, value } = await reader.read()
+      if (done) break
+      received += value.byteLength
+      // A result bigger than the cap is a document, not an error.
+      if (received > UPSTREAM_RESULT_SCAN_BYTES) break
+      text += decoder.decode(value, { stream: true })
+      // Checked per chunk, not at end of stream: an SSE stream can emit its error
+      // and then stay open. A partial JSON body parses to null and keeps reading.
+      const signal = upstreamErrorSignalOf(text)
+      if (signal) {
+        cancelQuietly(reader)
+        return signal
+      }
+    }
+    cancelQuietly(reader)
+    return null
+  } catch {
+    return null
+  }
 }
 
 async function forward(
@@ -300,4 +308,13 @@ function jsonRpcError(status: number, code: number, message: string): NextRespon
     { jsonrpc: "2.0", id: null, error: { code, message } },
     { status, headers: { "Cache-Control": "no-store" } },
   )
+}
+
+/**
+ * Not awaited: the cancel of one branch of a tee'd body settles only once the other
+ * branch (the one streaming to the agent) is also done, so awaiting it would hold the
+ * log scan open for as long as the provider's stream is.
+ */
+function cancelQuietly(reader: ReadableStreamDefaultReader<Uint8Array> | undefined): void {
+  void reader?.cancel().catch(() => {})
 }
