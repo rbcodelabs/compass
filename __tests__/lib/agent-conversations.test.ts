@@ -39,7 +39,7 @@ describe("getAgentConversationMessages", () => {
     expect(res).toBeNull()
     expect(mockPrisma.agentConversation.findFirst).toHaveBeenCalledWith({
       where: { id: "c-x", ...accessibleConversationsWhere("ws-1", "user-1") },
-      select: { userId: true, visibility: true, interviewProcessingJson: true, title: true, summary: true, updatedAt: true },
+      select: { userId: true, visibility: true, interviewProcessingJson: true, archivedAt: true, title: true, summary: true, updatedAt: true },
     })
     expect(mockPrisma.agentMessage.findMany).not.toHaveBeenCalled()
   })

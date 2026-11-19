@@ -66,6 +66,8 @@ describe("lib/agent-scheduled-wakeups", () => {
 
     let seq = 0
     prisma = {
+      // No archived shared thread here; the archived case is covered in conversation-archive-readonly.test.ts.
+      agentConversation: { findFirst: vi.fn(async () => null) },
       agentScheduledWakeup: {
         create: vi.fn(async ({ data }: { data: Omit<StoredWakeup, "id" | "firedRunId" | "failureReason" | "firedAt" | "canceledAt"> }) => {
           seq += 1
