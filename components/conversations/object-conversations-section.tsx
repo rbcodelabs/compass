@@ -94,6 +94,7 @@ function ObjectConversationsContent({
   // Archive is the only way a conversation leaves the list, and it is reversible: "Show archived" swaps the list for the
   // archived threads this person may restore (the server decides; nothing else is ever returned).
   const [showArchived, setShowArchived] = useState(false)
+  const [archivedCapped, setArchivedCapped] = useState(false)
   const [restoring, setRestoring] = useState<string[]>([])
   const [restoreErrors, setRestoreErrors] = useState<Record<string, string>>({})
   const mounted = useRef(false)
@@ -131,10 +132,12 @@ function ObjectConversationsContent({
       const body = (await res.json()) as {
         items?: ObjectConversationSummary[]
         mentionOptions?: MentionOptions
+        archivedCapped?: boolean
       }
       if (!Array.isArray(body.items)) throw new Error("Invalid list response")
       if (!current()) return
       setItems(body.items)
+      setArchivedCapped(showArchived && body.archivedCapped === true)
       if (body.mentionOptions) {
         setMentionOptions(body.mentionOptions)
       }
@@ -152,17 +155,23 @@ function ObjectConversationsContent({
 
   // A conversation archived from the panel: drop its row at once (a refresh that started earlier must not bring it
   // back), say so, and put focus where the row was, on the section heading.
+  const itemsRef = useRef<ObjectConversationSummary[]>([])
+  useEffect(() => { itemsRef.current = items }, [items])
   useEffect(() => {
     const onChange = (event: Event) => {
       const { conversationId, archived } = (event as CustomEvent<ConversationArchiveChange>).detail
-      if (archived && !showArchived) {
+      // Only this section's own rows are announced; another object's section ignores the event entirely.
+      const listed = itemsRef.current.some((row) => row.id === conversationId)
+      if (listed && archived !== showArchived) {
+        // Archived from the live list, or restored from the archived list: the row leaves this view.
         loadGeneration.current++
         setLoading(false)
         setItems((previous) => previous.filter((row) => row.id !== conversationId))
-        setStatus("Conversation archived.")
+        setStatus(archived ? "Conversation archived." : "Conversation restored.")
         headingRef.current?.focus()
       }
-      void load()
+      if (listed || (showArchived && archived)) void load()
+      else if (!showArchived && !archived) void load()
     }
     window.addEventListener(CONVERSATION_ARCHIVE_CHANGED_EVENT, onChange)
     return () => window.removeEventListener(CONVERSATION_ARCHIVE_CHANGED_EVENT, onChange)
@@ -385,6 +394,8 @@ function ObjectConversationsContent({
         </p>
         )
       ) : (
+        <>
+        {showArchived && archivedCapped && <p className="text-xs text-text-subtle">Showing the 50 most recent archived conversations.</p>}
         <ul className="flex flex-col gap-2">
           {items.map((item) => (
             <li key={item.id}>
@@ -405,6 +416,7 @@ function ObjectConversationsContent({
                 <div className="flex min-w-0 items-center justify-between gap-2">
                   <span className="flex min-w-0 items-center gap-1.5">
                     <MessageSquare className="size-3.5 shrink-0 text-primary" aria-hidden="true" />
+                    {item.archived && <span className="sr-only">Archived. </span>}
                     <span className="truncate text-sm font-medium text-text-primary">
                       {item.title}
                     </span>
@@ -469,6 +481,7 @@ function ObjectConversationsContent({
             </li>
           ))}
         </ul>
+        </>
       )}
 
       {panelCtx && (

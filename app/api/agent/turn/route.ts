@@ -177,6 +177,11 @@ function assemblePrompt(
     .join("\n\n")
 }
 
+/** 404 like a lost-access conversation (existence is not newly revealed: the caller can already read it), but marked so the client can show "archived" instead of an error. */
+function archivedConversationResponse() {
+  return new Response("Conversation archived.", { status: 404, headers: { "x-conversation-state": "archived" } })
+}
+
 export async function POST(request: NextRequest) {
   const session = await auth()
   if (!session?.user?.id) {
@@ -297,7 +302,8 @@ export async function POST(request: NextRequest) {
     let passiveConvo: { id: string } | null = null
     if (typeof conversationId === "string") {
       const access = await resolveConversationAccess(prisma, { conversationId, workspaceId, userId })
-      if (!access || isClosedToNewTurns(access)) {
+      if (access && isClosedToNewTurns(access)) return archivedConversationResponse()
+      if (!access) {
         return new Response("Conversation not found or access denied.", { status: 404 })
       }
       passiveConvo = { id: conversationId }
@@ -398,7 +404,8 @@ export async function POST(request: NextRequest) {
   let convo: { id: string } | null = null
   if (typeof conversationId === "string") {
     const access = await resolveConversationAccess(prisma, { conversationId, workspaceId, userId })
-    if (!access || isClosedToNewTurns(access)) {
+    if (access && isClosedToNewTurns(access)) return archivedConversationResponse()
+    if (!access) {
       return new Response("Conversation not found or access denied.", { status: 404 })
     }
     convo = { id: conversationId }

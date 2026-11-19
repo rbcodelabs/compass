@@ -124,6 +124,10 @@ type Props = {
   canArchive?: boolean
   /** The conversation was archived from this header; the host leaves it (the panel goes back one crumb). */
   onConversationArchived?: () => void
+  /** The conversation is archived (server-computed): read-only, with Restore for those who may. */
+  initialArchived?: boolean
+  /** Server-computed: the caller may restore this archived conversation. */
+  canRestore?: boolean
   workspaceId: string
   basePath: string // `/${orgSlug}/${workspaceSlug}`
   conversations: ConversationSummary[]
@@ -234,6 +238,8 @@ const SHARED_POLL_MS = 4_000
 
 export function AgentChat({
   canArchive = false,
+  canRestore = false,
+  initialArchived = false,
   onConversationArchived,
   workspaceId,
   basePath,
@@ -382,6 +388,29 @@ export function AgentChat({
   }, [activeConversationId, threadStatus, workspaceId])
 
   // Archive the whole thread (there is no per-message delete). Reversible: it is restored from the section's Archived view.
+  const [archivedOverride, setArchivedOverride] = useState<{ key: string; value: boolean } | null>(null)
+  const archived = archivedOverride?.key === (activeConversationId ?? "__new__") ? archivedOverride.value : initialArchived
+  const [restoring, setRestoring] = useState(false)
+  const [restoreFailed, setRestoreFailed] = useState(false)
+  const handleRestoreConversation = useCallback(async () => {
+    if (!activeConversationId || restoring) return
+    setRestoring(true)
+    setRestoreFailed(false)
+    try {
+      const res = await fetch(`/api/agent/conversations/${activeConversationId}?workspaceId=${encodeURIComponent(workspaceId)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ archived: false }),
+      })
+      if (!res.ok) { setRestoreFailed(true); return }
+      setArchivedOverride({ key: activeConversationId, value: false })
+      announceConversationArchiveChange({ conversationId: activeConversationId, archived: false })
+    } catch {
+      setRestoreFailed(true)
+    } finally {
+      setRestoring(false)
+    }
+  }, [activeConversationId, restoring, workspaceId])
   const [archiveOpen, setArchiveOpen] = useState(false)
   const [archiving, setArchiving] = useState(false)
   const [archiveFailed, setArchiveFailed] = useState(false)
@@ -491,9 +520,9 @@ export function AgentChat({
   const modelPick = useModelPick({ userId, workspaceId, choices: agentChoices, agentSelection })
   const turn = useAgentTurn({
     workspaceId,
-    // Archived (or access lost) while this tab was open: the next send answers 404. Show the same state a removed
-    // participant sees, not an error banner.
-    onConversationUnavailable: () => setAccessLost("removed"),
+    // Archived while this tab was open: the next send answers 404 with an "archived" marker. Show the read-only
+    // archived state, not an error banner and not the "removed" wording.
+    onConversationUnavailable: () => setArchivedOverride({ key: activeConversationId ?? "__new__", value: true }),
     onConversationCreated: (createdId) => {
       selfCreated.current.add(createdId)
       onConversationCreatedRef.current?.(createdId)
@@ -1174,7 +1203,7 @@ export function AgentChat({
   const runStarterId = activeRun?.startedByUserId ?? null
   const runStartedByOther = Boolean(runStarterId && runStarterId !== userId)
   const canCancelRun = !runStartedByOther || roster?.viewerRole === "OWNER"
-  const composerDisabled = isStreaming || composerBlocked || Boolean(accessLost)
+  const composerDisabled = isStreaming || composerBlocked || Boolean(accessLost) || archived
   const showEmptyRailSuggestions =
     isRail &&
     (railActive ?? true) &&
@@ -1476,7 +1505,7 @@ export function AgentChat({
                     </>
                   )}
                 </Button>
-                {canArchive && shared && (
+                {(canArchive || canRestore) && !archived && shared && (
                   <Button
                     type="button"
                     variant="ghost"
@@ -1590,6 +1619,18 @@ export function AgentChat({
               <p className="pl-10 text-xs text-text-subtle">
                 {`${nameOf(runStarterId) ?? "Another participant"} asked this. You can watch, and send your own message once it finishes.`}
               </p>
+            )}
+
+            {archived && !accessLost && (
+              <div role="status" className="flex flex-wrap items-center gap-2 rounded-lg border border-default bg-surface-inset px-4 py-3 text-sm text-text-secondary">
+                <span>This conversation is archived and read-only. Its messages are kept.</span>
+                {canRestore && (
+                  <Button type="button" variant="outline" size="xs" disabled={restoring} onClick={() => void handleRestoreConversation()}>
+                    {restoring ? "Restoring…" : "Restore"}
+                  </Button>
+                )}
+                {restoreFailed && <span role="alert" className="basis-full text-status-danger">We couldn’t restore this conversation. Please try again.</span>}
+              </div>
             )}
 
             {(accessLost ?? (leftNotice ? "left" : null)) && (

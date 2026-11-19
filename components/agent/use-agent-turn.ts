@@ -81,8 +81,9 @@ type Options = {
   /** A turn finished and its reply is ready. Not called for turns that errored or were abandoned. */
   onSettled?: (settlement: TurnSettlement) => void
   /**
-   * The server answered 404 to a turn aimed at an existing conversation: it was archived, or the sender lost access.
-   * Both look identical on purpose. The caller shows its "no longer available" state; no error banner is raised.
+   * The server refused a turn because the conversation was archived (404 with `x-conversation-state: archived`). The
+   * caller shows its read-only archived state; no error banner is raised. Any other 404 (workspace gone, deploy skew)
+   * is NOT this and surfaces as an ordinary error.
    */
   onConversationUnavailable?: () => void
 }
@@ -141,7 +142,7 @@ export function useAgentTurn({ workspaceId, onConversationCreated, onSettled, on
     onConversationCreatedRef.current = onConversationCreated
     onSettledRef.current = onSettled
     onUnavailableRef.current = onConversationUnavailable
-  }, [onConversationCreated, onSettled])
+  }, [onConversationCreated, onSettled, onConversationUnavailable])
 
   // Unmount only. A genuine thread switch calls `reset()` instead, which is the
   // one place that can tell adoption of a new conversation from switching.
@@ -403,9 +404,9 @@ export function useAgentTurn({ workspaceId, onConversationCreated, onSettled, on
         }),
       })
       if (controller.signal.aborted) return true
-      if (res.status === 404 && params.conversationId) {
+      if (res.status === 404 && params.conversationId && res.headers.get("x-conversation-state") === "archived") {
         conversationUnavailable = true
-        throw new Error("Conversation not found or access denied.")
+        throw new Error("Conversation archived.")
       }
       if (!res.ok || !res.body) {
         const serverMsg = readTurnErrorMessage(await res.text().catch(() => ""))

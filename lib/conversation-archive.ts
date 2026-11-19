@@ -12,7 +12,8 @@
  *
  * Who may archive or restore a shared (WORKSPACE) thread: the thread starter (author of its first message, falling
  * back to the conversation owner for rows that predate author tracking), a workspace admin, or an organization
- * owner/admin. The same rule is used to decide who is shown an archived thread in the "Show archived" list, so a
+ * owner/admin WHO IS ALSO A WORKSPACE MEMBER: every read goes through `accessibleConversationsWhere`, which requires
+ * workspace membership, so an org owner outside the workspace gets 404 (covered by the real-database tests). The same rule is used to decide who is shown an archived thread in the "Show archived" list, so a
  * person who cannot restore it never learns its title or summary. A conversation the caller cannot see is a 404
  * (never 403, see lib/agent-conversation-access.ts); a member who can see it without the right gets a 403.
  *
@@ -22,7 +23,15 @@
  * Private chats keep their older rule (owner-only, see setAgentConversationArchived) and are not audited here.
  *
  * `updatedAt`: Prisma's updatedAt write extension stamps `now` on any update that omits it. Archive and restore carry
- * the conversation's own value through unchanged, so neither action reorders a list.
+ * the conversation's own value through unchanged (re-read inside the transaction and written compare-and-set, see
+ * stampConversationArchived), for shared and private conversations alike, so neither action reorders a list and a
+ * message that lands mid-archive is never reverted.
+ *
+ * Read-only while archived ("archived takes no replies"): the turn route answers 404 with `x-conversation-state:
+ * archived`, edits answer 409 and `canEdit` is false, invites and settings changes answer 409, continuation runs
+ * (wake-ups, supervision actions) are refused with CONVERSATION_ARCHIVED, and archiving cancels pending wake-ups in the
+ * same transaction. A run that is ALREADY in flight when the thread is archived is allowed to finish and may append its
+ * reply: interrupting a run mid-stream is a separate decision. Restoring re-enables everything except cancelled wake-ups.
  *
  * Each real change writes a content-free AgentAuditLog row in the same transaction (ids, role, count; never text).
  * `conversationId` on that row is null on purpose: the audit must survive anything that later sweeps a conversation's
@@ -33,7 +42,8 @@ import getPrisma from "@/lib/db"
 import type { AppPrismaClient } from "@/lib/db"
 import { accessibleConversationsWhere } from "@/lib/agent-conversation-access"
 import { isWorkspaceAdmin } from "@/lib/conversation-messages"
-import { setAgentConversationArchived } from "@/lib/agent-conversations"
+import { stampConversationArchived } from "@/lib/agent-conversations"
+import { cancelAllPendingConversationWakeups } from "@/lib/agent-scheduled-wakeups"
 
 export type ArchiveResult =
   | { ok: true; archived: boolean; changed: boolean }
@@ -58,26 +68,33 @@ async function rootAuthorOf(
   return first?.authorUserId ?? ownerUserId
 }
 
+export type ArchiveCapabilities = { archived: boolean; canArchive: boolean; canRestore: boolean }
+
 /**
- * Whether the caller may archive (and, symmetrically, restore) this SHARED conversation. Computed on the server and
- * handed to the client as `canArchive` / `canRestore`; the client never infers it, because admins are not visible to it.
- * False for private chats, interview conversations and anything the caller cannot see.
+ * What the caller may do with this SHARED conversation, computed on the server and handed to the client; the client
+ * never infers it, because admins are not visible to it. An archived thread offers restore only, a live one archive only.
+ * All false for private chats, interview conversations and anything the caller cannot see.
  */
-export async function canArchiveSharedConversation(input: {
+export async function archiveCapabilities(input: {
   conversationId: string
   workspaceId: string
   userId: string
-}): Promise<boolean> {
+}): Promise<ArchiveCapabilities> {
   const { conversationId, workspaceId, userId } = input
   const prisma = getPrisma()
   const conversation = await prisma.agentConversation.findFirst({
     where: { id: conversationId, ...accessibleConversationsWhere(workspaceId, userId) },
-    select: { userId: true, visibility: true, interviewProcessingJson: true },
+    select: { userId: true, visibility: true, interviewProcessingJson: true, archivedAt: true },
   })
-  if (!conversation || conversation.visibility !== "WORKSPACE" || conversation.interviewProcessingJson != null) return false
+  if (!conversation) return { archived: false, canArchive: false, canRestore: false }
+  const archived = conversation.archivedAt != null
+  if (conversation.visibility !== "WORKSPACE" || conversation.interviewProcessingJson != null) {
+    return { archived, canArchive: false, canRestore: false }
+  }
   const rootAuthorId = await rootAuthorOf(prisma, conversationId, conversation.userId)
   const isAdmin = rootAuthorId === userId ? false : await isWorkspaceAdmin(prisma, workspaceId, userId)
-  return canArchiveConversation({ rootAuthorId, userId, isAdmin })
+  const allowed = canArchiveConversation({ rootAuthorId, userId, isAdmin })
+  return { archived, canArchive: allowed && !archived, canRestore: allowed && archived }
 }
 
 export async function setConversationArchived(input: {
@@ -91,15 +108,15 @@ export async function setConversationArchived(input: {
 
   const conversation = await prisma.agentConversation.findFirst({
     where: { id: conversationId, ...accessibleConversationsWhere(workspaceId, userId) },
-    select: { userId: true, visibility: true, interviewProcessingJson: true, updatedAt: true, targetType: true, targetId: true },
+    select: { userId: true, visibility: true, interviewProcessingJson: true, targetType: true, targetId: true },
   })
   if (!conversation) return { ok: false, status: 404 }
 
   // Private chats and interview conversations: unchanged owner-only behaviour, 404 for everyone else.
   if (conversation.visibility !== "WORKSPACE" || conversation.interviewProcessingJson != null) {
     if (conversation.userId !== userId) return { ok: false, status: 404 }
-    const ok = await setAgentConversationArchived(conversationId, workspaceId, userId, archived)
-    return ok ? { ok: true, archived, changed: true } : { ok: false, status: 404 }
+    const changedPrivate = await prisma.$transaction((tx) => stampConversationArchived(tx, { conversationId, workspaceId, archived }))
+    return { ok: true, archived, changed: changedPrivate }
   }
 
   const rootAuthorId = await rootAuthorOf(prisma, conversationId, conversation.userId)
@@ -108,12 +125,11 @@ export async function setConversationArchived(input: {
   if (!canArchiveConversation({ rootAuthorId, userId, isAdmin })) return { ok: false, status: 403 }
 
   const changed = await prisma.$transaction(async (tx) => {
-    // Guarded on the current state so a repeat is a no-op (and a double click cannot write two audit rows).
-    const { count } = await tx.agentConversation.updateMany({
-      where: { id: conversationId, workspaceId, archivedAt: archived ? null : { not: null } },
-      data: { archivedAt: archived ? new Date() : null, updatedAt: conversation.updatedAt },
-    })
-    if (count === 0) return false
+    // Compare-and-set on the current state, so a repeat is a no-op (and a double click cannot write two audit rows).
+    const stamped = await stampConversationArchived(tx, { conversationId, workspaceId, archived })
+    if (!stamped) return false
+    // No wake-up may fire into a thread that takes no replies.
+    if (archived) await cancelAllPendingConversationWakeups(tx, { conversationId })
     const messageCount = await tx.agentMessage.count({ where: { conversationId } })
     await tx.agentAuditLog.create({
       data: {
@@ -149,9 +165,19 @@ export type ArchivedConversationRow = {
   _count: { messages: number }
 }
 
+const ARCHIVED_LIST_CAP = 50
+const ARCHIVED_PAGE = 100
+const ARCHIVED_MAX_PAGES = 40
+
 /**
  * Archived conversations on one object that THIS caller may restore: everything for an admin, only their own threads
  * otherwise. Titles and summaries of anything else are never read into the response.
+ *
+ * Who started a thread is the author of its first message, which cannot be expressed as a relation filter, so the
+ * query pages through archived rows (newest first) and applies the starter rule to each page until it has collected the
+ * cap plus one (the extra row only tells the caller that more exist). The cap therefore applies AFTER the starter rule:
+ * a member whose own thread sits behind many newer archived threads by others still finds it. The page budget bounds the
+ * work; hitting it reports `capped` too.
  */
 export async function listRestorableArchivedConversations(input: {
   workspaceId: string
@@ -159,38 +185,52 @@ export async function listRestorableArchivedConversations(input: {
   targetType: string
   targetId: string
   linkedIds: string[]
-}): Promise<ArchivedConversationRow[]> {
+}): Promise<{ rows: ArchivedConversationRow[]; capped: boolean }> {
   const { workspaceId, userId, targetType, targetId, linkedIds } = input
   const prisma = getPrisma()
-  const rows = (await prisma.agentConversation.findMany({
-    where: {
-      archivedAt: { not: null },
-      visibility: "WORKSPACE",
-      interviewProcessingJson: null,
-      AND: [
-        accessibleConversationsWhere(workspaceId, userId),
-        { OR: [{ targetType, targetId }, ...(linkedIds.length > 0 ? [{ id: { in: linkedIds } }] : [])] },
-      ],
-    },
-    orderBy: { updatedAt: "desc" },
-    take: 50,
-    select: {
-      id: true, userId: true, title: true, summary: true, status: true, agentMode: true, visibility: true,
-      targetType: true, targetId: true, updatedAt: true, _count: { select: { messages: true } },
-    },
-  })) as Array<ArchivedConversationRow & { userId: string }>
-  if (rows.length === 0) return []
-
+  const where = {
+    archivedAt: { not: null },
+    visibility: "WORKSPACE",
+    interviewProcessingJson: null,
+    AND: [
+      accessibleConversationsWhere(workspaceId, userId),
+      { OR: [{ targetType, targetId }, ...(linkedIds.length > 0 ? [{ id: { in: linkedIds } }] : [])] },
+    ],
+  }
   const admin = await isWorkspaceAdmin(prisma, workspaceId, userId)
-  const strip = ({ userId: _owner, ...rest }: ArchivedConversationRow & { userId: string }): ArchivedConversationRow => rest
-  if (admin) return rows.map(strip)
+  const collected: Array<ArchivedConversationRow & { userId: string }> = []
+  let exhausted = false
 
-  const firsts = await prisma.agentMessage.findMany({
-    where: { conversationId: { in: rows.map((row) => row.id) } },
-    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-    distinct: ["conversationId"],
-    select: { conversationId: true, authorUserId: true },
-  })
-  const starter = new Map(firsts.map((first) => [first.conversationId, first.authorUserId]))
-  return rows.filter((row) => (starter.get(row.id) ?? row.userId) === userId).map(strip)
+  for (let page = 0; page < ARCHIVED_MAX_PAGES && collected.length <= ARCHIVED_LIST_CAP; page++) {
+    const batch = (await prisma.agentConversation.findMany({
+      where,
+      orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+      skip: page * ARCHIVED_PAGE,
+      take: ARCHIVED_PAGE,
+      select: {
+        id: true, userId: true, title: true, summary: true, status: true, agentMode: true, visibility: true,
+        targetType: true, targetId: true, updatedAt: true, _count: { select: { messages: true } },
+      },
+    })) as Array<ArchivedConversationRow & { userId: string }>
+
+    let allowed = batch
+    if (!admin && batch.length > 0) {
+      const firsts = await prisma.agentMessage.findMany({
+        where: { conversationId: { in: batch.map((row) => row.id) } },
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+        distinct: ["conversationId"],
+        select: { conversationId: true, authorUserId: true },
+      })
+      const starter = new Map(firsts.map((first) => [first.conversationId, first.authorUserId]))
+      allowed = batch.filter((row) => (starter.get(row.id) ?? row.userId) === userId)
+    }
+    collected.push(...allowed)
+    if (batch.length < ARCHIVED_PAGE) { exhausted = true; break }
+  }
+
+  const strip = ({ userId: _owner, ...rest }: ArchivedConversationRow & { userId: string }): ArchivedConversationRow => rest
+  return {
+    rows: collected.slice(0, ARCHIVED_LIST_CAP).map(strip),
+    capped: collected.length > ARCHIVED_LIST_CAP || !exhausted,
+  }
 }

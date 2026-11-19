@@ -44,11 +44,13 @@ export type MessageEditContext = {
   isInterview: boolean
   userId: string
   isAdmin: boolean
+  /** An archived shared thread is read-only (TASK-195 S2): nobody edits it until it is restored. */
+  archived?: boolean
 }
 
 /** Pure policy: may `ctx.userId` edit this message? */
 export function canEditMessage(message: EditableMessageFields, ctx: MessageEditContext): boolean {
-  if (ctx.isInterview || ctx.visibility !== "WORKSPACE") return false
+  if (ctx.isInterview || ctx.visibility !== "WORKSPACE" || ctx.archived) return false
   if (message.role !== "user") return false
   if (message.authorType != null && message.authorType !== "HUMAN") return false
   if (!EDITABLE_KINDS.has(message.messageKind)) return false
@@ -82,6 +84,7 @@ export type EditConversation = {
   userId: string
   visibility: string | null
   interviewProcessingJson: string | null
+  archivedAt: Date | null
   title: string | null
   summary: string | null
   updatedAt: Date
@@ -94,7 +97,7 @@ export async function loadAccessibleConversation(
 ): Promise<EditConversation | null> {
   return prisma.agentConversation.findFirst({
     where: { id: conversationId, ...accessibleConversationsWhere(workspaceId, userId) },
-    select: { userId: true, visibility: true, interviewProcessingJson: true, title: true, summary: true, updatedAt: true },
+    select: { userId: true, visibility: true, interviewProcessingJson: true, archivedAt: true, title: true, summary: true, updatedAt: true },
   })
 }
 
@@ -108,7 +111,7 @@ export type EditedMessageDto = {
 
 export type EditResult =
   | { ok: true; message: EditedMessageDto }
-  | { ok: false; status: 400 | 403 | 404; error: string }
+  | { ok: false; status: 400 | 403 | 404 | 409; error: string }
 
 const NOT_FOUND = { ok: false, status: 404, error: "Not found" } as const
 
@@ -135,6 +138,11 @@ export async function editConversationMessage(input: {
   const prisma = getPrisma()
   const conversation = await loadAccessibleConversation(prisma, { conversationId, workspaceId, userId })
   if (!conversation) return NOT_FOUND
+
+  // The caller can see it, so say why instead of a 404. Restoring the thread re-enables editing.
+  if (conversation.archivedAt != null && conversation.visibility === "WORKSPACE") {
+    return { ok: false, status: 409, error: "This conversation is archived. Restore it to edit." }
+  }
 
   const message = await prisma.agentMessage.findFirst({
     where: { id: messageId, conversationId },

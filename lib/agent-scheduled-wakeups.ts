@@ -309,6 +309,19 @@ export async function fireScheduledWakeupById(
     return { status: "skipped", wakeupId }
   }
 
+  // A due wake-up for a thread that was archived meanwhile is cancelled, not fired (archive also cancels pending ones).
+  const archivedShared = await prisma.agentConversation.findFirst({
+    where: { id: row.conversationId, visibility: "WORKSPACE", archivedAt: { not: null } },
+    select: { id: true },
+  })
+  if (archivedShared) {
+    await prisma.agentScheduledWakeup.updateMany({
+      where: { id: row.id, status: "PENDING" },
+      data: { status: "CANCELED", canceledAt: now, updatedAt: now },
+    })
+    return { status: "skipped", wakeupId: row.id }
+  }
+
   const active = await findActiveAgentRun({ prisma, conversationId: row.conversationId })
   if (active) {
     return { status: "deferred_busy", wakeupId: row.id, conversationId: row.conversationId }

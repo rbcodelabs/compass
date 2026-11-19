@@ -60,7 +60,6 @@ export type ObjectConversationSummary = {
   /** Present (true) only on rows returned for `archived=1`; those are only ever rows the caller may restore. */
   archived?: true
   canRestore?: true
-  canArchive?: true
 }
 
 export async function GET(request: NextRequest) {
@@ -127,8 +126,9 @@ export async function GET(request: NextRequest) {
 
     // `archived=1` swaps the list for the archived rows this caller may restore (the starter, or an admin). Anything
     // else stays out of the response entirely, so an archived title or summary never reaches someone who cannot act on it.
+    let archivedCapped = false
     const rows = wantsArchived
-      ? await listRestorableArchivedConversations({ workspaceId, userId, targetType, targetId, linkedIds })
+      ? await listRestorableArchivedConversations({ workspaceId, userId, targetType, targetId, linkedIds }).then(({ rows: restorable, capped }) => { archivedCapped = capped; return restorable })
       : await prisma.agentConversation.findMany({
       where: {
         archivedAt: null,
@@ -178,11 +178,11 @@ export async function GET(request: NextRequest) {
         updatedAt: row.updatedAt.toISOString(),
         anchored: row.targetType === targetType && row.targetId === targetId,
         links: linked.filter(link => link.conversationId === row.id).map(({ linkId, kind, auto }) => ({ linkId, kind, auto })),
-        ...(wantsArchived ? { archived: true as const, canRestore: true as const, canArchive: true as const } : {}),
+        ...(wantsArchived ? { archived: true as const, canRestore: true as const } : {}),
       }
     })
 
-    return Response.json({ items, mentionOptions })
+    return Response.json({ items, mentionOptions, ...(wantsArchived ? { archivedCapped } : {}) })
   } catch (error) {
     const failure = error as { code?: string; meta?: { column?: string } }
     const missingUnifiedColumn = failure.code === "P2022" && /^(?:agent_conversations|AgentConversation)\.(?:target_type|target_id|status|agent_mode)$/.test(failure.meta?.column ?? "")

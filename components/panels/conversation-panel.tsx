@@ -484,6 +484,8 @@ export function ConversationPanel({ conversationId }: { conversationId: string }
     targetId: string | null
     targetLabel: string | null
     canArchive: boolean
+    canRestore: boolean
+    archived: boolean
   } | null>(null)
 
   useEffect(() => {
@@ -527,6 +529,8 @@ export function ConversationPanel({ conversationId }: { conversationId: string }
             targetId?: string | null
             targetLabel?: string | null
             canArchive?: boolean
+            canRestore?: boolean
+            archived?: boolean
           }
           setSettingsState({
             id: conversationId,
@@ -537,6 +541,8 @@ export function ConversationPanel({ conversationId }: { conversationId: string }
             targetId: body.targetId ?? null,
             targetLabel: body.targetLabel ?? null,
             canArchive: body.canArchive === true,
+            canRestore: body.canRestore === true,
+            archived: body.archived === true,
           })
         })
         .catch(() => {}),
@@ -583,6 +589,8 @@ export function ConversationPanel({ conversationId }: { conversationId: string }
       initialTargetId={initialTargetId}
       initialTargetLabel={initialTargetLabel}
       canArchive={currentSettings?.canArchive === true}
+      canRestore={currentSettings?.canRestore === true}
+      initialArchived={currentSettings?.archived === true}
       onConversationArchived={() =>
         leaveArchivedConversation({ historyStack: ctx.historyStack, jumpToCrumb: ctx.jumpToCrumb, closePanel })
       }
