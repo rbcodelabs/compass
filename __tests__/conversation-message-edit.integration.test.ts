@@ -147,4 +147,47 @@ describe.skipIf(!databaseUrl)("conversation message edit (real PostgreSQL)", () 
     await ensureConversationForComment(prisma, thread.replyId)
     expect((await prisma.agentMessage.findUniqueOrThrow({ where: { id: thread.rootId } })).content).toBe("edited before repair")
   })
+
+  it("refuses to edit a plan proposal even when its mirror row still looks like an ordinary message", async () => {
+    const thread = await makeThread("Proposal body", "ok", 700)
+    // The race: the comment mirrored as a plain message, and only then was it marked as a proposal.
+    await prisma.solutionPlanProposal.create({ data: { commentId: thread.rootId } })
+    expect(await prisma.agentMessage.findUniqueOrThrow({ where: { id: thread.rootId } })).toMatchObject({ role: "user", messageKind: "COMMENT" })
+
+    expect(await edit(u.owner, thread.rootId, thread.rootId, "tampered")).toMatchObject({ ok: false, status: 404 })
+    expect((await prisma.agentMessage.findUniqueOrThrow({ where: { id: thread.rootId } })).content).toBe("Proposal body")
+    expect((await prisma.comment.findUniqueOrThrow({ where: { id: thread.rootId } })).body).toBe("Proposal body")
+  })
+
+  it("a later mirror repair or reply-delete does not turn an edit into new activity: the conversation keeps its place", async () => {
+    const older = await makeThread("Older", "o", 800)
+    const target = await makeThread("Target", "t", 900)
+    const newer = await makeThread("Newer", "n", 1000)
+    const order = await listOrder()
+    const before = (await prisma.agentConversation.findUniqueOrThrow({ where: { id: target.rootId } })).updatedAt
+
+    await edit(u.owner, target.rootId, target.rootId, "Target, edited")
+    await edit(u.replier, target.rootId, target.replyId, "t, edited")
+    await ensureConversationForComment(prisma, target.rootId)
+    await ensureConversationForComment(prisma, target.replyId)
+
+    const after = await prisma.agentConversation.findUniqueOrThrow({ where: { id: target.rootId } })
+    expect(after.updatedAt.getTime()).toBe(before.getTime())
+    expect(await listOrder()).toEqual(order)
+    expect(order.indexOf(newer.rootId)).toBeLessThan(order.indexOf(target.rootId))
+    expect(order.indexOf(target.rootId)).toBeLessThan(order.indexOf(older.rootId))
+  })
+
+  it("editing a message that an agent already answered starts no run and adds no message", async () => {
+    const thread = await makeThread("Asked", "answered?", 1100)
+    await prisma.agentMessage.create({ data: { conversationId: thread.rootId, role: "assistant", content: "the answer", createdAt: at(1110) } })
+    const counts = async () => ({
+      runs: await prisma.agentRun.count({ where: { conversationId: thread.rootId } }),
+      messages: await prisma.agentMessage.count({ where: { conversationId: thread.rootId } }),
+    })
+    const before = await counts()
+    expect((await edit(u.owner, thread.rootId, thread.rootId, "Asked, rephrased")).ok).toBe(true)
+    expect(await counts()).toEqual(before)
+  })
 })
+

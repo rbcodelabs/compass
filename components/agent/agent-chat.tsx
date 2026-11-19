@@ -61,6 +61,7 @@ import { Markdown } from "@/components/agent/markdown"
 import { RecentMentions } from "@/components/agent/recent-mentions"
 import type { MentionOptions } from "@/components/docs/mention-editor"
 import { plainTextOf } from "@/lib/comment-mentions"
+import { refreshEditedMessages } from "@/lib/conversation-message-merge"
 import { SharedMessageContent } from "@/components/conversations/message-actions"
 import { AttachMenu, uploadAgentFiles, type AttachedItem, type AttachedUpload } from "@/components/agent/composer/attach-menu"
 import { SeedContextChip } from "@/components/agent/seed-context-chip"
@@ -385,6 +386,12 @@ export function AgentChat({
     [workspaceId, activeConversationId, basePath, routeSegment, router],
   )
   const [messages, setMessages] = useState<Message[]>(initialMessages)
+
+  // The editor captures its mention options when it mounts, so they must already be here by the first click on Edit.
+  const hasEditableMessage = messages.some((m) => m.canEdit)
+  useEffect(() => {
+    if (hasEditableMessage) loadMentionOptions()
+  }, [hasEditableMessage, loadMentionOptions])
   // Prefilled (editable) composer instruction from a "Send to agent" hand-off
   // — only for a brand-new chat. Lazy initializer so this never overwrites
   // composer text when resuming a past conversation (activeConversationId set).
@@ -990,7 +997,7 @@ export function AgentChat({
           null,
         )
     const url = `/api/agent/conversations/${activeConversationId}/messages?workspaceId=${encodeURIComponent(workspaceId)}${
-      after ? `&after=${encodeURIComponent(after)}` : ""
+      after ? `&after=${encodeURIComponent(after)}&includeEdited=1` : ""
     }`
     const res = await fetch(url)
     if (res.status === 404) {
@@ -1024,15 +1031,9 @@ export function AgentChat({
     if (incoming.length === 0) return
     setMessages((current) => {
       const known = new Set(current.map((m) => m.id))
-      // The inclusive cursor re-sends the newest message, which is how somebody else's edit to it reaches this tab.
-      const changed = new Map(incoming.filter((m) => known.has(m.id)).map((m) => [m.id, m]))
-      const refreshed = current.map((m) => {
-        const next = changed.get(m.id)
-        return next && next.editedAt && next.editedAt !== m.editedAt
-          ? { ...m, content: next.content, editedAt: next.editedAt, canEdit: next.canEdit }
-          : m
-      })
-      const base = refreshed.some((m, i) => m !== current[i]) ? refreshed : current
+      // `includeEdited=1` makes the server also send every edited message, which is how somebody else's edit to an
+      // older message reaches this tab.
+      const base = refreshEditedMessages(current, incoming)
       const fresh = incoming.filter((m) => !known.has(m.id))
       if (fresh.length === 0) return base
       // The cursor is inclusive, so the last message comes back every time and is
@@ -1917,7 +1918,7 @@ function MessageRow({
             // PR chips. Private chats keep plain text (see the module doc of message-actions).
             <SharedMessageContent
               message={message}
-              authorLabel={message.authorName ?? (fromOther ? "Participant" : "you")}
+              authorLabel={message.authorName ?? "Participant"}
               workspaceId={workspaceId}
               conversationId={conversationId}
               mentionOptions={mentionOptions}

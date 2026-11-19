@@ -12,7 +12,7 @@
  * Copy here is entity-neutral on purpose: the thinking model renames entities per workspace.
  */
 
-import { useCallback, useState, type KeyboardEvent } from "react"
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react"
 
 import { MentionEditor, type MentionOptions } from "@/components/docs/mention-editor"
 import { MarkdownContent } from "@/components/markdown-content"
@@ -21,7 +21,11 @@ import { Button } from "@/components/ui/button"
 import { mentionsAsMarkdownLinks } from "@/lib/comment-mentions"
 import { cn } from "@/lib/utils"
 
-export function SharedMessageBody({
+/**
+ * Memoized on content + options: a long thread otherwise re-parses every message's markdown on each streamed chunk,
+ * poll and keystroke elsewhere in the chat.
+ */
+export const SharedMessageBody = memo(function SharedMessageBody({
   content,
   mentionOptions,
   className,
@@ -30,17 +34,19 @@ export function SharedMessageBody({
   mentionOptions: MentionOptions
   className?: string
 }) {
-  const live = mentionLookup(mentionOptions)
-  const markdown = mentionsAsMarkdownLinks(content, (ref) => {
-    const option = live.get(`${ref.kind}:${ref.id}`)
-    return option ? { name: option.name, outside: option.outsideWorkspace } : undefined
-  })
+  const markdown = useMemo(() => {
+    const live = mentionLookup(mentionOptions)
+    return mentionsAsMarkdownLinks(content, (ref) => {
+      const option = live.get(`${ref.kind}:${ref.id}`)
+      return option ? { name: option.name, outside: option.outsideWorkspace } : undefined
+    })
+  }, [content, mentionOptions])
   return (
     <MarkdownContent className={className} linkComponent={MentionAwareLink}>
       {markdown}
     </MarkdownContent>
   )
-}
+})
 
 export type EditableMessage = {
   id: string
@@ -86,6 +92,15 @@ export function SharedMessageContent({
   const [draft, setDraft] = useState(message.content)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const editButtonRef = useRef<HTMLButtonElement>(null)
+  // Keyboard users land back on the Edit button after Save or Cancel instead of on the document body.
+  const restoreFocus = useRef(false)
+  useEffect(() => {
+    if (!editing && restoreFocus.current) {
+      restoreFocus.current = false
+      editButtonRef.current?.focus()
+    }
+  }, [editing])
 
   const open = useCallback(() => {
     setDraft(message.content)
@@ -94,6 +109,7 @@ export function SharedMessageContent({
     onOpenMentions?.()
   }, [message.content, onOpenMentions])
   const close = useCallback(() => {
+    restoreFocus.current = true
     setEditing(false)
     setError(null)
   }, [])
@@ -119,6 +135,7 @@ export function SharedMessageContent({
         content: body.message?.content ?? content,
         editedAt: body.message?.editedAt ?? new Date().toISOString(),
       })
+      restoreFocus.current = true
       setEditing(false)
     } catch {
       setError("The message could not be saved.")
@@ -180,6 +197,7 @@ export function SharedMessageContent({
           {message.editedAt && <EditedMarker editedAt={message.editedAt} className={onPrimary ? "text-primary-foreground/80" : undefined} />}
           {message.canEdit && (
             <button
+              ref={editButtonRef}
               type="button"
               data-testid="message-edit-button"
               aria-label={`Edit comment by ${authorLabel}`}

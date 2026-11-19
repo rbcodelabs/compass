@@ -104,7 +104,9 @@ export async function mirrorCommentThread(
   const { root, replies, ownerUserId, onlyCommentId } = thread
   const allMessages = [root, ...replies]
   const lastMessage = allMessages[allMessages.length - 1]!
-  const threadUpdatedAt = lastMessage.updatedAt > root.updatedAt ? lastMessage.updatedAt : root.updatedAt
+  // Thread activity is when somebody last SAID something, not when text was last edited: a comment's updatedAt moves on
+  // an edit (and on resolve), and letting that reach the conversation would reorder every list after a repair.
+  const threadUpdatedAt = allMessages.reduce((latest, item) => (item.createdAt > latest ? item.createdAt : latest), root.createdAt)
   const title = deriveConversationTitleFromComment(root.body)
   const status = root.status === "RESOLVED" ? "RESOLVED" : "OPEN"
   // `Comment` has no resolve timestamp; the resolve bumps the root's updatedAt, which is the best real time available.
@@ -132,7 +134,7 @@ export async function mirrorCommentThread(
     const target = items[0]
     const existing = await prisma.agentConversation.findUnique({ where: { id: root.id }, select: { updatedAt: true } })
     const targetSummary = deriveConversationSummary(target?.body ?? "") ?? title.slice(0, 140)
-    const newer = Boolean(target && existing && target.updatedAt > existing.updatedAt)
+    const newer = Boolean(target && existing && target.createdAt > existing.updatedAt)
     // The updatedAt write extension bumps `updatedAt` to now on any upsert/update that omits it, so an "empty" update
     // would silently reorder the conversation. Write only when there is something to change, and always say updatedAt.
     if (!existing) {
@@ -142,7 +144,7 @@ export async function mirrorCommentThread(
         update: { updatedAt: threadUpdatedAt },
       })
     } else if (newer && target) {
-      await prisma.agentConversation.updateMany({ where: { id: root.id }, data: { summary: targetSummary, updatedAt: target.updatedAt } })
+      await prisma.agentConversation.updateMany({ where: { id: root.id }, data: { summary: targetSummary, updatedAt: target.createdAt } })
     }
   } else {
     const summary = deriveConversationSummary(lastMessage.body) ?? title.slice(0, 140)
@@ -356,10 +358,11 @@ export async function removeCommentMirror(prisma: AppPrismaClient, input: Remove
     const latest = await prisma.agentMessage.findFirst({
       where: { conversationId },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      select: { content: true, createdAt: true, editedAt: true },
+      select: { content: true, createdAt: true },
     })
     if (!latest) return
-    const updatedAt = latest.editedAt && latest.editedAt > latest.createdAt ? latest.editedAt : latest.createdAt
+    // Activity time, not edit time (see mirrorCommentThread).
+    const updatedAt = latest.createdAt
     await prisma.agentConversation.updateMany({
       where: { id: conversationId },
       data: { summary: deriveConversationSummary(latest.content) ?? null, updatedAt },

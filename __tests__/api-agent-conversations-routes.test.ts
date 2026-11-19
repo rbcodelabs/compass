@@ -304,3 +304,22 @@ describe("GET /api/agent/conversations/:conversationId/messages capabilities (TA
     expect(Object.values(m).every((x) => !x.canEdit)).toBe(true)
   })
 })
+
+describe("GET /api/agent/conversations/:conversationId/messages?includeEdited=1 (TASK-195 S1)", () => {
+  beforeEach(() => {
+    mockPrisma.agentConversation.findFirst.mockResolvedValue({ userId: "user-1", visibility: "WORKSPACE", interviewProcessingJson: null })
+  })
+  it("with a cursor, also returns every edited message so a poll sees an older message's edit", async () => {
+    const after = "2026-09-20T10:00:00.000Z"
+    await listMessages(...messagesReq(CONVERSATION_ID, { workspaceId: WORKSPACE_ID, after, includeEdited: "1" }))
+    expect(mockPrisma.agentMessage.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { conversationId: CONVERSATION_ID, OR: [{ createdAt: { gte: new Date(after) } }, { editedAt: { not: null } }] },
+      }),
+    )
+  })
+  it("is ignored without a cursor (a full read already has every row)", async () => {
+    await listMessages(...messagesReq(CONVERSATION_ID, { workspaceId: WORKSPACE_ID, includeEdited: "1" }))
+    expect(mockPrisma.agentMessage.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { conversationId: CONVERSATION_ID } }))
+  })
+})
