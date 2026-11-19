@@ -53,7 +53,7 @@ describe("atomic browser comment deletion", () => {
     tx.comment.findUnique.mockResolvedValue({ id: "root-1", parentId: null, authorId: "admin-1", solutionPlanProposal: null, _count: { replies: 1 } })
     tx.comment.findMany.mockResolvedValue([{ id: "reply-1" }])
     let committed = false
-    transaction.mockImplementation(async (op: never, options: never) => { const out = await runTransaction(op, options); committed = true; return out })
+    transaction.mockImplementation(async (op: Parameters<typeof runTransaction>[0], options?: { isolationLevel: string }) => { const out = await runTransaction(op, options); committed = true; return out })
     mirror.removeCommentMirrorAfterCommit.mockImplementation(async () => { expect(committed).toBe(true) })
     await deleteBrowserComment("root-1", { userId: "admin-1", admin: true }, true)
     expect(mirror.removeCommentMirrorAfterCommit).toHaveBeenCalledWith({ conversationId: "root-1", commentIds: ["reply-1", "root-1"], threadDeleted: true })
