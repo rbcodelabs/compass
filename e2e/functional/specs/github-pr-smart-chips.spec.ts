@@ -132,13 +132,18 @@ test.describe("GitHub PR smart chips", () => {
       await page.keyboard.press("Enter");
       await page.keyboard.type("Unapproved: ");
       await pastePlainText(page, ".ProseMirror", UNAPPROVED_PR_URL);
-      await page.waitForTimeout(1500);
       console.log("DIAG-198 tx " + JSON.stringify(await page.evaluate(() => (window as unknown as { __tx: unknown[] }).__tx)));
       console.log("DIAG-198 text " + JSON.stringify(await editor.innerText()));
       const unapprovedLink = editor.locator(`a[href="${UNAPPROVED_PR_URL}"]`);
       await expect(unapprovedLink).toHaveText(UNAPPROVED_PR_URL);
       await expect(unapprovedLink).not.toHaveAttribute("data-github-pr-link", "ready");
-      await expect(customChip).toHaveText("Custom PR label");
+      try {
+        await expect(customChip).toHaveText("Custom PR label");
+      } catch (error) {
+        console.log("DIAG-198 FAIL html " + JSON.stringify(await editor.innerHTML()));
+        console.log("DIAG-198 FAIL tx " + JSON.stringify(await page.evaluate(() => (window as unknown as { __tx: unknown[] }).__tx)).slice(0, 6000));
+        throw error;
+      }
 
       // Hover preview card displays branch & author metadata, then closes cleanly when moving away.
       fs.mkdirSync(SHOT_DIR, { recursive: true });
