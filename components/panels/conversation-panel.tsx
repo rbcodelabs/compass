@@ -10,7 +10,7 @@ import {
   useState,
   type ReactNode,
 } from "react"
-import { usePathname, useRouter } from "next/navigation"
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { Check, MessagesSquare, Plus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -26,6 +26,9 @@ import { isComposerPanelType } from "@/components/panels/composer-panel-types"
 import { panelTitles } from "@/components/panels/panel-titles"
 import { useLabels } from "@/components/thinking-model/thinking-model-provider"
 import { AgentChat } from "@/components/agent/agent-chat"
+import { CommentDeepLinkOpener } from "@/components/panels/comment-deep-link-opener"
+import { isCommentId } from "@/lib/comment-deep-link"
+import { LegacyRailLinkRedirect } from "@/components/panels/legacy-rail-link-redirect"
 import { parseConversationMessagesResponse, type PanelLoadedMessage } from "@/lib/conversation-panel-messages"
 import type { CommentTaskCardData } from "@/lib/comment-task-card"
 import type {
@@ -362,6 +365,8 @@ export function ConversationPanelProvider({
 
   return (
     <ConversationPanelContext.Provider value={value}>
+      <CommentDeepLinkOpener />
+      <LegacyRailLinkRedirect />
       {children}
     </ConversationPanelContext.Provider>
   )
@@ -463,6 +468,9 @@ function targetTypeToPanelType(targetType: string): PanelType | null {
 export function ConversationPanel({ conversationId }: { conversationId: string }) {
   const ctx = useConversationPanelOptional()
   const { openPanel, closePanel } = usePanelContext()
+  // `?comment=<messageId>` (set by the deep-link opener, or present on a shared link) names the message to highlight.
+  const linkedMessageId = useSearchParams().get("comment")
+  const focusMessageId = isCommentId(linkedMessageId) ? linkedMessageId : undefined
   const isNew = conversationId === "new"
   const activeConversationId = isNew ? null : conversationId
 
@@ -578,6 +586,7 @@ export function ConversationPanel({ conversationId }: { conversationId: string }
       canArchive={currentSettings?.canArchive === true}
       canRestore={currentSettings?.canRestore === true}
       initialArchived={currentSettings?.archived === true}
+      focusMessageId={focusMessageId}
       onConversationArchived={() =>
         leaveArchivedConversation({ historyStack: ctx.historyStack, jumpToCrumb: ctx.jumpToCrumb, closePanel })
       }

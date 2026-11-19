@@ -129,6 +129,11 @@ type Props = {
   onConversationArchived?: () => void
   /** The conversation is archived (server-computed): read-only, with Restore for those who may. */
   initialArchived?: boolean
+  /**
+   * The message a comment-origin deep link points at (`?comment=<id>`, TASK-195 S3): it is highlighted, scrolled into view
+   * once it is on screen, and announced politely. A message that is not in this conversation is silently ignored.
+   */
+  focusMessageId?: string | null
   /** Server-computed: the caller may restore this archived conversation. */
   canRestore?: boolean
   workspaceId: string
@@ -245,6 +250,7 @@ export function AgentChat({
   canArchive = false,
   canRestore = false,
   initialArchived = false,
+  focusMessageId,
   onConversationArchived,
   workspaceId,
   basePath,
@@ -629,6 +635,31 @@ export function AgentChat({
   const jumpToBottom = useRef(false)
   const transcriptHostRef = useRef<HTMLDivElement>(null)
 
+  // Comment-origin deep link: scroll the linked message into view once it is rendered, once per (conversation, message).
+  const focusDoneRef = useRef<string | null>(null)
+  // While the linked message is what the reader is looking at, the end-of-transcript scroll below must not pull the page
+  // away from it. Holds the message count at the time of the focus scroll; any new message (the reader sends or others post)
+  // releases it, and so does a different link or conversation.
+  const focusHoldRef = useRef<{ key: string; count: number } | null>(null)
+  const focusKeyRef = useRef<string | null>(null)
+  useEffect(() => {
+    focusKeyRef.current = focusMessageId && activeConversationId ? `${activeConversationId}:${focusMessageId}` : null
+  })
+  const [focusAnnounced, setFocusAnnounced] = useState<string | null>(null)
+  useEffect(() => {
+    if (!focusMessageId || !activeConversationId) return
+    const key = `${activeConversationId}:${focusMessageId}`
+    if (focusDoneRef.current === key) return
+    if (!messages.some((m) => m.id === focusMessageId)) return
+    const rows = transcriptHostRef.current?.querySelectorAll("[data-message-id]")
+    const target = rows ? Array.from(rows).find((row) => row.getAttribute("data-message-id") === focusMessageId) : undefined
+    if (!target) return
+    focusDoneRef.current = key
+    focusHoldRef.current = { key, count: messages.length }
+    target.scrollIntoView?.({ block: "center" })
+    setFocusAnnounced(key)
+  }, [focusMessageId, activeConversationId, messages])
+
   // Re-seed the transcript whenever the selected conversation changes — with one
   // exception, consumed exactly once.
   //
@@ -667,6 +698,12 @@ export function AgentChat({
     const instant = jumpToBottom.current
     jumpToBottom.current = false
     if (transcriptHostRef.current?.classList.contains("hidden")) return
+    // Declared after the focus effect, so on the commit that scrolled to a linked message this runs second: skip it.
+    const hold = focusHoldRef.current
+    if (hold) {
+      if (hold.key === focusKeyRef.current && messages.length <= hold.count) return
+      focusHoldRef.current = null
+    }
     bottomRef.current?.scrollIntoView({ behavior: instant ? "auto" : "smooth", block: "end" })
   }, [messages, streamingText, liveToolSteps, livePlan, liveSubagents, phase])
 
@@ -1615,8 +1652,14 @@ export function AgentChat({
               </div>
             )}
 
+            {/* Rendered empty first and filled later: a live region inserted together with its text is often not announced. */}
+            {focusMessageId && (
+              <p role="status" aria-live="polite" className="sr-only">
+                {focusAnnounced === `${activeConversationId}:${focusMessageId}` ? "Showing the linked message." : ""}
+              </p>
+            )}
             {messages.map((m) => (
-              <MessageRow key={m.id} message={m} userInitials={userInitials} userId={userId} shared={shared} workspaceId={workspaceId} conversationId={activeConversationId} basePath={basePath} onInspectSubagent={selectChildRun} mentionOptions={mentionOptions} onOpenMentions={loadMentionOptions} onMessageEdited={applyMessageEdit} taskCard={taskCards[m.id]} />
+              <MessageRow key={m.id} focused={Boolean(focusMessageId) && m.id === focusMessageId} message={m} userInitials={userInitials} userId={userId} shared={shared} workspaceId={workspaceId} conversationId={activeConversationId} basePath={basePath} onInspectSubagent={selectChildRun} mentionOptions={mentionOptions} onOpenMentions={loadMentionOptions} onMessageEdited={applyMessageEdit} taskCard={taskCards[m.id]} />
             ))}
 
             {isStreaming && (
@@ -1979,6 +2022,7 @@ function AttachedChip({ label, hint, file, onRemove }: { label: string; hint: st
 
 function MessageRow({
   message,
+  focused = false,
   userInitials,
   userId,
   shared,
@@ -1993,6 +2037,8 @@ function MessageRow({
   taskCard,
 }: {
   message: Message
+  /** The message a deep link points at: ringed and marked `data-comment-focused`. */
+  focused?: boolean
   userInitials: string
   userId: string
   shared: boolean
@@ -2023,7 +2069,8 @@ function MessageRow({
   return (
     <Row
       {...(stored ? { id: `message-${message.id}`, "data-testid": "conversation-message", "data-message-id": message.id } : {})}
-      className={`flex gap-3 ${isUser && !fromOther ? "flex-row-reverse" : "flex-row"}`}
+      {...(stored && focused ? { "data-comment-focused": "true" } : {})}
+      className={`flex gap-3 ${isUser && !fromOther ? "flex-row-reverse" : "flex-row"}${stored && focused ? " scroll-mt-4 rounded-xl ring-2 ring-primary/60 ring-offset-2 ring-offset-background" : ""}`}
     >
       <Avatar className="size-7 shrink-0">
         <AvatarFallback className={isUser ? "bg-surface-interactive text-text-secondary" : "bg-primary text-primary-foreground"}>
