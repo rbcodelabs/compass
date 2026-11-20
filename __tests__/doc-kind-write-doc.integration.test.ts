@@ -154,7 +154,9 @@ describe.skipIf(!databaseUrl)("write_doc kind and list_docs against a real datab
   })
 
   it("createPath persists an eligible claim while leaving implicit parents untyped", async () => {
-    const result = await createPath(workspaceId, "Direct claimed parent/Direct claimed report", "---\nkind: qa_report\n---\nbody", {})
+    const result = await createPath(workspaceId, "Direct claimed parent/Direct claimed report", "---\nkind: qa_report\n---\nbody", {
+      authorName: "Integration Agent",
+    })
     expect(result.created).toBe(true)
     expect(result.kind).toBe("QA_REPORT")
     const { rows } = await pool.query<{ title: string; kind: string | null; metadata: unknown; doc_type: string }>(
