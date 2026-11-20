@@ -58,7 +58,11 @@ export function CommentDeepLinkOpener() {
   const confirmed = useRef<string | null>(null)
   const attempts = useRef(0)
   const replaceRef = useRef(router.replace)
-  replaceRef.current = router.replace
+  // Refs are written in an effect, not during render. This runs before the opener effect below (same commit, declaration order),
+  // so that effect always sees the latest router.replace.
+  useEffect(() => {
+    replaceRef.current = router.replace
+  })
 
   const workspaceId = ctx?.workspaceId
   const comment = searchParams.get("comment")
