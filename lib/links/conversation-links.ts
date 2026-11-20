@@ -262,3 +262,19 @@ export async function removeConversationLink(prisma: AppPrismaClient, { linkId, 
   )
   return result.removed > 0
 }
+
+/**
+ * Links on a conversation other than the automatic CONVERSATION_MENTIONS one that the comment mirror records
+ * (task origin links, CREATED links). Non-zero means the conversation holds content beyond a comment mirror.
+ * Lives here because this directory is the only place besides the generic service that may name the EntityLink model.
+ */
+export async function countNonMirrorConversationLinks(db: Pick<AppPrismaClient, "entityLink">, conversationId: string): Promise<number> {
+  return db.entityLink.count({
+    where: {
+      AND: [
+        { OR: [{ fromType: "AGENT_CONVERSATION", fromId: conversationId }, { toType: "AGENT_CONVERSATION", toId: conversationId }] },
+        { linkType: { not: CONVERSATION_MENTIONS_LINK_TYPE } },
+      ],
+    },
+  })
+}
