@@ -1,3 +1,4 @@
+import { TRANSACTION_CONFLICT_ATTEMPTS } from "@/lib/transaction-conflict"
 /**
  * Assigning a task to a cloud agent starts an attributed run (phase 4).
  *
@@ -376,7 +377,9 @@ describe("concurrent triggers", () => {
   })
 
   it.each(conflicts)("asks the person to retry on a write conflict (%s) when NO run exists, instead of claiming one is running", async (_label, conflict) => {
-    prisma.$transaction.mockRejectedValueOnce(conflict)
+    for (let attempt = 0; attempt < TRANSACTION_CONFLICT_ATTEMPTS; attempt++) {
+      prisma.$transaction.mockRejectedValueOnce(conflict)
+    }
     const outcome = await trigger()
     expect(outcome).toMatchObject({ status: "refused", code: "AGENT_RUN_RETRY" })
     expect(outcome.status === "refused" && outcome.message).toMatch(/Assign it again/)
