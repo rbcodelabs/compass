@@ -1,11 +1,12 @@
 /**
- * GitHub PR smart chips across TipTap Docs, rich description editors, rendered Markdown descriptions, discussion comments, and Portal Docs.
+ * GitHub PR smart chips across TipTap Docs, rich description editors, rendered Markdown descriptions, Conversation transcripts, and Portal Docs.
  */
 import fs from "node:fs";
 import type { Page } from "@playwright/test";
 import { test, expect } from "../fixtures/index";
 import { clickNewDoc } from "../fixtures/docs";
 import getPrisma from "../../../lib/db";
+import { E2E_USER_EMAIL } from "../fixtures/seed-e2e";
 
 const SHOT_DIR = "test-results/visual-verification";
 const APPROVED_PR_URL = "https://github.com/rbcodelabs/compass/pull/209";
@@ -115,9 +116,16 @@ test.describe("GitHub PR smart chips", () => {
       const customChip = editor.locator('a[data-github-pr-link="ready"]').filter({ hasText: "Custom PR label" });
       await expect(customChip).toBeVisible({ timeout: 10_000 });
       await expect(customChip).toHaveText("Custom PR label");
+      // Applying the link starts an autosave and the editor host re-renders as it settles; ProseMirror re-asserts its own selection onto the
+      // DOM whenever the view updates, which would undo a native caret move made in that window (observed: DOM collapsed, ProseMirror
+      // still on the old range). Let the save settle before touching the selection.
+      await expect(page.getByTestId("doc-save-status")).toHaveAttribute("data-state", "saved", { timeout: 15_000 });
 
       // 3. Collapse the selection after `Custom PR label` with ArrowRight, then paste an unapproved PR URL on a third line.
       await page.keyboard.press("ArrowRight");
+      // The bubble menu shows only for a non-empty ProseMirror selection, so it hiding proves the editor itself (not just the DOM) has
+      // collapsed. Enter on a still-ranged selection would replace `Custom PR label` with the new paragraph.
+      await expect(bubble).toBeHidden({ timeout: 5_000 });
       await page.keyboard.press("Enter");
       await page.keyboard.type("Unapproved: ");
       await pastePlainText(page, ".ProseMirror", UNAPPROVED_PR_URL);
@@ -208,7 +216,7 @@ test.describe("GitHub PR smart chips", () => {
     }
   });
 
-  test("Rich description editor & rendered Markdown (descriptions + discussion comments) render PR smart chips and open the PR sidebar", async ({
+  test("Rich description editor & rendered Markdown (descriptions + Conversation transcripts) render PR smart chips and open the PR sidebar", async ({
     page,
     base,
     orgSlug,
@@ -220,6 +228,7 @@ test.describe("GitHub PR smart chips", () => {
       where: { slug: workspaceSlug, organization: { slug: orgSlug } },
     });
     const ts = Date.now();
+    let conversationId: string | null = null;
     const task = await prisma.task.create({
       data: {
         workspaceId: workspace.id,
@@ -253,24 +262,53 @@ test.describe("GitHub PR smart chips", () => {
       await expect(savedDescChip).toBeVisible({ timeout: 10_000 });
       await expect(savedDescChip).toContainText("#209 Support smart PR chips");
 
-      // 2. Discussion comment (MarkdownContent + MentionAwareLink): bare URL, custom [label](url), and unapproved fallback.
-      const commentBox = page.getByRole("textbox", { name: "Add comment", exact: true });
-      await commentBox.click();
-      await page.keyboard.type(`Shipped ${APPROVED_PR_URL} ([review link](${APPROVED_PR_URL})) vs ${UNAPPROVED_PR_URL}`);
-      await page.getByRole("button", { name: "Post comment", exact: true }).click();
-
-      const commentArticle = page.getByRole("article").filter({ hasText: "Shipped" });
-      await expect(commentArticle).toBeVisible({ timeout: 10_000 });
-      const commentChips = commentArticle.locator('a[data-entity-card="pullRequest"]');
+      // 2. Conversation transcript (Markdown + AgentMarkdownLink): bare URL, custom [label](url), and unapproved fallback.
+      // #593 replaced the Discussion comment composer with Conversations. A person's own turn renders as plain text, so the chip
+      // coverage that used to sit on a posted comment now sits on an agent reply in a conversation anchored to this task: seed one
+      // and open it from the task's Conversations section, as a person would.
+      const user = await prisma.user.findFirstOrThrow({ where: { email: E2E_USER_EMAIL } });
+      const conversation = await prisma.agentConversation.create({
+        data: {
+          workspaceId: workspace.id,
+          userId: user.id,
+          title: `PR chip thread ${ts}`,
+          targetType: "TASK",
+          targetId: task.id,
+          visibility: "WORKSPACE",
+          status: "OPEN",
+          agentMode: "MENTION_ONLY",
+          source: "BROWSER",
+        },
+      });
+      conversationId = conversation.id;
+      await prisma.agentMessage.create({
+        data: {
+          conversationId: conversation.id,
+          role: "assistant",
+          content: `Shipped ${APPROVED_PR_URL} ([review link](${APPROVED_PR_URL})) vs ${UNAPPROVED_PR_URL}`,
+          authorName: "Compass Agent",
+          authorType: "AGENT",
+        },
+      });
+      await page.reload();
+      await page.getByTestId("object-conversations-section").getByRole("button", { name: new RegExp(`^PR chip thread ${ts}`) }).click();
+      const transcript = page
+        .locator('[data-slot="pinned-panel"]')
+        .filter({ has: page.getByRole("heading", { name: "Conversation", exact: true }) })
+        .or(page.getByRole("dialog", { name: "Conversation", exact: true }));
+      // Scope to the message itself: the conversation header also shows a chip for the last PR link it saw.
+      const shipped = transcript.getByText("Shipped");
+      await expect(shipped).toBeVisible({ timeout: 10_000 });
+      const commentChips = shipped.locator('a[data-entity-card="pullRequest"]');
       await expect(commentChips).toHaveCount(2, { timeout: 10_000 });
       await expect(commentChips.nth(0)).toContainText("#209 Support smart PR chips");
       await expect(commentChips.nth(1)).toHaveText("review link");
 
-      const fallbackLink = commentArticle.locator(`a[href="${UNAPPROVED_PR_URL}"]`);
+      const fallbackLink = shipped.locator(`a[href="${UNAPPROVED_PR_URL}"]`);
       await expect(fallbackLink).toHaveText(UNAPPROVED_PR_URL);
       await expect(fallbackLink).not.toHaveAttribute("data-entity-card", "pullRequest");
 
-      // Clicking the PR chip in the comment opens the pullRequest detail sidebar.
+      // Clicking the PR chip in the transcript opens the pullRequest detail sidebar.
       fs.mkdirSync(SHOT_DIR, { recursive: true });
       await page.screenshot({ path: `${SHOT_DIR}/05-task-description-and-comments-pr-chips.png` });
       await commentChips.nth(0).click();
@@ -278,7 +316,60 @@ test.describe("GitHub PR smart chips", () => {
       await expect(prPanel).toBeVisible({ timeout: 10_000 });
       await expect(prPanel).toContainText("rbcodelabs/compass #209");
     } finally {
-      await prisma.comment.deleteMany({ where: { targetType: "TASK", targetId: task.id } }).catch(() => undefined);
+      if (conversationId) {
+        await prisma.agentMessage.deleteMany({ where: { conversationId } }).catch(() => undefined);
+        await prisma.agentConversation.deleteMany({ where: { id: conversationId } }).catch(() => undefined);
+      }
+      await prisma.task.deleteMany({ where: { id: task.id } }).catch(() => undefined);
+    }
+  });
+  // Slice S1 (shared-message renderer) shipped: a PERSON's message renders markdown, bold and PR chips like the old Discussion did.
+  test("Conversation transcript renders PR chips and bold markdown in a person-authored message", async ({
+    page,
+    base,
+    orgSlug,
+    workspaceSlug,
+  }) => {
+    await stubPullRequestApi(page);
+    const prisma = getPrisma();
+    const workspace = await prisma.workspace.findFirstOrThrow({ where: { slug: workspaceSlug, organization: { slug: orgSlug } } });
+    const ts = Date.now();
+    const task = await prisma.task.create({ data: { workspaceId: workspace.id, title: `E2E PR Chip Person Task ${ts}`, status: "TODO", priority: "MEDIUM" } });
+    const user = await prisma.user.findFirstOrThrow({ where: { email: E2E_USER_EMAIL } });
+    let conversationId: string | null = null;
+    try {
+      const conversation = await prisma.agentConversation.create({
+        data: { workspaceId: workspace.id, userId: user.id, title: `Person PR chip thread ${ts}`, targetType: "TASK", targetId: task.id, visibility: "WORKSPACE", status: "OPEN", agentMode: "MENTION_ONLY", source: "BROWSER" },
+      });
+      conversationId = conversation.id;
+      await prisma.agentMessage.create({
+        data: {
+          conversationId: conversation.id,
+          role: "user",
+          authorUserId: user.id,
+          content: `**Shipped** ${APPROVED_PR_URL} ([review link](${APPROVED_PR_URL})) vs ${UNAPPROVED_PR_URL}`,
+        },
+      });
+      await page.goto(`${base}/tasks/${task.id}`);
+      await page.getByTestId("object-conversations-section").getByRole("button", { name: new RegExp(`^Person PR chip thread ${ts}`) }).click();
+      const transcript = page
+        .locator('[data-slot="pinned-panel"]')
+        .filter({ has: page.getByRole("heading", { name: "Conversation", exact: true }) })
+        .or(page.getByRole("dialog", { name: "Conversation", exact: true }));
+      const message = transcript.getByText("Shipped").first();
+      await expect(message).toBeVisible({ timeout: 10_000 });
+      await expect(transcript.locator("strong").filter({ hasText: "Shipped" })).toBeVisible();
+      const chips = transcript.locator('a[data-entity-card="pullRequest"]');
+      await expect(chips).toHaveCount(2);
+      await expect(chips.nth(0)).toContainText("#209 Support smart PR chips");
+      await expect(chips.nth(1)).toHaveText("review link");
+      const fallback = transcript.locator(`a[href="${UNAPPROVED_PR_URL}"]:not([data-entity-card])`).first();
+      await expect(fallback).toHaveText(UNAPPROVED_PR_URL);
+    } finally {
+      if (conversationId) {
+        await prisma.agentMessage.deleteMany({ where: { conversationId } }).catch(() => undefined);
+        await prisma.agentConversation.deleteMany({ where: { id: conversationId } }).catch(() => undefined);
+      }
       await prisma.task.deleteMany({ where: { id: task.id } }).catch(() => undefined);
     }
   });
