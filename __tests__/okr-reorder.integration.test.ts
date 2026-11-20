@@ -19,7 +19,7 @@ describe.skipIf(!integrationDatabaseUrl)("OKR reorder against PostgreSQL", () =>
   const schema = `okr_reorder_${randomUUID().replaceAll("-", "")}`;
   let pool: Pool | undefined;
   let prisma: PrismaClient;
-  let workspaceId: string;
+  let workspace: { id: string };
   const orderBy = [{ sortOrder: "asc" }, { createdAt: "asc" }, { id: "asc" }] as const;
 
   beforeAll(async () => {
@@ -33,9 +33,9 @@ describe.skipIf(!integrationDatabaseUrl)("OKR reorder against PostgreSQL", () =>
     prisma = new PrismaClient({ adapter: new PrismaPg(pool, { schema }) }).$extends(injectUpdatedAtExtension) as unknown as PrismaClient;
     context.prisma = prisma;
     const organization = await prisma.organization.create({ data: { slug: "okr-reorder", name: "Reorder fixtures" } });
-    workspaceId = (await prisma.workspace.create({ data: { organizationId: organization.id, slug: "test", name: "Test" } })).id;
+    workspace = await prisma.workspace.create({ data: { organizationId: organization.id, slug: "test", name: "Test" } });
     context.userId = (await prisma.user.create({ data: { email: "reorder@example.test", name: "Reorder tester" } })).id;
-    await prisma.workspaceMember.create({ data: { workspaceId, userId: context.userId, role: "ADMIN" } });
+    await prisma.workspaceMember.create({ data: { workspaceId: workspace.id, userId: context.userId, role: "ADMIN" } });
   }, 240_000);
 
   afterAll(async () => {
@@ -48,8 +48,8 @@ describe.skipIf(!integrationDatabaseUrl)("OKR reorder against PostgreSQL", () =>
   });
 
   it("persists moves in both directions without changing key results of another objective", async () => {
-    const parent = await prisma.objective.create({ data: { workspaceId, title: "Parent" } });
-    const other = await prisma.objective.create({ data: { workspaceId, title: "Other" } });
+    const parent = await prisma.objective.create({ data: { workspaceId: workspace.id, title: "Parent" } });
+    const other = await prisma.objective.create({ data: { workspaceId: workspace.id, title: "Other" } });
     const create = (objectiveId: string, title: string, sortOrder: number) =>
       prisma.keyResult.create({ data: { objectiveId, title, sortOrder, target: 10 } });
     const a = await create(parent.id, "First", 0);
@@ -68,17 +68,17 @@ describe.skipIf(!integrationDatabaseUrl)("OKR reorder against PostgreSQL", () =>
 
   it("moves an objective using the visible anchor and preserves the full cycle order", async () => {
     const cycle = await prisma.oKRCycle.create({ data: {
-      workspaceId, title: "Reorder period", startDate: new Date("2026-01-01"), endDate: new Date("2026-03-31"),
+      workspaceId: workspace.id, title: "Reorder period", startDate: new Date("2026-01-01"), endDate: new Date("2026-03-31"),
     } });
     const create = (title: string, sortOrder: number, cycleId: string | null = cycle.id) =>
-      prisma.objective.create({ data: { workspaceId, title, sortOrder, cycleId } });
+      prisma.objective.create({ data: { workspaceId: workspace.id, title, sortOrder, cycleId } });
     const a = await create("First visible", 0);
     const b = await create("Hidden by name", 1);
     const c = await create("Second visible", 2);
     const unrelated = await create("Another cycle", 5, null);
 
     await reorderObjective(a.id, { anchorId: c.id, position: "after" }, "/okrs");
-    const ranks = (await prisma.objective.findMany({ where: { workspaceId, cycleId: cycle.id }, orderBy: [...orderBy] }))
+    const ranks = (await prisma.objective.findMany({ where: { workspaceId: workspace.id, cycleId: cycle.id }, orderBy: [...orderBy] }))
       .map(({ id, sortOrder }) => [id, sortOrder]);
     expect(ranks).toEqual([[b.id, 0], [c.id, 1], [a.id, 2]]);
     await expect(reorderObjective(a.id, { anchorId: unrelated.id, position: "after" }, "/okrs")).rejects.toThrow("Not found");
