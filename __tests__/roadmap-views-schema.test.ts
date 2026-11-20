@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
   DEFAULT_ROADMAP_DISPLAY, DEFAULT_ROADMAP_FILTERS, MAX_FILTER_IDS, countActiveFilters, hasExplicitRoadmapParams,
-  parseRoadmapParams, parseStoredDisplay, parseStoredFilters, roadmapStateKey, roadmapStateToParams,
+  makeRoadmapFieldKey, parseRoadmapFieldKey, parseRoadmapParams, parseStoredDisplay, parseStoredFilters, roadmapStateKey, roadmapStateToParams,
   roadmapViewFiltersSchema, roadmapViewInputSchema, type RoadmapViewDisplay, type RoadmapViewFilters,
 } from "@/lib/roadmap-views/schema"
 
@@ -13,15 +13,16 @@ const full: { filters: RoadmapViewFilters; display: RoadmapViewDisplay } = {
   filters: {
     workspaceIds: [W1, W2], horizons: ["NOW", "NEXT"], squadIds: [S1], deliveryStatuses: ["BLOCKED"],
     dateFrom: "2026-01-01", dateTo: "2026-06-30", keyResult: "linked", solution: "unlinked",
+    fields: [{ key: "SELECT:status", values: ["At risk", "On, track~ing"] }],
   },
-  display: { view: "timeline", groupBy: "workspace", sort: "startDate" },
+  display: { view: "table", groupBy: "workspace", sort: "startDate", fields: ["SELECT:status", "TEXT:owner, lead"], groupByField: "SELECT:status" },
 }
 
 describe("roadmap view filter schema", () => {
   it("defaults an empty document", () => {
     expect(roadmapViewFiltersSchema.parse({})).toEqual(DEFAULT_ROADMAP_FILTERS)
     expect(DEFAULT_ROADMAP_FILTERS.workspaceIds).toEqual([])
-    expect(DEFAULT_ROADMAP_DISPLAY).toEqual({ view: "board", groupBy: "horizon", sort: "manual" })
+    expect(DEFAULT_ROADMAP_DISPLAY).toEqual({ view: "board", groupBy: "horizon", sort: "manual", fields: [] })
   })
 
   it("rejects bad ids, unknown enums, bad dates and reversed ranges", () => {
@@ -112,7 +113,7 @@ describe("roadmap view URL round-trip", () => {
 
   it("counts active filters; a date range is one filter and display options are none", () => {
     expect(countActiveFilters(DEFAULT_ROADMAP_FILTERS)).toBe(0)
-    expect(countActiveFilters(full.filters)).toBe(7)
+    expect(countActiveFilters(full.filters)).toBe(8)
     expect(countActiveFilters({ ...DEFAULT_ROADMAP_FILTERS, dateFrom: "2026-01-01" })).toBe(1)
   })
 })
@@ -161,5 +162,96 @@ describe("display.columnLayout (pinned columns)", () => {
     expect(roadmapStateKey(withLayout)).not.toBe(roadmapStateKey(full))
     expect(roadmapStateKey({ ...withLayout, display: { ...withLayout.display, columnLayout: { ...layout, pinnedColumnIds: [...layout.pinnedColumnIds] } } })).toBe(roadmapStateKey(withLayout))
     expect(roadmapStateToParams(withLayout).toString()).toBe(roadmapStateToParams(full).toString())
+  })
+})
+
+describe("cross-workspace field keys", () => {
+  it("builds a case-insensitive type + name key and parses it back", () => {
+    expect(makeRoadmapFieldKey("SELECT", "  Status ")).toBe("SELECT:status")
+    expect(parseRoadmapFieldKey("SELECT:status")).toEqual({ fieldType: "SELECT", name: "status" })
+    expect(parseRoadmapFieldKey("NOPE:status")).toBeNull()
+    expect(parseRoadmapFieldKey("SELECT:")).toBeNull()
+    // Same name, different type, is a different field.
+    expect(makeRoadmapFieldKey("TEXT", "Status")).not.toBe(makeRoadmapFieldKey("SELECT", "Status"))
+  })
+
+  it("only lets picklist keys be filtered or grouped on", () => {
+    expect(roadmapViewFiltersSchema.safeParse({ fields: [{ key: "TEXT:owner", values: ["x"] }] }).success).toBe(false)
+    expect(roadmapViewFiltersSchema.safeParse({ fields: [{ key: "MULTI_SELECT:team", values: ["x"] }] }).success).toBe(true)
+    expect(roadmapViewInputSchema.safeParse({ name: "v", filters: {}, display: { groupByField: "TEXT:owner" } }).success).toBe(false)
+    expect(roadmapViewInputSchema.safeParse({ name: "v", filters: {}, display: { fields: ["TEXT:owner", "SELECT:status"] } }).success).toBe(true)
+  })
+
+  it("keeps commas and tildes inside names and labels intact through the URL", () => {
+    const params = Object.fromEntries(roadmapStateToParams(full))
+    const back = parseRoadmapParams(params)
+    expect(back.filters.fields).toEqual(full.filters.fields)
+    expect(back.display.fields).toEqual(["SELECT:status", "TEXT:owner, lead"])
+    expect(back.display.groupByField).toBe("SELECT:status")
+  })
+
+  it("drops invalid field tokens individually", () => {
+    const { filters, display } = parseRoadmapParams({ fields: "SELECT:status,BOGUS:x", ff: "TEXT:owner~a,SELECT:status~Done", groupByField: "TEXT:owner" })
+    expect(display.fields).toEqual(["SELECT:status"])
+    expect(filters.fields).toEqual([{ key: "SELECT:status", values: ["Done"] }])
+    expect(display.groupByField).toBeUndefined()
+  })
+
+  it("field order is part of the state key; filter order is not", () => {
+    const a = { ...full, display: { ...full.display, fields: ["SELECT:status", "SELECT:team"] } }
+    const b = { ...full, display: { ...full.display, fields: ["SELECT:team", "SELECT:status"] } }
+    expect(roadmapStateKey(a)).not.toBe(roadmapStateKey(b))
+    const f1 = { ...full, filters: { ...full.filters, fields: [{ key: "SELECT:a", values: ["x", "y"] }, { key: "SELECT:b", values: ["z"] }] } }
+    const f2 = { ...full, filters: { ...full.filters, fields: [{ key: "SELECT:b", values: ["z"] }, { key: "SELECT:a", values: ["y", "x"] }] } }
+    expect(roadmapStateKey(f1)).toBe(roadmapStateKey(f2))
+  })
+})
+
+describe("backward compatibility: saved views stored before field-driven views", () => {
+  // Literal documents in the shape persisted before `fields` / `groupByField` / the table layout existed.
+  const oldFilters = {
+    workspaceIds: [W1], horizons: ["NOW"], squadIds: [S1], deliveryStatuses: ["BLOCKED"],
+    dateFrom: "2026-01-01", dateTo: "2026-06-30", keyResult: "linked", solution: "unlinked",
+  }
+  const oldDisplay = { view: "timeline", groupBy: "squad", sort: "title" }
+
+  it("an old-shape filters document parses with every stored value unchanged and no field filters", () => {
+    expect(parseStoredFilters(oldFilters)).toEqual({ ...oldFilters, fields: [] })
+    expect(parseStoredFilters({})).toEqual(DEFAULT_ROADMAP_FILTERS)
+    expect(DEFAULT_ROADMAP_FILTERS.fields).toEqual([])
+  })
+
+  it("an old-shape display document parses with every stored value unchanged and no shown or grouping field", () => {
+    const parsed = parseStoredDisplay(oldDisplay)
+    expect(parsed).toEqual({ ...oldDisplay, fields: [] })
+    expect(parsed.groupByField).toBeUndefined()
+  })
+
+  it("old-shape display documents with the pre-existing options (workspace groupField, gallery, status) still validate", () => {
+    const groupField = "44444444-4444-4444-8444-444444444444"
+    expect(parseStoredDisplay({ view: "gallery", groupBy: "status", sort: "manual", groupField })).toMatchObject({ view: "gallery", groupBy: "status", groupField, fields: [] })
+  })
+
+  it("an old-shape view yields the same URL as before: the new params are omitted", () => {
+    const state = { filters: parseStoredFilters(oldFilters), display: parseStoredDisplay(oldDisplay) }
+    const params = roadmapStateToParams(state)
+    expect([...params.keys()].sort()).toEqual(["from", "groupBy", "horizons", "kr", "solution", "sort", "squads", "statuses", "to", "view", "workspaces"].sort())
+    for (const added of ["ff", "fields", "groupByField"]) expect(params.has(added)).toBe(false)
+  })
+
+  it("an old-shape view round-trips through the URL and is not reported as modified", () => {
+    const state = { filters: parseStoredFilters(oldFilters), display: parseStoredDisplay(oldDisplay) }
+    const back = parseRoadmapParams(Object.fromEntries(roadmapStateToParams(state)))
+    expect(roadmapStateKey(back)).toBe(roadmapStateKey(state))
+    expect(back.filters.fields).toEqual([])
+    expect(back.display.fields).toEqual([])
+  })
+
+  it("an old-shape view counts the same active filters as before", () => {
+    expect(countActiveFilters(parseStoredFilters(oldFilters))).toBe(7)
+  })
+
+  it("an old-shape payload is still accepted by the create/update schema", () => {
+    expect(roadmapViewInputSchema.safeParse({ name: "Legacy", visibility: "SHARED", filters: oldFilters, display: oldDisplay }).success).toBe(true)
   })
 })

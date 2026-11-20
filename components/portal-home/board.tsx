@@ -6,7 +6,7 @@ import { renderWidgetBody } from "./registry"
 import { TEMPLATE_GRID, TEMPLATE_SPAN, splitHubRegions, templateAttrs } from "./templates/arrange"
 import { cn } from "@/lib/utils"
 
-/** The pre-template 6-column arrangement: still what the team home (no template) renders. */
+/** The pre-template 6-column arrangement: still what callers that omit `template` render (the team home now passes the published template). */
 export const BOARD_CLASS = "grid grid-cols-1 gap-4 md:grid-cols-6"
 export const SIZE_CLASS: Record<WidgetSize, string> = { S: "md:col-span-2", M: "md:col-span-3", L: "md:col-span-6" }
 
@@ -43,7 +43,7 @@ function Slot({ item, className }: { item: BoardItem; className?: string }) {
  * the arrangement and card style (omitted: the legacy board); the widget list, sizes and order are the same for every template.
  */
 export function PortalHomeBoard({ widgets, resolved, template }: { widgets: PortalHomeWidget[]; resolved: Record<string, WidgetResolution>; template?: PortalTemplate | string | null }) {
-  // No template (the team home): the original 6-column board, unstyled by any template.
+  // No template at all: the original 6-column board, unstyled by any template.
   const active = coerceStoredTemplate(template)
   const items: BoardItem[] = []
   for (const widget of widgets) {

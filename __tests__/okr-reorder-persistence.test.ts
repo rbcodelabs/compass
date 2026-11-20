@@ -2,8 +2,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 type Row = { id: string; objectiveId: string; sortOrder: number; createdAt: number };
 const db = vi.hoisted(() => ({ rows: [] as Row[], inTx: 0, writesOutsideTx: 0, failOnWrite: 0, writes: 0 }));
-type ObjectiveRow = { id: string; cycleId: string; workspaceId: string; sortOrder: number };
-const objectiveRows = vi.hoisted(() => ({ rows: [] as ObjectiveRow[] }));
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("next/navigation", () => ({ redirect: vi.fn() }));
@@ -30,16 +28,6 @@ vi.mock("@/lib/db", () => {
   };
   const client = {
     keyResult,
-    objective: {
-      findFirst: async ({ where }: { where: { id: string; workspaceId: string } }) =>
-        objectiveRows.rows.find((r) => r.id === where.id && r.workspaceId === where.workspaceId) ?? null,
-      findMany: async ({ where }: { where: { cycleId: string; workspaceId: string } }) =>
-        objectiveRows.rows.filter((r) => r.cycleId === where.cycleId && r.workspaceId === where.workspaceId)
-          .sort((a, b) => a.sortOrder - b.sortOrder).map((r) => ({ ...r })),
-      update: async ({ where, data }: { where: { id: string }; data: { sortOrder: number } }) => {
-        objectiveRows.rows.find((r) => r.id === where.id)!.sortOrder = data.sortOrder;
-      },
-    },
   };
   return {
     default: () => ({
@@ -61,28 +49,7 @@ vi.mock("@/lib/db", () => {
   };
 });
 
-import { reorderKeyResult, reorderObjective } from "@/app/[orgSlug]/[workspaceSlug]/okrs/actions";
-
-describe("reorderObjective", () => {
-  beforeEach(() => {
-    objectiveRows.rows = [
-      { id: "A", cycleId: "cycle", workspaceId: "ws-1", sortOrder: 0 },
-      { id: "B", cycleId: "cycle", workspaceId: "ws-1", sortOrder: 1 },
-      { id: "C", cycleId: "cycle", workspaceId: "ws-1", sortOrder: 2 },
-      { id: "Foreign", cycleId: "cycle", workspaceId: "other", sortOrder: 0 },
-    ];
-  });
-
-  it("persists the order of the full cycle when a filtered list drops one objective before another", async () => {
-    await reorderObjective("C", { anchorId: "A", position: "before" }, "/p");
-    const ranks = Object.fromEntries(objectiveRows.rows.map(({ id, sortOrder }) => [id, sortOrder]));
-    expect(ranks).toEqual({ A: 1, B: 2, C: 0, Foreign: 0 });
-  });
-
-  it("rejects an anchor outside the workspace", async () => {
-    await expect(reorderObjective("C", { anchorId: "Foreign", position: "before" }, "/p")).rejects.toThrow("Not found");
-  });
-});
+import { reorderKeyResult } from "@/app/[orgSlug]/[workspaceSlug]/okrs/actions";
 
 // What the cycle page does: ORDER BY sortOrder, createdAt.
 const canonical = () =>

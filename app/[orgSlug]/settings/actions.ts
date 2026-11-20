@@ -194,7 +194,7 @@ export async function createWorkspace(
       ok: true,
       workspace: result.workspace,
       // Matches the workspace links on /dashboard (app/dashboard/page.tsx).
-      redirectTo: `/${orgSlug}/${result.workspace.slug}/okrs`,
+      redirectTo: `/${orgSlug}/${result.workspace.slug}/home`,
     };
   } catch (error) {
     // A slug collision is already mapped to SLUG_TAKEN inside the service and

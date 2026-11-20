@@ -7,7 +7,6 @@ import {
   PanelSkeleton,
   PanelError,
   PanelContainer,
-  FullPageLink,
   PanelTitle,
   EditableText,
   Section,
@@ -37,8 +36,6 @@ import {
   SOLUTION_STATUS_ORDER,
   solutionStatusBadge,
 } from "@/lib/solution-status";
-import { RequestDecisionLink } from "@/components/decisions/request-decision-link";
-import { FollowButton } from "@/components/following/follow-button";
 import { FleshThisOutLink } from "@/components/research/flesh-this-out-link";
 import { PmInterviewHistory } from "@/components/research/pm-interview-history";
 import { LinkedTasksSection, type LinkedTaskData } from "@/components/tasks/linked-tasks-section";
@@ -48,6 +45,7 @@ import { LinkedSpecsSection } from "@/components/specs/linked-specs-section";
 import { SolutionKeyResultPicker } from "@/components/discovery/solution-key-result-picker";
 import { useLabels, useThinkingModel } from "@/components/thinking-model/thinking-model-provider";
 import type { CustomFieldWithValue } from "@/lib/custom-field-definitions";
+import { usePanelHeaderActions } from "./panel-header-actions";
 
 type SolutionData = {
   id: string;
@@ -105,6 +103,15 @@ export function SolutionPanel({
     orgSlug,
     workspaceSlug
   );
+  usePanelHeaderActions(
+    data
+      ? {
+          fullPageHref: data.opportunity ? `/${orgSlug}/${workspaceSlug}/discovery/${data.opportunity.id}` : undefined,
+          follow: { subjectType: "SOLUTION", subjectId: data.id },
+          decision: { subjectType: "SOLUTION", subjectId: data.id, subjectTitle: data.title },
+        }
+      : {},
+  );
 
   const labels = useLabels();
   const offersKeyResultLinks = useThinkingModel().links.solToKr !== "hidden";
@@ -140,20 +147,12 @@ export function SolutionPanel({
 
   return (
     <PanelContainer entity={{ type: edit.type, id: edit.id, title: data.title }}>
-      {data.opportunity && (
-        <FullPageLink
-          href={`/${orgSlug}/${workspaceSlug}/discovery/${data.opportunity.id}`}
-        />
-      )}
-
       <PanelTitle displayId={displayId}
         title={data.title}
         status={{ value: data.status, ...solutionStatusBadge(data.status) }}
         edit={edit}
         statusEdit={{ field: "status", options: STATUS_ORDER, map: STATUS }}
       />
-      <FollowButton orgSlug={orgSlug} workspaceSlug={workspaceSlug} subjectType="SOLUTION" subjectId={data.id} />
-      <RequestDecisionLink orgSlug={orgSlug} workspaceSlug={workspaceSlug} subjectType="SOLUTION" subjectId={data.id} subjectTitle={data.title} />
       {data.pmInterviewEnabled && <FleshThisOutLink orgSlug={orgSlug} workspaceSlug={workspaceSlug} targetType="SOLUTION" targetId={id} />}
 
       <EditableText

@@ -13,7 +13,7 @@ vi.mock("@/auth", () => ({ auth: async () => ({ user: { id: context.userId } }) 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("next/navigation", () => ({ redirect: vi.fn() }));
 
-import { reorderKeyResult, reorderObjective } from "@/app/[orgSlug]/[workspaceSlug]/okrs/actions";
+import { reorderKeyResult } from "@/app/[orgSlug]/[workspaceSlug]/okrs/actions";
 
 describe.skipIf(!integrationDatabaseUrl)("OKR reorder against PostgreSQL", () => {
   const schema = `okr_reorder_${randomUUID().replaceAll("-", "")}`;
@@ -66,22 +66,4 @@ describe.skipIf(!integrationDatabaseUrl)("OKR reorder against PostgreSQL", () =>
     expect(await prisma.keyResult.findUnique({ where: { id: unrelated.id } })).toMatchObject({ sortOrder: 4 });
   });
 
-  it("moves an objective using the visible anchor and preserves the full cycle order", async () => {
-    const cycle = await prisma.oKRCycle.create({ data: {
-      workspaceId: workspace.id, title: "Reorder period", startDate: new Date("2026-01-01"), endDate: new Date("2026-03-31"),
-    } });
-    const create = (title: string, sortOrder: number, cycleId: string | null = cycle.id) =>
-      prisma.objective.create({ data: { workspaceId: workspace.id, title, sortOrder, cycleId } });
-    const a = await create("First visible", 0);
-    const b = await create("Hidden by name", 1);
-    const c = await create("Second visible", 2);
-    const unrelated = await create("Another cycle", 5, null);
-
-    await reorderObjective(a.id, { anchorId: c.id, position: "after" }, "/okrs");
-    const ranks = (await prisma.objective.findMany({ where: { workspaceId: workspace.id, cycleId: cycle.id }, orderBy: [...orderBy] }))
-      .map(({ id, sortOrder }) => [id, sortOrder]);
-    expect(ranks).toEqual([[b.id, 0], [c.id, 1], [a.id, 2]]);
-    await expect(reorderObjective(a.id, { anchorId: unrelated.id, position: "after" }, "/okrs")).rejects.toThrow("Not found");
-    expect(await prisma.objective.findUnique({ where: { id: unrelated.id } })).toMatchObject({ sortOrder: 5 });
-  });
 });

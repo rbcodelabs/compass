@@ -75,6 +75,12 @@ Manage your passkeys from your avatar menu → **Passkeys**: register a new one,
 
 When you return to the Compass homepage while signed in, the header provides a direct path back to your work. A single-workspace account gets a Dashboard shortcut; accounts with multiple workspaces can choose one from the workspace menu; and new accounts can continue workspace setup. Your avatar menu also includes Dashboard or setup, User Guide, and Sign out.
 
+## Install Compass
+
+You can use Compass in your browser or install it when your browser offers an install or add-to-home-screen option. Open Compass, choose that option from the browser's menu or address bar, and follow its prompts. Availability and wording depend on your browser and device. Installing does not change your account or sign-in requirements. Compass requires an internet connection; offline use is not supported.
+
+In a signed-in workspace, **Settings → Appearance** lets you choose Light, Dark, or System. See [Appearance](/help/11-branding#light-dark-or-system-appearance) for details.
+
 ## Getting Started
 
 The fastest path to value is:

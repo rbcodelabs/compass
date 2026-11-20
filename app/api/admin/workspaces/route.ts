@@ -127,10 +127,10 @@ export async function POST(req: NextRequest) {
         [userId, keyName, keyHash, keyPrefix]
       );
       log.push(`API key created (prefix: ${keyPrefix})`);
-      return NextResponse.json({ log, orgId, workspaceId: wsId, apiKey, url: `/${orgSlug}/${workspaceSlug}/okrs` });
+      return NextResponse.json({ log, orgId, workspaceId: wsId, apiKey, url: `/${orgSlug}/${workspaceSlug}/home` });
     }
 
-    return NextResponse.json({ log, orgId, workspaceId: wsId, url: `/${orgSlug}/${workspaceSlug}/okrs` });
+    return NextResponse.json({ log, orgId, workspaceId: wsId, url: `/${orgSlug}/${workspaceSlug}/home` });
   } finally {
     client.release();
     await pool.end();

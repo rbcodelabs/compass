@@ -80,3 +80,32 @@ describe("buildTimelineLayout", () => {
     expect(p.widthPct).toBeGreaterThan(0)
   })
 })
+
+describe("groupRoadmapItems by a custom field", () => {
+  const field = { key: "SELECT:status", name: "Status", options: [{ label: "On track", color: "#0a0" }, { label: "At risk" }] }
+  const cells = (...labels: string[]) => ({ "SELECT:status": labels.map((label) => ({ label })) })
+  const items = [
+    item("a", { fieldValues: cells("at risk") }), // different case from the option label
+    item("b", { workspace: WB, fieldValues: cells("On track") }),
+    item("c", { fieldValues: {} }),
+    item("d", { fieldValues: cells("Paused") }), // a label no workspace offers any more
+    item("e", { fieldValues: cells("On track", "At risk") }), // multi-select
+  ]
+
+  it("orders groups by option order, then unknown labels, then the unset group", () => {
+    const groups = groupRoadmapItems(items, "horizon", { horizons: [] }, [], field)
+    expect(groups.map((g) => g.label)).toEqual(["On track", "At risk", "Paused", "No Status"])
+    expect(groups[0].color).toBe("#0a0")
+  })
+
+  it("matches labels case-insensitively across workspaces and lists multi-select items under each label", () => {
+    const groups = groupRoadmapItems(items, "horizon", { horizons: [] }, [], field)
+    expect(groups.find((g) => g.label === "On track")!.items.map((i) => i.id)).toEqual(["b", "e"])
+    expect(groups.find((g) => g.label === "At risk")!.items.map((i) => i.id)).toEqual(["a", "e"])
+  })
+
+  it("keeps empty option groups (so a board shows every status column) but omits an empty unset group", () => {
+    const groups = groupRoadmapItems([item("a", { fieldValues: cells("On track") })], "horizon", { horizons: [] }, [], field)
+    expect(groups.map((g) => g.label)).toEqual(["On track", "At risk"])
+  })
+})
