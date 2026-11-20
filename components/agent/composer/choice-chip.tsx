@@ -116,7 +116,7 @@ export function ChoiceChip({ kind, icon, options, value, onChange, disabled = fa
     "inline-flex h-7 min-w-0 max-w-full items-center gap-1.5 rounded-lg border border-border bg-card px-1.5 text-[12.5px] text-foreground outline-none transition-colors",
     "hover:not-disabled:border-border-strong focus-visible:ring-2 focus-visible:ring-ring aria-expanded:border-ring aria-expanded:ring-[3px] aria-expanded:ring-ring/20",
     "disabled:cursor-not-allowed disabled:opacity-55 motion-reduce:transition-none",
-    "max-sm:h-9 @max-md/composer:min-w-28 @max-md/composer:flex-1",
+    "max-sm:h-9 @max-md/composer:w-full",
     className,
   )
   const triggerBody = (
@@ -134,7 +134,8 @@ export function ChoiceChip({ kind, icon, options, value, onChange, disabled = fa
     }
   }
   // Shrinkable: a long agent name must truncate inside the card, never push the tray past its edge.
-  const wrap = "flex min-w-0 flex-[0_1_auto] @max-md/composer:flex-1"
+  // On a narrow card the wrapper grows to fill its row but never below 7rem, so the footer wraps onto another row instead of squashing.
+  const wrap = "flex min-w-0 flex-[0_1_auto] @max-md/composer:min-w-28 @max-md/composer:flex-1"
 
   if (narrow) {
     return (
