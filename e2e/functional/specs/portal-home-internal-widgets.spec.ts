@@ -6,10 +6,11 @@ test("Portal Home publishes and removes team-only widgets without exposing them 
   page, base, browser, baseURL, workspaceSlug, orgSlug,
 }, testInfo) => {
   const prisma = getPrisma();
-  const { id: workspaceId } = await prisma.workspace.findFirstOrThrow({
+  const workspace = await prisma.workspace.findFirstOrThrow({
     where: { slug: workspaceSlug, organization: { slug: orgSlug } },
     select: { id: true },
   });
+  const workspaceId = workspace.id;
   const original = await prisma.portalHomeLayout.findUnique({ where: { workspaceId } });
   const artifactTitles = ["Portal widget test prototype", "Portal widget test reference"];
   const objectiveTitle = "Portal widget test objective";
@@ -26,7 +27,7 @@ test("Portal Home publishes and removes team-only widgets without exposing them 
       data: artifactTitles.map((title) => ({ workspaceId, title, sourceType: "EXTERNAL_LINK" })),
     });
     await prisma.objective.create({
-      data: { workspaceId, title: objectiveTitle, keyResults: { create: { workspaceId, title: "Reduce churn", target: -10, current: -5 } } },
+      data: { workspaceId: workspace.id, title: objectiveTitle, keyResults: { create: { workspaceId, title: "Reduce churn", target: -10, current: -5 } } },
     });
     const control = {
       id: "internal-widgets-public-control", type: "rich_text", size: "M", order: 0,

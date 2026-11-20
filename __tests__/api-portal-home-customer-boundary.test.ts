@@ -23,11 +23,12 @@ const prisma = {
   roadmapItem: { findMany: roadmapFindMany },
   doc: { findMany: vi.fn(async () => []) },
   artifact: { findMany: vi.fn(async () => [{ id: "a1", title: "Deck", kind: "SLIDE_DECK", sourceType: "HTML_UPLOAD" }]) },
-  oKRCycle: { findMany: vi.fn(async () => [{ id: "c1", title: "Q4", status: "ACTIVE" }]) },
+  oKRCycle: { findMany: vi.fn(async ({ where }: { where: { workspaceId: string; id?: { in: string[] } } }) =>
+    where.id ? [] : [{ id: "c1", title: "Q4", status: "ACTIVE" }]) },
   objective: { findMany: vi.fn(async () => [
-    { id: "o1", title: "Grow", cycle: { title: "Q4", workspaceId: WS } },
-    { id: "o2", title: "Loose", cycle: null },
-    { id: "o3", title: "Legacy objective", cycle: { title: "Other cycle", workspaceId: "legacy-workspace" } },
+    { id: "o1", title: "Grow", cycleId: "c1" },
+    { id: "o2", title: "Loose", cycleId: null },
+    { id: "o3", title: "Legacy objective", cycleId: "foreign-cycle" },
   ]) },
 }
 
@@ -100,6 +101,7 @@ describe("internal pickers (artifact gallery / OKR widgets)", () => {
     expect(prisma.doc.findMany).not.toHaveBeenCalled()
     expect(prisma.artifact.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { workspaceId: WS, status: "ACTIVE" } }))
     expect(prisma.oKRCycle.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { workspaceId: WS } }))
+    expect(prisma.oKRCycle.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { workspaceId: WS, id: { in: ["foreign-cycle"] } } }))
     expect(prisma.objective.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { workspaceId: WS } }))
     const body = (await response.json()) as { artifacts: unknown[]; okrCycles: unknown[]; objectives: { id: string; cycleTitle: string | null }[] }
     expect(body.artifacts).toHaveLength(1)

@@ -28,15 +28,24 @@ export async function GET(req: Request, route: HomeRouteParams) {
           where: { workspaceId },
           orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
           take: 200,
-          select: { id: true, title: true, cycle: { select: { title: true, workspaceId: true } } },
+          select: { id: true, title: true, cycleId: true },
         }),
       ])
+      const cycleTitles = new Map(okrCycles.map(({ id, title }) => [id, title]))
+      const additionalIds = [...new Set(objectives.flatMap(({ cycleId }) => cycleId && !cycleTitles.has(cycleId) ? [cycleId] : []))]
+      if (additionalIds.length > 0) {
+        const additionalCycles = await prisma.oKRCycle.findMany({
+          where: { workspaceId, id: { in: additionalIds } },
+          select: { id: true, title: true },
+        })
+        for (const { id, title } of additionalCycles) cycleTitles.set(id, title)
+      }
       return NextResponse.json({
         roadmapItems: [],
         docs: [],
         artifacts,
         okrCycles,
-        objectives: objectives.map((objective) => ({ id: objective.id, title: objective.title, cycleTitle: objective.cycle?.workspaceId === workspaceId ? objective.cycle.title : null })),
+        objectives: objectives.map((objective) => ({ id: objective.id, title: objective.title, cycleTitle: objective.cycleId ? cycleTitles.get(objective.cycleId) ?? null : null })),
       })
     }
 
