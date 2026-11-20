@@ -1,3 +1,5 @@
+import { parsePublicFileUrl } from "@/lib/public-file-keys";
+import { headPublicObject } from "@/lib/storage/s3";
 import { NextRequest, NextResponse } from "next/server";
 import getPrisma from "@/lib/db";
 import { getPortalSession } from "@/lib/portal-auth";
@@ -145,6 +147,13 @@ export async function POST(
     }
     portalAccountId = session.portalAccountId;
     effectiveSubmitterEmail = session.email;
+  }
+
+  for (const attachment of validatedAttachments) {
+    const key = parsePublicFileUrl(attachment.url);
+    if (key && !(await headPublicObject(key))) {
+      return NextResponse.json({ error: "Attachment is no longer available" }, { status: 422 });
+    }
   }
 
   const item = await withSequenceTransaction(prisma, async (tx) => tx.feedbackItem.create({

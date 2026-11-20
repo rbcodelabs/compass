@@ -9,6 +9,9 @@
 import { afterEach, describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 
+const headPublicObject = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/storage/s3", async (original) => ({ ...await original<typeof import("@/lib/storage/s3")>(), headPublicObject }));
+
 const mockWorkspace = { findFirst: vi.fn() };
 const mockFeedbackItem = { create: vi.fn() };
 
@@ -193,6 +196,18 @@ describe("POST /api/portal/[orgSlug]/[workspaceSlug]/feedback", () => {
     const res = await POST(makeRequest({ title: "Idea", type: "FEATURE" }), { params });
 
     expect(res.status).toBe(422);
+    expect(mockFeedbackItem.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects an owned S3 attachment after it has been retired", async () => {
+    mockWorkspace.findFirst.mockResolvedValue({ id: "ws-1", feedbackEnabled: true, portalAuthRequired: false });
+    headPublicObject.mockResolvedValue(null);
+    const attachment = {
+      url: "/api/files/public/feedback/ws-1/65923984-916a-4633-9986-0f96f0759fc9-a.png",
+      filename: "a.png", fileType: "image/png", fileSize: 100,
+    };
+    const response = await POST(makeRequest({ title: "Idea", attachments: [attachment] }), { params });
+    expect(response.status).toBe(422);
     expect(mockFeedbackItem.create).not.toHaveBeenCalled();
   });
 
