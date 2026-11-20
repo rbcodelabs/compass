@@ -119,25 +119,34 @@ test.describe("Comment-origin task links (descriptive, clickable, protected prov
 
     await page.goto(`${base}/discovery/OPP-${oppSeq}`);
     await expect(page.getByRole("heading", { name: oppTitle })).toBeVisible({ timeout: 20_000 });
-    await expect(page.getByText("No comments yet.")).toBeVisible({ timeout: 15_000 });
+    const section = page.getByTestId("object-conversations-section");
+    await expect(section.getByText(/No conversations on this item yet/)).toBeVisible({ timeout: 15_000 });
 
-    const editor = page.getByRole("textbox", { name: "Add comment", exact: true });
+    // The task row is opt-in in the Conversations composer: tick the toggle, then "Comment & create task".
+    const editor = section.getByTestId("object-conversation-composer");
     await editor.click();
     await page.keyboard.type(`Expand solution space for discussion integration @${memberName.slice(0, 14)}`);
     await page.getByTestId("mention-option").filter({ hasText: memberName }).first().click();
     await expect(editor.getByTestId("mention-chip")).toContainText(memberName);
-    await page.getByRole("button", { name: "Comment & create task" }).click();
+    await section.getByTestId("create-task-toggle").check();
+    await section.getByRole("button", { name: "Comment & create task" }).click();
 
-    const card = page.getByTestId("comment-task-card");
+    // Send opens the new conversation in the Conversation panel; the task card sits on the message.
+    const thread = page
+      .locator('[data-slot="pinned-panel"]')
+      .filter({ has: page.getByRole("heading", { name: "Conversation", exact: true }) })
+      .or(page.getByRole("dialog", { name: "Conversation", exact: true }));
+    const message = thread.getByTestId("conversation-message").filter({ hasText: "Expand solution space for discussion integration" });
+    const card = message.getByTestId("comment-task-card");
     await expect(card).toBeVisible({ timeout: 15_000 });
     const taskHref = await card.getByTestId("open-task-link").getAttribute("href");
     expect(taskHref).toMatch(/\/tasks\/[0-9a-f-]{36}$/);
     const taskId = taskHref!.split("/tasks/")[1]!;
     createdTaskIds.push(taskId);
 
-    // Resolve the thread on the Opportunity so we verify deep-linking expands resolved Discussion threads too.
-    await page.getByRole("button", { name: /Resolve thread by / }).click();
-    await expect(page.getByRole("button", { name: /Expand resolved thread by / })).toBeVisible({ timeout: 10_000 });
+    // Resolve the conversation (header strip of the Conversation panel) so we verify deep-linking opens resolved threads too.
+    await thread.getByRole("button", { name: "Resolve", exact: true }).click();
+    await expect(thread.getByText("Resolved", { exact: true })).toBeVisible({ timeout: 10_000 });
 
     // Open the Task full page and inspect the Links / Created from provenance block.
     await page.goto(`${base}/tasks/${taskId}`);
@@ -148,18 +157,19 @@ test.describe("Comment-origin task links (descriptive, clickable, protected prov
     const expectedPrefix = `Comment on OPP-${oppSeq}: "Expand solution space for discussion integration`;
     const commentLink = originBlock.getByRole("link").filter({ hasText: expectedPrefix });
     await expect(commentLink).toBeVisible();
-    await expect(commentLink).toHaveAttribute("href", new RegExp(`/discovery/OPP-${oppSeq}\\?comment=[0-9a-f-]{36}$`));
+    await expect(commentLink).toHaveAttribute("href", new RegExp(`/discovery/OPP-${oppSeq}\\?comment=[0-9a-f-]{36}`));
 
     // Origin provenance link has NO 'x' unlink button, whereas the Opportunity reference link keeps its Unlink button.
     await expect(originBlock.getByRole("button", { name: /Unlink/i })).toHaveCount(0);
     await expect(page.getByLabel(`Unlink ${oppTitle}`)).toBeVisible();
 
-    // Clicking the COMMENT origin link navigates to OPP-<seq>?comment=<id>, expands the resolved thread, and highlights the comment.
+    // Clicking the COMMENT origin link navigates to the opportunity, opens the (resolved) conversation in the panel, and highlights the
+    // message: the URL becomes ?detail=conversation:<cid>&comment=<message id>.
     await commentLink.click();
-    await expect(page).toHaveURL(new RegExp(`/discovery/OPP-${oppSeq}\\?comment=[0-9a-f-]{36}$`), { timeout: 15_000 });
-    const focusedArticle = page.locator('article[data-comment-focused="true"]');
-    await expect(focusedArticle).toBeVisible({ timeout: 15_000 });
-    await expect(focusedArticle).toContainText("Expand solution space for discussion integration");
+    await expect(page).toHaveURL(new RegExp(`/discovery/OPP-${oppSeq}\\?(?=.*detail=conversation(?::|%3A)[0-9a-f-]{36})(?=.*comment=[0-9a-f-]{36})`), { timeout: 15_000 });
+    const focusedMessage = page.locator('[data-testid="conversation-message"][data-comment-focused="true"]');
+    await expect(focusedMessage).toBeVisible({ timeout: 15_000 });
+    await expect(focusedMessage).toContainText("Expand solution space for discussion integration");
   });
 
   test("Doc comment -> Done Task: clicking COMMENT origin link opens Comments sidebar, reveals resolved thread, and highlights comment", async ({ page, base }) => {

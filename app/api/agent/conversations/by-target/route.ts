@@ -14,10 +14,14 @@ import {
 import {
   isConversationLinkTarget,
   listConversationsForObject,
+  type ObjectConversationLink,
 } from "@/lib/links/conversation-links"
 import { loadMentionCandidates, type MentionCandidates } from "@/lib/doc-comment-tasks"
 import { plainTextOf } from "@/lib/comment-mentions"
+import { listRestorableArchivedConversations } from "@/lib/conversation-archive"
 import { backfillUnifiedConversations } from "@/lib/unified-conversations-backfill"
+import { loadConversationTaskCards, loadTaskComposerContext } from "@/lib/conversation-task-cards"
+import type { CommentTaskCardData } from "@/lib/comment-task-card"
 
 export const runtime = "nodejs"
 
@@ -53,6 +57,13 @@ export type ObjectConversationSummary = {
   visibility: ConversationVisibility
   messageCount: number
   updatedAt: string
+  anchored: boolean
+  links: Array<Pick<ObjectConversationLink, "linkId" | "kind" | "auto">>
+  /** Present (true) only on rows returned for `archived=1`; those are only ever rows the caller may restore. */
+  archived?: true
+  canRestore?: true
+  /** The task made from this conversation's root post, when there is one (the section row shows its chip and card). */
+  taskCard?: CommentTaskCardData
 }
 
 export async function GET(request: NextRequest) {
@@ -71,6 +82,7 @@ export async function GET(request: NextRequest) {
 
   const userId = session.user.id
   const prisma = getPrisma()
+  const wantsArchived = request.nextUrl.searchParams.get("archived") === "1"
 
   const membership = await prisma.workspaceMember.findFirst({
     where: { workspaceId, userId },
@@ -102,24 +114,34 @@ export async function GET(request: NextRequest) {
   await backfillUnifiedConversations(prisma, { workspaceId, fallbackUserId: userId }).catch(() => {})
 
   const accessWhere = accessibleConversationsWhere(workspaceId, userId)
-  const linked = isConversationLinkTarget(targetType)
-    ? await listConversationsForObject(prisma, {
-        workspaceId,
-        entityType: targetType,
-        entityId: targetId,
-        userId,
-      }).catch(() => [])
-    : []
-  const linkedIds = linked.map((l) => l.conversationId)
-
+  let linked: ObjectConversationLink[] = []
+  let linksLoaded = false
   try {
-    const rows = await prisma.agentConversation.findMany({
+    linked = isConversationLinkTarget(targetType)
+      ? await listConversationsForObject(prisma, {
+          workspaceId,
+          entityType: targetType,
+          entityId: targetId,
+          userId,
+        })
+      : []
+    linksLoaded = true
+    const linkedIds = linked.map((l) => l.conversationId)
+
+    // `archived=1` swaps the list for the archived rows this caller may restore (the starter, or an admin). Anything
+    // else stays out of the response entirely, so an archived title or summary never reaches someone who cannot act on it.
+    let archivedCapped = false
+    const rows = wantsArchived
+      ? await listRestorableArchivedConversations({ workspaceId, userId, targetType, targetId, linkedIds }).then(({ rows: restorable, capped }) => { archivedCapped = capped; return restorable })
+      : await prisma.agentConversation.findMany({
       where: {
-        ...accessWhere,
         archivedAt: null,
-        OR: [
-          { targetType, targetId },
-          ...(linkedIds.length > 0 ? [{ id: { in: linkedIds } }] : []),
+        AND: [
+          accessWhere,
+          { OR: [
+            { targetType, targetId },
+            ...(linkedIds.length > 0 ? [{ id: { in: linkedIds } }] : []),
+          ] },
         ],
       },
       orderBy: { updatedAt: "desc" },
@@ -137,6 +159,12 @@ export async function GET(request: NextRequest) {
         _count: { select: { messages: true } },
       },
     })
+
+    // Cards and composer context are enrichments: each degrades to nothing on failure (see lib/conversation-task-cards.ts).
+    const [taskCards, taskContext] = await Promise.all([
+      loadConversationTaskCards(workspaceId, rows.map((row) => row.id)),
+      loadTaskComposerContext(workspaceId, targetType, targetId),
+    ])
 
     const items: ObjectConversationSummary[] = rows.map((row) => {
       const visibility: ConversationVisibility = isConversationVisibility(row.visibility)
@@ -158,38 +186,52 @@ export async function GET(request: NextRequest) {
         visibility,
         messageCount: row._count.messages,
         updatedAt: row.updatedAt.toISOString(),
+        anchored: row.targetType === targetType && row.targetId === targetId,
+        links: linked.filter(link => link.conversationId === row.id).map(({ linkId, kind, auto }) => ({ linkId, kind, auto })),
+        ...(wantsArchived ? { archived: true as const, canRestore: true as const } : {}),
+        ...(taskCards[row.id] ? { taskCard: taskCards[row.id] } : {}),
       }
     })
 
-    return Response.json({ items, mentionOptions })
-  } catch {
+    return Response.json({ items, mentionOptions, ...taskContext, ...(wantsArchived ? { archivedCapped } : {}) })
+  } catch (error) {
+    const failure = error as { code?: string; meta?: { column?: string } }
+    const missingUnifiedColumn = failure.code === "P2022" && /^(?:agent_conversations|AgentConversation)\.(?:target_type|target_id|status|agent_mode)$/.test(failure.meta?.column ?? "")
+    if (!linksLoaded || !missingUnifiedColumn) return Response.json({ error: "Could not load conversations. Please try again." }, { status: 503 })
+    const linkedIds = linked.map(link => link.conversationId)
     // Pre-124 fallback: use only linkedIds if migration 124 columns are not present yet.
-    if (linkedIds.length === 0) return Response.json({ items: [], mentionOptions })
-    const rows = await prisma.agentConversation.findMany({
-      where: {
-        ...accessWhere,
-        archivedAt: null,
-        id: { in: linkedIds },
-      },
-      orderBy: { updatedAt: "desc" },
-      take: 50,
-      select: {
-        id: true,
-        title: true,
-        updatedAt: true,
-        _count: { select: { messages: true } },
-      },
-    })
-    const items: ObjectConversationSummary[] = rows.map((row) => ({
-      id: row.id,
-      title: plainTextOf(row.title?.trim() || "Conversation"),
-      summary: null,
-      status: "OPEN",
-      agentMode: "AUTO",
-      visibility: "PRIVATE",
-      messageCount: row._count.messages,
-      updatedAt: row.updatedAt.toISOString(),
-    }))
-    return Response.json({ items, mentionOptions })
+    if (linkedIds.length === 0 || wantsArchived) return Response.json({ items: [], mentionOptions })
+    try {
+      const rows = await prisma.agentConversation.findMany({
+        where: {
+          ...accessWhere,
+          archivedAt: null,
+          id: { in: linkedIds },
+        },
+        orderBy: { updatedAt: "desc" },
+        take: 50,
+        select: {
+          id: true,
+          title: true,
+          updatedAt: true,
+          _count: { select: { messages: true } },
+        },
+      })
+      const items: ObjectConversationSummary[] = rows.map((row) => ({
+        id: row.id,
+        title: plainTextOf(row.title?.trim() || "Conversation"),
+        summary: null,
+        status: "OPEN",
+        agentMode: "AUTO",
+        visibility: "PRIVATE",
+        messageCount: row._count.messages,
+        updatedAt: row.updatedAt.toISOString(),
+        anchored: false,
+        links: linked.filter(link => link.conversationId === row.id).map(({ linkId, kind, auto }) => ({ linkId, kind, auto })),
+      }))
+      return Response.json({ items, mentionOptions })
+    } catch {
+      return Response.json({ error: "Could not load conversations. Please try again." }, { status: 503 })
+    }
   }
 }

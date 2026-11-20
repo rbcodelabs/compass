@@ -66,8 +66,9 @@ import {
  * ## The active conversation and the full page
  *
  * The full page selects a conversation with `?c=<id>`, server-loaded. The rail
- * owns `conversationId` in state and fetches through `/api/agent/conversations`,
- * mirrored as `?rc=<id>`. The two interoperate: "expand to full page" puts the
+ * owns `conversationId` in state and fetches through `/api/agent/conversations`;
+ * it is no longer mirrored to the URL (`?rc=` is a legacy link, redirected by
+ * LegacyRailLinkRedirect). The two interoperate: "expand to full page" puts the
  * rail's id in `c`, and while the page is showing (where the rail is hidden and
  * its params are not written) `c` is adopted back into `conversationId`, so
  * leaving the page and reopening the rail lands on the same thread. An id the

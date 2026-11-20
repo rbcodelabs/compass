@@ -134,7 +134,8 @@ export function ChoiceChip({ kind, icon, options, value, onChange, disabled = fa
     }
   }
   // Shrinkable: a long agent name must truncate inside the card, never push the tray past its edge.
-  const wrap = "flex min-w-0 flex-[0_1_auto] @max-md/composer:flex-1"
+  // On a narrow card the wrapper grows to fill its row but never below 7rem, so the footer wraps onto another row instead of squashing.
+  const wrap = "flex min-w-0 flex-[0_1_auto] @max-md/composer:min-w-28 @max-md/composer:flex-1"
 
   if (narrow) {
     return (
@@ -154,7 +155,7 @@ export function ChoiceChip({ kind, icon, options, value, onChange, disabled = fa
           {triggerBody}
         </button>
         <Sheet open={open} onOpenChange={setOpen}>
-          <SheetContent id={listId} aria-label={`${kind} options`} side="bottom" showCloseButton={false} initialFocus={focusSelected} className="max-h-[80dvh] gap-0 overflow-auto rounded-t-2xl p-2 pb-6" data-testid={`${kind.toLowerCase()}-sheet`}>
+          <SheetContent id={listId} aria-label={`${kind} options`} side="bottom" showCloseButton={false} initialFocus={focusSelected} raised className="max-h-[80dvh] gap-0 overflow-auto rounded-t-2xl p-2 pb-6" data-testid={`${kind.toLowerCase()}-sheet`}>
             <div aria-hidden="true" className="mx-auto mt-0.5 mb-2 h-1 w-9 rounded bg-border-strong" />
             <SheetTitle className="px-2.5 pt-2 pb-1 text-[10.5px] font-semibold tracking-[0.07em] text-muted-foreground uppercase">{kind}</SheetTitle>
             <OptionList kind={kind} options={options} value={value} onSelect={select} sheet listRef={listRef} />

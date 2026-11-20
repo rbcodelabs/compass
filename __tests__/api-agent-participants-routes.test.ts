@@ -7,7 +7,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 
 const mockAuth = vi.fn()
 vi.mock("@/auth", () => ({ auth: () => mockAuth() }))
-vi.mock("@/lib/db", () => ({ default: () => ({}) }))
+// resolveConversationAccess runs before an invite (an archived shared thread is read-only); this thread is live.
+vi.mock("@/lib/db", () => ({ default: () => ({ agentConversation: { findFirst: async () => ({ userId: "owner", visibility: "WORKSPACE", archivedAt: null }) } }) }))
 
 const mockList = vi.fn()
 const mockAdd = vi.fn()
