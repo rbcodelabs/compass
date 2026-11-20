@@ -48,7 +48,7 @@ test("Profile updates past and future conversation author names and account navi
     await itemConversations.getByTestId("object-conversation-composer").fill("A comment before the rename")
     await itemConversations.getByRole("button", { name: "Send", exact: true }).click()
     // Send opens the new conversation in the Conversation panel, where the follow-up is the old "reply".
-    await expect(conversationPanel().getByText("A comment before the rename", { exact: true })).toBeVisible()
+    await expect(conversationPanel().getByTestId("conversation-message").getByText("A comment before the rename", { exact: true })).toBeVisible()
     await expect.poll(openedConversationId).not.toBe("")
     const conversationId = openedConversationId()
     const reply = "A reply before the rename"
