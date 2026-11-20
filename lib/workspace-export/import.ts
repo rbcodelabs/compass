@@ -1,3 +1,4 @@
+import { parsePublicFileUrl } from "@/lib/public-file-keys"
 import { createHash, randomUUID } from "node:crypto"
 import { normalizeWorkspaceRole } from "@/lib/roles"
 import { SLUG_PATTERN, isReservedWorkspaceSlug } from "@/lib/slug"
@@ -277,6 +278,8 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
   const uploaded: { store: "artifact" | "research" | "feedback"; key: string }[] = []
   const sourceWorkspaceId = manifest.source.workspaceId
 
+  let omittedBrandingLogo = false
+  let omittedEmbedScreenshot = false
   const dropped: Record<string, number> = {}
   const deduped: Record<string, number> = {}
   const droppedIds = new Set<string>()
@@ -294,6 +297,15 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
       // Prisma rejects an explicit null there, so leave the key out and let the column default apply.
       if (value === null && !OPTIONAL_FIELDS[model]?.includes(name)) {
         delete row[name]
+        continue
+      }
+      const isBrandingLogo = model === "Workspace" && name === "brandingLogoUrl"
+      const isEmbedScreenshot = (model === "CommentElementAnchor" || model === "FeedbackElementAnchor") && name === "screenshotUrl"
+      if ((isBrandingLogo || isEmbedScreenshot) && parsePublicFileUrl(value)) {
+        row[name] = null
+        referencesCleared++
+        omittedBrandingLogo ||= isBrandingLogo
+        omittedEmbedScreenshot ||= isEmbedScreenshot
         continue
       }
       const pathRule = PATH_COLUMNS[`${model}.${name}`]
@@ -517,6 +529,8 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
     if (!wsRaw) throw new WorkspaceImportError("Bundle has no Workspace row")
     const wsRow = transform("Workspace", wsRaw)
     if (!wsRow) throw new WorkspaceImportError("Bundle Workspace row is invalid")
+    if (omittedBrandingLogo) warnings.push("Cleared the S3 branding logo reference because its file was not bundled.")
+    if (omittedEmbedScreenshot) warnings.push("Cleared S3 embed screenshot references because their files were not bundled.")
     Object.assign(wsRow, { id: newWorkspaceId, organizationId: opts.organizationId, name: baseName, slug })
     const memberRows = members.map((m) => ({ workspaceId: newWorkspaceId, userId: m.userId, role: normalizeWorkspaceRole(m.role) }))
     if (!memberRows.some((m) => m.userId === opts.importerUserId)) {

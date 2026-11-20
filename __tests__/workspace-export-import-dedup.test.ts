@@ -197,7 +197,7 @@ it("aborts an import when the existing private file differs from the bundle", as
   expect(db.tables.Workspace).toHaveLength(1)
 })
 
-it("does not give an imported workspace ownership of a source attachment when no bytes were bundled", async () => {
+it.each(["S3", "Blob"])("%s does not give an imported workspace ownership of a source attachment when no bytes were bundled", async (backend) => {
   const orgId = randomUUID()
   const wsId = randomUUID()
   const importerId = randomUUID()
@@ -211,7 +211,9 @@ it("does not give an imported workspace ownership of a source attachment when no
     FeedbackItem: [{ id: feedbackItemId, workspaceId: wsId, title: "Feedback" }],
     FeedbackAttachment: [{
       id: attachmentId, feedbackItemId, filename: "file.png", fileType: "image/png", fileSize: 1,
-      url: `/api/files/public/feedback/${wsId}/${attachmentId}-file.png`,
+      url: backend === "S3"
+        ? `/api/files/public/feedback/${wsId}/${attachmentId}-file.png`
+        : `https://fixture.public.blob.vercel-storage.com/feedback/${wsId}/${attachmentId}-file.png`,
     }],
   })
   const bundle = await exportWorkspaceToBuffer(db.client, wsId, noopBlobs)
@@ -220,6 +222,31 @@ it("does not give an imported workspace ownership of a source attachment when no
   })
   expect(report.warnings.join("\n")).toMatch(/attachment.*had no bytes.*skipped/i)
   expect(db.tables.FeedbackAttachment).toHaveLength(1)
+})
+
+it("clears S3 logos and embed screenshots whose bytes were not bundled", async () => {
+  const orgId = randomUUID()
+  const wsId = randomUUID()
+  const importerId = randomUUID()
+  const feedbackItemId = randomUUID()
+  const attachmentId = randomUUID()
+  const screenshotUrl = `/api/files/public/embed-feedback/${wsId}/source/capture-${attachmentId}.png`
+  const db = createInMemoryPrisma({
+    Organization: [{ id: orgId, slug: "org", name: "Org" }],
+    User: [{ id: importerId, email: "importer@example.com", name: "Importer" }],
+    OrganizationMember: [{ id: randomUUID(), organizationId: orgId, userId: importerId, role: "ADMIN" }],
+    Workspace: [{ id: wsId, organizationId: orgId, slug: "source", name: "Source", ssoEnabled: false, brandingLogoUrl: `/api/files/public/branding/${attachmentId}-logo.png` }],
+    FeedbackItem: [{ id: feedbackItemId, workspaceId: wsId, title: "Feedback" }],
+    FeedbackElementAnchor: [{ feedbackItemId, feedbackSourceId: "source", pageUrl: "https://fixture.example/", pagePath: "/", screenshotUrl }],
+  })
+  const bundle = await exportWorkspaceToBuffer(db.client, wsId, noopBlobs)
+  const report = await importWorkspaceBundle(db.client, bundle, {
+    organizationId: orgId, importerUserId: importerId, slug: "copy", blobs: noopBlobs,
+  })
+  expect(report.warnings.join("\n")).toMatch(/branding logo/i)
+  expect(report.warnings.join("\n")).toMatch(/embed screenshot/i)
+  expect(db.tables.Workspace.find((row) => row.id === report.workspaceId)?.brandingLogoUrl).toBeNull()
+  expect(db.tables.FeedbackElementAnchor.find((row) => row.feedbackItemId !== feedbackItemId)?.screenshotUrl).toBeNull()
 })
 
 it("reserves an import identity before either invocation writes bundle assets", async () => {

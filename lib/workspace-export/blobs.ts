@@ -25,16 +25,17 @@ export interface BlobAdapters {
 }
 
 export function defaultBlobAdapters(): BlobAdapters {
-  const claimImport = resolveStorageBackend() === "s3"
+  const usesS3 = resolveStorageBackend() === "s3"
+  const claimImport = usesS3
     ? (workspaceId: string) => createS3Storage("artifacts").claimStagedUpload!(`workspace-import-staging/claims/${workspaceId}`)
     : undefined
   return {
     ...(claimImport ? { claimImport } : {}),
     get artifact() {
-      return getArtifactStorage()
+      return usesS3 ? createS3Storage("artifacts", { strictReads: true }) : getArtifactStorage()
     },
     get research() {
-      return getResearchArtifactStorage()
+      return usesS3 ? createS3Storage("research", { strictReads: true }) : getResearchArtifactStorage()
     },
     async fetchPublic(url, workspaceId) {
       return isOwnFeedbackAttachmentUrl(url, workspaceId) ? getPublicFileStore().fetch(url) : null

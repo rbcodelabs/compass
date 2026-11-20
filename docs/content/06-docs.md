@@ -75,6 +75,13 @@ Files that Vercel Blob serves from a public URL (feedback attachments, embedded-
 
 Use S3 for new installations. For an installation with existing files, keep the current backend until you have a verified migration and rollback for private files, public URLs, and outstanding upload receipts. Public reads can use both stores while the original Blob credentials and S3 bucket configuration remain available. Private reads use the selected backend. Clients that only understand Vercel Blob upload tokens continue to work on Blob and need an update before using S3.
 
+Rehearse any backend change against isolated fixtures before requesting production approval:
+
+1. Record application references and inventory both stores by workspace and logical key. Reconcile every private Artifact revision, embedded document file and research attachment to its expected destination key. Compare byte lengths and independently computed checksums. Record source-only, destination-only and mismatched entries separately.
+2. Stop issuing uploads and pause writes during the rehearsal. Wait for the last outstanding receipt and upload credential to expire, or finish those receipts on the backend that issued them before switching reads. Verify that new receipts and writes stay paused until reconciliation completes.
+3. Run an export and restore on the fixture backend. Treat an access denial as a failed check. A verified missing object needs a recorded disposition before proceeding. Compare manifest entries and restored checksums, and test representative private downloads and public URLs.
+4. Rehearse rollback with writes on both sides of the switch. Pause writes again, inventory changes since cutover, reconcile new and updated objects back to the original store, and verify reads before restoring traffic. Retain the original inventory and object versions for comparison. An application flag change alone cannot recover data written after cutover.
+
 Artifacts have stable identities and appear alongside Docs and Diagrams in the Library. They are not nested into the Page hierarchy. An Artifact can be linked to multiple Solutions, and a Solution can link to multiple Artifacts.
 
 Artifacts can also be attached to **Experiments**: the Artifact page has a **Linked experiments** section where you can choose an experiment to link or unlink, and the experiment shows the same relationship under **Linked artifacts** (see [Experiments](/help/03-experiments)). Archived Artifacts cannot be newly linked to an experiment, but existing links stay visible and removable.

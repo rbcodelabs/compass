@@ -158,6 +158,15 @@ describe("createS3Storage", () => {
     warn.mockRestore()
   })
 
+  it("preserves S3 permission failures in strict mode and still recognizes missing files", async () => {
+    const store = createS3Storage("artifacts", { strictReads: true })
+    const denied = Object.assign(new Error("denied"), { name: "AccessDenied", $metadata: { httpStatusCode: 403 } })
+    s3.on(GetObjectCommand).rejects(denied)
+    await expect(store.get("ws/a.html")).rejects.toMatchObject({ name: "AccessDenied" })
+    s3.on(GetObjectCommand).rejects(Object.assign(new Error("missing"), { name: "NoSuchKey", $metadata: { httpStatusCode: 404 } }))
+    await expect(store.get("ws/a.html")).resolves.toBeNull()
+  })
+
   it("get does not swallow other failures", async () => {
     s3.on(GetObjectCommand).rejects(Object.assign(new Error("slow down"), { name: "SlowDown", $metadata: { httpStatusCode: 503 } }))
     await expect(createS3Storage("artifacts").get("ws/a.html")).rejects.toThrow("slow down")

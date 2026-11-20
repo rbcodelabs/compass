@@ -92,11 +92,12 @@ let lastDeniedWarningAt = 0
  * client. A role that is genuinely mis-scoped would look the same, so a denial is
  * logged (rate-limited) for operators.
  */
-function isMissing(error: unknown): boolean {
+function isMissing(error: unknown, strict = false): boolean {
   const name = (error as { name?: string } | null)?.name
   const status = (error as { $metadata?: { httpStatusCode?: number } } | null)?.$metadata?.httpStatusCode
   if (name === "NoSuchKey" || name === "NotFound" || status === 404) return true
   if (name === "AccessDenied" || name === "Forbidden" || status === 403) {
+    if (strict) return false
     const now = Date.now()
     if (now - lastDeniedWarningAt > 60_000) {
       lastDeniedWarningAt = now
@@ -134,7 +135,7 @@ export const PUBLIC_CACHE_CONTROL = "public, max-age=31536000, immutable"
 export const SAFE_CONTENT_DISPOSITION = "attachment"
 
 /** Private object store for one prefix. Behaves like the Blob and disk stores. */
-export function createS3Storage(store: Exclude<S3Store, "public" | "tmp">): ArtifactStorage {
+export function createS3Storage(store: Exclude<S3Store, "public" | "tmp">, { strictReads = false } = {}): ArtifactStorage {
   return {
     async put(pathname, bytes, contentType = "text/html; charset=utf-8", options) {
       const key = s3ObjectKey(store, pathname)
@@ -164,7 +165,7 @@ export function createS3Storage(store: Exclude<S3Store, "public" | "tmp">): Arti
           }
           return result.Body ? await result.Body.transformToByteArray() : null
         } catch (error) {
-          if (isMissing(error)) return null // includes 403 (no ListBucket outside the prefixes)
+          if (isMissing(error, strictReads)) return null
           throw error
         }
       }
@@ -183,7 +184,7 @@ export function createS3Storage(store: Exclude<S3Store, "public" | "tmp">): Arti
           if (!result.Body) return null
           return { stream: result.Body.transformToWebStream() as ReadableStream<Uint8Array>, size: typeof result.ContentLength === "number" ? result.ContentLength : null }
         } catch (error) {
-          if (isMissing(error)) return null // same not-found rule as get(), including 403
+          if (isMissing(error, strictReads)) return null
           throw error
         }
       }
