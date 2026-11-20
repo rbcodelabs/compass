@@ -36,7 +36,7 @@ import {
   type BoardColumnLayoutControls,
   type BoardDockTab,
 } from "@/components/patterns";
-import { DroppableDockTab, useStableBoardCollision } from "@/components/patterns/board-dock-dnd";
+import { cardFirstCollisionDetection, DroppableDockTab, useStableBoardCollision } from "@/components/patterns/board-dock-dnd";
 import { useOpportunitiesColumnLayout } from "@/components/discovery/discovery-column-layout";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { cn } from "@/lib/utils";
@@ -305,7 +305,7 @@ export function OpportunityBoard({
   // Stable across server and client; without it @dnd-kit numbers its
   // aria-describedby ids from a global counter and hydration mismatches.
   const dndId = useId();
-  const { collisionDetection, noteMoved, reset: resetCollision } = useStableBoardCollision();
+  const { collisionDetection, noteMoved, reset: resetCollision } = useStableBoardCollision(cardFirstCollisionDetection);
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })

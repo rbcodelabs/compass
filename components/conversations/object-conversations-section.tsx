@@ -1,15 +1,56 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
-import { AtSign, Bot, CheckCircle2, MessageSquare, Plus, Send } from "lucide-react"
+import { useCallback, useEffect, useRef, useState } from "react"
+import { Archive, AtSign, Bot, CheckCircle2, ListChecks, MessageSquare, Plus } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { MentionEditor, type MentionOptions } from "@/components/docs/mention-editor"
+import type { MentionOptions } from "@/components/docs/mention-editor"
+import { DocCommentComposer, type ComposerPayload, type ComposerResult } from "@/components/docs/doc-comment-composer"
+import { CommentTaskCard } from "@/components/docs/comment-task-card"
+import type { CommentTaskCardData } from "@/lib/comment-task-card"
 import { useConversationPanelOptional } from "@/components/panels/conversation-panel"
 import type { ObjectConversationSummary } from "@/app/api/agent/conversations/by-target/route"
 import { formatRelativeTime } from "@/lib/agent-board"
 import { plainTextOf, serializeMention } from "@/lib/comment-mentions"
+import { CONVERSATION_ARCHIVE_CHANGED_EVENT, type ConversationArchiveChange } from "@/components/conversations/archive-events"
+import { removeObjectConversationLink } from "@/app/[orgSlug]/[workspaceSlug]/links/conversation-actions"
 
 const BUILTIN_COMPASS_AGENT_ID = "00000000-0000-4000-8000-000000000001"
+/** A module constant, not an inline array: the composer memoizes on this prop, and a fresh array per render would rebuild its set on every keystroke. */
+const EXCLUDED_ASSIGNEE_IDS = [BUILTIN_COMPASS_AGENT_ID]
+
+async function acceptedConversationId(response: Response): Promise<string | null> {
+  const type = response.headers.get("content-type") ?? ""
+  if (type.includes("application/json")) {
+    const body = await response.json() as { conversationId?: unknown }
+    return typeof body?.conversationId === "string" && body.conversationId ? body.conversationId : null
+  }
+  // The older streaming turn acknowledges persistence in its booting event.
+  if (!type.includes("text/event-stream") || !response.body) return null
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffered = ""
+  let bytes = 0
+  try {
+    while (bytes < 65_536) {
+      const { done, value } = await reader.read()
+      if (done) return null
+      bytes += value.byteLength
+      if (bytes > 65_536) return null
+      buffered += decoder.decode(value, { stream: true })
+      const frames = buffered.split(/\r?\n\r?\n/)
+      buffered = frames.pop() ?? ""
+      for (const frame of frames) {
+        const data = frame.split(/\r?\n/).filter(line => line.startsWith("data:")).map(line => line.slice(5).trim()).join("\n")
+        if (!data) continue
+        const body = JSON.parse(data) as { conversationId?: unknown }
+        if (typeof body?.conversationId === "string" && body.conversationId) return body.conversationId
+      }
+    }
+    return null
+  } finally {
+    reader.releaseLock()
+  }
+}
 
 const DEFAULT_MENTION_OPTIONS: MentionOptions = {
   people: [],
@@ -26,15 +67,18 @@ const DEFAULT_MENTION_OPTIONS: MentionOptions = {
   outside: [],
 }
 
-export function ObjectConversationsSection({
+type Props = { targetType: string; targetId: string; targetLabel?: string | null }
+
+export function ObjectConversationsSection(props: Props) {
+  const panel = useConversationPanelOptional()
+  return <ObjectConversationsContent key={`${panel?.workspaceId}:${props.targetType}:${props.targetId}`} {...props} />
+}
+
+function ObjectConversationsContent({
   targetType,
   targetId,
   targetLabel,
-}: {
-  targetType: string
-  targetId: string
-  targetLabel?: string | null
-}) {
+}: Props) {
   const panelCtx = useConversationPanelOptional()
   const workspaceId = panelCtx?.workspaceId
   const normalizedTargetType = targetType.toUpperCase()
@@ -42,50 +86,149 @@ export function ObjectConversationsSection({
   const [items, setItems] = useState<ObjectConversationSummary[]>([])
   const [mentionOptions, setMentionOptions] = useState<MentionOptions>(DEFAULT_MENTION_OPTIONS)
   const [loading, setLoading] = useState(true)
+  // The composer keeps its own text; `draft` mirrors it (for Retry send and the Agent button), and a new `composerKey` remounts
+  // it with `composerSeed` as its starting text.
   const [draft, setDraft] = useState("")
-  const [editorKey, setEditorKey] = useState(0)
+  const [composerKey, setComposerKey] = useState(0)
+  const [composerSeed, setComposerSeed] = useState("")
   const [autoFocusEditor, setAutoFocusEditor] = useState(false)
+  // Agents that already hold a task made from a comment on this item (no scope confirmation for them) and the item's title.
+  const [confirmedAgentIds, setConfirmedAgentIds] = useState<string[]>([])
+  const [targetTitle, setTargetTitle] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [sendError, setSendError] = useState<"rejected" | "uncertain" | null>(null)
+  const [status, setStatus] = useState("")
+  const [confirmLink, setConfirmLink] = useState<string | null>(null)
+  const [removing, setRemoving] = useState<string[]>([])
+  const [removeErrors, setRemoveErrors] = useState<Record<string, string>>({})
+  // Archive is the only way a conversation leaves the list, and it is reversible: "Show archived" swaps the list for the
+  // archived threads this person may restore (the server decides; nothing else is ever returned).
+  const [showArchived, setShowArchived] = useState(false)
+  const [archivedCapped, setArchivedCapped] = useState(false)
+  const [restoring, setRestoring] = useState<string[]>([])
+  const [restoreErrors, setRestoreErrors] = useState<Record<string, string>>({})
+  const mounted = useRef(false)
+  const lifetime = useRef(0)
+  const loadGeneration = useRef(0)
+  const sendPending = useRef(false)
+  const removalPending = useRef(new Set<string>())
+  const headingRef = useRef<HTMLHeadingElement>(null)
+  const removeButtonRefs = useRef(new Map<string, HTMLButtonElement>())
+
+  useEffect(() => {
+    mounted.current = true
+    lifetime.current++
+    return () => { mounted.current = false; lifetime.current++; loadGeneration.current++ }
+  }, [])
 
   const load = useCallback(async () => {
+    const generation = ++loadGeneration.current
+    const current = () => mounted.current && loadGeneration.current === generation
     if (!workspaceId) {
       setLoading(false)
       return
     }
+    setLoading(true)
+    setLoadError(null)
     try {
       const qs = new URLSearchParams({
         workspaceId,
         targetType: normalizedTargetType,
         targetId,
+        ...(showArchived ? { archived: "1" } : {}),
       })
       const res = await fetch(`/api/agent/conversations/by-target?${qs.toString()}`)
-      if (!res.ok) return
+      if (!res.ok) throw new Error("List request failed")
       const body = (await res.json()) as {
         items?: ObjectConversationSummary[]
         mentionOptions?: MentionOptions
+        archivedCapped?: boolean
+        confirmedAgentIds?: unknown
+        targetTitle?: unknown
       }
-      if (Array.isArray(body.items)) {
-        setItems(body.items)
-      }
+      if (!Array.isArray(body.items)) throw new Error("Invalid list response")
+      if (!current()) return
+      setItems(body.items)
+      setArchivedCapped(showArchived && body.archivedCapped === true)
       if (body.mentionOptions) {
         setMentionOptions(body.mentionOptions)
       }
+      if (Array.isArray(body.confirmedAgentIds)) setConfirmedAgentIds(body.confirmedAgentIds.filter((id): id is string => typeof id === "string"))
+      setTargetTitle(typeof body.targetTitle === "string" ? body.targetTitle : null)
     } catch {
-      // Best-effort
+      if (current()) setLoadError("Could not load conversations. Please try again.")
     } finally {
-      setLoading(false)
+      if (current()) setLoading(false)
     }
-  }, [workspaceId, normalizedTargetType, targetId])
+  }, [workspaceId, normalizedTargetType, targetId, showArchived])
 
   useEffect(() => {
     setLoading(true)
     void load()
   }, [load])
 
-  const submitQuickStart = useCallback(async () => {
-    const text = draft.trim()
-    if (!text || !panelCtx || submitting) return
+  // A conversation archived from the panel: drop its row at once (a refresh that started earlier must not bring it
+  // back), say so, and put focus where the row was, on the section heading.
+  const itemsRef = useRef<ObjectConversationSummary[]>([])
+  useEffect(() => { itemsRef.current = items }, [items])
+  useEffect(() => {
+    const onChange = (event: Event) => {
+      const { conversationId, archived } = (event as CustomEvent<ConversationArchiveChange>).detail
+      // Only this section's own rows are announced; another object's section ignores the event entirely.
+      const listed = itemsRef.current.some((row) => row.id === conversationId)
+      if (listed && archived !== showArchived) {
+        // Archived from the live list, or restored from the archived list: the row leaves this view.
+        loadGeneration.current++
+        setLoading(false)
+        setItems((previous) => previous.filter((row) => row.id !== conversationId))
+        setStatus(archived ? "Conversation archived." : "Conversation restored.")
+        headingRef.current?.focus()
+      }
+      if (listed || (showArchived && archived)) void load()
+      else if (!showArchived && !archived) void load()
+    }
+    window.addEventListener(CONVERSATION_ARCHIVE_CHANGED_EVENT, onChange)
+    return () => window.removeEventListener(CONVERSATION_ARCHIVE_CHANGED_EVENT, onChange)
+  }, [load, showArchived])
+
+  async function restoreConversation(item: ObjectConversationSummary) {
+    if (!workspaceId || restoring.includes(item.id)) return
+    const generation = lifetime.current
+    const current = () => mounted.current && lifetime.current === generation
+    setRestoring((previous) => [...previous, item.id])
+    setRestoreErrors((previous) => { const next = { ...previous }; delete next[item.id]; return next })
+    try {
+      const res = await fetch(`/api/agent/conversations/${item.id}?workspaceId=${encodeURIComponent(workspaceId)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ archived: false }),
+      })
+      if (!current()) return
+      if (!res.ok) throw new Error("restore failed")
+      loadGeneration.current++
+      setLoading(false)
+      setItems((previous) => previous.filter((row) => row.id !== item.id))
+      setStatus("Conversation restored.")
+      headingRef.current?.focus()
+    } catch {
+      if (current()) setRestoreErrors((previous) => ({ ...previous, [item.id]: "We couldn’t restore this conversation. Please try again." }))
+    } finally {
+      if (current()) setRestoring((previous) => previous.filter((id) => id !== item.id))
+    }
+  }
+
+  // A plain post: a chat turn on the item (no comment, no task). Returns whether the server accepted it. `viaComposer` is true
+  // when the composer sent it (it clears itself on success); the Retry button is not the composer, so it remounts it empty.
+  const submitQuickStart = useCallback(async (text: string, viaComposer = true): Promise<boolean> => {
+    if (!text.trim() || !panelCtx || sendPending.current) return false
+    sendPending.current = true
+    const generation = lifetime.current
+    const current = () => mounted.current && lifetime.current === generation
     setSubmitting(true)
+    setSendError(null)
+    setStatus("")
+    let accepted = false
     try {
       const res = await fetch("/api/agent/turn", {
         method: "POST",
@@ -99,60 +242,174 @@ export function ObjectConversationsSection({
           agentMode: "MENTION_ONLY",
         }),
       })
-      if (res.ok) {
-        setDraft("")
-        setAutoFocusEditor(false)
-        setEditorKey((k) => k + 1)
-        const contentType = res.headers.get("content-type") ?? ""
-        if (contentType.includes("application/json")) {
-          const body = (await res.json()) as { conversationId?: string }
-          await load()
-          if (body.conversationId) {
-            panelCtx.openConversationInPanel(body.conversationId, {
-              label: plainTextOf(text).slice(0, 60),
-              targetType: normalizedTargetType,
-              targetId,
-              targetLabel: targetLabel ?? null,
-              visibility: "WORKSPACE",
-              agentMode: "MENTION_ONLY",
-            })
-          }
-        } else {
-          await load()
+      if (!current()) return false
+      if (!res.ok) {
+        setSendError(res.status >= 500 ? "uncertain" : "rejected")
+        return false
+      }
+      // A malformed acceptance cannot tell us which conversation received the
+      // message. Keep the draft for deliberate recovery, never resend silently.
+      const conversationId = await acceptedConversationId(res)
+      if (!current()) return false
+      if (!conversationId) {
+        setSendError("uncertain")
+        return false
+      }
+      accepted = true
+      setDraft("")
+      setAutoFocusEditor(false)
+      if (!viaComposer) { setComposerSeed(""); setComposerKey((k) => k + 1) }
+      setStatus("Message sent.")
+      await load()
+      if (current()) {
+        panelCtx.openConversationInPanel(conversationId, {
+          label: plainTextOf(text).slice(0, 60),
+          targetType: normalizedTargetType,
+          targetId,
+          targetLabel: targetLabel ?? null,
+          visibility: "WORKSPACE",
+          agentMode: "MENTION_ONLY",
+        })
+      }
+      return true
+    } catch {
+      if (current() && !accepted) setSendError("uncertain")
+      return accepted
+    } finally {
+      sendPending.current = false
+      if (current()) setSubmitting(false)
+    }
+  }, [panelCtx, normalizedTargetType, targetId, targetLabel, load])
+
+  // A task-bearing root post is a comment, not a chat turn: Comment stays the write path for threads that carry a task
+  // (POST /api/comments creates the comment, the task and its provenance; the mirror makes the conversation after commit).
+  // No agent turn starts, even when an agent is the assignee: that task runs through the task system.
+  const submitTaskPost = useCallback(async (payload: ComposerPayload): Promise<ComposerResult> => {
+    if (!panelCtx || sendPending.current) return { ok: false, error: "BUSY", message: "" }
+    sendPending.current = true
+    const generation = lifetime.current
+    const current = () => mounted.current && lifetime.current === generation
+    setSubmitting(true)
+    setSendError(null)
+    setStatus("")
+    try {
+      const res = await fetch("/api/comments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          targetType: normalizedTargetType,
+          targetId,
+          parentId: null,
+          body: payload.body,
+          task: payload.task,
+          assignee: payload.assignee,
+          agentScopeConfirmed: payload.agentScopeConfirmed,
+        }),
+      })
+      const result: unknown = await res.json().catch(() => null)
+      if (!res.ok) {
+        const failure = typeof result === "object" && result ? result as { error?: unknown; code?: unknown } : {}
+        // The server does not know this agent yet: forget it locally so the composer shows its scope step again.
+        if (failure.code === "AGENT_SCOPE_CONFIRMATION_REQUIRED" && payload.assignee) {
+          const agentId = payload.assignee.id
+          setConfirmedAgentIds((ids) => ids.filter((id) => id !== agentId))
+        }
+        return {
+          ok: false,
+          error: typeof failure.code === "string" ? failure.code : "ERROR",
+          message: res.status < 500 && typeof failure.error === "string" ? failure.error : "The comment could not be posted. Your draft is kept.",
         }
       }
+      if (!current()) return { ok: true }
+      const created = (typeof result === "object" && result ? result : {}) as { id?: unknown; taskCard?: CommentTaskCardData | null }
+      const agentId = created.taskCard?.assignee?.type === "AGENT" ? created.taskCard.assignee.id : null
+      if (agentId) setConfirmedAgentIds((ids) => (ids.includes(agentId) ? ids : [...ids, agentId]))
+      setDraft("")
+      setStatus(payload.task ? "Comment posted and task created." : "Comment posted.")
+      await load()
+      if (current() && typeof created.id === "string" && created.id) {
+        panelCtx.openConversationInPanel(created.id, {
+          label: plainTextOf(payload.body).slice(0, 60),
+          targetType: normalizedTargetType,
+          targetId,
+          targetLabel: targetLabel ?? null,
+          visibility: "WORKSPACE",
+          agentMode: "MENTION_ONLY",
+        })
+      }
+      return { ok: true }
+    } catch {
+      return { ok: false, error: "ERROR", message: "We couldn’t confirm whether this was posted. Check conversations before retrying." }
     } finally {
-      setSubmitting(false)
+      sendPending.current = false
+      if (current()) setSubmitting(false)
     }
-  }, [draft, panelCtx, submitting, normalizedTargetType, targetId, targetLabel, load])
+  }, [panelCtx, normalizedTargetType, targetId, targetLabel, load])
 
-  const handleQuickStart = (e: React.FormEvent) => {
-    e.preventDefault()
-    void submitQuickStart()
+  const submitComposer = useCallback(async (payload: ComposerPayload): Promise<ComposerResult> => {
+    if (payload.task) return submitTaskPost(payload)
+    // Not accepted: the section's own alert (with Retry send / Refresh) says why, so the composer adds no second message.
+    return (await submitQuickStart(payload.body)) ? { ok: true } : { ok: false, error: "SEND_FAILED", message: "" }
+  }, [submitTaskPost, submitQuickStart])
+
+  async function removeLink(item: ObjectConversationSummary, linkId: string) {
+    if (!panelCtx || removalPending.current.has(item.id)) return
+    removalPending.current.add(item.id)
+    const generation = lifetime.current
+    const current = () => mounted.current && lifetime.current === generation
+    setRemoving(previous => [...previous, item.id])
+    setRemoveErrors(previous => { const next = { ...previous }; delete next[linkId]; return next })
+    try {
+      const result = await removeObjectConversationLink(panelCtx.orgSlug, panelCtx.workspaceSlug, linkId)
+      if (!current()) return
+      if (!result.ok) throw new Error(result.error)
+      if (!result.removed) {
+        await load()
+        if (current()) { setConfirmLink(null); setStatus("Conversations refreshed. Check the link before retrying."); headingRef.current?.focus() }
+        return
+      }
+      // A refresh started before unlinking must not resurrect its stale link.
+      loadGeneration.current++
+      setLoading(false)
+      setItems(previous => previous.flatMap(row => {
+        if (row.id !== item.id) return [row]
+        const links = row.links.filter(link => link.linkId !== linkId)
+        return row.anchored || links.length ? [{ ...row, links }] : []
+      }))
+      setConfirmLink(null)
+      setStatus("Link removed. Conversation kept.")
+      headingRef.current?.focus()
+      await load()
+    } catch {
+      if (current()) setRemoveErrors(previous => ({ ...previous, [linkId]: "Could not remove the link. Please try again." }))
+    } finally {
+      removalPending.current.delete(item.id)
+      if (current()) setRemoving(previous => previous.filter(id => id !== item.id))
+    }
   }
 
   const handleInsertAgentMention = () => {
+    if (sendPending.current) return
     const agentOpt = mentionOptions.agents[0] ?? DEFAULT_MENTION_OPTIONS.agents[0]!
     const token = serializeMention({
       kind: "agent",
       id: agentOpt.id,
       label: agentOpt.name,
     })
-    setDraft((prev) => {
-      if (prev.includes(`mention:agent:${agentOpt.id}`) || prev.includes("@Compass Agent")) {
-        return prev
-      }
-      return prev.trim() ? `${token} ${prev.trimStart()}` : `${token} `
-    })
+    const next = draft.includes(`mention:agent:${agentOpt.id}`) || draft.includes("@Compass Agent")
+      ? draft
+      : draft.trim() ? `${token} ${draft.trimStart()}` : `${token} `
+    setDraft(next)
+    setComposerSeed(next)
     setAutoFocusEditor(true)
-    setEditorKey((k) => k + 1)
+    setComposerKey((k) => k + 1)
   }
 
   return (
     <div className="flex min-w-0 flex-col gap-3" data-testid="object-conversations-section">
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-2 gap-y-1.5">
         <div className="flex items-center gap-2">
-          <h3 className="text-xs font-semibold uppercase tracking-wider text-text-subtle">
+          <h3 ref={headingRef} tabIndex={-1} className="text-xs font-semibold uppercase tracking-wider text-text-subtle">
             Conversations
           </h3>
           {items.length > 0 && (
@@ -161,36 +418,65 @@ export function ObjectConversationsSection({
             </span>
           )}
         </div>
-        {panelCtx && (
+        <div className="flex min-w-0 flex-wrap items-center gap-1.5">
           <Button
             type="button"
-            variant="outline"
+            variant={showArchived ? "secondary" : "ghost"}
             size="xs"
             className="gap-1"
-            onClick={() =>
-              panelCtx.startNewConversationInPanel({
-                targetType: normalizedTargetType,
-                targetId,
-                targetLabel: targetLabel ?? null,
-                visibility: "WORKSPACE",
-                agentMode: "MENTION_ONLY",
-              })
-            }
+            aria-pressed={showArchived}
+            onClick={() => {
+              loadGeneration.current++
+              setItems([])
+              setLoadError(null)
+              setStatus("")
+              setShowArchived((value) => !value)
+            }}
           >
-            <Plus className="size-3" aria-hidden="true" />
-            New conversation
+            <Archive className="size-3" aria-hidden="true" />
+            Show archived
           </Button>
-        )}
+          {panelCtx && (
+            <Button
+              type="button"
+              variant="outline"
+              size="xs"
+              className="gap-1"
+              onClick={() =>
+                panelCtx.startNewConversationInPanel({
+                  targetType: normalizedTargetType,
+                  targetId,
+                  targetLabel: targetLabel ?? null,
+                  visibility: "WORKSPACE",
+                  agentMode: "MENTION_ONLY",
+                })
+              }
+            >
+              <Plus className="size-3" aria-hidden="true" />
+              New conversation
+            </Button>
+          )}
+        </div>
       </div>
 
-      {loading ? (
+      {loadError && <div role="alert" className="flex flex-wrap items-center gap-2 rounded-lg border border-status-danger/30 bg-status-danger-surface p-3 text-sm text-status-danger">
+        <p>{loadError}{items.length > 0 && " Showing the last loaded list."}</p>
+        <Button type="button" variant="outline" size="xs" disabled={loading} onClick={() => void load()}>Retry</Button>
+      </div>}
+      {loading && items.length === 0 ? (
         <p className="text-xs text-text-subtle">Loading conversations…</p>
-      ) : items.length === 0 ? (
+      ) : items.length === 0 && !loadError ? (
+        showArchived ? (
+          <p className="text-xs text-text-subtle">No archived conversations that you can restore.</p>
+        ) : (
         <p className="text-xs text-text-subtle">
           No conversations on this item yet. Start a thread with teammates or mention{" "}
           <span className="font-medium text-text-secondary">@Compass Agent</span> to pull in AI.
         </p>
+        )
       ) : (
+        <>
+        {showArchived && archivedCapped && <p className="text-xs text-text-subtle">Showing the 50 most recent archived conversations.</p>}
         <ul className="flex flex-col gap-2">
           {items.map((item) => (
             <li key={item.id}>
@@ -211,6 +497,7 @@ export function ObjectConversationsSection({
                 <div className="flex min-w-0 items-center justify-between gap-2">
                   <span className="flex min-w-0 items-center gap-1.5">
                     <MessageSquare className="size-3.5 shrink-0 text-primary" aria-hidden="true" />
+                    {item.archived && <span className="sr-only">Archived. </span>}
                     <span className="truncate text-sm font-medium text-text-primary">
                       {item.title}
                     </span>
@@ -236,6 +523,13 @@ export function ObjectConversationsSection({
                         )}
                       </span>
                     )}
+                    {item.taskCard && (
+                      <span data-testid="conversation-task-chip" className="inline-flex items-center gap-1 rounded bg-status-info-surface px-1.5 py-0.5 font-medium text-status-info">
+                        <ListChecks className="size-3" aria-hidden="true" />
+                        <span className="sr-only">Task </span>
+                        {item.taskCard.displayId ?? "Task"}
+                      </span>
+                    )}
                     <span className="tabular-nums text-text-subtle">
                       {item.messageCount} {item.messageCount === 1 ? "msg" : "msgs"}
                     </span>
@@ -248,51 +542,88 @@ export function ObjectConversationsSection({
                   <p className="truncate pl-5 text-xs text-text-subtle">{item.summary}</p>
                 )}
               </button>
+              {item.taskCard && panelCtx && (
+                <CommentTaskCard card={item.taskCard} startsRun={false} taskHref={`/${panelCtx.orgSlug}/${panelCtx.workspaceSlug}/tasks/${item.taskCard.taskId}`} />
+              )}
+              {item.canRestore && (
+                <div className="flex flex-wrap items-center gap-2 pt-1 text-xs text-text-subtle">
+                  <span>Archived</span>
+                  <Button type="button" variant="outline" size="xs" disabled={restoring.includes(item.id)} onClick={() => void restoreConversation(item)}>
+                    Restore
+                  </Button>
+                  {restoreErrors[item.id] && <p role="alert" className="basis-full text-status-danger">{restoreErrors[item.id]}</p>}
+                </div>
+              )}
+              <div className="flex flex-wrap items-center gap-2 pt-1 text-xs text-text-subtle">
+                {item.anchored && <span>On this item</span>}
+                {item.links?.map(link => <div key={link.linkId} className="flex flex-wrap items-center gap-2">
+                  <span>{link.kind === "CREATED" ? "Created here" : "Mentioned"}</span>
+                  {link.auto && <Button ref={element => { if (element) removeButtonRefs.current.set(link.linkId, element); else removeButtonRefs.current.delete(link.linkId) }} type="button" variant="ghost" size="xs" disabled={removing.includes(item.id)} aria-label={`Remove ${link.kind === "CREATED" ? "Created here" : "Mentioned"} link to ${item.title}`} onClick={() => setConfirmLink(link.linkId)}>Remove link</Button>}
+                  {confirmLink === link.linkId && <div className="basis-full rounded-lg border border-border-default p-3 text-sm text-text-primary">
+                    <p>Remove this link?</p><p>The conversation and this item will be kept.</p>
+                    <div className="mt-2 flex gap-2">
+                      <Button type="button" variant="outline" size="xs" disabled={removing.includes(item.id)} onClick={() => { setConfirmLink(null); removeButtonRefs.current.get(link.linkId)?.focus() }}>Cancel</Button>
+                      <Button type="button" variant="outline" size="xs" disabled={removing.includes(item.id)} onClick={() => void removeLink(item, link.linkId)}>{removing.includes(item.id) ? "Removing…" : "Remove link"}</Button>
+                    </div>
+                  </div>}
+                  {removeErrors[link.linkId] && <div role="alert" className="basis-full text-status-danger"><p>{removeErrors[link.linkId]}</p><Button type="button" variant="outline" size="xs" disabled={removing.includes(item.id)} onClick={() => void removeLink(item, link.linkId)}>Retry removal</Button></div>}
+                </div>)}
+              </div>
             </li>
           ))}
         </ul>
+        </>
       )}
 
       {panelCtx && (
-        <form onSubmit={handleQuickStart} className="flex flex-col gap-2">
+        <div className="flex flex-col gap-2">
+          {sendError && <div role="alert" className="rounded-lg border border-status-danger/30 bg-status-danger-surface p-3 text-sm text-status-danger">
+            <p>{sendError === "uncertain" ? "We couldn’t confirm whether this was sent. Check conversations before retrying." : "Could not send your message. Your draft is kept."}</p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {sendError === "uncertain" && <Button type="button" variant="outline" size="xs" disabled={loading} onClick={() => void load()}>Refresh conversations</Button>}
+              <Button type="button" variant="outline" size="xs" disabled={submitting || !draft.trim()} onClick={() => void submitQuickStart(draft, false)}>Retry send</Button>
+            </div>
+          </div>}
           <div className="flex items-start gap-2">
             <div className="min-w-0 flex-1">
-              <MentionEditor
-                key={editorKey}
+              <DocCommentComposer
+                key={composerKey}
                 options={mentionOptions}
-                initialValue={draft}
+                confirmedAgentIds={confirmedAgentIds}
+                docTitle={targetTitle ?? targetLabel ?? ""}
+                targetNoun="item"
                 ariaLabel="Start a conversation"
                 placeholder="Start a conversation… (type @ to mention people or agents)"
-                onChange={setDraft}
-                onSubmitShortcut={() => void submitQuickStart()}
-                submitOnEnter
+                idleLabel={submitting ? "Sending…" : "Send"}
+                initialBody={composerSeed}
+                onBodyChange={setDraft}
                 autoFocus={autoFocusEditor}
                 disabled={submitting}
-                className="min-h-8 rounded-lg border-default bg-surface-card px-3 py-1.5 text-xs focus-visible:border-border-focus"
-                testId="object-conversation-composer"
+                submitOnEnter
+                // Task creation is opt-in here: a mention is a plain message until the person turns the task on, and the built-in
+                // agent (no task queue) is never an assignee candidate.
+                defaultTaskOn={false}
+                excludedAssigneeIds={EXCLUDED_ASSIGNEE_IDS}
+                taskToggleHint="Leave off to send a plain message with this mention."
+                editorTestId="object-conversation-composer"
+                editorClassName="min-h-8 rounded-lg border-default bg-surface-card px-3 py-1.5 text-xs focus-visible:border-border-focus"
+                onSubmit={submitComposer}
               />
             </div>
             <button
               type="button"
               onClick={handleInsertAgentMention}
+              disabled={submitting}
               title="Mention @Compass Agent"
               className="inline-flex h-8 shrink-0 items-center gap-1 rounded-lg border border-primary/30 bg-primary/10 px-2.5 text-xs font-medium text-primary hover:bg-primary/15"
             >
               <AtSign className="size-3" aria-hidden="true" />
               <span>Agent</span>
             </button>
-            <Button
-              type="submit"
-              size="sm"
-              disabled={!draft.trim() || submitting}
-              className="h-8 gap-1 px-3 text-xs"
-            >
-              <Send className="size-3" aria-hidden="true" />
-              Send
-            </Button>
           </div>
-        </form>
+        </div>
       )}
+      <p role="status" className="text-xs text-text-secondary">{status}</p>
     </div>
   )
 }
