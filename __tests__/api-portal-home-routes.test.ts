@@ -30,6 +30,9 @@ const prisma = {
   },
   roadmapItem: { findMany: vi.fn(async () => []) },
   doc: { findMany: vi.fn(async () => []) },
+  artifact: { findMany: vi.fn(async () => []) },
+  oKRCycle: { findMany: vi.fn(async () => []) },
+  objective: { findMany: vi.fn(async () => []) },
 }
 
 vi.mock("@/lib/permissions", async (importOriginal) => ({
@@ -71,6 +74,8 @@ describe("authorization", () => {
     expect(prisma.portalHomeLayout.upsert).not.toHaveBeenCalled()
     expect(prisma.portalHomeLayout.update).not.toHaveBeenCalled()
     expect(prisma.roadmapItem.findMany).not.toHaveBeenCalled()
+    expect(prisma.artifact.findMany).not.toHaveBeenCalled()
+    expect(prisma.objective.findMany).not.toHaveBeenCalled()
   })
 })
 

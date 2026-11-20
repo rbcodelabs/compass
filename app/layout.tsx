@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
 import { ProductAnalytics } from "@/components/product-analytics";
 import "./globals.css";
@@ -82,7 +82,25 @@ const sourceSerif = localFont({
   display: "swap",
 });
 
+// Title bar / status bar colour for the installed PWA and mobile browsers.
+// Matches --surface-navigation (sidebar) in light and dark so the OS chrome
+// blends with the app. Keep in sync with THEME_COLOR_* in lib/theme.ts.
+// viewportFit "cover" lets content use the safe areas.
+export const viewport: Viewport = {
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#F4F2ED" },
+    { media: "(prefers-color-scheme: dark)", color: "#1B1A18" },
+  ],
+  viewportFit: "cover",
+};
+
 export const metadata: Metadata = {
+  applicationName: "Compass",
+  appleWebApp: {
+    capable: true,
+    title: "Compass",
+    statusBarStyle: "default",
+  },
   title: {
     default: "Compass",
     template: "%s · Compass",

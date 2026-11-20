@@ -1,7 +1,8 @@
 import { compassEnv } from "@/lib/runtime-env";
 import { NextRequest, NextResponse } from "next/server";
 import { secretMatches } from "@/lib/secret-compare";
-import { Pool } from "pg";
+import { Pool, type PoolConfig } from "pg";
+import { createInspectionPool } from "@/lib/migrations/inspection-pool";
 import { DsqlSigner } from "@aws-sdk/dsql-signer";
 import { awsCredentialsProvider } from "@vercel/functions/oidc";
 import { getActiveSchema } from "@/lib/schema";
@@ -22,7 +23,8 @@ import { parseMigratePostBody } from "@/lib/migrations/admin-request";
 
 const DSQL_QUERY_TIMEOUT_MS = 280_000;
 
-async function getPool(): Promise<Pool> {
+async function getPool(inspection = false): Promise<Pool> {
+  const fromConfig = (config: PoolConfig) => inspection ? createInspectionPool(config) : new Pool(config);
   // worktree-bootstrap provides a local Postgres URL. Keep local verification
   // on the exact same migration runner/search_path as DSQL deployments.
   // Migrations need session semantics, so prefer DATABASE_MIGRATION_URL (session or
@@ -32,7 +34,7 @@ async function getPool(): Promise<Pool> {
     if (getPoolerMode(migrationUrl, process.env) === "transaction") {
       throw new Error("Migrations require a session-mode or direct connection (port 5432); set DATABASE_MIGRATION_URL to the session pooler (port 5432).");
     }
-    return new Pool({ connectionString: migrationUrl, max: 3, query_timeout: 40_000 });
+    return fromConfig({ connectionString: migrationUrl, max: 3, query_timeout: 40_000 });
   }
   const host = process.env.PGHOST!;
   const signer = new DsqlSigner({
@@ -70,7 +72,7 @@ export async function GET(req: NextRequest) {
   if (compassEnv() === "preview" && process.env.PREVIEW_AUTOMATION_ENABLED === "1") return NextResponse.json({ error: "Not found" }, { status: 404 });
   if (!checkAuth(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const pool = await getPool();
-  try { return await getMigrationStatus(pool, getActiveSchema()); } finally { await pool.end(); }
+  try { return await getMigrationStatus(pool, getActiveSchema(), () => getPool(true)); } finally { await pool.end(); }
 }
 export async function POST(req: NextRequest) {
   if (process.env.PREVIEW_DATABASE_MODE === "vercel-managed") return managedRequest(req, true);
