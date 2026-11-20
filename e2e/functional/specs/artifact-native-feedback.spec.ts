@@ -54,12 +54,12 @@ test("A workspace member can pick an element, leave anchored feedback, and see i
   await expect(pin(page)).toHaveAttribute("aria-label", /Move this button above the fold\./)
 
   // The comment is an ordinary root ARTIFACT comment underneath the anchor,
-  // so it also shows up in the whole-artifact Discussion thread. (Panel
+  // so it also shows up in the whole-artifact Conversations list. (Panel
   // open/close/pin responsive behavior itself is covered by
   // artifact-comments.spec.ts — this only checks the anchor didn't fork the
-  // comment into a separate, invisible-to-Discussion record.)
+  // comment into a separate, invisible-to-Conversations record.)
   await page.getByRole("button", { name: "Comments", exact: true }).click()
-  await expect(page.getByText("Move this button above the fold.", { exact: true })).toBeVisible()
+  await expect(page.getByTestId("object-conversations-section").getByRole("button", { name: /^Move this button above the fold\./ })).toBeVisible()
 
   // Re-anchoring survives a fresh load: the selector is re-resolved against
   // the live sandbox DOM rather than replayed from a cache.
