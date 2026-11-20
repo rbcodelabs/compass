@@ -25,7 +25,7 @@ export function AgentModeChip({
     value === "NONE" ? <MessageSquareOff /> : value === "MENTION_ONLY" ? <AtSign /> : <Bot />
 
   return (
-    <div className="inline-flex min-w-0 max-w-full flex-wrap items-center gap-1.5">
+    <div className="inline-flex items-center gap-1.5">
       <ChoiceChip
         kind="Participation"
         icon={icon}
