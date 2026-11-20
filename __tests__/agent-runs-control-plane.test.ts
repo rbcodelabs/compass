@@ -86,7 +86,8 @@ function fakePrisma(overrides: Record<string, Any> = {}) {
   const prisma: Any = {
     $queryRaw: vi.fn().mockResolvedValue([]),
     $executeRaw: vi.fn().mockResolvedValue(1),
-    agentSandboxOperation: { findUnique: vi.fn().mockResolvedValue(null) },
+    agentSandboxOperation: { findUnique: vi.fn().mockResolvedValue(null), findMany: vi.fn().mockResolvedValue([]) },
+    agentSandboxGeneration: { findUnique: vi.fn().mockResolvedValue(null) },
     agentRun: {
       findUnique: vi.fn(),
       findFirst: vi.fn(),
@@ -611,6 +612,7 @@ function fakePersistentSandboxPrisma() {
   const prisma = fakePrisma({
     agentSandboxOperation: {
       findUnique: vi.fn(async () => operation),
+      findMany: vi.fn().mockResolvedValue([]),
       create: vi.fn(async ({ data }) => operation = data),
       update: vi.fn(async ({ data }) => operation = { ...operation, ...data }),
       updateMany: vi.fn(async ({ where, data }) => {

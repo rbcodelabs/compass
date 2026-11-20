@@ -43,6 +43,7 @@ import { isVercelSandboxQuiescent, prepareVercelSandboxStop } from "@/lib/sandbo
 import {
   findPersistentSandboxStopCandidates,
   lockSandboxConversation,
+  recoverPersistentSandboxLaunches,
   stopPersistentSandbox,
   type PreparePersistentSandboxStop,
 } from "@/lib/agent-sandbox-fence"
@@ -721,7 +722,7 @@ export type AgentRunUsage = {
 export type AgentRunCleanup = {
   stopSandbox?: (sandboxName: string) => Promise<void>
   preparePersistentStop?: PreparePersistentSandboxStop
-  isPersistentSandboxQuiescent?: (name: string) => Promise<boolean>
+  isPersistentSandboxQuiescent?: (name: string, sessionId: string) => Promise<boolean>
   revokeKey?: (apiKeyId: string) => Promise<void>
   finishClaim?: (conversationId: string, claimId: string, successful: boolean) => Promise<void>
 }
@@ -1076,11 +1077,13 @@ export async function reapIdleConversationSandboxes({
   limit?: number
   cleanup?: AgentRunCleanup
 }) {
+  await recoverPersistentSandboxLaunches(prisma, now, limit)
   const candidates = await findPersistentSandboxStopCandidates(prisma, {
     now, idleBefore: new Date(now.getTime() - idleMs), limit, prefix: CONVERSATION_SANDBOX_PREFIX,
   })
+  const stopSandbox = cleanup?.stopSandbox
   const prepare = cleanup?.preparePersistentStop ??
-    (cleanup?.stopSandbox ? async (name: string) => () => cleanup.stopSandbox!(name) : defaultCleanup.preparePersistentStop)
+    (stopSandbox ? async (name: string) => ({ sessionId: "fixture", stop: () => stopSandbox(name) }) : defaultCleanup.preparePersistentStop)
   const isQuiescent = cleanup?.isPersistentSandboxQuiescent ?? defaultCleanup.isPersistentSandboxQuiescent
   const stopped: string[] = []
   const failed: { sandboxName: string; error: string }[] = []

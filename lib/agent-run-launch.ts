@@ -16,7 +16,12 @@
  */
 import type { AppPrismaClient } from "@/lib/db"
 import { bootSandboxFromSnapshot, stopSandboxByName } from "@/lib/agent-sandbox"
-import { releasePersistentSandboxLaunch, reservePersistentSandboxLaunch } from "@/lib/agent-sandbox-fence"
+import {
+  dispatchPersistentSandboxLaunch,
+  PERSISTENT_SANDBOX_LOOKUP_FAILED,
+  releasePersistentSandboxLaunch,
+  reservePersistentSandboxLaunch,
+} from "@/lib/agent-sandbox-fence"
 import { AGENT_SANDBOX_IDLE_MS, agentSandboxReuseEnabled, sandboxNetworkProfile } from "@/lib/agent-sandbox-reuse"
 import { agentModelForHarness, type AgentHarness } from "@/lib/agent-harness"
 import { mintAgentMcpKey, revokeAgentMcpKey } from "@/lib/agent-mcp-key"
@@ -118,6 +123,7 @@ export async function launchQueuedAgentRun(ctx: LaunchContext): Promise<{ starte
   const { prisma, run } = ctx
   let apiKeyId: string | undefined
   let launchReservation: string | null = null
+  let launchMayBeInFlight = false
   try {
     const preparedPacks = await prepareCapabilityPacksForTurn(await activePacksFor(prisma, ctx.workspace.id), {
       get: (pathname) => getCapabilityPackArtifactStorage().get(pathname),
@@ -181,6 +187,11 @@ export async function launchQueuedAgentRun(ctx: LaunchContext): Promise<{ starte
       ? agentConversationSandboxName(reuseTarget.conversationId, { developer: reuseTarget.developer })
       : ctx.sandboxName
 
+    const docMaterial = materializeDocs ? await materializeLaunchDocTree(ctx.workspace.id) : undefined
+    const manifestFiles = docMaterial
+      ? [{ path: DOC_MANIFEST_FILE, content: JSON.stringify(signDocManifest(run.id, ctx.workspace.id, docMaterial.baseline)) }]
+      : []
+
     let sandbox: Awaited<ReturnType<typeof bootSandboxFromSnapshot>>
     if (!reuseTarget) {
       sandbox = await bootSandboxFromSnapshot(ctx.snapshotId, {
@@ -190,9 +201,12 @@ export async function launchQueuedAgentRun(ctx: LaunchContext): Promise<{ starte
         networkPolicy,
       })
     } else {
-      launchReservation = await reservePersistentSandboxLaunch(prisma, reuseTarget.conversationId, run.id, runSandboxName)
-      if (!launchReservation) throw new Error("The persistent sandbox launch could not be reserved")
       const previous = await findPreviousRunForSandboxReuse(prisma, reuseTarget.conversationId, run.id)
+      launchReservation = await reservePersistentSandboxLaunch(prisma, reuseTarget.conversationId, run.id, runSandboxName)
+      if (!launchReservation || !(await dispatchPersistentSandboxLaunch(prisma, reuseTarget.conversationId, run.id, runSandboxName, launchReservation))) {
+        throw new Error("The persistent sandbox launch could not be reserved")
+      }
+      launchMayBeInFlight = true
       const requiredMs = ctx.budgetMs + 2 * RUN_INFRA_GRACE_MS
       const profile = sandboxNetworkProfile(networkPolicy)
       const { acquireConversationSandbox } = await import("@/lib/agent-sandbox")
@@ -210,11 +224,6 @@ export async function launchQueuedAgentRun(ctx: LaunchContext): Promise<{ starte
       })
       sandbox = acquired.sandbox
     }
-
-    const docMaterial = materializeDocs ? await materializeLaunchDocTree(ctx.workspace.id) : undefined
-    const manifestFiles = docMaterial
-      ? [{ path: DOC_MANIFEST_FILE, content: JSON.stringify(signDocManifest(run.id, ctx.workspace.id, docMaterial.baseline)) }]
-      : []
 
     await sandbox.writeFiles([
       { path: "entry.ts", content: readEntryScript(ctx.harness) },
@@ -258,11 +267,13 @@ export async function launchQueuedAgentRun(ctx: LaunchContext): Promise<{ starte
       detached: true,
       timeoutMs: ctx.budgetMs,
     })
+    launchMayBeInFlight = false
     if (reuseTarget && launchReservation) {
       await releasePersistentSandboxLaunch(prisma, reuseTarget.conversationId, launchReservation)
+      launchReservation = null
     }
     if (!(await markAgentRunStarted({ prisma, runId: run.id, apiKeyId, sandboxName: runSandboxName }))) {
-      console.warn("[agent-run-launch] run ended before its start was recorded; stopping the sandbox", { runId: run.id })
+      console.warn("[agent-run-launch] run ended before its start was recorded", { runId: run.id })
       try {
         await revokeAgentMcpKey(apiKeyId)
       } catch {
@@ -277,6 +288,11 @@ export async function launchQueuedAgentRun(ctx: LaunchContext): Promise<{ starte
     }
     return { started: true }
   } catch (error) {
+    if (ctx.reuseConversationSandbox && launchReservation && (!launchMayBeInFlight || (error instanceof Error && error.name === PERSISTENT_SANDBOX_LOOKUP_FAILED))) {
+      await releasePersistentSandboxLaunch(prisma, ctx.reuseConversationSandbox.conversationId, launchReservation).catch((releaseError) => {
+        console.error("[agent-run-launch] launch reservation release failed", { runId: run.id, releaseError })
+      })
+    }
     console.error("[agent-run-launch] triggered run failed to start", { runId: run.id, persistentSandboxReserved: Boolean(launchReservation), error })
     if (apiKeyId) await revokeAgentMcpKey(apiKeyId)
     await finalizeAgentRun({

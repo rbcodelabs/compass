@@ -294,7 +294,7 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   "125_unified_conversations": "dc6968e7f3573b5bc5aa9982f59c2f147643c807764c7c2ad768b21182333faf",
   // Links an assistant message to the run that produced it (ADR-0032): one nullable `ADD COLUMN IF NOT EXISTS run_id UUID` on agent_messages plus one ASYNC index; no default, backfill or FK. No code postcondition. Digest recorded from the shipped SQL after reading it.
   "129_agent_message_run_id": "f82b208a7648bac31ef3917a3080efeb350730cd485bb347b64f615007a4c9bd",
-  "130_agent_sandbox_operations": "276bc904ceeffcc812c08b7462af7dd369aaf466f2e2022375bb13b32894cc02",
+  "130_agent_sandbox_operations": "a19322f4022bfe3e0595788943adb4bb04320b3ea568a6dea5b09180d33c97d4",
 };
 
 /**
@@ -444,7 +444,7 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
   },
   // The fence depends on one operation per conversation.
   "130_agent_sandbox_operations": {
-    "lib/migrations/agent-sandbox-operations.ts": "993a02d44f9bbc785ae9ba1fa966e7221cc3bea0799a2c7714186061ae1009e6",
+    "lib/migrations/agent-sandbox-operations.ts": "67b9c49a4bc0a10829a309aecd2e68d356b986a17af676493a2e68290f1c7e00",
   },
   // The 129 postcondition (agent_messages.run_id is a bare nullable uuid; idx_agent_messages_run is valid, ready, non-unique, on run_id only); editing it re-reviews the migration.
   "129_agent_message_run_id": {

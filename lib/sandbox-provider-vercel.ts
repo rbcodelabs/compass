@@ -1,4 +1,5 @@
 import { APIError, Sandbox, Snapshot, type Command } from "@vercel/sandbox"
+import type { PreparedPersistentSandboxStop } from "@/lib/agent-sandbox-fence"
 import type {
   BootSandboxOptions,
   CommandHandle,
@@ -114,29 +115,39 @@ async function readVercelSandboxSession(name: string) {
     throw error
   }
   try {
-    return { exists: true as const, session: sandbox.currentSession() }
+    return { exists: true as const, sandbox, session: sandbox.currentSession() }
   } catch (error) {
     // currentSession() throws when the fresh lookup returned no session.
     if (error instanceof Error && error.message.startsWith("No active session.")) {
-      return { exists: true as const, session: null }
+      return { exists: true as const, sandbox, session: null }
     }
     throw error
   }
 }
 
-export async function isVercelSandboxQuiescent(name: string): Promise<boolean> {
+export async function isVercelSandboxQuiescent(name: string, sessionId: string): Promise<boolean> {
   const found = await readVercelSandboxSession(name)
-  return found.exists && (found.session === null || found.session.status === "stopped")
+  if (!found.exists || !found.sandbox.currentSnapshotId) return false
+  if (found.session) return found.session.sessionId === sessionId && found.session.status === "stopped"
+  const recent = await found.sandbox.listSessions({ limit: 10, sortOrder: "desc" })
+  return recent.sessions.some((session) => session.id === sessionId && session.status === "stopped")
 }
 
-export async function prepareVercelSandboxStop(name: string): Promise<(() => Promise<void>) | null> {
+export async function prepareVercelSandboxStop(name: string): Promise<PreparedPersistentSandboxStop | null> {
   const found = await readVercelSandboxSession(name)
-  if (!found.exists || !found.session || found.session.status === "stopped") return null
+  if (!found.exists) return null
+  if (!found.session || found.session.status === "stopped") {
+    if (!found.sandbox.currentSnapshotId) throw new Error("Sandbox paused without a confirmed saved snapshot")
+    return null
+  }
   const session = found.session
   if (session.status !== "running") throw new Error("Sandbox session has not settled")
-  return async () => {
-    const result = await session.stop()
-    if (result.session.status !== "stopped") throw new Error("Sandbox stop has not been confirmed")
+  return {
+    sessionId: session.sessionId,
+    stop: async () => {
+      const result = await session.stop()
+      if (result.session.status !== "stopped" || !result.snapshot) throw new Error("Sandbox pause or saved snapshot has not been confirmed")
+    },
   }
 }
 

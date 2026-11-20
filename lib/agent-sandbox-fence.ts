@@ -5,13 +5,18 @@ import { getActiveSchema } from "@/lib/schema"
 import { withConflictRetry } from "@/lib/transaction-conflict"
 
 const IN_FLIGHT = ["QUEUED", "RUNNING"]
-const RESERVATION_MS = 60_000
+const RETRY_MS = 60_000
 
 type Candidate = {
   id: string
   conversationId: string
   sandboxName: string
   createdAt: Date
+}
+
+function schemaTable(name: "agent_runs" | "agent_sandbox_operations" | "agent_sandbox_generations" | "agent_conversations") {
+  const schema = getActiveSchema().replaceAll('"', '""')
+  return Prisma.raw(`"${schema}"."${name}"`)
 }
 
 /** All run starters and persistent sandbox operations write this row before reading their predicates. */
@@ -29,34 +34,78 @@ export async function reservePersistentSandboxLaunch(
   conversationId: string,
   runId: string,
   sandboxName: string,
+  now = new Date(),
 ): Promise<string | null> {
   const token = randomUUID()
   return withConflictRetry(() => prisma.$transaction(async (tx) => {
     if (!(await lockSandboxConversation(tx, conversationId))) return null
     if (await tx.agentSandboxOperation.findUnique({ where: { conversationId } })) return null
-    const named = await tx.agentRun.updateMany({
-      where: { id: runId, conversationId, status: "QUEUED" },
-      data: { sandboxName },
+    const run = await tx.agentRun.findFirst({ where: { id: runId, conversationId, status: "QUEUED" }, select: { id: true } })
+    if (!run) return null
+    await tx.agentSandboxOperation.create({
+      data: { conversationId, runId, sandboxName, token, phase: "LAUNCH_PREPARED", retryAt: new Date(now.getTime() + RETRY_MS) },
     })
-    if (named.count !== 1) return null
-    await tx.agentSandboxOperation.create({ data: { conversationId, runId, sandboxName, token, phase: "LAUNCHING" } })
     return token
   }))
 }
 
-/** Release only after the launch's provider calls have settled successfully. */
-export async function releasePersistentSandboxLaunch(prisma: AppPrismaClient, conversationId: string, token: string) {
-  await withConflictRetry(() => prisma.agentSandboxOperation.deleteMany({ where: { conversationId, token, phase: "LAUNCHING" } }))
+/** Bind the sandbox name and durable generation before the caller can contact the provider. */
+export async function dispatchPersistentSandboxLaunch(
+  prisma: AppPrismaClient,
+  conversationId: string,
+  runId: string,
+  sandboxName: string,
+  token: string,
+) {
+  return withConflictRetry(() => prisma.$transaction(async (tx) => {
+    if (!(await lockSandboxConversation(tx, conversationId))) return false
+    const operation = await tx.agentSandboxOperation.findUnique({ where: { conversationId } })
+    if (operation?.token !== token || operation.phase !== "LAUNCH_PREPARED") return false
+    const named = await tx.agentRun.updateMany({
+      where: { id: runId, conversationId, status: "QUEUED" },
+      data: { sandboxName },
+    })
+    if (named.count !== 1) return false
+    const changed = await tx.agentSandboxOperation.updateMany({
+      where: { conversationId, token, phase: "LAUNCH_PREPARED" },
+      data: { phase: "LAUNCHING", retryAt: null },
+    })
+    if (changed.count !== 1) throw new Error("Persistent launch reservation changed concurrently")
+    await tx.agentSandboxGeneration.upsert({
+      where: { sandboxName },
+      create: { sandboxName, conversationId, runId },
+      update: { runId },
+    })
+    return true
+  }))
 }
 
-function schemaTable(name: "agent_runs" | "agent_sandbox_operations" | "agent_conversations") {
-  const schema = getActiveSchema().replaceAll('"', '""')
-  return Prisma.raw(`"${schema}"."${name}"`)
+/** Release only when provider calls have settled or when none could have been issued. */
+export async function releasePersistentSandboxLaunch(prisma: AppPrismaClient, conversationId: string, token: string) {
+  await withConflictRetry(() => prisma.agentSandboxOperation.updateMany({
+    where: { conversationId, token, phase: { in: ["LAUNCH_PREPARED", "LAUNCHING"] } },
+    data: { phase: "LAUNCH_SETTLED", retryAt: null },
+  }))
+  await withConflictRetry(() => prisma.agentSandboxOperation.deleteMany({ where: { conversationId, token, phase: "LAUNCH_SETTLED" } }))
+}
+
+/** Retire pre-dispatch reservations or completed launches left behind by a dead process. */
+export async function recoverPersistentSandboxLaunches(prisma: AppPrismaClient, now: Date, limit: number) {
+  const recoverable = {
+    OR: [{ phase: "LAUNCH_SETTLED" }, { phase: "LAUNCH_PREPARED", retryAt: { lte: now } }],
+  }
+  const rows = await prisma.agentSandboxOperation.findMany({
+    where: recoverable, take: limit, orderBy: { conversationId: "asc" },
+    select: { conversationId: true, token: true },
+  })
+  for (const row of rows) {
+    await withConflictRetry(() => prisma.agentSandboxOperation.deleteMany({ where: { ...row, ...recoverable } }))
+  }
 }
 
 /**
- * A page consists of eligible generations, never historical turns. A blocked conversation
- * or a generation waiting for its retry time cannot occupy a slot on subsequent ticks.
+ * Fresh work has its own bounded page, so even a full page of retrying failures
+ * cannot starve it at the cron cadence. A retry page also runs during busy ticks.
  */
 export async function findPersistentSandboxStopCandidates(
   prisma: AppPrismaClient,
@@ -64,72 +113,78 @@ export async function findPersistentSandboxStopCandidates(
 ) {
   const runs = schemaTable("agent_runs")
   const operations = schemaTable("agent_sandbox_operations")
+  const generations = schemaTable("agent_sandbox_generations")
   return prisma.$queryRaw<Candidate[]>`
-    SELECT r.id, r.conversation_id AS "conversationId", r.sandbox_name AS "sandboxName",
-           r.created_at AS "createdAt"
-    FROM ${runs} r
-    LEFT JOIN ${operations} op ON op.conversation_id = r.conversation_id
-    WHERE r.sandbox_name LIKE ${prefix + "%"}
-      AND r.sandbox_stopped_at IS NULL
-      AND r.finished_at IS NOT NULL
-      AND (r.status IN ('FAILED', 'INTERRUPTED', 'CANCELED')
-        OR (r.status = 'SUCCEEDED' AND r.finished_at <= ${idleBefore}))
-      AND (op.token IS NULL OR (op.run_id = r.id AND (
-        op.phase = 'CONFIRMED'
-        OR (op.phase IN ('RESERVED', 'RETRY', 'DISPATCHED') AND op.retry_at <= ${now})
-      )))
-      AND NOT EXISTS (
-        SELECT 1 FROM ${runs} active
-        WHERE active.conversation_id = r.conversation_id
-          AND active.status IN ('QUEUED', 'RUNNING')
-      )
-      AND NOT EXISTS (
-        SELECT 1 FROM ${runs} newer
-        WHERE newer.conversation_id = r.conversation_id AND newer.sandbox_name = r.sandbox_name
-          AND (newer.created_at, newer.id) > (r.created_at, r.id)
-      )
-    ORDER BY r.finished_at, r.id
-    LIMIT ${limit}
+    WITH eligible AS (
+      SELECT r.id, r.conversation_id AS "conversationId", r.sandbox_name AS "sandboxName",
+             r.created_at AS "createdAt", r.finished_at, op.token IS NULL AS fresh, op.retry_at
+      FROM ${runs} r
+      LEFT JOIN ${operations} op ON op.conversation_id = r.conversation_id
+      LEFT JOIN ${generations} gen ON gen.sandbox_name = r.sandbox_name
+      WHERE r.sandbox_name LIKE ${prefix + "%"}
+        AND r.sandbox_stopped_at IS NULL
+        AND r.finished_at IS NOT NULL
+        AND (r.status IN ('FAILED', 'INTERRUPTED', 'CANCELED')
+          OR (r.status = 'SUCCEEDED' AND r.finished_at <= ${idleBefore}))
+        AND (op.token IS NULL OR (op.run_id = r.id AND op.phase IN ('RESERVED', 'RETRY', 'DISPATCHED', 'CONFIRMED')
+          AND op.retry_at <= ${now}))
+        AND NOT EXISTS (
+          SELECT 1 FROM ${runs} active
+          WHERE active.conversation_id = r.conversation_id AND active.status IN ('QUEUED', 'RUNNING')
+        )
+        AND (gen.run_id = r.id OR (gen.run_id IS NULL AND NOT EXISTS (
+          SELECT 1 FROM ${runs} newer
+          WHERE newer.conversation_id = r.conversation_id AND newer.sandbox_name = r.sandbox_name
+            AND (newer.created_at, newer.id) > (r.created_at, r.id)
+        )))
+    )
+    (SELECT id, "conversationId", "sandboxName", "createdAt" FROM eligible WHERE fresh ORDER BY finished_at, id LIMIT ${limit})
+    UNION ALL
+    (SELECT id, "conversationId", "sandboxName", "createdAt" FROM eligible WHERE NOT fresh ORDER BY retry_at, id LIMIT ${Math.min(limit, 5)})
   `
 }
 
-/** A prepared stop has done the lookup but has not yet sent a stop. null means already quiescent. */
-export type PreparePersistentSandboxStop = (name: string) => Promise<(() => Promise<void>) | null>
+export type PreparedPersistentSandboxStop = { sessionId: string; stop: () => Promise<void> }
+/** Preparation only reads the provider. null means the sandbox has already stopped or never existed. */
+export type PreparePersistentSandboxStop = (name: string) => Promise<PreparedPersistentSandboxStop | null>
 
 export async function stopPersistentSandbox(
   prisma: AppPrismaClient,
   candidate: Candidate,
   now: Date,
   prepare: PreparePersistentSandboxStop,
-  isQuiescent: (name: string) => Promise<boolean>,
+  isQuiescent: (name: string, sessionId: string) => Promise<boolean>,
 ): Promise<boolean> {
   const { conversationId, id: runId, sandboxName, createdAt } = candidate
   const token = randomUUID()
+  const retryAt = new Date(now.getTime() + RETRY_MS)
   const owner = await withConflictRetry(() => prisma.$transaction(async (tx) => {
     if (!(await lockSandboxConversation(tx, conversationId))) return null
     const operation = await tx.agentSandboxOperation.findUnique({ where: { conversationId } })
-    if (operation?.runId === runId && (
-      operation.phase === "CONFIRMED" ||
-      (operation.phase === "DISPATCHED" && operation.retryAt && operation.retryAt <= now)
-    )) return operation
+    if (operation?.runId === runId && ["CONFIRMED", "DISPATCHED"].includes(operation.phase) &&
+      operation.retryAt && operation.retryAt <= now) return operation
     if (operation && (operation.runId !== runId || !["RESERVED", "RETRY"].includes(operation.phase) ||
       !operation.retryAt || operation.retryAt > now)) return null
     const current = await tx.agentRun.findUnique({ where: { id: runId }, select: { sandboxStoppedAt: true } })
     if (!current || current.sandboxStoppedAt) return null
-    const newer = await tx.agentRun.findFirst({
+    const generation = await tx.agentSandboxGeneration.findUnique({ where: { sandboxName }, select: { runId: true } })
+    if (generation && generation.runId !== runId) return null
+    const newerOrActive = await tx.agentRun.findFirst({
       where: {
         conversationId,
         id: { not: runId },
         OR: [
           { status: { in: IN_FLIGHT } },
-          { sandboxName, createdAt: { gt: createdAt } },
-          { sandboxName, createdAt, id: { gt: runId } },
+          ...(!generation ? [
+            { sandboxName, createdAt: { gt: createdAt } },
+            { sandboxName, createdAt, id: { gt: runId } },
+          ] : []),
         ],
       },
       select: { id: true },
     })
-    if (newer) return null
-    const data = { runId, sandboxName, token, phase: "RESERVED", retryAt: new Date(now.getTime() + RESERVATION_MS) }
+    if (newerOrActive) return null
+    const data = { runId, sandboxName, token, phase: "RESERVED", retryAt }
     return operation
       ? tx.agentSandboxOperation.update({ where: { conversationId }, data })
       : tx.agentSandboxOperation.create({ data: { conversationId, ...data } })
@@ -138,50 +193,57 @@ export async function stopPersistentSandbox(
 
   const claim = { conversationId, token: owner.token }
   if (owner.phase === "DISPATCHED") {
-    // Only observe. Never send an additional stop on an indeterminate generation.
-    // The original request is pinned to one provider session; a stopped session
-    // cannot host a resumed turn. A missing named sandbox alone proves nothing.
+    // Reconcile the recorded immutable session. Never issue a fresh named stop
+    // to recover a request that may already have taken effect.
     const polled = await withConflictRetry(() => prisma.agentSandboxOperation.updateMany({
       where: { ...claim, phase: "DISPATCHED", retryAt: owner.retryAt },
-      data: { retryAt: new Date(now.getTime() + RESERVATION_MS) },
+      data: { retryAt },
     }))
-    if (polled.count !== 1 || !(await isQuiescent(sandboxName))) return false
+    if (polled.count !== 1 || !owner.providerSessionId || !(await isQuiescent(sandboxName, owner.providerSessionId))) return false
   } else if (owner.phase === "RESERVED") {
-    let stop: Awaited<ReturnType<PreparePersistentSandboxStop>>
+    let prepared: Awaited<ReturnType<PreparePersistentSandboxStop>>
     try {
-      stop = await prepare(sandboxName)
+      prepared = await prepare(sandboxName)
     } catch (error) {
-      // Lookup failed before any stop was issued. Back off without removing the fence.
       await withConflictRetry(() => prisma.agentSandboxOperation.updateMany({
         where: { ...claim, phase: "RESERVED" },
-        data: { phase: "RETRY", retryAt: new Date(now.getTime() + RESERVATION_MS) },
+        data: { phase: "RETRY", retryAt },
       }))
       throw error
     }
     const { count } = await withConflictRetry(() => prisma.agentSandboxOperation.updateMany({
       where: { ...claim, phase: "RESERVED" },
-      data: { phase: "DISPATCHED", retryAt: new Date(now.getTime() + RESERVATION_MS) },
+      data: prepared
+        ? { phase: "DISPATCHED", providerSessionId: prepared.sessionId, retryAt }
+        : { phase: "CONFIRMED", retryAt: now },
     }))
     if (count !== 1) return false
-    // An exception or crash from here through confirmation leaves the fence intact.
-    // A clock timeout cannot prove the provider request will never take effect.
-    if (stop) await stop()
+    if (prepared) await prepared.stop()
   }
   if (owner.phase !== "CONFIRMED") {
-    const confirmed = await withConflictRetry(() => prisma.agentSandboxOperation.updateMany({
+    await withConflictRetry(() => prisma.agentSandboxOperation.updateMany({
       where: { ...claim, phase: "DISPATCHED" },
-      data: { phase: "CONFIRMED" },
+      data: { phase: "CONFIRMED", retryAt: now },
     }))
-    if (confirmed.count !== 1) return false
   }
 
-  return withConflictRetry(() => prisma.$transaction(async (tx) => {
-    const released = await tx.agentSandboxOperation.deleteMany({ where: { ...claim, phase: "CONFIRMED" } })
-    if (released.count !== 1) return false
-    await tx.agentRun.updateMany({
-      where: { id: runId, conversationId, sandboxName, sandboxStoppedAt: null },
-      data: { sandboxStoppedAt: now, updatedAt: now },
-    })
-    return true
-  }))
+  try {
+    return await withConflictRetry(() => prisma.$transaction(async (tx) => {
+      const released = await tx.agentSandboxOperation.deleteMany({ where: { ...claim, phase: "CONFIRMED" } })
+      if (released.count !== 1) return false
+      await tx.agentRun.updateMany({
+        where: { id: runId, conversationId, sandboxName, sandboxStoppedAt: null },
+        data: { sandboxStoppedAt: now, updatedAt: now },
+      })
+      return true
+    }))
+  } catch (error) {
+    await withConflictRetry(() => prisma.agentSandboxOperation.updateMany({
+      where: { ...claim, phase: "CONFIRMED" },
+      data: { retryAt },
+    }))
+    throw error
+  }
 }
+
+export const PERSISTENT_SANDBOX_LOOKUP_FAILED = "PersistentSandboxLookupFailed"

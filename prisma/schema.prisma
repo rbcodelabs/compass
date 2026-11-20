@@ -3107,9 +3107,19 @@ model AgentSandboxOperation {
   sandboxName    String    @map("sandbox_name")
   token          String    @db.Uuid
   phase          String
+  providerSessionId String? @map("provider_session_id")
   retryAt        DateTime? @map("retry_at") @db.Timestamptz
 
   @@map("agent_sandbox_operations")
+}
+
+/// Latest generation to use a named persistent sandbox.
+model AgentSandboxGeneration {
+  sandboxName    String @id @map("sandbox_name")
+  conversationId String @map("conversation_id") @db.Uuid
+  runId          String @map("run_id") @db.Uuid
+
+  @@map("agent_sandbox_generations")
 }
 
 /// One durable, detachable agent turn. The sandbox owns execution and

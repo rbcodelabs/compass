@@ -362,7 +362,7 @@ export async function fireScheduledWakeupById(
   }
 
   if (outcome.status === "already_running") {
-    // Another run won the race between findActiveAgentRun and createAgentRun; restore PENDING for after finalize.
+    // A run or a sandbox operation won the race. Restore PENDING for the next tick.
     await prisma.agentScheduledWakeup
       .update({
         where: { id: row.id },
