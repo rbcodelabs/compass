@@ -150,7 +150,7 @@ test("the chat model picker shows the effective model, sends an explicit pick, r
     // The composer card itself fits the rail (the rail's own resize handle makes the <aside>'s scrollWidth a few px wider, so
     // measure the card and its chips, not the aside).
     const card = rail.locator('[data-slot="composer-card"]');
-    // Dropped here (kept as the test.fixme below, TASK-197 product gap): the card's own scrollWidth <= clientWidth.
+    await expect.poll(() => card.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
     const railBox = (await rail.boundingBox())!;
     const cardBox = (await card.boundingBox())!;
     expect(cardBox.x).toBeGreaterThanOrEqual(railBox.x);
@@ -178,10 +178,8 @@ test("the chat model picker shows the effective model, sends an explicit pick, r
   }
 });
 
-// TASK-197 product gap (not a spec problem): the pre-#593 agent rail's composer card never scrolled horizontally. In the docked
-// Conversation panel an icon inside the card ends up ~12px past its right edge (observed on tq: scrollWidth 433 vs clientWidth 421).
-// Re-enable once the composer fits the docked panel column.
-test.fixme("the docked Conversation panel's composer card does not overflow horizontally (TASK-197)", async ({ page, base }) => {
+// TASK-197: the docked Conversation panel's composer card must not scroll horizontally (its footer chips wrap).
+test("the docked Conversation panel's composer card does not overflow horizontally (TASK-197)", async ({ page, base }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto(`${base}/`);
   await page.keyboard.press("ControlOrMeta+j");
