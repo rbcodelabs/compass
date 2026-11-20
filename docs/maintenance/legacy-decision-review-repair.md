@@ -19,7 +19,7 @@ Confirm the intended `schema` and that `manifest` contains migration 048. If `ap
 
 Otherwise, confirm that `legacyDecisionReviewRepair` reports the target workspace as `PRESENT`. Review every allowlisted plan: before application each must be `READY`, `ALREADY_APPLIED`, or `SKIPPED_DECIDED`. The authenticated preflight includes the proposed bounded packet/context so operators can inspect the actual readable result before writing; it never includes the original legacy packet.
 
-Repair inspection is informational within the overall status response. If inspection fails, including a connection failure, status returns an unavailable diagnostic (`available: false`, an explanatory `reason`, and a redacted error description for thrown errors) while allowing the rest of the status check to continue. A successful overall status response does not prove that the repair preflight succeeded. An unavailable report does not permit application: resolve the inspection failure and obtain the required preflight evidence before proceeding.
+Repair inspection is informational within the overall status response. If inspection fails, including a connection failure, status returns an unavailable diagnostic (`available: false`, an explanatory `reason`, and an allowlisted error code/category or fixed UNKNOWN category for thrown errors) while allowing the rest of the status check to continue. Driver messages, metadata, and record values are omitted. Pending inspection uses its own one-connection pool with a one-second connection acquisition limit, two-second query/statement limits, and a five-second transaction deadline for all inspection reads. A successful overall status response does not prove that the repair preflight succeeded. An unavailable report does not permit application: resolve the inspection failure and obtain the required preflight evidence before proceeding.
 
 ## Apply only migration 048
 
@@ -38,7 +38,7 @@ Schemas where the exact production workspace does not exist are an explicit no-o
 
 ## Verify
 
-If you just executed the repair, check the successful apply response's log: for a schema containing the target workspace, it must summarize only terminal `ALREADY_APPLIED`, `APPLIED`, or `SKIPPED_DECIDED` per-request results; for an absent target workspace, it instead reports `target workspace not present`. Repeat the authenticated GET and verify that `appliedMigrations` contains migration 048.
+If you just executed the repair, check the successful apply response's `message` field: for a schema containing the target workspace, it must summarize only terminal `ALREADY_APPLIED`, `APPLIED`, or `SKIPPED_DECIDED` per-request results; for an absent target workspace, the `message` field instead reports `target workspace not present`. Repeat the authenticated GET and verify that `appliedMigrations` contains migration 048.
 
 If 048 was already applied before this inspection, verify its existing finished receipt and read back the requests through the normal review API/UI as described below. Do not reapply it to obtain a new POST log. In both cases, the status GET skips repair inspection once 048 is applied and does not repeat the per-request repair plans.
 

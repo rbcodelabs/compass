@@ -5,6 +5,16 @@ const mocks = vi.hoisted(() => ({
   disconnect: vi.fn(),
   findWorkspace: vi.fn(),
   repair: vi.fn(),
+  createPool: vi.fn(),
+  endInspectionPool: vi.fn(),
+  transaction: vi.fn(),
+}))
+
+vi.mock("pg", () => ({
+  Pool: class MockPool {
+    end = mocks.endInspectionPool
+    constructor(options: unknown) { mocks.createPool(options) }
+  },
 }))
 
 vi.mock("@prisma/adapter-pg", () => ({
@@ -18,6 +28,7 @@ vi.mock("@prisma/client", () => ({
   PrismaClient: class MockPrismaClient {
     workspace = { findUnique: mocks.findWorkspace }
     $disconnect = mocks.disconnect
+    $transaction = mocks.transaction
   },
 }))
 vi.mock("@/lib/legacy-decision-repair", async (importOriginal) => {
@@ -34,11 +45,35 @@ const pool = { end: vi.fn() }
 
 beforeEach(() => {
   vi.clearAllMocks()
+  mocks.repair.mockReset()
   mocks.disconnect.mockResolvedValue(undefined)
   mocks.findWorkspace.mockResolvedValue({ id: "3eaf938a-782c-4073-a452-070d54156896" })
+  mocks.transaction.mockReset().mockImplementation(async (callback: (client: unknown) => Promise<unknown>) => callback({ workspace: { findUnique: mocks.findWorkspace } }))
 })
 
 describe("legacy decision review migration hook", () => {
+  it("inspects with its own bounded pool when the caller's only connection is occupied", async () => {
+    const occupiedPool = { options: { max: 1, host: "localhost" }, connect: vi.fn(() => new Promise(() => {})) }
+    mocks.transaction.mockImplementationOnce(async (callback: (client: unknown) => Promise<unknown>) => callback({ workspace: { findUnique: mocks.findWorkspace } }))
+    mocks.findWorkspace.mockResolvedValueOnce(null)
+
+    await expect(getLegacyDecisionReviewRepairStatus(occupiedPool as never, "compass_prod")).resolves.toMatchObject({ available: true, workspaceStatus: "NOT_PRESENT" })
+    expect(occupiedPool.connect).not.toHaveBeenCalled()
+    expect(mocks.createPool).toHaveBeenCalledWith(expect.objectContaining({ host: "localhost", max: 1, connectionTimeoutMillis: 1000, query_timeout: 2000, statement_timeout: 2000 }))
+    expect(mocks.transaction).toHaveBeenCalledWith(expect.any(Function), { maxWait: 1000, timeout: 5000 })
+    expect(mocks.endInspectionPool).toHaveBeenCalledOnce()
+    expect(mocks.disconnect).toHaveBeenCalledOnce()
+  })
+
+  it("cleans up the bounded inspection pool after acquisition or execution timeout", async () => {
+    mocks.transaction.mockRejectedValueOnce(Object.assign(new Error("transaction timed out"), { code: "P2028" }))
+    mocks.repair.mockResolvedValueOnce({ mode: "DRY_RUN", workspaceId: "test", requests: [] })
+    await expect(getLegacyDecisionReviewRepairStatus(pool as never, "compass_prod")).rejects.toThrow("transaction timed out")
+    expect(mocks.endInspectionPool).toHaveBeenCalledOnce()
+    expect(mocks.disconnect).toHaveBeenCalledOnce()
+    expect(mocks.repair).not.toHaveBeenCalled()
+  })
+
   it("propagates connection failure during explicit apply and disconnects", async () => {
     mocks.findWorkspace.mockRejectedValueOnce(Object.assign(new Error("synthetic connection failure"), { code: "P1001" }))
 

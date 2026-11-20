@@ -12,7 +12,7 @@ import {
   LEGACY_DECISION_REVIEW_REPAIR_MIGRATION,
 } from "@/lib/migrations/legacy-decision-review-repair";
 import type { LegacyDecisionRepairManifest } from "@/lib/legacy-decision-repair";
-import { describeErrorChain } from "@/lib/migrations/error-chain";
+import { describeInspectionFailure } from "@/lib/migrations/error-chain";
 import { assertAgentIdentityMigration } from "@/lib/migrations/agent-identity";
 import { assertSharedFieldOptionSetsMigration } from "@/lib/migrations/shared-field-option-sets";
 import { assertOAuthAuthorizationServerMigration } from "@/lib/migrations/oauth-authorization-server";
@@ -2037,9 +2037,7 @@ export async function inspectLegacyDecisionReviewRepairForStatus(pool: Pool, sch
   try {
     return await getLegacyDecisionReviewRepairStatus(pool, schema)
   } catch (error) {
-    const description = describeErrorChain(error)
-    const detail = description.code ?? description.name ?? "error"
-    return { available: false as const, reason: `Inspection failed (${detail}); the status check continued without it.`, error: description }
+    return { available: false as const, reason: "Inspection failed; the status check continued without it.", error: describeInspectionFailure(error) }
   }
 }
 

@@ -1,6 +1,6 @@
 import { PrismaPg } from "@prisma/adapter-pg"
 import { PrismaClient } from "@prisma/client"
-import type { Pool } from "pg"
+import { Pool } from "pg"
 import manifestJson from "./048-legacy-decision-review-repair-manifest.json"
 import {
   parseLegacyDecisionRepairManifest,
@@ -53,25 +53,37 @@ async function run(
   schema: string,
   apply: boolean,
   manifestOverride?: LegacyDecisionRepairManifest,
+  boundedInspection = false,
 ): Promise<LegacyDecisionReviewRepairReport> {
   const manifest = parseLegacyDecisionRepairManifest(manifestOverride ?? productionManifest)
-  const prisma = createClient(pool, schema)
+  // Status already holds a caller-pool connection. A separate, bounded pool prevents a max=1 caller from waiting on itself.
+  const inspectionPool = boundedInspection ? new Pool({
+    ...pool.options, max: 1, connectionTimeoutMillis: 1000, query_timeout: 2000, statement_timeout: 2000,
+  }) : undefined
+  let prisma: PrismaClient | undefined
   try {
-    // Missing tables are migration-system errors. Only a genuine absent target
-    // workspace is a safe no-op in dev/preview schemas.
-    const workspace = await prisma.workspace.findUnique({ where: { id: manifest.workspaceId }, select: { id: true } })
-    if (!workspace) {
-      return { workspaceId: manifest.workspaceId, workspaceStatus: "NOT_PRESENT", mode: apply ? "APPLY" : "DRY_RUN", requests: [] }
-    }
+    prisma = createClient(inspectionPool ?? pool, schema)
+    const execute = async (db: LegacyDecisionRepairClient): Promise<LegacyDecisionReviewRepairReport> => {
+      // Missing tables are migration-system errors. Only a genuine absent target
+      // workspace is a safe no-op in dev/preview schemas.
+      const workspace = await db.workspace.findUnique({ where: { id: manifest.workspaceId }, select: { id: true } })
+      if (!workspace) {
+        return { workspaceId: manifest.workspaceId, workspaceStatus: "NOT_PRESENT", mode: apply ? "APPLY" : "DRY_RUN", requests: [] }
+      }
 
-    const report = await repairLegacyDecisionRequests(
-      prisma as unknown as LegacyDecisionRepairClient,
-      manifest,
-      { apply },
-    )
-    return summarize(report, "PRESENT")
+      const report = await repairLegacyDecisionRequests(
+        db,
+        manifest,
+        { apply },
+      )
+      return summarize(report, "PRESENT")
+    }
+    // Dry-run performs no nested transactions. The deadline covers the entire sequence of inspection reads.
+    return boundedInspection
+      ? await prisma.$transaction((tx) => execute(tx as unknown as LegacyDecisionRepairClient), { maxWait: 1000, timeout: 5000 })
+      : await execute(prisma as unknown as LegacyDecisionRepairClient)
   } finally {
-    await prisma.$disconnect()
+    try { await prisma?.$disconnect() } finally { await inspectionPool?.end() }
   }
 }
 
@@ -80,7 +92,7 @@ export function inspectLegacyDecisionReviewRepair(
   schema: string,
   manifestOverride?: LegacyDecisionRepairManifest,
 ) {
-  return run(pool, schema, false, manifestOverride)
+  return run(pool, schema, false, manifestOverride, true)
 }
 
 export async function getLegacyDecisionReviewRepairStatus(pool: Pool, schema: string) {

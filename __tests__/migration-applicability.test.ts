@@ -696,6 +696,25 @@ describe("048 legacy-repair inspection never fails the status check", () => {
   const LEGACY_REPAIR = "048_legacy_decision_review_repair"
   const inspect = vi.mocked(getLegacyDecisionReviewRepairStatus)
 
+  it("returns only fixed public diagnostics, omitting unlabelled driver and record text", async () => {
+    const sensitive = "unlabelled-private-credential-and-record-value"
+    inspect.mockRejectedValueOnce(Object.assign(new Error(sensitive), {
+      code: "P1001", name: sensitive, address: sensitive,
+      meta: { value: sensitive, driverAdapterError: { cause: { originalMessage: sensitive, detail: sensitive, hint: sensitive } } },
+      cause: Object.assign(new Error(sensitive), { code: sensitive }),
+    }))
+    const response = await getMigrationStatus(statusPool([]).pool, "compass_prod")
+    const body = await response.json()
+    expect(response.status).toBe(200)
+    expect(body.legacyDecisionReviewRepair).toEqual({
+      available: false,
+      reason: "Inspection failed; the status check continued without it.",
+      error: { category: "CONNECTION", code: "P1001" },
+    })
+    expect(JSON.stringify(body)).not.toContain(sensitive)
+    expect(body.pending).toContain(LEGACY_REPAIR)
+  })
+
   it("skips the inspection entirely once 048 is applied", async () => {
     inspect.mockClear()
     const { pool } = statusPool([LEGACY_REPAIR])
@@ -720,7 +739,7 @@ describe("048 legacy-repair inspection never fails the status check", () => {
     expect(body.legacyDecisionReviewRepair).toMatchObject({
       available: false,
       reason: expect.stringContaining("Inspection failed"),
-      error: { name: "PrismaClientUnknownRequestError", cause: { name: "AggregateError", errors: [{ code: "ECONNREFUSED" }] } },
+      error: { category: "CONNECTION", code: "ECONNREFUSED" },
     })
     // The rest of the status is intact: the pending list still names 048.
     expect(body.pending).toContain(LEGACY_REPAIR)
@@ -730,7 +749,7 @@ describe("048 legacy-repair inspection never fails the status check", () => {
     inspect.mockClear()
     inspect.mockRejectedValueOnce(Object.assign(new Error("permission denied for table workspaces"), { code: "42501" }))
     const failed = await (await getMigrationStatus(statusPool([]).pool, "compass_prod")).json()
-    expect(failed.legacyDecisionReviewRepair).toMatchObject({ available: false, reason: expect.stringContaining("42501") })
+    expect(failed.legacyDecisionReviewRepair).toMatchObject({ available: false, error: { category: "PERMISSION", code: "42501" } })
 
     inspect.mockResolvedValueOnce({ available: true, workspaceId: "w", workspaceStatus: "NOT_PRESENT", mode: "DRY_RUN", requests: [] } as never)
     const ok = await (await getMigrationStatus(statusPool([]).pool, "compass_prod")).json()
