@@ -5,6 +5,7 @@ import { getActiveSchema } from "./schema";
 import { getPoolerMode, getRuntimeDatabaseUrl } from "./db-url";
 import { injectUpdatedAtExtension } from "./prisma-updated-at";
 import { getManagedPilotContext } from "./preview-automation/managed-context";
+import { retryReadsExtension } from "./db-retry";
 
 declare global {
   var __prisma: AppPrismaClient | undefined;
@@ -40,6 +41,40 @@ export function getPlainPoolOptions(
   const defaultMax = getPoolerMode(connectionString, env) === "transaction" ? 5 : 3;
   const max = Number.isInteger(requested) && requested > 0 ? requested : defaultMax;
   return { connectionString, max, idleTimeoutMillis: 10_000 };
+}
+
+/**
+ * Resilience settings for the Aurora DSQL pool. Each is overridable by env var.
+ *
+ *  - connectionTimeoutMillis: `pg` waits forever by default, so a stalled
+ *    connect hung the request (e.g. a page's `generateMetadata`) until the OS
+ *    gave up with ETIMEDOUT.
+ *  - maxLifetimeSeconds: DSQL cuts connections at about 60 minutes. Recycling
+ *    at 50 means a pooled connection is never reused after the cut.
+ *  - query_timeout: a pooled connection that was dropped silently (no FIN) hangs
+ *    on the *query*, not on connect, and neither setting above covers it.
+ *  - keepAlive: lets the OS notice idle drops by a NAT gateway or load balancer.
+ */
+export function getDsqlPoolOptions(env: Record<string, string | undefined>): {
+  max: number;
+  connectionTimeoutMillis: number;
+  maxLifetimeSeconds: number;
+  query_timeout: number;
+  keepAlive: true;
+  keepAliveInitialDelayMillis: number;
+} {
+  const positiveInt = (name: string, fallback: number): number => {
+    const value = Number(env[name]?.trim() || Number.NaN);
+    return Number.isInteger(value) && value > 0 ? value : fallback;
+  };
+  return {
+    max: positiveInt("DSQL_POOL_MAX", 20),
+    connectionTimeoutMillis: positiveInt("DSQL_CONNECT_TIMEOUT_MS", 10_000),
+    maxLifetimeSeconds: positiveInt("DSQL_MAX_LIFETIME_SECONDS", 3000),
+    query_timeout: positiveInt("DSQL_QUERY_TIMEOUT_MS", 30_000),
+    keepAlive: true,
+    keepAliveInitialDelayMillis: 10_000,
+  };
 }
 
 /**
@@ -111,7 +146,7 @@ export function createBasePrismaClient(): PrismaClient {
     password: () => automationPreview && !getManagedPilotContext() ? signer.getDbConnectAuthToken() : signer.getDbConnectAdminAuthToken(),
     port: 5432,
     ssl: true,
-    max: 20,
+    ...getDsqlPoolOptions(process.env),
   });
 
   attachDatabasePool(pool);
@@ -125,7 +160,19 @@ export function createBasePrismaClient(): PrismaClient {
  * This is what the application should use everywhere.
  */
 export function createPrismaClient() {
-  return createBasePrismaClient().$extends(injectUpdatedAtExtension);
+  const extended = createBasePrismaClient().$extends(injectUpdatedAtExtension);
+  // retryReadsExtension only wraps query execution; it adds no model or client
+  // surface. Keep the previous client type so this extra $extends layer does
+  // not re-expand every model type across the project (it pushed a default-heap
+  // `tsc --noEmit` out of memory).
+  //
+  // DSQL only: the retry exists for DSQL's dropped/stalled connections. Plain
+  // Postgres (DATABASE_URL / POSTGRES_URL) keeps its previous behavior.
+  // Deliberately keyed on getRuntimeDatabaseUrl, not usesPlainPostgres():
+  // the latter follows the migration URL, so it can disagree with the pool
+  // createBasePrismaClient actually built from the runtime URL.
+  if (getRuntimeDatabaseUrl(process.env)) return extended;
+  return extended.$extends(retryReadsExtension) as unknown as typeof extended;
 }
 
 /** The application's PrismaClient type, including client extensions. */
