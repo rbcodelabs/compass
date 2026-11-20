@@ -64,6 +64,7 @@ const REKEY_COLUMNS = new Set(["DecisionRecord.idempotencyKey", "DecisionApplica
 const MAX_ROWS_PER_MODEL = 2_000_000
 
 export class WorkspaceImportError extends Error {}
+export class WorkspaceImportRecoveryRequired extends AggregateError {}
 
 export type ImportOptions = {
   organizationId: string
@@ -157,6 +158,23 @@ function allowedModels(): Set<string> {
   return new Set(["Workspace", ...exportOrder()])
 }
 
+function workspaceImportKey(exportId: string, organizationId: string, nonce: string): string {
+  return createHash("sha256").update(`${exportId}:${organizationId}:${nonce}`).digest("hex")
+}
+
+/** Read the commit point for an authenticated staged retry, without applying the bundle again. */
+export async function findCommittedWorkspaceImport(client: Client, bytes: Uint8Array, organizationId: string, nonce: string): Promise<ImportReport | undefined> {
+  let manifest: BundleManifest
+  try {
+    manifest = new BundleReader(bytes).manifest()
+  } catch {
+    return undefined
+  }
+  const id = deriveId(workspaceImportKey(manifest.exportId, organizationId, nonce), manifest.source.workspaceId)
+  const [workspace] = await delegateFor(client, "Workspace").findMany({ where: { id, organizationId }, take: 1 })
+  return workspace ? alreadyImportedReport(workspace, manifest) : undefined
+}
+
 export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, opts: ImportOptions): Promise<ImportReport> {
   let reader: BundleReader
   try {
@@ -188,9 +206,7 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
   if (!org[0]) throw new WorkspaceImportError("Target organization not found")
 
   // ---- identity: every exported row id gets a deterministic new id ---------------------------------------------------
-  const importKey = createHash("sha256")
-    .update(`${manifest.exportId}:${opts.organizationId}:${opts.nonce ?? randomUUID()}`)
-    .digest("hex")
+  const importKey = workspaceImportKey(manifest.exportId, opts.organizationId, opts.nonce ?? randomUUID())
   const idSet = new Set<string>([manifest.source.workspaceId.toLowerCase()])
   for (const model of ["Workspace", ...exportOrder()]) {
     if (!modelHasId(model)) continue
@@ -568,7 +584,7 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
     // winner's rows, so treat it as "already imported" and leave everything alone.
     canReleaseClaim = false
     const committed = await delegateFor(client, "Workspace").findMany({ where: { id: newWorkspaceId }, take: 1 }).catch((statusError) => {
-      if (releaseImport) throw new AggregateError([error, statusError], "Could not verify the import outcome before rollback")
+      if (releaseImport) throw new WorkspaceImportRecoveryRequired([error, statusError], "Could not verify the import outcome before rollback")
       return []
     })
     if (committed[0]) {
@@ -578,6 +594,7 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
     }
     await rollbackImport(client, reader, importKey, newWorkspaceId, uploaded, opts.blobs).then(() => { canReleaseClaim = true }).catch((rollbackError) => {
       console.error("[workspace-import] rollback failed; partial rows may remain for workspace", newWorkspaceId, rollbackError)
+      if (releaseImport) throw new WorkspaceImportRecoveryRequired([error, rollbackError], "Could not complete import rollback")
     })
     throw error
   } finally {

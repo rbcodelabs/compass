@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest"
 import type { BlobAdapters } from "@/lib/workspace-export/blobs"
 import { BundleReader } from "@/lib/workspace-export/bundle"
 import { exportWorkspaceToBuffer } from "@/lib/workspace-export/export"
-import { importWorkspaceBundle } from "@/lib/workspace-export/import"
+import { findCommittedWorkspaceImport, importWorkspaceBundle } from "@/lib/workspace-export/import"
 import { UNIQUE_KEYS } from "@/lib/workspace-export/schema-meta.generated"
 import { delegateKey, dmmfModels } from "@/lib/workspace-export/scope"
 
@@ -394,6 +394,8 @@ it("reserves an import identity before either invocation writes bundle assets", 
     await initial
   }
   await expect(importWorkspaceBundle(db.client, bundle, opts)).resolves.toMatchObject({ alreadyImported: true })
+  await expect(findCommittedWorkspaceImport(db.client, bundle, orgId, opts.nonce)).resolves.toMatchObject({ alreadyImported: true })
+  await expect(findCommittedWorkspaceImport(db.client, bundle, orgId, "other-import")).resolves.toBeUndefined()
   expect(put).toHaveBeenCalledOnce()
   expect(claimed).toBe(false)
 })

@@ -63,14 +63,15 @@ export function verifyBundleReceipt(receipt: string, organizationId: string, use
   return p
 }
 
-type ResultLookup = { nonce?: string; persistResult: boolean }
-type StagedBundle = { bytes: Uint8Array; commit: (apply: () => Promise<ImportReport>) => Promise<ImportReport> }
+type ResultLookup = { canReleaseClaim?: (error: unknown) => boolean; nonce?: string; persistResult: boolean; recover?: (bytes: Uint8Array, nonce: string) => Promise<ImportReport | undefined> }
+type StagedBundle = { bytes: Uint8Array; nonce?: string; commit: (apply: () => Promise<ImportReport>) => Promise<ImportReport> }
 export function loadStagedBundle(receipt: string, organizationId: string, userId: string, storage: ArtifactStorage): Promise<StagedBundle>
 export function loadStagedBundle(receipt: string, organizationId: string, userId: string, storage: ArtifactStorage, lookup: ResultLookup): Promise<StagedBundle | { result: ImportReport }>
 export async function loadStagedBundle(receipt: string, organizationId: string, userId: string, storage: ArtifactStorage, lookup?: ResultLookup): Promise<StagedBundle | { result: ImportReport }> {
   const p = verifyBundleReceipt(receipt, organizationId, userId)
-  const resultPath = lookup?.persistResult
-    ? `${p.pathname}.result-${createHash("sha256").update(JSON.stringify(lookup.nonce ?? null)).digest("hex")}`
+  const nonce = lookup?.persistResult ? lookup.nonce ?? p.uploadId : undefined
+  const resultPath = nonce !== undefined
+    ? `${p.pathname}.result-${createHash("sha256").update(JSON.stringify(nonce)).digest("hex")}`
     : undefined
   if (resultPath) {
     const recorded = await storage.get(resultPath)
@@ -79,8 +80,19 @@ export async function loadStagedBundle(receipt: string, organizationId: string, 
   const bytes = await storage.get(p.pathname)
   if (!bytes) throw new Error("No uploaded bundle found for this receipt")
   if (bytes.byteLength !== p.fileSize) throw new Error("Uploaded bundle size does not match the prepared upload")
-  const commit = stagedUploadCommit(storage, p.pathname)
-  return { bytes, commit: (apply) => commit(apply, resultPath ? async (result) => {
+  const record = resultPath ? async (result: ImportReport) => {
     await storage.put(resultPath, Buffer.from(JSON.stringify(result)), "application/json")
-  } : undefined) }
+  } : undefined
+  if (record && nonce !== undefined) {
+    const recovered = await lookup?.recover?.(bytes, nonce)
+    if (recovered) {
+      // The database result is authoritative. Keep the ZIP as recovery evidence
+      // if the sidecar cannot be written yet.
+      const stored = await record(recovered).then(() => true, () => false)
+      if (stored) await storage.del(p.pathname).catch(() => undefined)
+      return { result: recovered }
+    }
+  }
+  const commit = stagedUploadCommit(storage, p.pathname)
+  return { bytes, nonce, commit: (apply) => commit(apply, record, lookup?.canReleaseClaim) }
 }

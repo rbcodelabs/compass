@@ -4,7 +4,7 @@ import { auth } from "@/auth"
 import { getArtifactStorage } from "@/lib/artifact-storage"
 import { isPermissionError, resolveOrgAdmin } from "@/lib/permissions"
 import { defaultBlobAdapters } from "@/lib/workspace-export/blobs"
-import { WorkspaceImportError, importWorkspaceBundle, type ImportReport } from "@/lib/workspace-export/import"
+import { WorkspaceImportError, WorkspaceImportRecoveryRequired, findCommittedWorkspaceImport, importWorkspaceBundle, type ImportReport } from "@/lib/workspace-export/import"
 import { MAX_BUNDLE_BYTES, loadStagedBundle } from "@/lib/workspace-export/upload"
 
 export const maxDuration = 300
@@ -41,11 +41,13 @@ export async function POST(req: Request, { params }: { params: Promise<{ orgSlug
       if (body.nonce !== undefined && typeof body.nonce !== "string") return NextResponse.json({ error: "Invalid nonce" }, { status: 400 })
       const staged = await loadStagedBundle(body.receipt, organizationId, userId, getArtifactStorage(), {
         nonce: body.nonce, persistResult: resolveStorageBackend() === "s3",
+        canReleaseClaim: (error) => !(error instanceof WorkspaceImportRecoveryRequired),
+        recover: (zip, nonce) => findCommittedWorkspaceImport(prisma, zip, organizationId, nonce),
       })
       if ("result" in staged) return NextResponse.json({ ok: true, ...staged.result })
       bytes = staged.bytes
       commit = staged.commit
-      fields = body
+      fields = { ...body, nonce: staged.nonce ?? body.nonce }
     } else {
       const form = await req.formData()
       const file = form.get("file")
@@ -76,6 +78,6 @@ export async function POST(req: Request, { params }: { params: Promise<{ orgSlug
   } catch (error) {
     if (error instanceof WorkspaceImportError) return NextResponse.json({ error: error.message }, { status: 422 })
     console.error("[workspace-import] failed", error)
-    return NextResponse.json({ error: "The import failed and was rolled back. Try again, or contact support if it keeps failing." }, { status: 500 })
+    return NextResponse.json({ error: "The import could not be confirmed. Retry with the same receipt or nonce, or contact support if it keeps failing." }, { status: 500 })
   }
 }

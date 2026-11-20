@@ -164,6 +164,52 @@ describe("prepare_artifact_upload on S3", () => {
     expect(get).not.toHaveBeenCalledWith(prepared.pathname)
   })
 
+  it.each([false, true])("recovers the committed import when recording the result failed (outage persists: %s)", async (outagePersists) => {
+    const prepared = await prepareBundleUpload({ organizationId: WS, userId: OTHER_WS, fileSize: 1 })
+    const objects = new Map([[prepared.pathname, new Uint8Array([1])]])
+    const get = vi.fn(async (pathname: string) => objects.get(pathname) ?? null)
+    let failWrite = true
+    const storage = {
+      get,
+      put: async (pathname: string, bytes: Uint8Array) => {
+        if (failWrite) throw new Error("receipt write failed")
+        objects.set(pathname, bytes)
+        return { pathname, created: true }
+      },
+      del: async (pathname: string) => { objects.delete(pathname) },
+    }
+    const result = { workspaceId: WS, slug: "imported", name: "Imported", alreadyImported: false,
+      counts: {}, usersMatched: 0, usersFallbackToImporter: 0, referencesCleared: 0, blobsCopied: 0, warnings: [] }
+    const recover = vi.fn<() => Promise<typeof result | undefined>>().mockResolvedValueOnce(undefined).mockResolvedValue(result)
+    const identity = { nonce: "retry", persistResult: true, recover }
+    const staged = await loadStagedBundle(prepared.receipt, WS, OTHER_WS, storage, identity)
+    if (!("commit" in staged)) throw new Error("expected staged bytes")
+    await expect(staged.commit(async () => result)).rejects.toThrow("receipt write failed")
+    failWrite = outagePersists
+    await expect(loadStagedBundle(prepared.receipt, WS, OTHER_WS, storage, identity)).resolves.toMatchObject({ result })
+    expect(recover).toHaveBeenCalledTimes(2)
+    expect(objects.has(prepared.pathname)).toBe(outagePersists)
+  })
+
+  it("keeps the receipt claim if an interrupted import has an unknown outcome", async () => {
+    const prepared = await prepareBundleUpload({ organizationId: WS, userId: OTHER_WS, fileSize: 1 })
+    const release = vi.fn(async () => undefined)
+    const storage = {
+      get: async (path: string) => path === prepared.pathname ? new Uint8Array([1]) : null,
+      put: async (pathname: string) => ({ pathname, created: true }),
+      del: vi.fn(async () => undefined),
+      claimStagedUpload: async () => release,
+    }
+    const unknownOutcome = new AggregateError([], "Could not verify the import outcome before rollback")
+    const staged = await loadStagedBundle(prepared.receipt, WS, OTHER_WS, storage, {
+      nonce: "retry", persistResult: true, canReleaseClaim: (error: unknown) => error !== unknownOutcome,
+    })
+    if (!("commit" in staged)) throw new Error("expected staged bytes")
+    await expect(staged.commit(async () => { throw unknownOutcome })).rejects.toBe(unknownOutcome)
+    expect(release).not.toHaveBeenCalled()
+    expect(storage.del).not.toHaveBeenCalled()
+  })
+
   it("uses an expiring S3 staging key for a workspace import receipt", async () => {
     const prepared = await prepareBundleUpload({ organizationId: WS, userId: OTHER_WS, fileSize: 1 })
     if (!("upload" in prepared)) throw new Error("expected an S3 upload target")
