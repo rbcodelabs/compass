@@ -255,4 +255,36 @@ describe.skipIf(!databaseUrl)("durable sandbox fence on PostgreSQL", () => {
     expect(await marker(queued.run.id)).toEqual({ sandboxStoppedAt: now })
     expect(await marker(older)).toEqual({ sandboxStoppedAt: null })
   })
+
+  it("retains an ambiguous launch fence after run deletion and releases it after recorded settlement", async () => {
+    const conversationId = await makeConversation()
+    const sandboxName = agentConversationSandboxName(conversationId)
+    const { run } = await launch(conversationId)
+    const token = await reservePersistentSandboxLaunch(prisma, conversationId, run.id, sandboxName, now)
+    expect(token).toBeTruthy()
+    expect(await dispatchPersistentSandboxLaunch(prisma, conversationId, run.id, sandboxName, token!)).toBe(true)
+    await prisma.agentRun.delete({ where: { id: run.id } })
+
+    const stopSandbox = vi.fn()
+    const later = new Date(now.getTime() + 5 * 60_000)
+    await reapIdleConversationSandboxes({ prisma, now: later, cleanup: { stopSandbox } })
+    await expect(launch(conversationId, later)).rejects.toMatchObject({ code: "SANDBOX_OPERATION_IN_FLIGHT" })
+    expect(await prisma.agentSandboxGeneration.findUnique({ where: { sandboxName } })).toMatchObject({ runId: run.id })
+    expect(stopSandbox).not.toHaveBeenCalled()
+
+    // Simulate a durable settlement written before the launcher exited.
+    await prisma.agentSandboxOperation.update({
+      where: { conversationId },
+      data: { phase: "LAUNCH_SETTLED" },
+    })
+    await reapIdleConversationSandboxes({ prisma, now: later, cleanup: { stopSandbox } })
+    expect(await prisma.agentSandboxOperation.findUnique({ where: { conversationId } })).toBeNull()
+    const replacement = await launch(conversationId, later)
+    const replacementToken = await reservePersistentSandboxLaunch(prisma, conversationId, replacement.run.id, sandboxName, later)
+    expect(replacementToken).toBeTruthy()
+    expect(await dispatchPersistentSandboxLaunch(prisma, conversationId, replacement.run.id, sandboxName, replacementToken!)).toBe(true)
+    expect(await prisma.agentSandboxGeneration.findUnique({ where: { sandboxName } })).toMatchObject({ runId: replacement.run.id })
+    expect(stopSandbox).not.toHaveBeenCalled()
+  })
+
 })
