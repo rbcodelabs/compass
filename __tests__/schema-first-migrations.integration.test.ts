@@ -7,7 +7,6 @@ import { integrationDatabaseUrl } from "./helpers/integration-database"
 import { replayAllMigrations } from "./helpers/replay-migrations"
 
 const migrations = [
-  "126_external_links",
   "126_doc_version_numbers",
   "127_decision_votes",
   "128_task_start_date",
@@ -76,7 +75,7 @@ describe.skipIf(!integrationDatabaseUrl)("schema-first migration batch on Postgr
     }
   })
 
-  it("applies the six exact migrations in order, preserves existing data, and replays finished receipts", async () => {
+  it("applies the five exact migrations in order, preserves existing data, and replays finished receipts", async () => {
     const manifest = partitionPendingMigrations(schema, new Set()).pending
     expect(manifest.slice(-migrations.length).map(({ name }) => name)).toEqual(migrations)
     assertReviewedManagedManifest(manifest)
@@ -108,24 +107,22 @@ describe.skipIf(!integrationDatabaseUrl)("schema-first migration batch on Postgr
   }, 120_000)
 
   it.each([
-    [migrations[2], "ALTER TABLE @schema@.decision_votes DROP CONSTRAINT decision_votes_pkey", "ALTER TABLE @schema@.decision_votes DROP CONSTRAINT IF EXISTS decision_votes_pkey", "ALTER TABLE @schema@.decision_votes ADD PRIMARY KEY (id)", "primary key"],
-    [migrations[2], "ALTER TABLE @schema@.decision_votes ALTER COLUMN id DROP DEFAULT", "ALTER TABLE @schema@.decision_votes ALTER COLUMN id SET DEFAULT '00000000-0000-4000-8000-000000000001'::uuid", "ALTER TABLE @schema@.decision_votes ALTER COLUMN id SET DEFAULT gen_random_uuid()", "decision_votes.id"],
-    [migrations[2], "ALTER TABLE @schema@.decision_votes ALTER COLUMN created_at TYPE TIMESTAMP(6)", "ALTER TABLE @schema@.decision_votes ALTER COLUMN created_at SET DEFAULT CURRENT_TIMESTAMP", "ALTER TABLE @schema@.decision_votes ALTER COLUMN created_at TYPE TIMESTAMP(3)", "decision_votes.created_at"],
-    [migrations[2], "ALTER TABLE @schema@.decision_votes ALTER COLUMN question_index DROP DEFAULT", "ALTER TABLE @schema@.decision_votes ALTER COLUMN question_index SET DEFAULT 0", "ALTER TABLE @schema@.decision_votes ALTER COLUMN question_index DROP DEFAULT", "decision_votes.question_index"],
-    [migrations[2], "ALTER TABLE @schema@.decision_votes DROP COLUMN IF EXISTS extra_required", "ALTER TABLE @schema@.decision_votes ADD COLUMN extra_required TEXT NOT NULL", "ALTER TABLE @schema@.decision_votes DROP COLUMN extra_required", "unexpected columns"],
-    [migrations[2], "ALTER TABLE @schema@.decision_votes ALTER COLUMN question_index DROP DEFAULT", "ALTER TABLE @schema@.decision_votes ALTER COLUMN question_index ADD GENERATED ALWAYS AS IDENTITY", "ALTER TABLE @schema@.decision_votes ALTER COLUMN question_index DROP IDENTITY", "decision_votes.question_index"],
-    [migrations[2], "ALTER TABLE @schema@.decision_votes ALTER COLUMN id DROP DEFAULT", "ALTER TABLE @schema@.decision_votes ALTER COLUMN updated_at DROP DEFAULT", "ALTER TABLE @schema@.decision_votes ALTER COLUMN id SET DEFAULT gen_random_uuid(), ALTER COLUMN updated_at SET DEFAULT CURRENT_TIMESTAMP", "decision_votes.id"],
-    [migrations[2], "ALTER TABLE @schema@.decision_votes ALTER COLUMN created_at DROP DEFAULT", "ALTER TABLE @schema@.decision_votes ALTER COLUMN updated_at DROP DEFAULT", "ALTER TABLE @schema@.decision_votes ALTER COLUMN created_at SET DEFAULT CURRENT_TIMESTAMP, ALTER COLUMN updated_at SET DEFAULT CURRENT_TIMESTAMP", "decision_votes.created_at"],
-    [migrations[2], "ALTER TABLE @schema@.decision_votes DROP CONSTRAINT decision_votes_pkey", "ALTER TABLE @schema@.decision_votes ADD PRIMARY KEY (request_id)", "ALTER TABLE @schema@.decision_votes DROP CONSTRAINT decision_votes_pkey, ADD PRIMARY KEY (id)", "primary key"],
-    [migrations[0], "ALTER TABLE @schema@.external_links DROP COLUMN title", "ALTER TABLE @schema@.external_links ADD COLUMN title VARCHAR(255) GENERATED ALWAYS AS (relation) STORED NOT NULL", "ALTER TABLE @schema@.external_links DROP COLUMN title, ADD COLUMN title VARCHAR(255) NOT NULL", "external_links.title"],
-    [migrations[1], "ALTER TABLE @schema@.doc_versions DROP COLUMN version_number", "ALTER TABLE @schema@.doc_versions ADD COLUMN version_number TEXT", "ALTER TABLE @schema@.doc_versions DROP COLUMN version_number", "doc_versions.version_number"],
-    [migrations[2], "ALTER TABLE @schema@.decision_votes ALTER COLUMN chosen_option TYPE VARCHAR(1)", "ALTER TABLE @schema@.decision_votes ALTER COLUMN chosen_option TYPE VARCHAR(1)", "ALTER TABLE @schema@.decision_votes ALTER COLUMN chosen_option TYPE VARCHAR(120)", "decision_votes.chosen_option"],
-    [migrations[3], "ALTER TABLE @schema@.tasks DROP COLUMN start_date", "ALTER TABLE @schema@.tasks ADD COLUMN start_date TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP", "ALTER TABLE @schema@.tasks DROP COLUMN start_date", "tasks.start_date"],
-    [migrations[5], "ALTER TABLE @schema@.agent_sandbox_operations DROP COLUMN token", "ALTER TABLE @schema@.agent_sandbox_operations ADD COLUMN token UUID GENERATED ALWAYS AS (run_id) STORED NOT NULL", "ALTER TABLE @schema@.agent_sandbox_operations DROP COLUMN token, ADD COLUMN token UUID NOT NULL", "agent_sandbox_operations.token"],
-    [migrations[5], "ALTER TABLE @schema@.agent_sandbox_operations DROP COLUMN IF EXISTS extra_required", "ALTER TABLE @schema@.agent_sandbox_operations ADD COLUMN extra_required TEXT NOT NULL", "ALTER TABLE @schema@.agent_sandbox_operations DROP COLUMN extra_required", "extra_required"],
-    [migrations[0], "DROP INDEX IF EXISTS @schema@.idx_external_links_subject_key", "CREATE INDEX idx_external_links_subject_key ON @schema@.external_links(subject_type)", "DROP INDEX @schema@.idx_external_links_subject_key", "idx_external_links_subject_key"],
-    [migrations[2], "DROP INDEX IF EXISTS @schema@.idx_decision_votes_voter", "CREATE INDEX idx_decision_votes_voter ON @schema@.decision_votes(request_id)", "DROP INDEX @schema@.idx_decision_votes_voter", "idx_decision_votes_voter"],
-    [migrations[5], "ALTER TABLE @schema@.agent_conversations DROP COLUMN IF EXISTS sandbox_coordination_token", "ALTER TABLE @schema@.agent_conversations ADD COLUMN sandbox_coordination_token UUID GENERATED ALWAYS AS (id) STORED", "ALTER TABLE @schema@.agent_conversations DROP COLUMN sandbox_coordination_token", "conversation coordination token"],
+    [migrations[1], "ALTER TABLE @schema@.decision_votes DROP CONSTRAINT decision_votes_pkey", "ALTER TABLE @schema@.decision_votes DROP CONSTRAINT IF EXISTS decision_votes_pkey", "ALTER TABLE @schema@.decision_votes ADD PRIMARY KEY (id)", "primary key"],
+    [migrations[1], "ALTER TABLE @schema@.decision_votes ALTER COLUMN id DROP DEFAULT", "ALTER TABLE @schema@.decision_votes ALTER COLUMN id SET DEFAULT '00000000-0000-4000-8000-000000000001'::uuid", "ALTER TABLE @schema@.decision_votes ALTER COLUMN id SET DEFAULT gen_random_uuid()", "decision_votes.id"],
+    [migrations[1], "ALTER TABLE @schema@.decision_votes ALTER COLUMN created_at TYPE TIMESTAMP(6)", "ALTER TABLE @schema@.decision_votes ALTER COLUMN created_at SET DEFAULT CURRENT_TIMESTAMP", "ALTER TABLE @schema@.decision_votes ALTER COLUMN created_at TYPE TIMESTAMP(3)", "decision_votes.created_at"],
+    [migrations[1], "ALTER TABLE @schema@.decision_votes ALTER COLUMN question_index DROP DEFAULT", "ALTER TABLE @schema@.decision_votes ALTER COLUMN question_index SET DEFAULT 0", "ALTER TABLE @schema@.decision_votes ALTER COLUMN question_index DROP DEFAULT", "decision_votes.question_index"],
+    [migrations[1], "ALTER TABLE @schema@.decision_votes DROP COLUMN IF EXISTS extra_required", "ALTER TABLE @schema@.decision_votes ADD COLUMN extra_required TEXT NOT NULL", "ALTER TABLE @schema@.decision_votes DROP COLUMN extra_required", "unexpected columns"],
+    [migrations[1], "ALTER TABLE @schema@.decision_votes ALTER COLUMN question_index DROP DEFAULT", "ALTER TABLE @schema@.decision_votes ALTER COLUMN question_index ADD GENERATED ALWAYS AS IDENTITY", "ALTER TABLE @schema@.decision_votes ALTER COLUMN question_index DROP IDENTITY", "decision_votes.question_index"],
+    [migrations[1], "ALTER TABLE @schema@.decision_votes ALTER COLUMN id DROP DEFAULT", "ALTER TABLE @schema@.decision_votes ALTER COLUMN updated_at DROP DEFAULT", "ALTER TABLE @schema@.decision_votes ALTER COLUMN id SET DEFAULT gen_random_uuid(), ALTER COLUMN updated_at SET DEFAULT CURRENT_TIMESTAMP", "decision_votes.id"],
+    [migrations[1], "ALTER TABLE @schema@.decision_votes ALTER COLUMN created_at DROP DEFAULT", "ALTER TABLE @schema@.decision_votes ALTER COLUMN updated_at DROP DEFAULT", "ALTER TABLE @schema@.decision_votes ALTER COLUMN created_at SET DEFAULT CURRENT_TIMESTAMP, ALTER COLUMN updated_at SET DEFAULT CURRENT_TIMESTAMP", "decision_votes.created_at"],
+    [migrations[1], "ALTER TABLE @schema@.decision_votes DROP CONSTRAINT decision_votes_pkey", "ALTER TABLE @schema@.decision_votes ADD PRIMARY KEY (request_id)", "ALTER TABLE @schema@.decision_votes DROP CONSTRAINT decision_votes_pkey, ADD PRIMARY KEY (id)", "primary key"],
+    [migrations[0], "ALTER TABLE @schema@.doc_versions DROP COLUMN version_number", "ALTER TABLE @schema@.doc_versions ADD COLUMN version_number TEXT", "ALTER TABLE @schema@.doc_versions DROP COLUMN version_number", "doc_versions.version_number"],
+    [migrations[1], "ALTER TABLE @schema@.decision_votes ALTER COLUMN chosen_option TYPE VARCHAR(1)", "ALTER TABLE @schema@.decision_votes ALTER COLUMN chosen_option TYPE VARCHAR(1)", "ALTER TABLE @schema@.decision_votes ALTER COLUMN chosen_option TYPE VARCHAR(120)", "decision_votes.chosen_option"],
+    [migrations[2], "ALTER TABLE @schema@.tasks DROP COLUMN start_date", "ALTER TABLE @schema@.tasks ADD COLUMN start_date TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP", "ALTER TABLE @schema@.tasks DROP COLUMN start_date", "tasks.start_date"],
+    [migrations[4], "ALTER TABLE @schema@.agent_sandbox_operations DROP COLUMN token", "ALTER TABLE @schema@.agent_sandbox_operations ADD COLUMN token UUID GENERATED ALWAYS AS (run_id) STORED NOT NULL", "ALTER TABLE @schema@.agent_sandbox_operations DROP COLUMN token, ADD COLUMN token UUID NOT NULL", "agent_sandbox_operations.token"],
+    [migrations[4], "ALTER TABLE @schema@.agent_sandbox_operations DROP COLUMN IF EXISTS extra_required", "ALTER TABLE @schema@.agent_sandbox_operations ADD COLUMN extra_required TEXT NOT NULL", "ALTER TABLE @schema@.agent_sandbox_operations DROP COLUMN extra_required", "extra_required"],
+    [migrations[1], "DROP INDEX IF EXISTS @schema@.idx_decision_votes_voter", "CREATE INDEX idx_decision_votes_voter ON @schema@.decision_votes(request_id)", "DROP INDEX @schema@.idx_decision_votes_voter", "idx_decision_votes_voter"],
+    [migrations[4], "ALTER TABLE @schema@.agent_conversations DROP COLUMN IF EXISTS sandbox_coordination_token", "ALTER TABLE @schema@.agent_conversations ADD COLUMN sandbox_coordination_token UUID GENERATED ALWAYS AS (id) STORED", "ALTER TABLE @schema@.agent_conversations DROP COLUMN sandbox_coordination_token", "conversation coordination token"],
   ])("rejects drift for %s before receipt and retains the failed attempt on recovery", async (name, remove, drift, repair, error) => {
     // Install the schema independently so this regression also runs in isolation.
     await apply(name)
