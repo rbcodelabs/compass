@@ -47,6 +47,10 @@ describe("computeChangeToken okrs scope", () => {
     keyResult: { findMany: vi.fn() },
     checkIn: { count: vi.fn() },
     customFieldValue: { findMany: vi.fn() },
+    squad: { findMany: vi.fn() },
+    customFieldDefinition: { findMany: vi.fn() },
+    opportunity: { findMany: vi.fn() },
+    entityLink: { findMany: vi.fn() },
   };
 
   async function token() {
@@ -66,6 +70,10 @@ describe("computeChangeToken okrs scope", () => {
     mockPrisma.keyResult.findMany.mockResolvedValue([keyResult]);
     mockPrisma.checkIn.count.mockResolvedValue(2);
     mockPrisma.customFieldValue.findMany.mockResolvedValue([]);
+    mockPrisma.squad.findMany.mockResolvedValue([]);
+    mockPrisma.customFieldDefinition.findMany.mockResolvedValue([]);
+    mockPrisma.opportunity.findMany.mockResolvedValue([{ id: "opp" }]);
+    mockPrisma.entityLink.findMany.mockResolvedValue([]);
   });
 
   it("scopes every query to the workspace", async () => {
@@ -101,5 +109,28 @@ describe("computeChangeToken okrs scope", () => {
     mockPrisma.objective.findMany.mockResolvedValue([]);
     await token();
     expect(mockPrisma.customFieldValue.findMany).not.toHaveBeenCalled();
+  });
+
+  it("invalidates on a squad rename", async () => {
+    mockPrisma.squad.findMany.mockResolvedValue([{ id: "squad", name: "Previous" }]);
+    const base = await token();
+    mockPrisma.squad.findMany.mockResolvedValue([{ id: "squad", name: "Renamed" }]);
+    expect(await token()).not.toBe(base);
+  });
+
+  it("invalidates when an objective group's shared options change", async () => {
+    mockPrisma.customFieldDefinition.findMany.mockResolvedValue([{ id: "field", sharedOptionSet: { options: [{ label: "Previous" }] } }]);
+    const base = await token();
+    mockPrisma.customFieldDefinition.findMany.mockResolvedValue([{ id: "field", sharedOptionSet: { options: [{ label: "Renamed" }] } }]);
+    expect(await token()).not.toBe(base);
+  });
+
+  it("invalidates when an opportunity link changes or its opportunity is archived", async () => {
+    const base = await token();
+    mockPrisma.entityLink.findMany.mockResolvedValue([{ fromId: "opp", toId: "o1" }]);
+    const linked = await token();
+    expect(linked).not.toBe(base);
+    mockPrisma.opportunity.findMany.mockResolvedValue([]);
+    expect(await token()).not.toBe(linked);
   });
 });

@@ -24,6 +24,8 @@ import type {
   SquadData,
 } from "@/lib/types";
 import { PageHeader, StatusBadge } from "@/components/patterns";
+import { OkrFilterProvider } from "@/components/okrs/okr-filter-context";
+import { OkrNameFilter } from "@/components/okrs/okr-name-filter";
 import { toCustomFieldDefinitionData } from "@/lib/custom-field-definitions";
 import { getThinkingModelForSlugs } from "@/lib/thinking-model/server";
 import { resolveThinkingModel } from "@/lib/thinking-model/resolve";
@@ -106,7 +108,7 @@ export default async function CyclePage({ params, searchParams }: CyclePageProps
         workspaceId: workspace.id,
         ...(squadFilter ? { squadId: squadFilter } : {}),
       },
-      orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+      orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }, { id: "asc" }],
     }),
     getEligibleParentKeyResults(workspace.id, cycle?.id ?? null),
     getEligibleSupportingObjectives(workspace.id, cycle?.id ?? null),
@@ -259,6 +261,8 @@ export default async function CyclePage({ params, searchParams }: CyclePageProps
   const requestedGroupBy = (await searchParams).groupBy;
   const groupBy = groupableFields.some((f) => `field:${f.id}` === requestedGroupBy) ? requestedGroupBy! : "none";
   const headerActions = (
+    <>
+    <OkrNameFilter />
     <Suspense>
       {groupableFields.length > 0 && (
         <OkrGroupByToggle
@@ -268,9 +272,11 @@ export default async function CyclePage({ params, searchParams }: CyclePageProps
       )}
       <SquadFilterBar squads={squads} />
     </Suspense>
+    </>
   );
 
   return (
+    <OkrFilterProvider>
     <main className="okx flex flex-col flex-1 p-4 sm:p-6 md:p-8 gap-6">
       <OkrLiveRefresh orgSlug={orgSlug} workspaceSlug={workspaceSlug} />
       {cycle && cycleStatus ? (
@@ -312,5 +318,6 @@ export default async function CyclePage({ params, searchParams }: CyclePageProps
         />
       </div>
     </main>
+    </OkrFilterProvider>
   );
 }

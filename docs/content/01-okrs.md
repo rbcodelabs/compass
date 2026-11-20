@@ -30,6 +30,10 @@ Click **+ Add Objective** inside a cycle to create one. Objectives with no cycle
 
 To scan many Objectives at once, collapse them. Each Objective card has a chevron beside its title that hides or shows its Key Results; a collapsed card shows how many Key Results it holds (for example, "3 key results"). When a cycle has more than one Objective, a **Collapse all** / **Expand all** control above the list does every card in one click. Cards start expanded, and the state is not saved — it resets when you reload the page.
 
+Use **Filter objectives by name** in the cycle header to find an Objective or one of its Key Results. Matches stay expanded, and the count shows how many Objectives match. Press **Escape** in the search box or click **Clear filter** to restore the list and its previous expansion state. In-progress Add Key Result and check-in drafts are preserved while their cards are hidden.
+
+The OKR list and cycle screens refresh while the tab is visible. Changes made elsewhere, such as a renamed Key Result or a new check-in, appear without reloading the page. A rename can change which Objectives match the current filter while open form drafts stay in their rows.
+
 ## Key Results
 
 Key Results are the measurable outcomes that tell you whether you've hit your Objective. Each KR has:

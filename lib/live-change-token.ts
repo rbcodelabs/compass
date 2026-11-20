@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import getPrisma from "@/lib/db";
 import { loadCardSortBoard } from "@/lib/card-sort";
 import { listCardSortNewEntries } from "@/lib/card-sort-new-entries";
+import { listOutcomeOpportunityLinkTokenRows } from "@/lib/links/readers";
 
 /**
  * Cheap "did anything on this board change?" fingerprint for live refresh.
@@ -125,9 +126,8 @@ export async function computeChangeToken(
       return hashRows([opportunities, solutions, [evidenceCount]]);
     }
     case "okrs": {
-      // Feeds the OKR cycles index, the Outcomes index and every cycle page: cycles, objectives, key results
-      // (current/target move on check-in), check-in count (progress history) and objective custom-field values.
-      const [cycles, objectives, keyResults, checkInCount] = await Promise.all([
+      // The cycle pages also show squads and objective fields. The Outcomes index shows linked opportunity counts.
+      const [cycles, objectives, keyResults, checkInCount, squads, fieldDefinitions, opportunities, opportunityLinks] = await Promise.all([
         prisma.oKRCycle.findMany({
           where: { workspaceId },
           select: { id: true, title: true, status: true, startDate: true, endDate: true, updatedAt: true },
@@ -144,6 +144,16 @@ export async function computeChangeToken(
           select: { id: true, objectiveId: true, title: true, target: true, current: true, unit: true, sortOrder: true, updatedAt: true },
         }),
         prisma.checkIn.count({ where: { keyResult: { objective: { workspaceId } } } }),
+        prisma.squad.findMany({ where: { workspaceId }, select: { id: true, name: true, color: true } }),
+        prisma.customFieldDefinition.findMany({
+          where: { workspaceId, objectType: "OBJECTIVE" },
+          select: {
+            id: true, name: true, fieldType: true, options: true, required: true, order: true,
+            sharedOptionSet: { select: { id: true, name: true, options: true } },
+          },
+        }),
+        prisma.opportunity.findMany({ where: { workspaceId, status: { not: "ARCHIVED" } }, select: { id: true } }),
+        listOutcomeOpportunityLinkTokenRows(prisma, workspaceId),
       ]);
       const fieldValues = objectives.length === 0
         ? []
@@ -151,7 +161,9 @@ export async function computeChangeToken(
             where: { objectId: { in: objectives.map((objective) => objective.id) } },
             select: { fieldId: true, objectId: true, value: true, updatedAt: true },
           });
-      return hashRows([cycles, objectives, keyResults, [checkInCount], fieldValues]);
+      const activeOpportunityIds = new Set(opportunities.map(({ id }) => id));
+      const activeLinks = opportunityLinks.filter(({ fromId }) => activeOpportunityIds.has(fromId));
+      return hashRows([cycles, objectives, keyResults, [checkInCount], fieldValues, squads, fieldDefinitions, activeLinks]);
     }
     case "solutions": {
       const [solutions, opportunities] = await Promise.all([

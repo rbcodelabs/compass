@@ -92,7 +92,7 @@ describe("OKR drag-to-reorder", () => {
     await keyboardDrag(objectiveHandle);
 
     expect(reorderObjective).toHaveBeenCalledTimes(1);
-    expect(reorderObjective).toHaveBeenCalledWith("o1", 1, "/org/ws/okrs/c1");
+    expect(reorderObjective).toHaveBeenCalledWith("o1", { anchorId: "o2", position: "after" }, "/org/ws/okrs/c1");
     expect(reorderKeyResult).not.toHaveBeenCalled();
   });
 
