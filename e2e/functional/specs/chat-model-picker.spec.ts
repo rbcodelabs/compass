@@ -187,6 +187,7 @@ test("the docked Conversation panel's composer card does not overflow horizontal
     .locator('[data-slot="pinned-panel"]')
     .filter({ has: page.getByRole("heading", { name: "Conversation", exact: true }) });
   await expect(panel).toBeVisible({ timeout: 15_000 });
+  await expect(panel.getByRole("button", { name: /^Model:/ })).toBeVisible({ timeout: 15_000 });
   const card = panel.locator('[data-slot="composer-card"]');
   await expect.poll(() => card.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
 });
