@@ -179,7 +179,8 @@ async function mutateCurrentVote(
 export async function castDecisionVote(input: { workspaceId: string; requestId: string; voterUserId: string; questionIndex: number; option: string; revisionId: string }): Promise<void> {
   const request = await loadRequest(input.workspaceId, input.requestId)
   if (!request?.currentRevision) throw new DecisionVoteError("NOT_FOUND", "Decision not found.")
-  if (input.revisionId !== request.currentRevision.id) throw new DecisionVoteError("STALE_REVISION", "This decision has changed. Refresh the card before voting.")
+  const revisionId = request.currentRevision.id
+  if (input.revisionId !== revisionId) throw new DecisionVoteError("STALE_REVISION", "This decision has changed. Refresh the card before voting.")
   if (request.state !== VOTABLE_STATE) throw new DecisionVoteError("CLOSED", "Voting is closed for this decision.")
   const questions = voteQuestionsOf(request.currentRevision.packetJson)
   if (!Number.isInteger(input.questionIndex) || input.questionIndex < 0 || input.questionIndex >= questions.length) {
@@ -193,7 +194,7 @@ export async function castDecisionVote(input: { workspaceId: string; requestId: 
     where: {
       requestId_revisionId_questionIndex_voterUserId: {
         requestId: request.id,
-        revisionId: request.currentRevision.id,
+        revisionId,
         questionIndex: input.questionIndex,
         voterUserId: input.voterUserId,
       },
@@ -201,7 +202,7 @@ export async function castDecisionVote(input: { workspaceId: string; requestId: 
     create: {
       workspaceId: input.workspaceId,
       requestId: request.id,
-      revisionId: request.currentRevision.id,
+      revisionId,
       questionIndex: input.questionIndex,
       chosenOption: input.option,
       voterUserId: input.voterUserId,
@@ -216,10 +217,11 @@ export async function castDecisionVote(input: { workspaceId: string; requestId: 
 export async function retractDecisionVote(input: { workspaceId: string; requestId: string; voterUserId: string; questionIndex: number; revisionId: string }): Promise<void> {
   const request = await loadRequest(input.workspaceId, input.requestId)
   if (!request?.currentRevision) throw new DecisionVoteError("NOT_FOUND", "Decision not found.")
-  if (input.revisionId !== request.currentRevision.id) throw new DecisionVoteError("STALE_REVISION", "This decision has changed. Refresh the card before voting.")
+  const revisionId = request.currentRevision.id
+  if (input.revisionId !== revisionId) throw new DecisionVoteError("STALE_REVISION", "This decision has changed. Refresh the card before voting.")
   if (request.state !== VOTABLE_STATE) throw new DecisionVoteError("CLOSED", "Voting is closed for this decision.")
   if (!Number.isInteger(input.questionIndex) || input.questionIndex < 0) throw new DecisionVoteError("INVALID_QUESTION", "That question is not part of this decision.")
   await mutateCurrentVote({ ...input, requestId: request.id }, tx => tx.decisionVote.deleteMany({
-    where: { workspaceId: input.workspaceId, requestId: request.id, revisionId: request.currentRevision.id, questionIndex: input.questionIndex, voterUserId: input.voterUserId },
+    where: { workspaceId: input.workspaceId, requestId: request.id, revisionId, questionIndex: input.questionIndex, voterUserId: input.voterUserId },
   }))
 }
