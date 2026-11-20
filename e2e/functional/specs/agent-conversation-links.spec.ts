@@ -78,7 +78,7 @@ test("the chat lists linked objects; opportunities and tasks list only the conve
 
     // ── Chat: the Linked objects card lists both objects with titles and links
     await page.setViewportSize({ width: 1280, height: 800 });
-    await page.goto(`${base}/agent?c=${visibleId}`);
+    await page.goto(`${base}/conversations?c=${visibleId}`);
     const card = page.getByRole("region", { name: "Linked objects" });
     await expect(card).toBeVisible({ timeout: 30_000 });
     await expect(card.getByRole("link", { name: oppTitle })).toHaveAttribute("href", new RegExp(`${base}/discovery/`));
@@ -97,10 +97,10 @@ test("the chat lists linked objects; opportunities and tasks list only the conve
     // ── Opportunity: only the conversation this viewer may open, with its relationship; the private one never appears
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.goto(`${base}/discovery/${oppId}`);
-    const conversations = page.getByTestId("linked-conversations");
+    const conversations = page.getByTestId("object-conversations-section");
     await expect(conversations).toBeVisible({ timeout: 30_000 });
-    await expect(conversations.getByTestId("linked-conversation")).toHaveCount(1);
-    await expect(conversations.getByRole("link", { name: visibleTitle })).toHaveAttribute("href", `${base}/agent?c=${visibleId}`);
+    await expect(conversations.getByRole("listitem")).toHaveCount(1);
+    await expect(conversations.getByRole("button", { name: new RegExp(`^${visibleTitle}`) })).toBeVisible();
     await expect(conversations.getByText("Created here")).toBeVisible();
     await expect(page.getByText(privateTitle), "an inaccessible conversation's title never reaches the page").toHaveCount(0);
     await page.screenshot({ path: path.join(SHOTS, "opportunity-desktop.png") });
@@ -108,12 +108,18 @@ test("the chat lists linked objects; opportunities and tasks list only the conve
     await expect(conversations).toBeVisible();
     await conversations.scrollIntoViewIfNeeded();
     await page.screenshot({ path: path.join(SHOTS, "opportunity-mobile.png") });
+    await conversations.getByRole("button", { name: new RegExp(`^${visibleTitle}`) }).click();
+    await expect(page).toHaveURL(new RegExp(`detail=conversation(?::|%3A)${visibleId}`));
+    const conversationPanel = page.getByRole("dialog", { name: "Conversation", exact: true });
+    await expect(conversationPanel).toBeVisible();
+    await expect(conversationPanel.getByRole("link", { name: "Open full page" })).toHaveAttribute("href", `${base}/conversations?c=${visibleId}`);
+    await expect(conversationPanel.getByRole("region", { name: "Linked objects" }).getByRole("link", { name: oppTitle, exact: true })).toHaveAttribute("href", `${base}/discovery/${oppId}`);
 
     // ── Task: the same, as "Mentioned"
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.goto(`${base}/tasks/${taskId}`);
-    const taskConversations = page.getByTestId("linked-conversations");
-    await expect(taskConversations.getByRole("link", { name: visibleTitle })).toBeVisible({ timeout: 30_000 });
+    const taskConversations = page.getByTestId("object-conversations-section");
+    await expect(taskConversations.getByRole("button", { name: new RegExp(`^${visibleTitle}`) })).toBeVisible({ timeout: 30_000 });
     await expect(taskConversations.getByText("Mentioned")).toBeVisible();
     await expect(page.getByText(privateTitle)).toHaveCount(0);
     await page.screenshot({ path: path.join(SHOTS, "task-desktop.png") });
@@ -125,10 +131,10 @@ test("the chat lists linked objects; opportunities and tasks list only the conve
     // ── Solution (opens as a detail panel): only the conversation this viewer may open; the private one never appears
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.goto(`${base}/solutions?detail=solution:${solutionId}`);
-    const solutionConversations = page.getByTestId("linked-conversations");
+    const solutionConversations = page.getByTestId("object-conversations-section");
     await expect(solutionConversations).toBeVisible({ timeout: 30_000 });
-    await expect(solutionConversations.getByTestId("linked-conversation")).toHaveCount(1);
-    await expect(solutionConversations.getByRole("link", { name: visibleTitle })).toHaveAttribute("href", `${base}/agent?c=${visibleId}`);
+    await expect(solutionConversations.getByRole("listitem")).toHaveCount(1);
+    await expect(solutionConversations.getByRole("button", { name: new RegExp(`^${visibleTitle}`) })).toBeVisible();
     await expect(solutionConversations.getByText("Created here")).toBeVisible();
     await expect(page.getByText(privateTitle)).toHaveCount(0);
     await solutionConversations.scrollIntoViewIfNeeded();
@@ -140,16 +146,18 @@ test("the chat lists linked objects; opportunities and tasks list only the conve
 
     // ── Removing an automatic link: gone from the page and from the table; the private conversation's link is untouched
     await page.goto(`${base}/discovery/${oppId}`);
-    await page.getByRole("button", { name: `Remove link to conversation ${visibleTitle}` }).click();
-    await expect(page.getByTestId("linked-conversations")).toHaveCount(0, { timeout: 15_000 });
+    await page.getByRole("button", { name: `Remove Created here link to ${visibleTitle}` }).click();
+    await page.getByRole("button", { name: "Remove link", exact: true }).click();
+    await expect(page.getByTestId("object-conversations-section").getByRole("listitem")).toHaveCount(0, { timeout: 15_000 });
     const left = await pool.query<{ from_id: string }>(`SELECT from_id FROM "${S}".entity_links WHERE to_id = $1 AND link_type LIKE 'CONVERSATION_%'`, [oppId]);
     expect(left.rows.map((r) => r.from_id)).toEqual([privateId]);
 
     // Removing from a task works the same way and leaves the other object links of that conversation alone
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.goto(`${base}/tasks/${taskId}`);
-    await page.getByRole("button", { name: `Remove link to conversation ${visibleTitle}` }).click();
-    await expect(page.getByTestId("linked-conversations")).toHaveCount(0, { timeout: 15_000 });
+    await page.getByRole("button", { name: `Remove Mentioned link to ${visibleTitle}` }).click();
+    await page.getByRole("button", { name: "Remove link", exact: true }).click();
+    await expect(page.getByTestId("object-conversations-section").getByRole("listitem")).toHaveCount(0, { timeout: 15_000 });
     const remaining = await pool.query<{ to_type: string }>(`SELECT to_type FROM "${S}".entity_links WHERE from_id = $1 AND link_type LIKE 'CONVERSATION_%'`, [visibleId]);
     expect(remaining.rows.map((r) => r.to_type)).toEqual(["SOLUTION"]);
   } finally {

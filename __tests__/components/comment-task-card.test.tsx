@@ -21,6 +21,12 @@ describe("CommentTaskCard copy for agent assignees", () => {
     expect(screen.queryByText(/task queue/i)).toBeNull()
   })
 
+  it("makes no run claim where the creating path starts none (startsRun=false)", () => {
+    render(<CommentTaskCard taskHref="/t/1" card={agentCard("CLOUD")} startsRun={false} />)
+    expect(screen.queryByText(/starts a run/i)).toBeNull()
+    expect(screen.getByText(/open the task to follow it/i)).toBeInTheDocument()
+  })
+
   it.each([["EXTERNAL" as const], [undefined]])("keeps the queue wording for an external or unknown agent (%s)", (kind) => {
     render(<CommentTaskCard taskHref="/t/1" card={agentCard(kind)} />)
     expect(screen.getByText("Waiting in the agent’s task queue.")).toBeInTheDocument()

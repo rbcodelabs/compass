@@ -1,14 +1,21 @@
 /**
- * Shared Discussion functional spec.
+ * Roadmap Item shared Conversations functional spec (was the shared Discussion spec; #593 replaced Discussion).
  *
- * Exercises the complete Roadmap Item discussion lifecycle through the panel,
- * including persistence and the deliberate destructive confirmation required
- * when an administrator deletes a root that still has replies.
+ * Exercises the roadmap item conversation lifecycle through the panels: start a thread from the item's Conversations section, follow
+ * up, edit a message, resolve and reopen, persist across a reopen, and archive then restore. There is no per-message delete: a
+ * thread leaves the list by being archived, which is reversible.
  */
+import type { Page } from "@playwright/test";
 import { test, expect } from "../fixtures/index";
 
-test.describe("Roadmap Item shared Discussion", () => {
-  test("add, reply, edit, resolve, reopen, persist, and safely delete a thread", async ({ page, base }) => {
+const conversationPanel = (page: Page) =>
+  page
+    .locator('[data-slot="pinned-panel"]')
+    .filter({ has: page.getByRole("heading", { name: "Conversation", exact: true }) })
+    .or(page.getByRole("dialog", { name: "Conversation", exact: true }))
+
+test.describe("Roadmap Item shared Conversations", () => {
+  test("start, follow up, edit, resolve, reopen, persist, and archive then restore a thread", async ({ page, base }) => {
     const stamp = Date.now();
     const itemTitle = `E2E Shared Discussion ${stamp}`;
     const rootBody = `Root comment ${stamp}`;
@@ -25,51 +32,58 @@ test.describe("Roadmap Item shared Discussion", () => {
     await expect(card).toBeVisible({ timeout: 10_000 });
     await card.getByRole("button", { name: itemTitle }).click();
 
-    let panel = page.locator('[data-slot="sheet-content"]');
-    const discussion = panel.getByRole("heading", { name: "Discussion", exact: true }).locator("..");
-    await expect(panel.getByText("No comments yet.")).toBeVisible({ timeout: 10_000 });
+    const itemPanel = page.locator('[data-slot="sheet-content"]');
+    const section = () => itemPanel.getByTestId("object-conversations-section");
+    await expect(section().getByText(/No conversations on this item yet/)).toBeVisible({ timeout: 10_000 });
 
-    await panel.getByLabel("Add comment").fill(rootBody);
-    await panel.getByRole("button", { name: "Post comment" }).click();
-    await expect(panel.getByText(rootBody)).toBeVisible({ timeout: 10_000 });
+    // Start the thread; Send opens it in the Conversation panel, replacing the item panel.
+    await section().getByTestId("object-conversation-composer").fill(rootBody);
+    await section().getByRole("button", { name: "Send", exact: true }).click();
+    const thread = conversationPanel(page);
+    await expect(thread.getByText(rootBody, { exact: true })).toBeVisible({ timeout: 10_000 });
 
-    await panel.getByRole("button", { name: /Reply to / }).click();
-    await panel.getByRole("textbox", { name: /Reply to / }).fill(replyBody);
-    await panel.getByRole("button", { name: "Post reply" }).click();
-    await expect(panel.getByText(replyBody)).toBeVisible({ timeout: 10_000 });
+    await thread.getByPlaceholder(/message the agent/i).fill(replyBody);
+    await thread.getByRole("button", { name: "Send message" }).click();
+    await expect(thread.getByText(replyBody, { exact: true })).toBeVisible({ timeout: 10_000 });
 
-    const editRoot = panel.getByRole("button", { name: /Edit comment by / }).first();
+    const rootMessage = thread.getByTestId("conversation-message").filter({ hasText: rootBody });
+    const editRoot = rootMessage.getByRole("button", { name: /Edit comment by / });
     await expect(editRoot).toBeEnabled();
     await editRoot.click();
-    await panel.getByRole("textbox", { name: /Edit comment by / }).fill(editedRootBody);
-    await panel.getByRole("button", { name: "Save edit" }).click();
-    await expect(panel.getByText(editedRootBody)).toBeVisible({ timeout: 10_000 });
-    await expect(panel.getByText("Edited", { exact: true })).toBeVisible();
+    await thread.getByRole("textbox", { name: /Edit comment by / }).fill(editedRootBody);
+    await thread.getByRole("button", { name: "Save edit" }).click();
+    await expect(thread.getByText(editedRootBody, { exact: true })).toBeVisible({ timeout: 10_000 });
+    await expect(thread.getByText("Edited", { exact: true })).toBeVisible();
 
-    await panel.getByRole("button", { name: /Resolve thread by / }).click();
-    await expect(panel.getByRole("button", { name: /Expand resolved thread by / })).toBeVisible({ timeout: 10_000 });
-    await panel.getByRole("button", { name: /Reopen thread by / }).click();
-    await expect(panel.getByText(replyBody)).toBeVisible({ timeout: 10_000 });
+    await thread.getByRole("button", { name: "Resolve", exact: true }).click();
+    await expect(thread.getByText("Resolved", { exact: true })).toBeVisible({ timeout: 10_000 });
+    await thread.getByRole("button", { name: "Reopen", exact: true }).click();
+    await expect(thread.getByRole("button", { name: "Resolve", exact: true })).toBeVisible({ timeout: 10_000 });
+    await expect(thread.getByText(replyBody, { exact: true })).toBeVisible();
 
-    await panel.getByRole("button", { name: "Close" }).click();
-    await expect(panel).not.toBeVisible();
+    // Persist: close (the row is now named by the edited text: the title follows the first message), reopen the item, open the thread from its Conversations section.
+    await page.getByRole("button", { name: "Close panel" }).click();
+    await expect(thread).not.toBeVisible();
     await card.getByRole("button", { name: itemTitle }).click();
-    panel = page.locator('[data-slot="sheet-content"]');
-    await expect(panel.getByText(editedRootBody)).toBeVisible({ timeout: 10_000 });
-    await expect(panel.getByText(replyBody)).toBeVisible();
+    await section().getByRole("button", { name: new RegExp(`^${editedRootBody}`) }).click();
+    await expect(thread.getByText(editedRootBody, { exact: true })).toBeVisible({ timeout: 10_000 });
+    await expect(thread.getByText(replyBody, { exact: true })).toBeVisible();
 
-    let confirmations = 0;
-    page.on("dialog", async (dialog) => {
-      confirmations += 1;
-      expect(dialog.type()).toBe("confirm");
-      expect(dialog.message()).toContain("every reply");
-      await dialog.accept();
-    });
-    await panel.getByRole("button", { name: /Delete thread by / }).click();
-    await expect(panel.getByText(editedRootBody)).not.toBeVisible({ timeout: 10_000 });
-    await expect(panel.getByText(replyBody)).not.toBeVisible();
-    expect(confirmations).toBe(1);
-    await expect(panel.getByText("No comments yet.")).toBeVisible();
-    await expect(discussion).toBeAttached();
+    // Archive (reversible) instead of delete: the thread leaves the active list and returns on restore.
+    await thread.getByRole("button", { name: "Archive conversation" }).click();
+    await page.getByRole("alertdialog", { name: "Archive this conversation?" }).getByRole("button", { name: "Archive", exact: true }).click();
+    await expect(page.getByRole("alertdialog")).toHaveCount(0);
+    // Archiving closes the Conversation panel itself (back to the item panel when that was the previous crumb).
+    await expect(thread).toHaveCount(0);
+    if (!(await itemPanel.isVisible())) await card.getByRole("button", { name: itemTitle }).click();
+    await expect(section().getByRole("button", { name: /^Show archived/ })).toBeVisible({ timeout: 10_000 });
+    await expect(section().getByRole("button", { name: new RegExp(`^${editedRootBody}`) })).toHaveCount(0);
+    await section().getByRole("button", { name: /^Show archived/ }).click();
+    const archivedRow = section().getByRole("listitem").filter({ hasText: editedRootBody });
+    await expect(archivedRow).toBeVisible({ timeout: 10_000 });
+    await archivedRow.getByRole("button", { name: "Restore", exact: true }).click();
+    await expect(section().getByRole("status")).toContainText("Conversation restored.");
+    await section().getByRole("button", { name: /^Show archived/ }).click();
+    await expect(section().getByRole("button", { name: new RegExp(`^${editedRootBody}`) })).toBeVisible({ timeout: 10_000 });
   });
 });
