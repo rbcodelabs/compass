@@ -20,7 +20,7 @@ test.describe("Marketing navigation", () => {
     await page.getByRole("button", { name: "Choose workspace" }).click()
     await expect(page.getByRole("link", { name: /E2E Workspace/ })).toHaveAttribute(
       "href",
-      `/${orgSlug}/${workspaceSlug}/okrs`
+      `/${orgSlug}/${workspaceSlug}/home`
     )
     const planning = page.getByRole("link", { name: /E2E Planning/ })
     await expect(planning).toHaveAttribute("href", `/${orgSlug}/${E2E_SECOND_WORKSPACE_SLUG}/home`)
