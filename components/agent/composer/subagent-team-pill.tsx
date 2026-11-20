@@ -293,6 +293,7 @@ export function SubagentTeamPill({
             aria-label="Sub-agent team"
             side="bottom"
             showCloseButton={false}
+            raised
             initialFocus={focusSelected}
             className="max-h-[80dvh] gap-0 overflow-auto rounded-t-2xl p-2 pb-6"
             data-testid="subagent-team-popover"

@@ -63,20 +63,28 @@ function SheetContent({
   children,
   side = "right",
   showCloseButton = true,
+  raised = false,
   ...props
 }: SheetPrimitive.Popup.Props & {
   side?: "top" | "right" | "bottom" | "left"
   showCloseButton?: boolean
+  /**
+   * For a sheet opened from inside another raised surface (e.g. the z-60 detail panel's own sheet). Puts the content and its
+   * backdrop on the popup layer (z-80) and always renders the backdrop: Base UI omits the backdrop of a nested dialog unless
+   * forced, which left such a sheet with nothing to tap outside of.
+   */
+  raised?: boolean
 }) {
   return (
     <SheetPortal>
-      <SheetOverlay />
+      <SheetOverlay className={raised ? "z-[80]" : undefined} forceRender={raised} />
       <SheetPrimitive.Popup
         data-slot="sheet-content"
         data-side={side}
         className={cn(
           "fixed z-50 flex flex-col gap-4 bg-popover bg-clip-padding text-sm text-popover-foreground shadow-lg transition duration-200 ease-in-out data-ending-style:opacity-0 data-starting-style:opacity-0",
           sheetSideClasses[side],
+          raised && "z-[80]",
           className
         )}
         {...props}
