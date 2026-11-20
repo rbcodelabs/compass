@@ -229,6 +229,26 @@ describe("terminal events", () => {
     expect(prisma.agentMessage.create.mock.calls[0][0].data.content).toContain("Model provider throttled the request.")
   })
 
+  it("records the spend a failed run reported with its error (ADR-0032)", async () => {
+    const prisma = fakePrisma()
+    const res = await handleAgentRunCallback(
+      post({ events: [{ seq: 1, type: "error", payload: { message: "query() ended with subtype: error_max_turns", usage: { totalCostUsd: 0.37, numTurns: 12, durationMs: 4000, usage: { input_tokens: 5, output_tokens: 6 } } } }] }),
+      RUN_ID,
+      "events",
+      prisma,
+      CLEANUP,
+    )
+    expect(await res.json()).toMatchObject({ status: "FAILED", finalized: true })
+    expect(prisma.agentRun.updateMany.mock.calls.at(-1)![0].data).toMatchObject({ status: "FAILED", costUsd: 0.37, numTurns: 12 })
+    expect(prisma.agentMessage.create.mock.calls[0][0].data).toMatchObject({ costUsd: 0.37 })
+  })
+
+  it("still finalizes an error event that carries no usage, with cost left null", async () => {
+    const prisma = fakePrisma()
+    await handleAgentRunCallback(post({ events: [{ seq: 1, type: "error", payload: { message: "boom" } }] }), RUN_ID, "events", prisma, CLEANUP)
+    expect(prisma.agentRun.updateMany.mock.calls.at(-1)![0].data.costUsd).toBeNull()
+  })
+
   it("finalizes on a *replayed* terminal event too, so a lost response does not strand the run", async () => {
     const prisma = fakePrisma(runRow({ lastSeq: 1, eventCount: 1 }))
     prisma.agentRunEvent.findMany.mockResolvedValue([{ seq: 1 }])

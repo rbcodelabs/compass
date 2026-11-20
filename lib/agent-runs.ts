@@ -857,7 +857,11 @@ export async function finalizeAgentRun({
         role: "assistant",
         content,
         ...author,
-        ...(status === "SUCCEEDED"
+        // Links this message to the run that produced it, so spend is counted once (run cost) and not again (message
+        // cost). Inline turns have no run and keep run_id NULL. See lib/agent-spend.ts and ADR-0032.
+        runId,
+        // A failed or interrupted run that still reported usage keeps its cost: it was real spend.
+        ...(status === "SUCCEEDED" || usage?.totalCostUsd != null
           ? {
               model: run.model ?? AGENT_RUN_MODEL_ID,
               inputTokens: usage?.usage?.input_tokens ?? null,

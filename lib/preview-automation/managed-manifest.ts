@@ -292,6 +292,8 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   // Unified Conversations model (OPP-67 / SOL-117): twelve nullable ADD COLUMN IF NOT EXISTS statements across agent_conversations and agent_messages; no default, backfill, index or FK.
   // Postcondition pinned in REVIEWED_MIGRATION_CODE_SHA256. Digest recorded from the shipped SQL after reading it.
   "125_unified_conversations": "dc6968e7f3573b5bc5aa9982f59c2f147643c807764c7c2ad768b21182333faf",
+  // Links an assistant message to the run that produced it (ADR-0032): one nullable `ADD COLUMN IF NOT EXISTS run_id UUID` on agent_messages plus one ASYNC index; no default, backfill or FK. No code postcondition. Digest recorded from the shipped SQL after reading it.
+  "129_agent_message_run_id": "f82b208a7648bac31ef3917a3080efeb350730cd485bb347b64f615007a4c9bd",
 };
 
 /**
@@ -438,6 +440,10 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
   },
   "109_agent_conversation_reviews": {
     "lib/migrations/agent-conversation-reviews.ts": "970ff2d900951977feefd21dc9592b49b5d59dc0819c9b2e66e0e911718503ed",
+  },
+  // The 129 postcondition (agent_messages.run_id is a bare nullable uuid; idx_agent_messages_run is valid, ready, non-unique, on run_id only); editing it re-reviews the migration.
+  "129_agent_message_run_id": {
+    "lib/migrations/agent-message-run-id.ts": "f4656e60cd96e4610ff07183dc98bc144de4cafa1f4d6025f5a60dfaf4dc29e9",
   },
   // The 110 postcondition (columns, plus every index valid and ready); editing it re-reviews the migration.
   "110_artifact_external_share": {
