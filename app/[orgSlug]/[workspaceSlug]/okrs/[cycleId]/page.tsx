@@ -107,7 +107,7 @@ export default async function CyclePage({ params, searchParams }: CyclePageProps
         workspaceId: workspace.id,
         ...(squadFilter ? { squadId: squadFilter } : {}),
       },
-      orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+      orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }, { id: "asc" }],
     }),
     getEligibleParentKeyResults(workspace.id, cycle?.id ?? null),
     getEligibleSupportingObjectives(workspace.id, cycle?.id ?? null),

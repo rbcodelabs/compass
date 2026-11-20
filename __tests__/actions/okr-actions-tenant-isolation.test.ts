@@ -220,7 +220,7 @@ describe("OKR server actions", () => {
     ["updateObjectiveStatus(foreign)", () => okr.updateObjectiveStatus("obj-b", "AT_RISK", "globex", "beta")],
     ["deleteObjective(foreign)", () => okr.deleteObjective("obj-b", "/p")],
     ["deleteKeyResult(foreign)", () => okr.deleteKeyResult("kr-b", "/p")],
-    ["reorderObjective(foreign)", () => okr.reorderObjective("obj-b", 9, "/p")],
+    ["reorderObjective(foreign)", () => okr.reorderObjective("obj-b", { anchorId: "obj-a", position: "after" }, "/p")],
     ["reorderKeyResult(foreign)", () => okr.reorderKeyResult("kr-b", 9, "/p")],
   ];
 
@@ -286,7 +286,8 @@ describe("OKR server actions", () => {
     await okr.createObjective("cycle-a", "acme", "alpha", form({ title: "Mine", squadId: "00000000-0000-4000-8000-00000000000a" }));
     await okr.addKeyResult("obj-a", "acme", "alpha", form({ title: "KR", target: "5" }));
     await okr.updateObjectiveStatus("obj-a", "AT_RISK", "acme", "alpha");
-    await okr.reorderObjective("obj-a", 4, "/p");
+    await okr.reorderObjective("obj-a", { anchorId: "objective-new", position: "after" }, "/p");
+    expect(db.current!.tables.objective.find((o) => o.id === "obj-a")).toMatchObject({ sortOrder: 1 });
     await okr.reorderKeyResult("kr-a", 4, "/p");
     await okr.deleteKeyResult("kr-a", "/p");
     await okr.deleteObjective("obj-a", "/p");
