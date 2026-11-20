@@ -18,11 +18,12 @@ import {
 } from "@/lib/feedback-attachments"
 import { EMBED_SCREENSHOT_PREFIX, isEmbedScreenshotUrl, storeEmbedScreenshot } from "@/lib/embed-screenshots"
 import { createS3Storage } from "@/lib/storage/s3"
+import { putFileToPresignedTarget } from "@/lib/storage/browser-upload"
+import { prepareBundleUpload, loadStagedBundle } from "@/lib/workspace-export/upload"
 
 const s3 = mockClient(S3Client)
 const WS = "11111111-1111-4111-8111-111111111111"
 const OTHER_WS = "22222222-2222-4222-8222-222222222222"
-const decode = (fields: Record<string, string>) => JSON.parse(Buffer.from(fields.Policy!, "base64").toString("utf8")).conditions as unknown[]
 
 beforeEach(() => {
   s3.reset()
@@ -39,8 +40,30 @@ beforeEach(() => {
 })
 afterEach(() => vi.unstubAllEnvs())
 
+it("rejects a pre-aborted upload without opening a connection", async () => {
+  const open = vi.fn()
+  vi.stubGlobal("XMLHttpRequest", class {
+    upload = {}
+    open = open
+    abort() {}
+  })
+  try {
+    const signal = AbortSignal.abort()
+    const upload = putFileToPresignedTarget(
+      { method: "PUT", url: "https://example.invalid/object", headers: {} }, new Blob(["demo"]), { signal },
+    )
+    const result = await Promise.race([
+      upload.catch((error: unknown) => error), Promise.resolve().then(() => Promise.resolve("pending")),
+    ])
+    expect(result).toMatchObject({ name: "AbortError" })
+    expect(open).not.toHaveBeenCalled()
+  } finally {
+    vi.unstubAllGlobals()
+  }
+})
+
 describe("prepare_artifact_upload on S3", () => {
-  it("returns a presigned POST for the staging key, keeping the receipt contract", async () => {
+  it("returns a presigned PUT for the staging key, keeping the receipt contract", async () => {
     const prepared = await prepareArtifactUpload({ workspaceId: WS, filename: "proto.html", fileSize: 4096 })
     expect(prepared.clientToken).toBe("")
     if (!("upload" in prepared)) throw new Error("expected an S3 upload target")
@@ -48,10 +71,9 @@ describe("prepare_artifact_upload on S3", () => {
     expect(prepared.access).toBe("private")
     expect(prepared.fileType).toBe("text/html")
     expect(prepared.pathname).toBe(`artifact-staging/${WS}/${prepared.uploadId}.html`)
-    expect(prepared.upload!.fields.key).toBe(`tmp/artifact-staging/${WS}/${prepared.uploadId}.html`)
-    expect(decode(prepared.upload!.fields)).toEqual(expect.arrayContaining([
-      ["content-length-range", 4096, 4096], ["eq", "$Content-Type", "text/html"],
-    ]))
+    expect(new URL(prepared.upload.url).pathname).toBe(`/tmp/artifact-staging/${WS}/${prepared.uploadId}.html`)
+    expect(prepared.upload.headers).toMatchObject({ "If-None-Match": "*", "Content-Type": "text/html" })
+    expect(new URL(prepared.upload.url).searchParams.get("X-Amz-SignedHeaders")).toContain("content-length")
     expect(blobToken).not.toHaveBeenCalled()
   })
 
@@ -75,19 +97,58 @@ describe("prepare_artifact_upload on S3", () => {
     await expect(prepareArtifactUpload({ workspaceId: WS, filename: "a.html", fileSize: 10 })).rejects.toThrow("Artifact direct uploads are not configured")
   })
 
-  it("consume path: the staged object is read from tmp/ and deleted from tmp/", async () => {
+  it("leaves the consumed staging key reserved until lifecycle expiry", async () => {
     const prepared = await prepareArtifactUpload({ workspaceId: WS, filename: "p.html", fileSize: 3 })
     const bytes = new Uint8Array([1, 2, 3])
-    const store = new Map<string, Uint8Array>()
-    s3.on(PutObjectCommand).callsFake(async (input: { Key: string; Body: Uint8Array }) => { store.set(input.Key, input.Body); return {} })
-    s3.on(GetObjectCommand).callsFake(async (input: { Key: string }) => ({ Body: { transformToByteArray: async () => store.get(input.Key) } }))
+    const store = new Map<string, { bytes: Uint8Array; contentType: string | undefined }>()
+    s3.on(PutObjectCommand).callsFake(async (input: { Key: string; Body: Uint8Array; ContentType?: string }) => {
+      store.set(input.Key, { bytes: input.Body, contentType: input.ContentType })
+      return {}
+    })
+    s3.on(GetObjectCommand).callsFake(async (input: { Key: string }) => {
+      const object = store.get(input.Key)
+      return { ContentType: object?.contentType, Body: { transformToByteArray: async () => object?.bytes } }
+    })
     await createS3Storage("artifacts").put(prepared.pathname, bytes)
     expect([...store.keys()]).toEqual([`tmp/${prepared.pathname}`])
     const staged = await loadStagedArtifactUpload(prepared.receipt, WS, createS3Storage("artifacts"))
     expect(staged.bytes).toEqual(bytes)
-    s3.on(DeleteObjectCommand).resolves({})
-    await staged.discard()
-    expect(s3.commandCalls(DeleteObjectCommand)[0]!.args[0].input.Key).toBe(`tmp/${prepared.pathname}`)
+    s3.on(DeleteObjectCommand).callsFake(async ({ Key }) => { store.delete(Key); return {} })
+    await staged.commit(async () => undefined)
+    expect(store.get(`tmp/${prepared.pathname}`)?.bytes).toEqual(new Uint8Array())
+    expect(s3.commandCalls(DeleteObjectCommand)).toHaveLength(0)
+    await expect(loadStagedArtifactUpload(prepared.receipt, WS, createS3Storage("artifacts"))).rejects.toThrow(/already used/)
+  })
+
+  it("lets one request claim an artifact upload while its commit is in flight", async () => {
+    const prepared = await prepareArtifactUpload({ workspaceId: WS, filename: "p.html", fileSize: 1 })
+    const storage = createS3Storage("artifacts")
+    s3.on(GetObjectCommand).resolves({ Body: { transformToByteArray: async () => new Uint8Array([1]) } as never })
+    const activeKeys = new Set<string>()
+    s3.on(PutObjectCommand).callsFake(async ({ Key, IfNoneMatch }) => {
+      if (IfNoneMatch === "*" && activeKeys.has(Key)) throw Object.assign(new Error("exists"), { name: "PreconditionFailed" })
+      activeKeys.add(Key)
+      return {}
+    })
+    const first = await loadStagedArtifactUpload(prepared.receipt, WS, storage)
+    const second = await loadStagedArtifactUpload(prepared.receipt, WS, storage)
+    expect(first).toHaveProperty("commit", expect.any(Function))
+    const apply = vi.fn(async () => "saved")
+    await expect(Promise.allSettled([first.commit(apply), second.commit(apply)])).resolves.toEqual([
+      { status: "fulfilled", value: "saved" },
+      { status: "rejected", reason: expect.objectContaining({ message: expect.stringMatching(/already used/i) }) },
+    ])
+    expect(apply).toHaveBeenCalledOnce()
+  })
+
+  it("uses an expiring S3 staging key for a workspace import receipt", async () => {
+    const prepared = await prepareBundleUpload({ organizationId: WS, userId: OTHER_WS, fileSize: 1 })
+    if (!("upload" in prepared)) throw new Error("expected an S3 upload target")
+    expect(new URL(prepared.upload.url).pathname).toBe(`/tmp/${prepared.pathname}`)
+    s3.on(GetObjectCommand).resolves({ Body: { transformToByteArray: async () => new Uint8Array([1]) } as never })
+    const staged = await loadStagedBundle(prepared.receipt, WS, OTHER_WS, createS3Storage("artifacts"))
+    expect(staged.bytes).toEqual(new Uint8Array([1]))
+    expect(s3.commandCalls(GetObjectCommand)[0]!.args[0].input.Key).toBe(`tmp/${prepared.pathname}`)
   })
 })
 
@@ -97,8 +158,9 @@ describe("prepare_doc_image_upload on S3", () => {
     if (!("upload" in prepared)) throw new Error("expected an S3 upload target")
     expect(prepared.url).toBe(`/api/docs/images/${WS}/${prepared.imageName}`)
     expect(prepared.markdown).toBe(`![shot.png](${prepared.url})`)
-    expect(prepared.upload.fields.key).toBe(`artifacts/docs/${WS}/images/${prepared.imageName}`)
-    expect(decode(prepared.upload.fields)).toEqual(expect.arrayContaining([["content-length-range", 5000, 5000], ["eq", "$Content-Type", "image/png"]]))
+    expect(new URL(prepared.upload.url).pathname).toBe(`/artifacts/docs/${WS}/images/${prepared.imageName}`)
+    expect(prepared.upload.headers).toMatchObject({ "If-None-Match": "*", "Content-Type": "image/png" })
+    expect(new URL(prepared.upload.url).searchParams.get("X-Amz-SignedHeaders")).toContain("content-length")
     expect(resolveDocImage(WS, prepared.imageName)?.pathname).toBe(prepared.pathname)
   })
 
@@ -111,13 +173,14 @@ describe("prepare_doc_image_upload on S3", () => {
 describe("prepare_feedback_attachment_upload on S3", () => {
   const input = { workspaceId: WS, filename: "my shot.png", fileType: "image/png", fileSize: 2048 }
 
-  it("returns a presigned POST into public/ plus the app-route URL, and a receipt that verifies as before", async () => {
+  it("returns a presigned PUT into public/ plus the app-route URL, and a receipt that verifies as before", async () => {
     const prepared = await prepareFeedbackAttachmentUpload(input)
     if (!("upload" in prepared)) throw new Error("expected an S3 upload target")
     expect(prepared.url).toBe(`/api/files/public/${prepared.pathname}`)
     expect(prepared.pathname).toMatch(new RegExp(`^feedback/${WS}/[0-9a-f-]{36}-my_shot\\.png$`))
-    expect(prepared.upload.fields.key).toBe(`public/${prepared.pathname}`)
-    expect(decode(prepared.upload.fields)).toEqual(expect.arrayContaining([["content-length-range", 2048, 2048], ["eq", "$Content-Type", "image/png"]]))
+    expect(new URL(prepared.upload.url).pathname).toBe(`/public/${prepared.pathname}`)
+    expect(prepared.upload.headers).toMatchObject({ "If-None-Match": "*", "Content-Type": "image/png" })
+    expect(new URL(prepared.upload.url).searchParams.get("X-Amz-SignedHeaders")).toContain("content-length")
     expect(verifyFeedbackUploadReceipt(prepared.receipt)).toMatchObject({ workspaceId: WS, pathname: prepared.pathname, fileType: "image/png", fileSize: 2048 })
     expect(blobToken).not.toHaveBeenCalled()
   })
@@ -215,6 +278,7 @@ describe("public-store writes on S3", () => {
   })
 
   it("cleanup deletes route-URL objects from S3 and leaves Blob URLs to Blob", async () => {
+    vi.stubEnv("BLOB_READ_WRITE_TOKEN", "vercel_blob_rw_abc123_test")
     s3.on(DeleteObjectCommand).resolves({})
     blobDel.mockImplementation(() => Promise.resolve() as never)
     const route = "/api/files/public/feedback/ws_1/0f8fad5b-d9cb-469f-a165-70867728950e-a.png"

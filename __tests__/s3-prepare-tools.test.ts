@@ -33,14 +33,14 @@ describe("prepare_* tool results", () => {
       ["prepare_artifact_upload", () => prepareArtifactUploadTool({ workspaceId: WS, filename: "a.html", fileSize: 100 })],
       ["prepare_doc_image_upload", () => prepareDocImageUploadTool({ workspaceId: WS, filename: "a.png", fileType: "image/png", fileSize: 100 })],
       ["prepare_feedback_attachment_upload", () => prepareFeedbackAttachmentUploadTool({ workspaceId: WS, filename: "a.png", fileType: "image/png", fileSize: 100 })],
-    ])("%s tells the caller to POST the form, and keeps the Blob-shaped fields", async (_name, run) => {
+    ])("%s tells the caller to PUT the raw file, and keeps the Blob-shaped fields", async (_name, run) => {
       const result = await run()
-      expect(text(result)).toContain("multipart/form-data POST to upload.url")
+      expect(text(result)).toContain("one PUT to upload.url")
       expect(text(result)).not.toContain("@vercel/blob/client")
       const data = result.structuredContent!.data as Record<string, unknown>
       expect(data.clientToken).toBe("")
       expect(data.receipt ?? data.pathname).toBeTruthy()
-      expect((data.upload as { method: string; url: string; fields: Record<string, string> }).method).toBe("POST")
+      expect((data.upload as { method: string; url: string; headers: Record<string, string> }).method).toBe("PUT")
     })
   })
 

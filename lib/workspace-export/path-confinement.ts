@@ -76,6 +76,9 @@ export function isOwnFeedbackAttachmentUrl(url: unknown, sourceWorkspaceId: stri
       parsed.protocol === "https:" &&
       !parsed.username &&
       !parsed.password &&
+      !parsed.port &&
+      !parsed.search &&
+      !parsed.hash &&
       parsed.hostname.toLowerCase() === configuredBlobStoreHostname() &&
       parsed.pathname.slice(1).toLowerCase().startsWith(ownSegment) &&
       !/%2e|%2f|%5c/i.test(url)

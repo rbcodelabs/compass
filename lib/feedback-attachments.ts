@@ -2,6 +2,8 @@ import { createHmac, randomUUID, timingSafeEqual } from "node:crypto"
 import { head } from "@vercel/blob"
 import { isPublicFileKey, parsePublicFileUrl, publicFileUrl } from "@/lib/public-file-keys"
 import { createDirectUpload } from "@/lib/storage/direct-upload"
+import { feedbackUploadReceiptSecret } from "@/lib/storage/availability"
+import { publicBlobStoreHostname } from "@/lib/storage/config"
 import { headPublicObject } from "@/lib/storage/s3"
 import { getPublicFileStore } from "@/lib/storage/public-store"
 
@@ -165,7 +167,7 @@ export async function uploadInlineFeedbackAttachments(
 }
 
 function receiptSecret(): string {
-  const secret = process.env.FEEDBACK_UPLOAD_RECEIPT_SECRET ?? process.env.BLOB_READ_WRITE_TOKEN
+  const secret = feedbackUploadReceiptSecret()
   if (!secret) throw new Error("Feedback direct uploads are not configured.")
   return secret
 }
@@ -178,12 +180,11 @@ function receiptSecret(): string {
  * proves a URL is hosted on *some* Vercel Blob public store, not this one.
  */
 export function configuredBlobStoreHostname(): string {
-  const token = process.env.BLOB_READ_WRITE_TOKEN
-  const storeId = token?.split("_")[3]
-  if (!storeId || !/^[a-zA-Z0-9-]+$/.test(storeId)) {
+  const hostname = publicBlobStoreHostname()
+  if (!hostname) {
     throw new Error("Feedback direct uploads are not configured with a valid Blob store.")
   }
-  return `${storeId.toLowerCase()}.public.blob.vercel-storage.com`
+  return hostname
 }
 
 function signReceiptPayload(encodedPayload: string): string {
@@ -252,6 +253,7 @@ export async function prepareFeedbackAttachmentUpload(input: {
   const pathname = `feedback/${input.workspaceId}/${randomUUID()}-${sanitizeFeedbackAttachmentFilename(input.filename)}`
   const attachmentId = randomUUID()
   const expiresAt = Date.now() + DIRECT_UPLOAD_TTL_MS
+  const receipt = createFeedbackUploadReceipt({ version: 1, attachmentId, ...input, pathname, expiresAt })
   const credential = await createDirectUpload({
     store: "public",
     pathname,
@@ -261,7 +263,6 @@ export async function prepareFeedbackAttachmentUpload(input: {
     ttlSeconds: DIRECT_UPLOAD_TTL_MS / 1000,
     allowOverwrite: false,
   })
-  const receipt = createFeedbackUploadReceipt({ version: 1, attachmentId, ...input, pathname, expiresAt })
   return { ...credential, receipt, pathname, expiresAt, attachmentId }
 }
 

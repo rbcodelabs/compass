@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { MODULE_KEYS } from "@/lib/modules/registry"
-import { collectionOf, uuid, workspaceSchema } from "@/lib/rest/schemas"
+import { collectionOf, feedbackAttachmentUrl, uuid, workspaceSchema } from "@/lib/rest/schemas"
 
 const timestamp = z.string().datetime()
 const thinkingModel = z.object({
@@ -56,7 +56,7 @@ export const evidence = z.object({
 export const evidenceCollection = collectionOf(evidence)
 
 export const feedbackAttachment = z.object({
-  id: uuid, feedbackItemId: uuid, url: z.string().url(), filename: z.string(), fileType: z.string(), fileSize: z.number().int().positive(),
+  id: uuid, feedbackItemId: uuid, url: feedbackAttachmentUrl, filename: z.string(), fileType: z.string(), fileSize: z.number().int().positive(),
   feedbackUrl: z.string().url().nullable(), alreadyAttached: z.boolean(), createdAt: timestamp, updatedAt: timestamp,
 }).strict()
 

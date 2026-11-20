@@ -5,8 +5,10 @@ import {
   PutObjectCommand,
   S3Client,
   type GetObjectCommandOutput,
+  type PutObjectCommandInput,
 } from "@aws-sdk/client-s3"
-import { createPresignedPost } from "@aws-sdk/s3-presigned-post"
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner"
+import type { PresignedUploadTarget } from "@/lib/storage/direct-upload-client"
 import { s3Config } from "@/lib/storage/config"
 import type { ArtifactStorage } from "@/lib/storage/types"
 
@@ -27,8 +29,8 @@ export type S3Store =
   | "public"
   | "tmp"
 
-/** Logical staging path used by direct HTML uploads (see lib/artifact-upload.ts). */
-const ARTIFACT_STAGING_PREFIX = "artifact-staging/"
+const STAGING_PREFIXES = ["artifact-staging/", "workspace-import-staging/"]
+const CONSUMED_STAGING_TYPE = "application/x-compass-consumed-upload"
 
 /**
  * Maps a logical storage pathname to its S3 key. Rejects anything that could
@@ -53,7 +55,7 @@ export function s3ObjectKey(store: S3Store, pathname: string): string {
   for (const segment of pathname.split("/")) {
     if (segment === "" || segment === "." || segment === "..") throw new Error("Invalid storage path")
   }
-  if (store === "artifacts" && pathname.startsWith(ARTIFACT_STAGING_PREFIX)) return `tmp/${pathname}`
+  if (store === "artifacts" && STAGING_PREFIXES.some((prefix) => pathname.startsWith(prefix))) return `tmp/${pathname}`
   const prefix = `${store}/`
   return `${prefix}${pathname.startsWith(prefix) ? pathname.slice(prefix.length) : pathname}`
 }
@@ -69,7 +71,7 @@ export function getS3Client(): { client: S3Client; bucket: string } {
       client: new S3Client({
         ...(config.region ? { region: config.region } : {}),
         ...(config.forcePathStyle ? { forcePathStyle: true } : {}),
-        // Presigned POST policies must not depend on an opportunistic checksum header.
+        // Presigned uploads must not depend on an opportunistic checksum header.
         requestChecksumCalculation: "WHEN_REQUIRED",
         responseChecksumValidation: "WHEN_REQUIRED",
       }),
@@ -108,8 +110,21 @@ function isMissing(error: unknown): boolean {
 function isPreconditionFailed(error: unknown): boolean {
   const name = (error as { name?: string } | null)?.name
   const status = (error as { $metadata?: { httpStatusCode?: number } } | null)?.$metadata?.httpStatusCode
-  // ConditionalRequestConflict: a concurrent write to the same key is in flight, so it is not ours to overwrite either.
-  return name === "PreconditionFailed" || name === "ConditionalRequestConflict" || status === 412
+  return name === "PreconditionFailed" || status === 412
+}
+
+async function putObjectIfAbsent(client: S3Client, input: PutObjectCommandInput): Promise<boolean> {
+  const attempts = 3
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await client.send(new PutObjectCommand({ ...input, IfNoneMatch: "*" }))
+      return true
+    } catch (error) {
+      if (isPreconditionFailed(error)) return false
+      const name = (error as { name?: string } | null)?.name
+      if (name !== "ConditionalRequestConflict" || attempt >= attempts) throw error
+    }
+  }
 }
 
 export const PRIVATE_CACHE_CONTROL = "private, no-store"
@@ -125,22 +140,17 @@ export function createS3Storage(store: Exclude<S3Store, "public" | "tmp">): Arti
       const key = s3ObjectKey(store, pathname)
       const { client, bucket } = getS3Client()
       const noOverwrite = options?.overwrite === false
-      try {
-        await client.send(new PutObjectCommand({
-          Bucket: bucket,
-          Key: key,
-          Body: bytes,
-          ContentType: contentType,
-          CacheControl: PRIVATE_CACHE_CONTROL,
-          ContentDisposition: SAFE_CONTENT_DISPOSITION,
-          // Conditional write: S3 answers 412 and leaves the existing object alone.
-          ...(noOverwrite ? { IfNoneMatch: "*" } : {}),
-        }))
-      } catch (error) {
-        if (noOverwrite && isPreconditionFailed(error)) return { pathname, created: false }
-        throw error
+      const input = {
+        Bucket: bucket,
+        Key: key,
+        Body: bytes,
+        ContentType: contentType,
+        CacheControl: PRIVATE_CACHE_CONTROL,
+        ContentDisposition: SAFE_CONTENT_DISPOSITION,
       }
-      return noOverwrite ? { pathname, created: true } : { pathname }
+      if (noOverwrite) return { pathname, created: await putObjectIfAbsent(client, input) }
+      await client.send(new PutObjectCommand(input))
+      return { pathname }
     },
     async get(pathname) {
       const key = s3ObjectKey(store, pathname)
@@ -148,6 +158,10 @@ export function createS3Storage(store: Exclude<S3Store, "public" | "tmp">): Arti
       const read = async (k: string) => {
         try {
           const result = await client.send(new GetObjectCommand({ Bucket: bucket, Key: k }))
+          if (result.ContentType === CONSUMED_STAGING_TYPE) {
+            await result.Body?.transformToByteArray()
+            return null
+          }
           return result.Body ? await result.Body.transformToByteArray() : null
         } catch (error) {
           if (isMissing(error)) return null // includes 403 (no ListBucket outside the prefixes)
@@ -162,6 +176,10 @@ export function createS3Storage(store: Exclude<S3Store, "public" | "tmp">): Arti
       const open = async (k: string) => {
         try {
           const result = await client.send(new GetObjectCommand({ Bucket: bucket, Key: k }))
+          if (result.ContentType === CONSUMED_STAGING_TYPE) {
+            await result.Body?.transformToByteArray()
+            return null
+          }
           if (!result.Body) return null
           return { stream: result.Body.transformToWebStream() as ReadableStream<Uint8Array>, size: typeof result.ContentLength === "number" ? result.ContentLength : null }
         } catch (error) {
@@ -171,55 +189,69 @@ export function createS3Storage(store: Exclude<S3Store, "public" | "tmp">): Arti
       }
       return open(key)
     },
+    async claimStagedUpload(pathname) {
+      const stagingKey = s3ObjectKey(store, pathname)
+      if (!stagingKey.startsWith("tmp/")) throw new Error("Invalid upload staging path")
+      const key = `${stagingKey}.claim`
+      const { client, bucket } = getS3Client()
+      const created = await putObjectIfAbsent(client, {
+        Bucket: bucket, Key: key, Body: new Uint8Array(), CacheControl: PRIVATE_CACHE_CONTROL,
+      })
+      if (!created) throw new Error("This upload receipt is already used or is being committed")
+      return async () => { await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key })) }
+    },
     async del(pathname) {
       const key = s3ObjectKey(store, pathname)
       const { client, bucket } = getS3Client()
+      if (key.startsWith("tmp/")) {
+        // Keep the key occupied while a previously issued create-only URL can
+        // still be used. The bucket lifecycle expires this marker later.
+        await client.send(new PutObjectCommand({
+          Bucket: bucket,
+          Key: key,
+          Body: new Uint8Array(),
+          ContentType: CONSUMED_STAGING_TYPE,
+          CacheControl: PRIVATE_CACHE_CONTROL,
+          ContentDisposition: SAFE_CONTENT_DISPOSITION,
+        }))
+        return
+      }
       await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }))
     },
   }
 }
 
-export type PresignedPostTarget = {
-  method: "POST"
-  url: string
-  /** Form fields to send verbatim, in order, before the `file` field. */
-  fields: Record<string, string>
-}
-
-/**
- * Presigned POST for a browser or agent direct upload. The signed policy pins
- * the exact key, the exact content type, the exact byte length and the stored
- * cache/disposition headers, and expires with the receipt. A client that sends
- * a different size, type or key is refused by S3 itself.
- */
+/** Sign a create-only upload with an exact object length and type. */
 export async function createPresignedUpload(input: {
   store: S3Store
   pathname: string
   contentType: string
   fileSize: number
   expiresInSeconds: number
-}): Promise<PresignedPostTarget> {
+}): Promise<PresignedUploadTarget> {
   if (!Number.isInteger(input.fileSize) || input.fileSize < 1) throw new Error("Invalid upload size")
   const key = s3ObjectKey(input.store, input.pathname)
   const { client, bucket } = getS3Client()
-  const cacheControl = input.store === "public" ? PUBLIC_CACHE_CONTROL : PRIVATE_CACHE_CONTROL
-  const post = await createPresignedPost(client, {
+  const headers = {
+    "If-None-Match": "*",
+    "Content-Type": input.contentType,
+    "Cache-Control": input.store === "public" ? PUBLIC_CACHE_CONTROL : PRIVATE_CACHE_CONTROL,
+    "Content-Disposition": SAFE_CONTENT_DISPOSITION,
+  }
+  const url = await getSignedUrl(client, new PutObjectCommand({
     Bucket: bucket,
     Key: key,
-    Expires: input.expiresInSeconds,
-    Fields: {
-      "Content-Type": input.contentType,
-      "Cache-Control": cacheControl,
-      "Content-Disposition": SAFE_CONTENT_DISPOSITION,
-    },
-    Conditions: [
-      ["content-length-range", input.fileSize, input.fileSize],
-      ["eq", "$Content-Type", input.contentType],
-      ["eq", "$Cache-Control", cacheControl],
-      ["eq", "$Content-Disposition", SAFE_CONTENT_DISPOSITION],
-    ],
+    IfNoneMatch: headers["If-None-Match"],
+    ContentType: headers["Content-Type"],
+    ContentLength: input.fileSize,
+    CacheControl: headers["Cache-Control"],
+    ContentDisposition: headers["Content-Disposition"],
+  }), {
+    expiresIn: input.expiresInSeconds,
+    signableHeaders: new Set([...Object.keys(headers).map((name) => name.toLowerCase()), "content-length"]),
   })
-  return { method: "POST", url: post.url, fields: post.fields }
+  // Browsers and curl supply Content-Length from the raw file body.
+  return { method: "PUT", url, headers }
 }
 
 export type S3ObjectHead = { contentType: string | undefined; contentLength: number | undefined; etag: string | undefined }
@@ -237,14 +269,16 @@ export async function headPublicObject(key: string): Promise<S3ObjectHead | null
 
 export async function putPublicObject(key: string, body: Uint8Array, contentType: string | undefined): Promise<void> {
   const { client, bucket } = getS3Client()
-  await client.send(new PutObjectCommand({
+  const created = await putObjectIfAbsent(client, {
     Bucket: bucket,
     Key: s3ObjectKey("public", key),
     Body: body,
     ContentType: contentType ?? "application/octet-stream",
     CacheControl: PUBLIC_CACHE_CONTROL,
     ContentDisposition: SAFE_CONTENT_DISPOSITION,
-  }))
+  })
+  // No successful return means the caller cannot register this key for rollback cleanup.
+  if (!created) throw new Error("Public file already exists")
 }
 
 export async function deletePublicObject(key: string): Promise<void> {

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto"
 import { zipSync } from "fflate"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import type { BlobAdapters } from "@/lib/workspace-export/blobs"
 import { BundleReader } from "@/lib/workspace-export/bundle"
 import { exportWorkspaceToBuffer } from "@/lib/workspace-export/export"
@@ -169,6 +169,100 @@ const noopBlobs: BlobAdapters = {
   },
   async delPublic() {},
 }
+
+it("aborts an import when the existing private file differs from the bundle", async () => {
+  const orgId = randomUUID()
+  const wsId = randomUUID()
+  const importerId = randomUUID()
+  const db = createInMemoryPrisma({
+    Organization: [{ id: orgId, slug: "org", name: "Org" }],
+    User: [{ id: importerId, email: "importer@example.com", name: "Importer" }],
+    OrganizationMember: [{ id: randomUUID(), organizationId: orgId, userId: importerId, role: "ADMIN" }],
+    Workspace: [{ id: wsId, organizationId: orgId, slug: "source", name: "Source", ssoEnabled: false }],
+    Doc: [{ id: randomUUID(), workspaceId: wsId, title: "Doc", content: `![image](/api/docs/images/${wsId}/${randomUUID()}.png)` }],
+  })
+  const bundle = await exportWorkspaceToBuffer(db.client, wsId, {
+    ...noopBlobs, artifact: { ...noopBlobs.artifact, get: async () => new Uint8Array([1]) },
+  })
+  const deleted: string[] = []
+  const artifact = {
+    put: async (pathname: string) => ({ pathname, created: false }),
+    get: async () => new Uint8Array([2]),
+    del: async (pathname: string) => { deleted.push(pathname) },
+  }
+  await expect(importWorkspaceBundle(db.client, bundle, {
+    organizationId: orgId, importerUserId: importerId, slug: "copy", blobs: { ...noopBlobs, artifact },
+  })).rejects.toThrow(/existing private file differs/i)
+  expect(deleted).toEqual([])
+  expect(db.tables.Workspace).toHaveLength(1)
+})
+
+it("does not give an imported workspace ownership of a source attachment when no bytes were bundled", async () => {
+  const orgId = randomUUID()
+  const wsId = randomUUID()
+  const importerId = randomUUID()
+  const feedbackItemId = randomUUID()
+  const attachmentId = randomUUID()
+  const db = createInMemoryPrisma({
+    Organization: [{ id: orgId, slug: "org", name: "Org" }],
+    User: [{ id: importerId, email: "importer@example.com", name: "Importer" }],
+    OrganizationMember: [{ id: randomUUID(), organizationId: orgId, userId: importerId, role: "ADMIN" }],
+    Workspace: [{ id: wsId, organizationId: orgId, slug: "source", name: "Source", ssoEnabled: false }],
+    FeedbackItem: [{ id: feedbackItemId, workspaceId: wsId, title: "Feedback" }],
+    FeedbackAttachment: [{
+      id: attachmentId, feedbackItemId, filename: "file.png", fileType: "image/png", fileSize: 1,
+      url: `/api/files/public/feedback/${wsId}/${attachmentId}-file.png`,
+    }],
+  })
+  const bundle = await exportWorkspaceToBuffer(db.client, wsId, noopBlobs)
+  const report = await importWorkspaceBundle(db.client, bundle, {
+    organizationId: orgId, importerUserId: importerId, slug: "copy", blobs: noopBlobs,
+  })
+  expect(report.warnings.join("\n")).toMatch(/attachment.*had no bytes.*skipped/i)
+  expect(db.tables.FeedbackAttachment).toHaveLength(1)
+})
+
+it("reserves an import identity before either invocation writes bundle assets", async () => {
+  const orgId = randomUUID()
+  const wsId = randomUUID()
+  const importerId = randomUUID()
+  const db = createInMemoryPrisma({
+    Organization: [{ id: orgId, slug: "org", name: "Org" }],
+    User: [{ id: importerId, email: "importer@example.com", name: "Importer" }],
+    OrganizationMember: [{ id: randomUUID(), organizationId: orgId, userId: importerId, role: "ADMIN" }],
+    Workspace: [{ id: wsId, organizationId: orgId, slug: "source", name: "Source", ssoEnabled: false }],
+    Doc: [{ id: randomUUID(), workspaceId: wsId, title: "Doc", content: `![image](/api/docs/images/${wsId}/${randomUUID()}.png)` }],
+  })
+  const artifact = { ...noopBlobs.artifact, get: async () => new Uint8Array([1]) }
+  const bundle = await exportWorkspaceToBuffer(db.client, wsId, { ...noopBlobs, artifact })
+  const entered = Promise.withResolvers<void>()
+  const resume = Promise.withResolvers<void>()
+  const put = vi.fn(async (pathname: string) => {
+    if (put.mock.calls.length > 1) throw new Error("unexpected second writer")
+    entered.resolve()
+    await resume.promise
+    return { pathname, created: true }
+  })
+  let claimed = false
+  const claimImport = async () => {
+    if (claimed) throw new Error("import already in progress")
+    claimed = true
+    return async () => { claimed = false }
+  }
+  const blobs = { ...noopBlobs, artifact: { ...artifact, put }, claimImport }
+  const opts = { organizationId: orgId, importerUserId: importerId, slug: "copy", nonce: "one-import", blobs }
+  const initial = importWorkspaceBundle(db.client, bundle, opts)
+  await entered.promise
+  try {
+    await expect(importWorkspaceBundle(db.client, bundle, opts)).rejects.toThrow("import already in progress")
+  } finally {
+    resume.resolve()
+    await initial
+  }
+  await expect(importWorkspaceBundle(db.client, bundle, opts)).resolves.toMatchObject({ alreadyImported: true })
+  expect(put).toHaveBeenCalledOnce()
+  expect(claimed).toBe(false)
+})
 
 describe("importWorkspaceBundle unique-key deduplication on collapsed users", () => {
   it("deduplicates CardSortProposal and Follow rows when 5 unmatched source users collapse onto the importer", async () => {

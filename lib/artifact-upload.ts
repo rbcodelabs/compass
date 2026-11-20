@@ -1,7 +1,7 @@
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto"
 import type { ArtifactStorage } from "@/lib/artifact-storage"
 import { MAX_ARTIFACT_HTML_BYTES } from "@/lib/artifacts"
-import { createDirectUpload } from "@/lib/storage/direct-upload"
+import { createDirectUpload, privateUploadReceiptSecret, stagedUploadCommit } from "@/lib/storage/direct-upload"
 
 /**
  * Direct-upload path for HTML artifacts.
@@ -31,7 +31,7 @@ type ArtifactUploadReceiptPayload = {
 }
 
 function receiptSecret(): string {
-  const secret = process.env.ARTIFACT_UPLOAD_RECEIPT_SECRET?.trim() || process.env.ARTIFACT_BLOB_READ_WRITE_TOKEN?.trim()
+  const secret = privateUploadReceiptSecret()
   if (!secret) throw new Error("Artifact direct uploads are not configured")
   return secret
 }
@@ -60,13 +60,14 @@ export async function prepareArtifactUpload(input: { workspaceId: string; filena
   const uploadId = randomUUID()
   const pathname = stagingPathname(input.workspaceId, uploadId)
   const expiresAt = now + DIRECT_UPLOAD_TTL_MS
+  const payload: ArtifactUploadReceiptPayload = { version: 1, uploadId, workspaceId: input.workspaceId, pathname, filename: input.filename, fileSize: input.fileSize, expiresAt }
+  const encoded = Buffer.from(JSON.stringify(payload)).toString("base64url")
+  const receipt = `${encoded}.${sign(encoded)}`
   const credential = await createDirectUpload({
     store: "private", pathname, allowedContentTypes: ["text/html"], maxBytes: input.fileSize,
     validUntil: expiresAt, ttlSeconds: DIRECT_UPLOAD_TTL_MS / 1000, allowOverwrite: false,
   })
-  const payload: ArtifactUploadReceiptPayload = { version: 1, uploadId, workspaceId: input.workspaceId, pathname, filename: input.filename, fileSize: input.fileSize, expiresAt }
-  const encoded = Buffer.from(JSON.stringify(payload)).toString("base64url")
-  return { uploadId, pathname, ...credential, receipt: `${encoded}.${sign(encoded)}`, filename: input.filename, fileType: "text/html", fileSize: input.fileSize, expiresAt, access: "private" as const }
+  return { uploadId, pathname, ...credential, receipt, filename: input.filename, fileType: "text/html", fileSize: input.fileSize, expiresAt, access: "private" as const }
 }
 
 export function verifyArtifactUploadReceipt(receipt: string, workspaceId: string, now = Date.now()): ArtifactUploadReceiptPayload {
@@ -93,8 +94,7 @@ export function verifyArtifactUploadReceipt(receipt: string, workspaceId: string
 export type StagedArtifactUpload = {
   bytes: Uint8Array
   filename: string
-  /** Best-effort removal of the staging blob once the artifact revision is committed. */
-  discard: () => Promise<void>
+  commit: <T>(apply: () => Promise<T>) => Promise<T>
 }
 
 /**
@@ -106,5 +106,5 @@ export async function loadStagedArtifactUpload(receipt: string, workspaceId: str
   const bytes = await storage.get(payload.pathname)
   if (!bytes) throw new Error("No uploaded file found for this receipt. Upload the file first, or it was already used.")
   if (bytes.byteLength !== payload.fileSize) throw new Error("Uploaded file size does not match the prepared upload")
-  return { bytes, filename: payload.filename, discard: () => storage.del(payload.pathname).catch(() => undefined) }
+  return { bytes, filename: payload.filename, commit: stagedUploadCommit(storage, payload.pathname) }
 }

@@ -1,6 +1,5 @@
 import { NextRequest } from "next/server"
 import { keyFromSegments, parseSingleRange } from "@/lib/storage/public-route"
-import { resolveStorageBackend } from "@/lib/storage/config"
 import { getPublicObject, headPublicObject } from "@/lib/storage/s3"
 
 /**
@@ -58,7 +57,7 @@ function safeHeaders(key: string, storedType: string | undefined, etag: string |
   headers.set("X-Content-Type-Options", "nosniff")
   headers.set("Content-Security-Policy", "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:")
   headers.set("Referrer-Policy", "no-referrer")
-  headers.set("Cross-Origin-Resource-Policy", "same-site")
+  headers.set("Cross-Origin-Resource-Policy", key.startsWith("embed-feedback/") ? "cross-origin" : "same-site")
   // Keys carry a random UUID and are never rewritten, so the bytes behind one never change.
   headers.set("Cache-Control", "public, max-age=31536000, immutable")
   headers.set("Accept-Ranges", "bytes")
@@ -70,7 +69,7 @@ async function handle(request: NextRequest, context: { params: Promise<Params> }
   const key = keyFromSegments((await context.params).key)
   if (!key) return notFound()
   try {
-    if (resolveStorageBackend() !== "s3") return notFound()
+    if (!process.env.COMPASS_S3_BUCKET?.trim()) return notFound()
 
     if (headOnly) {
       const head = await headPublicObject(key)

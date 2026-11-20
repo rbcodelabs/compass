@@ -31,7 +31,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ orgSlug
   const userId = session!.user!.id!
 
   let bytes: Uint8Array
-  let discard: (() => Promise<void>) | undefined
+  let commit: Awaited<ReturnType<typeof loadStagedBundle>>["commit"] | undefined
   let fields: { name?: string; slug?: string; nonce?: string } = {}
   try {
     if ((req.headers.get("content-type") ?? "").includes("application/json")) {
@@ -39,7 +39,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ orgSlug
       if (!body.receipt) return NextResponse.json({ error: "receipt is required" }, { status: 400 })
       const staged = await loadStagedBundle(body.receipt, organizationId, userId, getArtifactStorage())
       bytes = staged.bytes
-      discard = staged.discard
+      commit = staged.commit
       fields = body
     } else {
       const form = await req.formData()
@@ -55,7 +55,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ orgSlug
   }
 
   try {
-    const report = await importWorkspaceBundle(prisma, bytes, {
+    const importBundle = () => importWorkspaceBundle(prisma, bytes, {
       organizationId,
       importerUserId: userId,
       name: fields.name,
@@ -63,7 +63,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ orgSlug
       nonce: fields.nonce,
       blobs: defaultBlobAdapters(),
     })
-    await discard?.()
+    const report = await (commit ? commit(importBundle) : importBundle())
     const { revalidatePath } = await import("next/cache")
     revalidatePath("/dashboard")
     revalidatePath("/", "layout")

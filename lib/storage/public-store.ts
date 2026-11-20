@@ -33,7 +33,11 @@ export interface PublicFileStore {
 
 /** The active public store. One place decides; every caller goes through it. */
 export function getPublicFileStore(): PublicFileStore {
-  return resolveStorageBackend() === "s3" ? s3PublicFileStore : vercelBlobPublicFileStore
+  if (resolveStorageBackend() === "s3") return s3PublicFileStore
+  if (process.env.COMPASS_S3_BUCKET?.trim()) {
+    return { put: vercelBlobPublicFileStore.put, fetch: s3PublicFileStore.fetch, delete: s3PublicFileStore.delete }
+  }
+  return vercelBlobPublicFileStore
 }
 
 export { vercelBlobPublicFileStore }

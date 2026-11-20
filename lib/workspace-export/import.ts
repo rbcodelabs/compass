@@ -11,7 +11,6 @@ import { IMPORT_OVERRIDES, SECRET_COLUMNS } from "@/lib/workspace-export/model-r
 import {
   capabilityPackArtifactPath,
   confineStoragePath,
-  isOwnFeedbackAttachmentUrl,
   type PrivateBlobStore,
 } from "@/lib/workspace-export/path-confinement"
 import {
@@ -364,7 +363,16 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
 
   const rewritePath = rewriteText
 
+  // Multiple receipts and the multipart path can address the same derived
+  // workspace. Check for a completed retry again after acquiring its claim.
+  const releaseImport = await opts.blobs.claimImport?.(newWorkspaceId)
+  let writesStarted = false
   try {
+    if (releaseImport) {
+      const [committed] = await wsDelegate.findMany({ where: { id: newWorkspaceId }, take: 1 })
+      if (committed) return alreadyImportedReport(committed, manifest)
+    }
+    writesStarted = true
     // ---- blobs first: a failure here writes nothing to the database ------------------------------------------------------
     let blobsCopied = 0
     for (const b of manifest.blobs) {
@@ -386,7 +394,14 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
       const storage = b.store === "research" ? opts.blobs.research : opts.blobs.artifact
       // Never overwrite: the target prefix is brand new, so an existing object is not ours to replace (or to delete later).
       const put = await storage.put(target, data, b.contentType, { overwrite: false })
-      if (put.created !== false) uploaded.push({ store: b.store, key: target })
+      if (put.created === false) {
+        const stored = await storage.get(target)
+        if (!stored || !Buffer.from(stored).equals(data)) {
+          throw new WorkspaceImportError("The existing private file differs from the bundle")
+        }
+      } else {
+        uploaded.push({ store: b.store, key: target })
+      }
       blobsCopied++
     }
 
@@ -441,13 +456,9 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
             row.url = await opts.blobs.putPublic(key, data, String(raw.fileType ?? "application/octet-stream"))
             uploaded.push({ store: "feedback", key: row.url as string })
             blobsCopied++
-          } else if (isOwnFeedbackAttachmentUrl(raw.url, sourceWorkspaceId)) {
-            // Only this deployment's own public-store URLs survive, and verbatim (not run through the id rewrite).
-            row.url = raw.url
-            warnings.push(`Feedback attachment ${raw.id} bytes were not in the bundle; its original URL was kept`)
           } else {
             dropped.FeedbackAttachment = (dropped.FeedbackAttachment ?? 0) + 1
-            warnings.push(`Feedback attachment ${raw.id} had no bytes in the bundle and an external URL; it was skipped`)
+            warnings.push(`Feedback attachment ${raw.id} had no bytes in the bundle; it was skipped`)
             continue
           }
         }
@@ -539,10 +550,14 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
       warnings,
     }
   } catch (error) {
+    if (!writesStarted) throw error
     // The Workspace row is the commit point. If it exists, a request with the same nonce finished first (two concurrent
     // submissions derive identical ids, and the loser fails at the Workspace insert). Rolling back would delete the
     // winner's rows, so treat it as "already imported" and leave everything alone.
-    const committed = await delegateFor(client, "Workspace").findMany({ where: { id: newWorkspaceId }, take: 1 }).catch(() => [])
+    const committed = await delegateFor(client, "Workspace").findMany({ where: { id: newWorkspaceId }, take: 1 }).catch((statusError) => {
+      if (releaseImport) throw new AggregateError([error, statusError], "Could not verify the import outcome before rollback")
+      return []
+    })
     if (committed[0]) {
       if ((error as { code?: string }).code === "P2002") return alreadyImportedReport(committed[0], manifest)
       throw error
@@ -551,6 +566,10 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
       console.error("[workspace-import] rollback failed; partial rows may remain for workspace", newWorkspaceId, rollbackError)
     })
     throw error
+  } finally {
+    await releaseImport?.().catch((error: unknown) => {
+      console.error("[workspace-import] could not release import claim", error)
+    })
   }
 }
 

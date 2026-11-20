@@ -44,6 +44,7 @@ describe("s3ObjectKey", () => {
 
   it("sends unconsumed direct-upload staging objects to the expiring tmp/ prefix", () => {
     expect(s3ObjectKey("artifacts", "artifact-staging/ws/u.html")).toBe("tmp/artifact-staging/ws/u.html")
+    expect(s3ObjectKey("artifacts", "workspace-import-staging/org/bundle.zip")).toBe("tmp/workspace-import-staging/org/bundle.zip")
     // Only the artifacts store has staging; other stores never remap.
     expect(s3ObjectKey("research", "artifact-staging/ws/u.html")).toBe("research/artifact-staging/ws/u.html")
   })
@@ -86,6 +87,30 @@ describe("createS3Storage", () => {
     s3.on(PutObjectCommand).rejects(Object.assign(new Error("PreconditionFailed"), { name: "PreconditionFailed", $metadata: { httpStatusCode: 412 } }))
     const result = await createS3Storage("artifacts").put("ws/a.html", new Uint8Array([1]), "text/html", { overwrite: false })
     expect(result).toEqual({ pathname: "ws/a.html", created: false })
+  })
+
+  it("retries a conditional conflict before reporting a private object was created", async () => {
+    const conflict = Object.assign(new Error("conditional write conflict"), {
+      name: "ConditionalRequestConflict",
+      $metadata: { httpStatusCode: 409 },
+    })
+    s3.on(PutObjectCommand).rejectsOnce(conflict).resolves({})
+    const storage = createS3Storage("artifacts")
+    await expect(storage.put("ws/a.html", new Uint8Array([1]), "text/html", { overwrite: false }))
+      .resolves.toEqual({ pathname: "ws/a.html", created: true })
+    expect(s3.commandCalls(PutObjectCommand)).toHaveLength(2)
+  })
+
+  it("surfaces a persistent conditional conflict after a bounded number of attempts", async () => {
+    const conflict = Object.assign(new Error("conditional write conflict"), {
+      name: "ConditionalRequestConflict",
+      $metadata: { httpStatusCode: 409 },
+    })
+    s3.on(PutObjectCommand).rejects(conflict)
+    const storage = createS3Storage("artifacts")
+    await expect(storage.put("ws/a.html", new Uint8Array([1]), "text/html", { overwrite: false }))
+      .rejects.toThrow("conditional write conflict")
+    expect(s3.commandCalls(PutObjectCommand)).toHaveLength(3)
   })
 
   it("a default put sends no If-None-Match and still surfaces real errors", async () => {
@@ -173,7 +198,7 @@ describe("public store helpers", () => {
     const result = await putS3PublicFile({ key, body: new Uint8Array([1]), contentType: "image/png" })
     expect(result).toEqual({ url: `/api/files/public/${key}` })
     expect(s3.commandCalls(PutObjectCommand)[0]!.args[0].input).toMatchObject({
-      Key: `public/${key}`, ContentType: "image/png", CacheControl: "public, max-age=31536000, immutable", ContentDisposition: "attachment",
+      Key: `public/${key}`, ContentType: "image/png", CacheControl: "public, max-age=31536000, immutable", ContentDisposition: "attachment", IfNoneMatch: "*",
     })
   })
 
@@ -214,47 +239,29 @@ describe("public store helpers", () => {
   })
 })
 
-describe("createPresignedUpload (presigned POST)", () => {
-  const decodePolicy = (fields: Record<string, string>) =>
-    JSON.parse(Buffer.from(fields.Policy!, "base64").toString("utf8")) as { expiration: string; conditions: unknown[] }
-
-  it("pins bucket, exact key, exact content type, exact length and stored headers", async () => {
+describe("createPresignedUpload", () => {
+  it("signs a create-only PUT with the object metadata and exact byte length bound to the signature", async () => {
     const target = await createPresignedUpload({
       store: "artifacts", pathname: "artifact-staging/ws/u.html", contentType: "text/html", fileSize: 1234, expiresInSeconds: 600,
     })
-    expect(target.method).toBe("POST")
-    expect(target.url).toContain("compass-test-files")
-    expect(target.fields.key).toBe("tmp/artifact-staging/ws/u.html")
-    expect(target.fields["Content-Type"]).toBe("text/html")
-    const { conditions, expiration } = decodePolicy(target.fields)
-    expect(conditions).toEqual(expect.arrayContaining([
-      ["content-length-range", 1234, 1234],
-      ["eq", "$Content-Type", "text/html"],
-      ["eq", "$Cache-Control", "private, no-store"],
-      ["eq", "$Content-Disposition", "attachment"],
-      { bucket: "compass-test-files" },
-      { key: "tmp/artifact-staging/ws/u.html" },
+    const url = new URL(target.url)
+    expect(target).toMatchObject({ method: "PUT", headers: { "If-None-Match": "*", "Content-Type": "text/html" } })
+    expect(url.hostname).toContain("compass-test-files")
+    expect(url.pathname).toBe("/tmp/artifact-staging/ws/u.html")
+    expect(url.searchParams.get("X-Amz-Credential")).toMatch(/^AKIAIOSFODNN7EXAMPLE\//)
+    expect(url.searchParams.has("X-Amz-Security-Token")).toBe(false)
+    expect(url.searchParams.get("X-Amz-Expires")).toBe("600")
+    expect(url.searchParams.get("X-Amz-SignedHeaders")?.split(";")).toEqual(expect.arrayContaining([
+      "if-none-match", "content-length", "content-type", "cache-control", "content-disposition",
     ]))
-    // Hermetic: signed with the stubbed test credential, never an ambient one.
-    expect(conditions).toContainEqual({ "X-Amz-Credential": expect.stringMatching(/^AKIAIOSFODNN7EXAMPLE\//) })
-    expect(JSON.stringify(conditions)).not.toContain("X-Amz-Security-Token")
-    // No ACL and no wildcard key condition: nothing the client can steer. Look at the condition names and operators, not
-    // at the serialized text, which random credential characters could match by chance.
-    const names = conditions.map((condition) => (Array.isArray(condition) ? String(condition[1] ?? "") : Object.keys(condition as object)[0]).replace(/^\$/, "").toLowerCase())
-    const operators = conditions.filter(Array.isArray).map((condition) => String(condition[0]).toLowerCase())
-    expect(names).not.toContain("acl")
-    expect(operators).not.toContain("starts-with")
-    const ttl = new Date(expiration).getTime() - Date.now()
-    expect(ttl).toBeGreaterThan(540_000)
-    expect(ttl).toBeLessThanOrEqual(601_000)
   })
 
-  it("public uploads carry immutable caching in the signed policy", async () => {
+  it("public uploads carry immutable caching in the signed headers", async () => {
     const target = await createPresignedUpload({
       store: "public", pathname: `feedback/ws/${UUID}-a.png`, contentType: "image/png", fileSize: 10, expiresInSeconds: 600,
     })
-    expect(target.fields.key).toBe(`public/feedback/ws/${UUID}-a.png`)
-    expect(decodePolicy(target.fields).conditions).toEqual(expect.arrayContaining([["eq", "$Cache-Control", "public, max-age=31536000, immutable"]]))
+    expect(new URL(target.url).pathname).toBe(`/public/feedback/ws/${UUID}-a.png`)
+    expect(target.headers["Cache-Control"]).toBe("public, max-age=31536000, immutable")
   })
 
   it("refuses an empty size and a traversal path", async () => {
@@ -266,6 +273,7 @@ describe("createPresignedUpload (presigned POST)", () => {
     vi.stubEnv("AWS_ENDPOINT_URL_S3", "http://127.0.0.1:9000")
     vi.stubEnv("COMPASS_S3_FORCE_PATH_STYLE", "1")
     const target = await createPresignedUpload({ store: "artifacts", pathname: "a.html", contentType: "text/html", fileSize: 5, expiresInSeconds: 600 })
-    expect(target.url).toBe("http://127.0.0.1:9000/compass-test-files")
+    expect(new URL(target.url).origin).toBe("http://127.0.0.1:9000")
+    expect(new URL(target.url).pathname).toBe("/compass-test-files/artifacts/a.html")
   })
 })

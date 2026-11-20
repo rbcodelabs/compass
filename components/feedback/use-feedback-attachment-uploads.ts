@@ -1,5 +1,6 @@
 "use client";
 
+import type { PresignedUploadTarget } from "@/lib/storage/direct-upload-client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { uploadToTarget } from "@/lib/storage/direct-upload-client";
 
@@ -44,8 +45,8 @@ export type AttachmentTransport = {
       contentType: string;
       onProgress: (percentage: number) => void;
       signal: AbortSignal;
-      /** S3 backend: upload with this presigned POST instead of a Blob client token. */
-      presignedPost?: { url: string; fields: Record<string, string> };
+      /** S3 backend: upload with this presigned PUT instead of a Blob client token. */
+      presignedUpload?: PresignedUploadTarget;
       /** S3 backend: the app-route URL the finished upload is served at. */
       url?: string;
     },
@@ -56,9 +57,9 @@ export type AttachmentTransport = {
 export function defaultAttachmentTransport(orgSlug: string, workspaceSlug: string): AttachmentTransport {
   return {
     prepare: (file) => prepareFeedbackAttachment(orgSlug, workspaceSlug, file),
-    upload: (pathname, file, { token, contentType, onProgress, signal, presignedPost, url }) =>
+    upload: (pathname, file, { token, contentType, onProgress, signal, presignedUpload, url }) =>
       uploadToTarget(
-        { pathname, clientToken: token, access: "public", ...(presignedPost ? { upload: presignedPost } : {}), ...(url ? { url } : {}) },
+        { pathname, clientToken: token, access: "public", ...(presignedUpload ? { upload: presignedUpload } : {}), ...(url ? { url } : {}) },
         file,
         { contentType, signal, onProgress },
       ),
@@ -149,7 +150,7 @@ export function useFeedbackAttachmentUploads({
         if (controller.signal.aborted) return;
         const blob = await transportRef.current.upload(prepared.upload.pathname, file, {
           token: prepared.upload.clientToken,
-          presignedPost: prepared.upload.presignedPost,
+          presignedUpload: prepared.upload.presignedUpload,
           url: prepared.upload.url,
           contentType: file.type,
           signal: controller.signal,

@@ -449,7 +449,7 @@ export async function POST(request: NextRequest) {
         // so anything that is not a blob URL under the embed prefix is dropped
         // rather than rejected. Dropped, because a comment is worth keeping even
         // when its decoration is not.
-        screenshotUrl: isEmbedScreenshotUrl(input.screenshotUrl) ? input.screenshotUrl : null,
+        screenshotUrl: isEmbedScreenshotUrl(input.screenshotUrl, source) ? input.screenshotUrl : null,
       }
     }
 

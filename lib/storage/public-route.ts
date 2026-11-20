@@ -1,12 +1,13 @@
-import { isPublicFileKey } from "@/lib/public-file-keys"
+import { isPublicFileKey, MAX_PUBLIC_FILE_SEGMENT_LENGTH } from "@/lib/public-file-keys"
 
-const SEGMENT = /^[A-Za-z0-9._-]{1,255}$/
+const SEGMENT = /^[A-Za-z0-9._-]+$/
 
 /** Segment-wise validation, then the shape allowlist. Null means "not ours to serve". */
 export function keyFromSegments(segments: unknown): string | null {
   if (!Array.isArray(segments) || segments.length === 0 || segments.length > 6) return null
   for (const segment of segments) {
-    if (typeof segment !== "string" || !SEGMENT.test(segment) || segment === "." || segment === "..") return null
+    if (typeof segment !== "string" || segment.length > MAX_PUBLIC_FILE_SEGMENT_LENGTH ||
+      !SEGMENT.test(segment) || segment === "." || segment === "..") return null
   }
   const key = segments.join("/")
   return isPublicFileKey(key) ? key : null

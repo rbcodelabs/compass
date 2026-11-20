@@ -48,6 +48,14 @@ describe("GET /api/files/public/<key>: what is served", () => {
     expect(authSpy).not.toHaveBeenCalled()
   })
 
+  it("serves the full 255-character feedback filename after its UUID prefix", async () => {
+    const key = `feedback/ws_1/${UUID}-${"a".repeat(251)}.png`
+    s3.on(GetObjectCommand).resolves({ Body: bodyOf("IMAGE") as never, ContentType: "image/png" })
+    s3.on(HeadObjectCommand).resolves({ ContentType: "image/png" })
+    expect((await call(key.split("/"))).status).toBe(200)
+    expect((await call(key.split("/"), { method: "HEAD" })).status).toBe(200)
+  })
+
   it("sets type, length, validators, immutable caching and the active-content defences", async () => {
     s3.on(GetObjectCommand).resolves({ Body: bodyOf("PNGDATA") as never, ContentType: "image/png", ContentLength: 7, ETag: '"e1"' })
     const response = await call(FEEDBACK.split("/"))
@@ -142,10 +150,23 @@ describe("GET /api/files/public/<key>: what is refused", () => {
     warn.mockRestore()
   })
 
-  it("is inert unless the S3 backend is selected", async () => {
+  it("keeps existing S3 public URLs readable after the default write backend changes", async () => {
     vi.stubEnv("COMPASS_STORAGE_BACKEND", "blob")
+    s3.on(GetObjectCommand).resolves({ Body: bodyOf("PNGDATA") as never, ContentType: "image/png" })
+    expect((await call(FEEDBACK.split("/"))).status).toBe(200)
+  })
+
+  it("does not look up public S3 URLs without a configured bucket", async () => {
+    vi.stubEnv("COMPASS_STORAGE_BACKEND", "blob")
+    vi.stubEnv("COMPASS_S3_BUCKET", "")
     expect((await call(FEEDBACK.split("/"))).status).toBe(404)
     expect(s3.calls()).toHaveLength(0)
+  })
+
+  it("allows a linked embed screenshot to render on a separate site", async () => {
+    s3.on(GetObjectCommand).resolves({ Body: bodyOf("IMAGE") as never, ContentType: "image/png" })
+    const response = await call(`embed-feedback/ws_1/source_1/capture-${UUID}.png`.split("/"))
+    expect(response.headers.get("cross-origin-resource-policy")).toBe("cross-origin")
   })
 
   it("reports an unexpected storage failure as a generic 502 without leaking detail", async () => {

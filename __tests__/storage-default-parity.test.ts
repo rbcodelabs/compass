@@ -25,6 +25,16 @@ describe("with COMPASS_STORAGE_BACKEND unset the Vercel Blob behavior is unchang
     expect(feedbackAttachmentsAvailable()).toBe(true)
   })
 
+  it("S3 feedback direct upload needs a bucket and a receipt secret", () => {
+    vi.stubEnv("COMPASS_STORAGE_BACKEND", "s3")
+    vi.stubEnv("COMPASS_S3_BUCKET", "compass-test-files")
+    vi.stubEnv("BLOB_READ_WRITE_TOKEN", "")
+    vi.stubEnv("FEEDBACK_UPLOAD_RECEIPT_SECRET", "")
+    expect(feedbackAttachmentsAvailable()).toBe(false)
+    vi.stubEnv("FEEDBACK_UPLOAD_RECEIPT_SECRET", "test-secret")
+    expect(feedbackAttachmentsAvailable()).toBe(true)
+  })
+
   it("only the exact public-file key shapes skip the login redirect; other /api/files paths do not", () => {
     expect(isPublicPath(`/api/files/public/${KEY}`)).toBe(true)
     expect(isPublicPath("/api/files/public/artifacts/ws/secret.html")).toBe(false)

@@ -159,7 +159,7 @@ export async function* exportWorkspaceChunks(
         } else if (model === "FeedbackAttachment" && typeof raw.url === "string") {
           const url = raw.url
           const type = typeof raw.fileType === "string" ? raw.fileType : "application/octet-stream"
-          queueBlob("feedback", raw.id as string, type, async () => (await blobs.fetchPublic(url))?.bytes ?? null)
+          queueBlob("feedback", raw.id as string, type, async () => (await blobs.fetchPublic(url, workspaceId))?.bytes ?? null)
         } else if ((model === "Doc" || model === "DocVersion") && typeof raw.content === "string") {
           for (const m of raw.content.matchAll(DOC_IMAGE_URL)) {
             if (m[1].toLowerCase() !== workspaceId.toLowerCase()) continue

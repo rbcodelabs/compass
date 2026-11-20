@@ -1,10 +1,10 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const s3 = vi.hoisted(() => ({ putS3PublicFile: vi.fn(), deleteS3PublicFilesByUrl: vi.fn(), getPublicObject: vi.fn() }))
-const blob = vi.hoisted(() => ({ delete: vi.fn() }))
+const blob = vi.hoisted(() => ({ delete: vi.fn(), fetch: vi.fn() }))
 vi.mock("@/lib/storage/public-files", () => ({ putS3PublicFile: s3.putS3PublicFile, deleteS3PublicFilesByUrl: s3.deleteS3PublicFilesByUrl }))
 vi.mock("@/lib/storage/s3", () => ({ getPublicObject: s3.getPublicObject }))
-vi.mock("@/lib/storage/blob-public-store", () => ({ vercelBlobPublicFileStore: { delete: blob.delete, put: vi.fn(), fetch: vi.fn() } }))
+vi.mock("@/lib/storage/blob-public-store", () => ({ vercelBlobPublicFileStore: { delete: blob.delete, put: vi.fn(), fetch: blob.fetch } }))
 
 import { isPublicFileKey } from "@/lib/public-file-keys"
 import { publicKeyForPathname, s3PublicFileStore } from "@/lib/storage/s3-public-store"
@@ -45,7 +45,9 @@ describe("s3PublicFileStore", () => {
     s3.deleteS3PublicFilesByUrl.mockReset().mockResolvedValue(undefined)
     s3.getPublicObject.mockReset()
     blob.delete.mockReset().mockResolvedValue(undefined)
+    vi.stubEnv("BLOB_READ_WRITE_TOKEN", "vercel_blob_rw_teststore_test")
   })
+  afterEach(() => vi.unstubAllEnvs())
 
   it("stores bytes under the mapped key and returns the app route", async () => {
     const out = await s3PublicFileStore.put("feedback/ws1/1-a.png", new Blob(["hi"], { type: "image/png" }), { contentType: "image/png" })
@@ -64,7 +66,7 @@ describe("s3PublicFileStore", () => {
 
   it("routes each URL to the store that owns it when deleting (history can mix Blob and S3 rows)", async () => {
     const route = `/api/files/public/feedback/ws1/${UUID}-a.png`
-    const legacy = "https://x.public.blob.vercel-storage.com/feedback/ws1/old.png"
+    const legacy = "https://teststore.public.blob.vercel-storage.com/feedback/ws1/old.png"
     await s3PublicFileStore.delete([route, legacy])
     expect(s3.deleteS3PublicFilesByUrl).toHaveBeenCalledWith([route])
     expect(blob.delete).toHaveBeenCalledWith([legacy])
@@ -72,7 +74,10 @@ describe("s3PublicFileStore", () => {
 
   it("still attempts the other store when one fails, then rethrows", async () => {
     s3.deleteS3PublicFilesByUrl.mockRejectedValue(new Error("s3 down"))
-    await expect(s3PublicFileStore.delete([`/api/files/public/feedback/ws1/${UUID}-a.png`, "https://x/y"])).rejects.toThrow("s3 down")
+    await expect(s3PublicFileStore.delete([
+      `/api/files/public/feedback/ws1/${UUID}-a.png`,
+      "https://teststore.public.blob.vercel-storage.com/feedback/ws1/old.png",
+    ])).rejects.toThrow("s3 down")
     expect(blob.delete).toHaveBeenCalled()
   })
 
@@ -83,5 +88,18 @@ describe("s3PublicFileStore", () => {
     s3.getPublicObject.mockResolvedValueOnce({ kind: "not-found" })
     expect(await s3PublicFileStore.fetch(route)).toBeNull()
     expect(await s3PublicFileStore.fetch("https://elsewhere/x")).toBeNull()
+  })
+
+  it("reads historical feedback bytes from the configured Blob store", async () => {
+    vi.stubEnv("BLOB_READ_WRITE_TOKEN", "vercel_blob_rw_legacy_test")
+    const url = "https://legacy.public.blob.vercel-storage.com/feedback/ws1/old.png"
+    const object = { bytes: new Uint8Array([1]), contentType: "image/png" }
+    blob.fetch.mockResolvedValueOnce(object)
+    try {
+      await expect(s3PublicFileStore.fetch(url)).resolves.toEqual(object)
+      expect(blob.fetch).toHaveBeenCalledWith(url)
+    } finally {
+      vi.unstubAllEnvs()
+    }
   })
 })

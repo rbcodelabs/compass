@@ -6,7 +6,7 @@
  * the same "mock @/lib/db" pattern used elsewhere in this repo, applied here
  * to a route handler (no prior route-handler test precedent existed).
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { afterEach, describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 
 const mockWorkspace = { findFirst: vi.fn() };
@@ -44,6 +44,7 @@ const params = Promise.resolve({ orgSlug: "acme", workspaceSlug: "ws" });
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.stubEnv("BLOB_READ_WRITE_TOKEN", "vercel_blob_rw_abc123_test");
   mockFeedbackItem.create.mockResolvedValue({
     id: "fb-1",
     title: "Test",
@@ -53,6 +54,7 @@ beforeEach(() => {
     createdAt: new Date("2026-01-01T00:00:00Z"),
   });
 });
+afterEach(() => vi.unstubAllEnvs());
 
 describe("POST /api/portal/[orgSlug]/[workspaceSlug]/feedback", () => {
   it("portalAuthRequired=false: unaffected regression — client submitterEmail passes through untouched, no session lookup", async () => {
@@ -272,6 +274,19 @@ describe("POST /api/portal/[orgSlug]/[workspaceSlug]/feedback", () => {
 
     expect(res.status).toBe(422);
     expect(data.error).toBe("Invalid attachment URL");
+    expect(mockFeedbackItem.create).not.toHaveBeenCalled();
+  });
+
+  it("422s when a Blob attachment belongs to another workspace", async () => {
+    mockWorkspace.findFirst.mockResolvedValue({ id: "ws-1", feedbackEnabled: true, portalAuthRequired: false });
+    const attachment = {
+      url: "https://abc123.public.blob.vercel-storage.com/feedback/ws-2/1-file.png",
+      filename: "file.png",
+      fileType: "image/png",
+      fileSize: 100,
+    };
+    const response = await POST(makeRequest({ title: "Idea", attachments: [attachment] }), { params });
+    expect(response.status).toBe(422);
     expect(mockFeedbackItem.create).not.toHaveBeenCalled();
   });
 });

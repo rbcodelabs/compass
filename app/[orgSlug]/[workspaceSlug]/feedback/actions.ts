@@ -1,5 +1,6 @@
 "use server";
 
+import type { PresignedUploadTarget } from "@/lib/storage/direct-upload-client";
 import { revalidatePath } from "next/cache";
 import type { Prisma } from "@prisma/client";
 import { auth } from "@/auth";
@@ -199,10 +200,10 @@ export type PrepareFeedbackAttachmentResult =
       ok: true;
       upload: {
         /** Vercel Blob backend: client token for @vercel/blob/client put(). */
-        /** Empty on the S3 backend, where `presignedPost` is the target instead. */
+        /** Empty on the S3 backend, where `presignedUpload` is the target instead. */
         clientToken: string;
-        /** S3 backend: POST the file here (fields first, then `file`); `url` is the app route to store. */
-        presignedPost?: { method: "POST"; url: string; fields: Record<string, string> };
+        /** S3 backend: PUT the raw file using the signed headers; `url` is the app route to store. */
+        presignedUpload?: PresignedUploadTarget;
         url?: string;
         receipt: string;
         pathname: string;
@@ -213,7 +214,7 @@ export type PrepareFeedbackAttachmentResult =
 
 /**
  * Step one of an in-app attachment: validate the file's metadata and mint a
- * single-use, size- and type-locked client token (Vercel Blob) or presigned POST
+ * single-use, size- and type-locked client token (Vercel Blob) or presigned PUT
  * (S3 backend) for a direct browser upload, plus a signed receipt that `createFeedback` later verifies.
  *
  * Same storage, limits and receipt format as the MCP
@@ -254,7 +255,7 @@ export async function prepareFeedbackAttachment(
         ok: true,
         upload: {
           clientToken: "",
-          presignedPost: prepared.upload,
+          presignedUpload: prepared.upload,
           url: prepared.url,
           receipt: prepared.receipt,
           pathname: prepared.pathname,

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto"
 import { parsePublicFileUrl } from "@/lib/public-file-keys"
 import { vercelBlobPublicFileStore } from "@/lib/storage/blob-public-store"
+import { publicBlobStoreHostname } from "@/lib/storage/config"
 import type { PublicFileStore } from "@/lib/storage/public-store"
 import { deleteS3PublicFilesByUrl, putS3PublicFile } from "@/lib/storage/public-files"
 import { getPublicObject } from "@/lib/storage/s3"
@@ -18,6 +19,16 @@ import { getPublicObject } from "@/lib/storage/s3"
 const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
 const LEADING = new RegExp(`^(${UUID}|\\d+)-(.+)$`, "i")
 const EMBED_CAPTURE = /^capture(?:-[0-9a-f-]{36})?\.(jpg|png|webp)$/i
+
+function belongsToConfiguredBlobStore(value: string): boolean {
+  try {
+    const url = new URL(value)
+    return url.protocol === "https:" && url.hostname === publicBlobStoreHostname() &&
+      !url.username && !url.password && !url.port && !url.search && !url.hash
+  } catch {
+    return false
+  }
+}
 
 export function publicKeyForPathname(pathname: string): string {
   const parts = pathname.split("/")
@@ -47,7 +58,7 @@ export const s3PublicFileStore: PublicFileStore = {
    */
   async delete(urls) {
     const routeUrls = urls.filter((url) => parsePublicFileUrl(url) !== null)
-    const blobUrls = urls.filter((url) => parsePublicFileUrl(url) === null)
+    const blobUrls = urls.filter(belongsToConfiguredBlobStore)
     const results = await Promise.allSettled([
       routeUrls.length ? deleteS3PublicFilesByUrl(routeUrls) : Promise.resolve(),
       blobUrls.length ? vercelBlobPublicFileStore.delete(blobUrls) : Promise.resolve(),
@@ -57,7 +68,7 @@ export const s3PublicFileStore: PublicFileStore = {
   },
   async fetch(url) {
     const key = parsePublicFileUrl(url)
-    if (!key) return null
+    if (!key) return belongsToConfiguredBlobStore(url) ? vercelBlobPublicFileStore.fetch(url) : null
     const read = await getPublicObject(key)
     if (read.kind !== "ok" || !read.result.Body) return null
     return {

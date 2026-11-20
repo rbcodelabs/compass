@@ -18,5 +18,7 @@ export interface ArtifactStorage {
    * callers must handle its absence.
    */
   getStream?(pathname: string): Promise<{ stream: ReadableStream<Uint8Array>; size: number | null } | null>
+  /** Reserve a staging receipt across concurrent requests. Release only after a failed commit. */
+  claimStagedUpload?(pathname: string): Promise<() => Promise<void>>
   del(pathname: string): Promise<void>
 }

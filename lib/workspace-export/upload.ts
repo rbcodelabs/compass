@@ -1,6 +1,6 @@
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto"
 import { shouldUseLocalStorage, type ArtifactStorage } from "@/lib/artifact-storage"
-import { createDirectUpload, privateDirectUploadConfigured } from "@/lib/storage/direct-upload"
+import { createDirectUpload, privateDirectUploadConfigured, privateUploadReceiptSecret, stagedUploadCommit } from "@/lib/storage/direct-upload"
 
 /**
  * Direct-to-Blob staging for workspace bundles. A bundle can be far larger than a serverless request body
@@ -17,7 +17,7 @@ const TTL_MS = 30 * 60 * 1000
 type Payload = { v: 1; uploadId: string; organizationId: string; userId: string; pathname: string; fileSize: number; expiresAt: number }
 
 function secret(): string {
-  const s = process.env.ARTIFACT_UPLOAD_RECEIPT_SECRET?.trim() || process.env.ARTIFACT_BLOB_READ_WRITE_TOKEN?.trim()
+  const s = privateUploadReceiptSecret()
   if (!s) throw new Error("Workspace import uploads are not configured")
   return s
 }
@@ -34,13 +34,14 @@ export async function prepareBundleUpload(input: { organizationId: string; userI
   const uploadId = randomUUID()
   const pathname = stagingPath(input.organizationId, uploadId)
   const expiresAt = now + TTL_MS
+  const payload: Payload = { v: 1, uploadId, organizationId: input.organizationId, userId: input.userId, pathname, fileSize: input.fileSize, expiresAt }
+  const encoded = Buffer.from(JSON.stringify(payload)).toString("base64url")
+  const receipt = `${encoded}.${sign(encoded)}`
   const credential = await createDirectUpload({
     store: "private", pathname, allowedContentTypes: ["application/zip", "application/octet-stream"], maxBytes: input.fileSize,
     validUntil: expiresAt, ttlSeconds: TTL_MS / 1000, allowOverwrite: false, notConfiguredMessage: "Direct upload is not configured",
   })
-  const payload: Payload = { v: 1, uploadId, organizationId: input.organizationId, userId: input.userId, pathname, fileSize: input.fileSize, expiresAt }
-  const encoded = Buffer.from(JSON.stringify(payload)).toString("base64url")
-  return { uploadId, pathname, ...credential, receipt: `${encoded}.${sign(encoded)}`, expiresAt, access: "private" as const }
+  return { uploadId, pathname, ...credential, receipt, expiresAt, access: "private" as const }
 }
 
 export function verifyBundleReceipt(receipt: string, organizationId: string, userId: string, now = Date.now()): Payload {
@@ -66,5 +67,5 @@ export async function loadStagedBundle(receipt: string, organizationId: string, 
   const bytes = await storage.get(p.pathname)
   if (!bytes) throw new Error("No uploaded bundle found for this receipt")
   if (bytes.byteLength !== p.fileSize) throw new Error("Uploaded bundle size does not match the prepared upload")
-  return { bytes, discard: () => storage.del(p.pathname).catch(() => undefined) }
+  return { bytes, commit: stagedUploadCommit(storage, p.pathname) }
 }

@@ -6,6 +6,43 @@ import { roadmapCreateData } from "@/lib/roadmap-tool-handlers"
 const UUID = "11111111-1111-4111-8111-111111111111"
 
 describe("REST API registry", () => {
+  it("preserves S3 direct-upload credentials in feedback prepare responses", () => {
+    const schema = REST_ROUTES.find(route => route.operationId === "prepareFeedbackAttachmentUpload")!.responseSchema
+    const result = {
+      clientToken: "", backend: "s3", receipt: "receipt", pathname: `feedback/${UUID}/${UUID}-file.png`,
+      expiresAt: 12345, attachmentId: UUID, url: `/api/files/public/feedback/${UUID}/${UUID}-file.png`,
+      upload: { method: "PUT", url: "https://example.invalid/file", headers: { "If-None-Match": "*" } },
+    }
+    expect(schema.parse(result)).toEqual(result)
+  })
+
+  it("accepts app-route feedback attachment URLs in completion requests and responses", () => {
+    const route = REST_ROUTES.find(route => route.operationId === "completeFeedbackAttachmentUpload")!
+    const url = `/api/files/public/feedback/${UUID}/${UUID}-file.png`
+    expect(route.bodySchema!.safeParse({ url, receipt: "receipt" }).success).toBe(true)
+    expect(route.responseSchema.safeParse({
+      id: UUID, feedbackItemId: UUID, url, filename: "file.png", fileType: "image/png", fileSize: 1,
+      feedbackUrl: null, alreadyAttached: false, createdAt: "2026-11-20T12:00:00Z", updatedAt: "2026-11-20T12:00:00Z",
+    }).success).toBe(true)
+  })
+
+  it("preserves the backend-specific Docs image upload credential and read URL", () => {
+    const schema = REST_ROUTES.find(route => route.operationId === "prepareDocImageUpload")!.responseSchema
+    const imageName = `${UUID}.png`
+    const url = `/api/docs/images/${UUID}/${imageName}`
+    const fields = {
+      imageId: UUID, imageName, pathname: `docs/${UUID}/images/${imageName}`, url,
+      filename: "file.png", fileType: "image/png", fileSize: 5, expiresAt: 12345,
+      access: "private", markdown: `![file.png](${url})`,
+    }
+    const blob = { ...fields, clientToken: "blob-token" }
+    const s3 = {
+      ...fields, clientToken: "", backend: "s3",
+      upload: { method: "PUT", url: "https://example.invalid/file", headers: { "If-None-Match": "*" } },
+    }
+    expect(schema.parse(blob)).toEqual(blob)
+    expect(schema.parse(s3)).toEqual(s3)
+  })
   it("enumerates the approved Phase 5 closure surface", () => {
     const expected = [
       ["GET", "/api/v1/help-topics"], ["GET", "/api/v1/help-topics/{topic}"],

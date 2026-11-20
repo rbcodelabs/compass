@@ -27,7 +27,9 @@ const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
 /** Opaque row ids (cuid / uuid). No dots, so a segment can never be `.` or `..`. */
 const ID = "[A-Za-z0-9_-]{1,64}"
 /** The tail of a sanitized filename (`sanitizeFeedbackAttachmentFilename` output). */
-const NAME = "[A-Za-z0-9._-]{1,255}"
+const MAX_FILENAME_LENGTH = 255
+const NAME = `[A-Za-z0-9._-]{1,${MAX_FILENAME_LENGTH}}`
+export const MAX_PUBLIC_FILE_SEGMENT_LENGTH = 36 + 1 + MAX_FILENAME_LENGTH
 
 const PUBLIC_KEY_PATTERNS: readonly RegExp[] = [
   new RegExp(`^feedback/${ID}/${UUID}-${NAME}$`),

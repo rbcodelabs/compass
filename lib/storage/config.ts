@@ -14,6 +14,11 @@ export type StorageBackend = "blob" | "s3" | "local"
 
 type Env = Record<string, string | undefined>
 
+export function publicBlobStoreHostname(env: Env = process.env): string | null {
+  const storeId = /^vercel_blob_rw_([a-z0-9-]+)_/i.exec(env.BLOB_READ_WRITE_TOKEN ?? "")?.[1]
+  return storeId ? `${storeId.toLowerCase()}.public.blob.vercel-storage.com` : null
+}
+
 export function resolveStorageBackend(env: Env = process.env): StorageBackend {
   const raw = env.COMPASS_STORAGE_BACKEND?.trim().toLowerCase()
   if (raw) {

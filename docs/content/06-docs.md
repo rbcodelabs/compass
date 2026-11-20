@@ -65,13 +65,15 @@ Vercel Blob is the default and needs no extra setting. An administrator who host
 | `COMPASS_S3_REGION` | Optional. Falls back to `AWS_REGION` and the standard AWS configuration. |
 | `COMPASS_S3_FORCE_PATH_STYLE` | Set to `1` to use path-style addressing, for an S3-compatible server such as MinIO (together with `AWS_ENDPOINT_URL_S3`). |
 
-Credentials come from the standard AWS credential chain (environment variables, shared config, or an attached role); Compass never reads an access key of its own. The bucket stays **private**. Each store is a prefix in it: `artifacts/`, `capability-packs/`, `research/`, `agent-sessions/`, and `public/`. Uploads staged for the direct-upload flow go under `tmp/`, so a lifecycle rule on that prefix can expire abandoned ones.
+Credentials come from the standard AWS credential chain (environment variables, shared config, or an attached role); Compass never reads an access key of its own. The bucket stays **private**. Each store is a prefix in it: `artifacts/`, `capability-packs/`, `research/`, `agent-sessions/`, and `public/`. Set an expiration lifecycle rule on `tmp/` for abandoned artifact and workspace ZIP uploads and their consumed markers. Set the expiration longer than the 30-minute maximum upload window. In a versioned bucket, configure noncurrent version expiration on this prefix too. Docs images and feedback files use durable prefixes, so scope the expiration rule to `tmp/`.
 
-Browser and agent uploads use a presigned POST that pins the exact key, content type and byte length. The bucket's CORS rule must allow `POST` from the Compass origin.
+Browser and agent uploads use a create-only presigned PUT that signs the object key, content type and byte length. The bucket CORS rule must allow `PUT` from the Compass origin and allow `If-None-Match`, `Content-Type`, `Cache-Control` and `Content-Disposition`. Upload clients send the raw file and the returned headers.
+
+Set `ARTIFACT_UPLOAD_RECEIPT_SECRET` and `FEEDBACK_UPLOAD_RECEIPT_SECRET` when running without Blob credentials. The first signs artifact and workspace import receipts. The second signs feedback attachment receipts.
 
 Files that Vercel Blob serves from a public URL (feedback attachments, embedded-feedback screenshots, workspace logos) are served by Compass itself at `/api/files/public/<key>` on S3. Only keys of the shapes Compass generates, each containing a random UUID, are served, with or without a session; this is the same exposure as an unguessable Blob URL. Private stores are never reachable through that route.
 
-Switching an existing installation does not move files: stored paths and URLs are kept as they are, so copy existing objects into the bucket under the same prefixes before switching.
+Use S3 for new installations. For an installation with existing files, keep the current backend until you have a verified migration and rollback for private files, public URLs, and outstanding upload receipts. Public reads can use both stores while the original Blob credentials and S3 bucket configuration remain available. Private reads use the selected backend. Clients that only understand Vercel Blob upload tokens continue to work on Blob and need an update before using S3.
 
 Artifacts have stable identities and appear alongside Docs and Diagrams in the Library. They are not nested into the Page hierarchy. An Artifact can be linked to multiple Solutions, and a Solution can link to multiple Artifacts.
 
