@@ -24,7 +24,11 @@ const prisma = {
   doc: { findMany: vi.fn(async () => []) },
   artifact: { findMany: vi.fn(async () => [{ id: "a1", title: "Deck", kind: "SLIDE_DECK", sourceType: "HTML_UPLOAD" }]) },
   oKRCycle: { findMany: vi.fn(async () => [{ id: "c1", title: "Q4", status: "ACTIVE" }]) },
-  objective: { findMany: vi.fn(async () => [{ id: "o1", title: "Grow", cycle: { title: "Q4", workspaceId: WS } }, { id: "o2", title: "Loose", cycle: null }]) },
+  objective: { findMany: vi.fn(async () => [
+    { id: "o1", title: "Grow", cycle: { title: "Q4", workspaceId: WS } },
+    { id: "o2", title: "Loose", cycle: null },
+    { id: "o3", title: "Legacy objective", cycle: { title: "Other cycle", workspaceId: "legacy-workspace" } },
+  ]) },
 }
 
 vi.mock("@/lib/permissions", async (importOriginal) => ({
@@ -79,25 +83,44 @@ describe("pin picker", () => {
 })
 
 describe("internal pickers (artifact gallery / OKR widgets)", () => {
-  it("offers only this workspace's ACTIVE artifacts, its cycles and objectives, with flattened cycle titles", async () => {
+  it("loads shared choices without querying the team pickers", async () => {
     const { GET } = await import("@/app/api/portal-home/[orgSlug]/[workspaceSlug]/options/route")
     const response = await GET(new Request("http://x"), route)
     expect(response.status).toBe(200)
+    expect(prisma.artifact.findMany).not.toHaveBeenCalled()
+    expect(prisma.objective.findMany).not.toHaveBeenCalled()
+    expect(prisma.oKRCycle.findMany).not.toHaveBeenCalled()
+  })
+
+  it("offers only this workspace's ACTIVE artifacts, its cycles and objectives, with flattened cycle titles", async () => {
+    const { GET } = await import("@/app/api/portal-home/[orgSlug]/[workspaceSlug]/options/route")
+    const response = await GET(new Request("http://x?audience=team"), route)
+    expect(response.status).toBe(200)
+    expect(prisma.roadmapItem.findMany).not.toHaveBeenCalled()
+    expect(prisma.doc.findMany).not.toHaveBeenCalled()
     expect(prisma.artifact.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { workspaceId: WS, status: "ACTIVE" } }))
     expect(prisma.oKRCycle.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { workspaceId: WS } }))
     expect(prisma.objective.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { workspaceId: WS } }))
     const body = (await response.json()) as { artifacts: unknown[]; okrCycles: unknown[]; objectives: { id: string; cycleTitle: string | null }[] }
     expect(body.artifacts).toHaveLength(1)
     expect(body.okrCycles).toHaveLength(1)
-    expect(body.objectives).toEqual([{ id: "o1", title: "Grow", cycleTitle: "Q4" }, { id: "o2", title: "Loose", cycleTitle: null }])
+    expect(body.objectives).toEqual([
+      { id: "o1", title: "Grow", cycleTitle: "Q4" },
+      { id: "o2", title: "Loose", cycleTitle: null },
+      { id: "o3", title: "Legacy objective", cycleTitle: null },
+    ])
   })
 
   it("the customer resolve route returns neither widget, even when both are visible to everyone", async () => {
     const { POST } = await import("@/app/api/portal-home/[orgSlug]/[workspaceSlug]/resolve/route")
     const widgets = [createWidget("artifact_gallery", 0), createWidget("okr_summary", 1)]
       .map((widget) => ({ ...widget, visibility: "everyone" }))
-    const body = (await (await POST(post({ widgets, audience: "customer" }), route)).json()) as { widgets: unknown[]; resolved: Record<string, unknown> }
-    expect(body.widgets ?? []).toEqual([])
+    const publicWidget = createWidget("announcement", 2)
+    const response = await POST(post({ widgets: [...widgets, publicWidget], audience: "customer", signedIn: true }), route)
+    expect(response.status).toBe(200)
+    const body = (await response.json()) as { widgets: unknown[]; resolved: Record<string, unknown> }
+    expect(body.widgets).toEqual([publicWidget])
+    for (const widget of widgets) expect(body.resolved).not.toHaveProperty(widget.id)
     expect(JSON.stringify(body)).not.toContain("Deck")
     expect(prisma.artifact.findMany).not.toHaveBeenCalled()
   })

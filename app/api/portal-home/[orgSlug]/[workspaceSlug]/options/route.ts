@@ -8,9 +8,39 @@ import { withHomeAdmin, type HomeRouteParams } from "@/lib/portal-home/admin-api
  * private pinned item: the customer resolver re-applies the public predicate
  * server-side whatever was pinned. Docs are workspace members' own; only publishable ones are offered (no canvas, no externally stored).
  */
-export async function GET(_req: Request, route: HomeRouteParams) {
+export async function GET(req: Request, route: HomeRouteParams) {
   return withHomeAdmin(route, async ({ prisma, workspaceId }) => {
-    const [roadmapItems, docs, artifacts, okrCycles, objectives] = await Promise.all([
+    if (new URL(req.url).searchParams.get("audience") === "team") {
+      const [artifacts, okrCycles, objectives] = await Promise.all([
+        prisma.artifact.findMany({
+          where: { workspaceId, status: "ACTIVE" },
+          orderBy: [{ updatedAt: "desc" }],
+          take: 200,
+          select: { id: true, title: true, kind: true, sourceType: true },
+        }),
+        prisma.oKRCycle.findMany({
+          where: { workspaceId },
+          orderBy: [{ startDate: "desc" }],
+          take: 50,
+          select: { id: true, title: true, status: true },
+        }),
+        prisma.objective.findMany({
+          where: { workspaceId },
+          orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+          take: 200,
+          select: { id: true, title: true, cycle: { select: { title: true, workspaceId: true } } },
+        }),
+      ])
+      return NextResponse.json({
+        roadmapItems: [],
+        docs: [],
+        artifacts,
+        okrCycles,
+        objectives: objectives.map((objective) => ({ id: objective.id, title: objective.title, cycleTitle: objective.cycle?.workspaceId === workspaceId ? objective.cycle.title : null })),
+      })
+    }
+
+    const [roadmapItems, docs] = await Promise.all([
       prisma.roadmapItem.findMany({
         where: { workspaceId, status: { not: "ARCHIVED" } },
         orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
@@ -23,33 +53,11 @@ export async function GET(_req: Request, route: HomeRouteParams) {
         take: 200,
         select: { id: true, title: true, publishedAt: true },
       }),
-      // Team-only pickers (artifact gallery / OKR widgets). This route is admin-only (withHomeAdmin) and never customer-facing.
-      prisma.artifact.findMany({
-        where: { workspaceId, status: "ACTIVE" },
-        orderBy: [{ updatedAt: "desc" }],
-        take: 200,
-        select: { id: true, title: true, kind: true, sourceType: true },
-      }),
-      prisma.oKRCycle.findMany({
-        where: { workspaceId },
-        orderBy: [{ startDate: "desc" }],
-        take: 50,
-        select: { id: true, title: true, status: true },
-      }),
-      prisma.objective.findMany({
-        where: { workspaceId },
-        orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
-        take: 200,
-        select: { id: true, title: true, cycle: { select: { title: true, workspaceId: true } } },
-      }),
     ])
-    // isPublished lets the Docs widget picker flag docs customers cannot see yet. The timestamp itself stays server-side.
+    // The timestamp stays server-side. The picker only needs to know whether the doc is published.
     return NextResponse.json({
       roadmapItems,
       docs: docs.map((doc) => ({ id: doc.id, title: doc.title, isPublished: doc.publishedAt !== null })),
-      artifacts,
-      okrCycles,
-      objectives: objectives.map((objective) => ({ id: objective.id, title: objective.title, cycleTitle: objective.cycle?.workspaceId === workspaceId ? objective.cycle.title : null })),
     })
   })
 }

@@ -26,6 +26,8 @@ import { TemplatePicker } from "./templates/template-picker"
 import type { HomeOptions } from "./types"
 
 type Mode = "view" | "edit" | "preview"
+type OptionsScope = "shared" | "team"
+
 type SaveState = "saved" | "saving" | "dirty" | "invalid" | "error"
 
 interface Props {
@@ -45,6 +47,8 @@ interface Props {
   /** Separate from initialResolved (team data): would each draft widget reach customers? */
   initialCustomerAvailability: Record<string, CustomerAvailability>
 }
+
+const EMPTY_OPTIONS: HomeOptions = { roadmapItems: [], docs: [] }
 
 const VISIBILITY_LABEL = { everyone: "Everyone", signed_in: "Signed-in customers", segments: "Segments", team: "Team only" } as const
 
@@ -94,8 +98,7 @@ export function PortalHomeEditor({ orgSlug, workspaceSlug, children, initialDraf
   const [saveState, setSaveState] = useState<SaveState>("saved")
   const [message, setMessage] = useState<string | null>(null)
   const [publishing, setPublishing] = useState(false)
-  const [options, setOptions] = useState<HomeOptions | null>(null)
-  const [optionsFailed, setOptionsFailed] = useState(false)
+  const [optionsByScope, setOptionsByScope] = useState<Partial<Record<OptionsScope, HomeOptions | "error">>>({})
   const [preview, setPreview] = useState<{ widgets: PortalHomeWidget[]; resolved: Record<string, WidgetResolution> } | null>(null)
 
   const widgetsRef = useRef(widgets)
@@ -106,6 +109,8 @@ export function PortalHomeEditor({ orgSlug, workspaceSlug, children, initialDraf
 
   const unpublished = hasUnpublishedChanges(widgets, baseline, { draft: template, published: baselineTemplate })
   const selected = widgets.find((widget) => widget.id === selectedId) ?? null
+  const optionsScope: OptionsScope = selected && isTeamOnlyWidgetType(selected.type) ? "team" : "shared"
+  const options = optionsByScope[optionsScope]
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -197,13 +202,17 @@ export function PortalHomeEditor({ orgSlug, workspaceSlug, children, initialDraf
   }, [widgets, mode, endpoint])
 
   useEffect(() => {
-    if (mode !== "edit" || options || optionsFailed) return
+    if (mode !== "edit" || options) return
     let cancelled = false
-    api<HomeOptions>(`${endpoint}/options`)
-      .then((result) => { if (!cancelled) setOptions(result) })
-      .catch(() => { if (!cancelled) setOptionsFailed(true) })
+    const suffix = optionsScope === "team" ? "?audience=team" : ""
+    const saveOptions = (result: HomeOptions | "error") => {
+      if (!cancelled) setOptionsByScope((current) => ({ ...current, [optionsScope]: result }))
+    }
+    api<HomeOptions>(`${endpoint}/options${suffix}`)
+      .then(saveOptions)
+      .catch(() => saveOptions("error"))
     return () => { cancelled = true }
-  }, [mode, options, optionsFailed, endpoint])
+  }, [mode, options, optionsScope, endpoint])
 
   const startPreview = async () => {
     if (!(await saveNow())) return
@@ -377,12 +386,13 @@ export function PortalHomeEditor({ orgSlug, workspaceSlug, children, initialDraf
                     <X />
                   </Button>
                 </div>
-                {optionsFailed && isTeamOnlyWidgetType(selected.type) ? (
+                {options === "error" ? (
                   <div>
                     <p role="status" className="text-sm text-text-secondary">Could not load widget options.</p>
-                    <Button type="button" variant="outline" onClick={() => setOptionsFailed(false)}>Retry</Button>
+                    <Button type="button" variant="outline" onClick={() => setOptionsByScope((current) => ({ ...current, [optionsScope]: undefined }))}>Retry</Button>
                   </div>
-                ) : renderWidgetForm(selected, updateWidget, options)}
+                ) : null}
+                {renderWidgetForm(selected, updateWidget, options === "error" ? EMPTY_OPTIONS : options ?? null)}
                 {isTeamOnlyWidgetType(selected.type) ? (
                   <p className="text-sm text-text-secondary">Visible to: Team only</p>
                 ) : (
