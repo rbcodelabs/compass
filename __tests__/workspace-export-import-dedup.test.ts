@@ -249,6 +249,33 @@ it("clears S3 logos and embed screenshots whose bytes were not bundled", async (
   expect(db.tables.FeedbackElementAnchor.find((row) => row.feedbackItemId !== feedbackItemId)?.screenshotUrl).toBeNull()
 })
 
+it("returns a committed retry before checking its occupied slug", async () => {
+  const orgId = randomUUID()
+  const wsId = randomUUID()
+  const importerId = randomUUID()
+  const db = createInMemoryPrisma({
+    Organization: [{ id: orgId, slug: "org", name: "Org" }],
+    User: [{ id: importerId, email: "importer@example.com", name: "Importer" }],
+    OrganizationMember: [{ id: randomUUID(), organizationId: orgId, userId: importerId, role: "ADMIN" }],
+    Workspace: [{ id: wsId, organizationId: orgId, slug: "source", name: "Source", ssoEnabled: false }],
+    Doc: [{ id: randomUUID(), workspaceId: wsId, title: "Doc", content: `![image](/api/docs/images/${wsId}/${randomUUID()}.png)` }],
+  })
+  const bundle = await exportWorkspaceToBuffer(db.client, wsId, noopBlobs)
+  const opts = { organizationId: orgId, importerUserId: importerId, slug: "copy", nonce: "one-import", blobs: {
+    ...noopBlobs, claimImport: async () => async () => undefined,
+  } }
+  const workspace = db.client.workspace as { findMany: (args: unknown) => Promise<Row[]> }
+  db.client.workspace = {
+    ...workspace,
+    findMany: vi.fn(workspace.findMany).mockImplementationOnce(async () => {
+      const client = new Proxy(db.client, { get: (target, prop) => prop === "workspace" ? workspace : Reflect.get(target, prop) })
+      await importWorkspaceBundle(client, bundle, opts)
+      return []
+    }),
+  }
+  await expect(importWorkspaceBundle(db.client, bundle, opts)).resolves.toMatchObject({ alreadyImported: true, slug: "copy" })
+})
+
 it("reserves an import identity before either invocation writes bundle assets", async () => {
   const orgId = randomUUID()
   const wsId = randomUUID()

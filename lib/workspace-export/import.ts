@@ -259,20 +259,10 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
   if (slug.length > 100) throw new WorkspaceImportError("Slug must be 100 characters or fewer")
   const requestedReserved = isReservedWorkspaceSlug(slug) ? slug : null
   if (requestedReserved) slug = `${slug}-workspace`
-  if (!opts.slug) {
-    const base = slug
-    for (let i = 2; (await wsDelegate.count({ where: { organizationId: opts.organizationId, slug } })) > 0; i++) slug = `${base}-${i}`
-  } else if ((await wsDelegate.count({ where: { organizationId: opts.organizationId, slug } })) > 0) {
-    throw new WorkspaceImportError(`A workspace with the slug "${slug}" already exists in this organization`)
-  }
-
-  const slugWarnings = requestedReserved
-    ? [`The URL slug "${requestedReserved}" is reserved by Compass, so the workspace uses "${slug}" instead.`]
-    : []
 
   // ---- row transform -----------------------------------------------------------------------------------------------------
   let referencesCleared = 0
-  const warnings = [...manifest.warnings, ...slugWarnings]
+  const warnings = [...manifest.warnings]
   if (retiredSeen.size > 0) warnings.push(`Ignored retired legacy link data in the bundle (${[...retiredSeen].sort().join(", ")}); links are restored from the bundle's EntityLink rows.`)
   /** Only objects THIS import created. Rollback deletes exactly these, never a pre-existing object. */
   const uploaded: { store: "artifact" | "research" | "feedback"; key: string }[] = []
@@ -384,6 +374,13 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
       const [committed] = await wsDelegate.findMany({ where: { id: newWorkspaceId }, take: 1 })
       if (committed) return alreadyImportedReport(committed, manifest)
     }
+    if (!opts.slug) {
+      const base = slug
+      for (let i = 2; (await wsDelegate.count({ where: { organizationId: opts.organizationId, slug } })) > 0; i++) slug = `${base}-${i}`
+    } else if ((await wsDelegate.count({ where: { organizationId: opts.organizationId, slug } })) > 0) {
+      throw new WorkspaceImportError(`A workspace with the slug "${slug}" already exists in this organization`)
+    }
+    if (requestedReserved) warnings.push(`The URL slug "${requestedReserved}" is reserved by Compass, so the workspace uses "${slug}" instead.`)
     writesStarted = true
     // ---- blobs first: a failure here writes nothing to the database ------------------------------------------------------
     let blobsCopied = 0
