@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 //
 // Agent selection in the chat composer and the Send to agent menu (phase 3 of "Cloud agents as first-class identities").
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import "@testing-library/jest-dom/vitest"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -161,6 +161,16 @@ describe("SendToAgentPicker with cloud agents", () => {
     <SendToAgentPicker orgSlug="acme" workspaceSlug="product" entityType="solutionPlan" entityId="plan-1">Send to agent</SendToAgentPicker>
   )
 
+  async function openMenu() {
+    const trigger = await screen.findByRole("button", { name: /send to agent/i }, { timeout: 5000 })
+    // Use Base UI's keyboard navigation path with focus on the trigger in jsdom.
+    await act(async () => {
+      trigger.focus()
+      fireEvent.keyDown(trigger, { key: "ArrowDown" })
+    })
+    return screen.findByRole("menu", { name: /send to agent/i }, { timeout: 5000 })
+  }
+
   it("stays the plain link when there are no cloud agents", async () => {
     stubFetch({ agents: [], defaultAgentId: null })
     render(picker())
@@ -171,21 +181,19 @@ describe("SendToAgentPicker with cloud agents", () => {
   it("becomes a menu naming the default first and offering every other agent and the built-in one", async () => {
     stubFetch(CHOICES)
     render(picker())
-    // Generous timeouts: the menu renders after an async fetch, and the default 1s is too tight on a loaded CI runner.
-    fireEvent.click(await screen.findByRole("button", { name: /send to agent/i }, { timeout: 5000 }))
-    const defaultLink = await screen.findByRole("link", { name: "Triage (default)" }, { timeout: 5000 })
+    const menu = within(await openMenu())
+    const defaultLink = menu.getByRole("link", { name: "Triage (default)" })
     expect(defaultLink).toHaveAttribute("href", "/acme/product/agent?entityType=solutionPlan&entityId=plan-1")
-    expect(screen.getByRole("link", { name: "Mine" })).toHaveAttribute("href", "/acme/product/agent?entityType=solutionPlan&entityId=plan-1&agentId=a-mine")
-    expect(screen.getByRole("link", { name: "Built-in cloud agent" })).toHaveAttribute("href", "/acme/product/agent?entityType=solutionPlan&entityId=plan-1&agentId=builtin")
+    expect(menu.getByRole("link", { name: "Mine" })).toHaveAttribute("href", "/acme/product/agent?entityType=solutionPlan&entityId=plan-1&agentId=a-mine")
+    expect(menu.getByRole("link", { name: "Built-in cloud agent" })).toHaveAttribute("href", "/acme/product/agent?entityType=solutionPlan&entityId=plan-1&agentId=builtin")
     expect(screen.queryByText("Geode")).toBeNull()
   })
 
   it("keeps Built-in cloud agent as the first plain link when agents exist but none is the default", async () => {
     stubFetch({ ...CHOICES, defaultAgentId: null })
     render(picker())
-    fireEvent.click(await screen.findByRole("button", { name: /send to agent/i }, { timeout: 5000 }))
-    // Generous timeout: the menu renders after an async fetch, and the default 1s is too tight on a loaded CI runner.
-    expect(await screen.findByRole("link", { name: "Built-in cloud agent" }, { timeout: 5000 })).toHaveAttribute("href", "/acme/product/agent?entityType=solutionPlan&entityId=plan-1")
-    expect(screen.getByRole("link", { name: "Triage" })).toBeInTheDocument()
+    const menu = within(await openMenu())
+    expect(menu.getByRole("link", { name: "Built-in cloud agent" })).toHaveAttribute("href", "/acme/product/agent?entityType=solutionPlan&entityId=plan-1")
+    expect(menu.getByRole("link", { name: "Triage" })).toBeInTheDocument()
   })
 })
