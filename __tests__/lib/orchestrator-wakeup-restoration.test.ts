@@ -11,12 +11,12 @@ it("restores only the claimed generation when a new wake-up supersedes another r
   }))
   const rows = batch.map(row => ({ ...row }))
   const updateMany = vi.fn(async ({ where, data }: {
-    where: { id?: string; OR?: { id: string; generation: number }[]; generation?: number; state?: string | { in: string[] }; dispatchedRunId?: null }
+    where: { id?: string; OR?: { id: string; generation?: number }[]; generation?: number; state?: string | { in: string[] }; dispatchedRunId?: null }
     data: { state: string }
   }) => {
     const matches = rows.filter(row => {
       const generations = where.OR ?? [{ id: where.id, generation: where.generation }]
-      return generations.some(key => key.id === row.id && key.generation === row.generation)
+      return generations.some(key => key.id === row.id && (key.generation === undefined || key.generation === row.generation))
         && (typeof where.state === "string" ? row.state === where.state : where.state?.in.includes(row.state))
         && (where.dispatchedRunId === undefined || row.dispatchedRunId === where.dispatchedRunId)
     })
