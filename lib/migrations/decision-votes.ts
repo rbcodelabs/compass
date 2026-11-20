@@ -27,8 +27,8 @@ export const DECISION_VOTES_INDEXES = [
  * drifted table) fails closed instead of letting concurrent votes be counted twice.
  */
 export async function assertDecisionVotesMigration(client: PoolClient, schema: string) {
-  const result = await client.query<{ column_name: string; is_nullable: string; data_type: string; character_maximum_length: number | null; is_generated: string; column_default: string | null; datetime_precision: number | null }>(
-    "SELECT column_name, is_nullable, data_type, character_maximum_length, is_generated, column_default, datetime_precision FROM information_schema.columns WHERE table_schema=$1 AND table_name=$2",
+  const result = await client.query<{ column_name: string; is_nullable: string; data_type: string; character_maximum_length: number | null; is_generated: string; is_identity: string; column_default: string | null; datetime_precision: number | null }>(
+    "SELECT column_name, is_nullable, data_type, character_maximum_length, is_generated, is_identity, column_default, datetime_precision FROM information_schema.columns WHERE table_schema=$1 AND table_name=$2",
     [schema, DECISION_VOTES_TABLE],
   )
   const actual = new Map(result.rows.map((row) => [row.column_name, row]))
@@ -38,7 +38,7 @@ export async function assertDecisionVotesMigration(client: PoolClient, schema: s
     const defaultMatches = column === "id" ? /^(?:[a-z_]+\.)?gen_random_uuid\(\)$/.test(row?.column_default ?? "")
       : column.endsWith("_at") ? /^(?:CURRENT_TIMESTAMP|now\(\))$/i.test(row?.column_default ?? "")
       : row?.column_default === null
-    if (!row || !defaultMatches || row.datetime_precision !== (column.endsWith("_at") ? 3 : null) || (row.is_nullable === "YES") !== nullable || row.data_type !== type || row.is_generated !== "NEVER" || (column === "chosen_option" && row.character_maximum_length !== 120)) {
+    if (!row || !defaultMatches || row.datetime_precision !== (column.endsWith("_at") ? 3 : null) || (row.is_nullable === "YES") !== nullable || row.data_type !== type || row.is_generated !== "NEVER" || row.is_identity !== "NO" || (column === "chosen_option" && row.character_maximum_length !== 120)) {
       throw new Error(`migration 127 postcondition failed: ${DECISION_VOTES_TABLE}.${column} is missing or has the wrong shape`)
     }
   }

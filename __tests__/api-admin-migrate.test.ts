@@ -1116,7 +1116,7 @@ describe.each([
     return { rows: job === "missing" ? [] : [{status: "completed"}] }
    }
    if (sql.includes("information_schema.columns") && (params?.[1] === table || sql.includes("table_name='agent_messages'"))) {
-    const base = { is_nullable: "NO", data_type: "uuid", is_generated: "NEVER", column_default: null }
+    const base = { is_nullable: "NO", data_type: "uuid", is_generated: "NEVER", is_identity: "NO", column_default: null }
     const votes = ["id", "workspace_id", "request_id", "revision_id", "question_index", "chosen_option", "voter_user_id", "created_at", "updated_at"]
     return { rows: migration.startsWith("129") ? [{...base, is_nullable: "YES"}] : votes.map(column_name => ({
      ...base, column_name,
