@@ -12,6 +12,8 @@ import {
   LEGACY_DECISION_REVIEW_REPAIR_MIGRATION,
 } from "@/lib/migrations/legacy-decision-review-repair";
 import type { LegacyDecisionRepairManifest } from "@/lib/legacy-decision-repair";
+import type { InspectionPoolFactory } from "@/lib/migrations/inspection-pool";
+import { describeInspectionFailure } from "@/lib/migrations/error-chain";
 import { assertAgentIdentityMigration } from "@/lib/migrations/agent-identity";
 import { assertSharedFieldOptionSetsMigration } from "@/lib/migrations/shared-field-option-sets";
 import { assertOAuthAuthorizationServerMigration } from "@/lib/migrations/oauth-authorization-server";
@@ -2021,8 +2023,27 @@ async function getResearchCaptureHardeningReport(
   };
 }
 
+/**
+ * The 048 legacy-repair report shown in the status response. It is informational, and it opens its own pooled Prisma client on a second
+ * connection, so it must never be the thing that fails the whole status check (a connect failure here once crashed a deploy).
+ *   - 048 already applied: skipped, no query at all. The report only describes what the one-off repair would still do.
+ *   - otherwise: any error becomes { available: false, reason }. Missing review tables are already reported that way by
+ *     getLegacyDecisionReviewRepairStatus itself; this adds the same for everything else (connection errors included).
+ * Applying 048 explicitly (applyLegacyDecisionReviewRepair) stays strict and still throws.
+ */
+export async function inspectLegacyDecisionReviewRepairForStatus(pool: Pool, schema: string, appliedNames: readonly string[], inspectionPoolFactory?: InspectionPoolFactory) {
+  if (appliedNames.includes(LEGACY_DECISION_REVIEW_REPAIR_MIGRATION)) {
+    return { available: false as const, skipped: true as const, reason: `${LEGACY_DECISION_REVIEW_REPAIR_MIGRATION} is already applied; inspection skipped.` }
+  }
+  try {
+    return await getLegacyDecisionReviewRepairStatus(pool, schema, inspectionPoolFactory)
+  } catch (error) {
+    return { available: false as const, reason: "Inspection failed; the status check continued without it.", error: describeInspectionFailure(error) }
+  }
+}
+
 // GET — check migration status
-export async function getMigrationStatus(pool: Pool, schema: string) {
+export async function getMigrationStatus(pool: Pool, schema: string, inspectionPoolFactory?: InspectionPoolFactory) {
   const client = await pool.connect();
 
   try {
@@ -2050,7 +2071,7 @@ export async function getMigrationStatus(pool: Pool, schema: string) {
       getResearchVoiceControlPlaneReport(client, schema),
       getDecisionGateInfrastructureHealth(client, schema, appliedNames, unresolvedNames),
       client.query(`SELECT migration_name, attempt_id, plan_version, plan_fingerprint, next_step, executing_step, executing_started_at, pending_step, pending_job_id, claim_epoch, claimed_by IS NOT NULL AND claim_expires_at >= CURRENT_TIMESTAMP AS claimed, last_error, updated_at FROM "${schema}"._migration_execution_state ORDER BY updated_at DESC`).then(({ rows }) => rows).catch(() => []),
-      getLegacyDecisionReviewRepairStatus(pool, schema),
+      inspectLegacyDecisionReviewRepairForStatus(pool, schema, appliedNames, inspectionPoolFactory),
     ]);
 
     // Counts only. linkIntegrity is null while the 071 tables do not exist; the
@@ -2358,7 +2379,7 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
             const jobId = result.rows[0]?.job_id
             // IF NOT EXISTS returns no job for an already-created agent index.
             // Its validity is checked before a completion receipt is written.
-            if (!jobId && ["049_agent_identity", "050_pm_interviews", "051_pm_agent_handoff", "052_research_evidence_promotion", "053_shared_field_option_sets", "054_webauthn_authenticators", "055_oauth_authorization_server", "056_agent_scoped_oauth_binding", "058_oauth_authorization_events", "059_geode_document_storage", "061_product_analytics", "062_mcp_connectors", "064_embed_feedback_sources", "067_card_sort_rounds", "068_card_sort_new_entries", "068_follows_notifications", "068_workspace_id_on_solution_objective", "071_typed_link_tables", "074_portal_home_layout", "079_roadmap_views", "069_background_agent_runs", "082_agent_conversation_participants", "091_entity_links", "092_work_item_ids", "098_agent_kind_and_workspace_owner", "100_saved_views_surface", "100_agent_runs_agent_attribution", "101_agent_default_selection", "104_agent_retention_indexes", "107_workspace_modules", "109_agent_conversation_reviews", "110_agent_ui_control", "110_agent_sandbox_class", "110_artifact_external_share", "120_agent_child_runs", "121_agent_interactive_controls", "122_agent_orchestrator_supervision", "123_agent_orchestrator_wakeups", "113_custom_field_inheritance_rules"].includes(migration.name)) continue
+            if (!jobId && ["049_agent_identity", "050_pm_interviews", "051_pm_agent_handoff", "052_research_evidence_promotion", "053_shared_field_option_sets", "054_webauthn_authenticators", "055_oauth_authorization_server", "056_agent_scoped_oauth_binding", "058_oauth_authorization_events", "059_geode_document_storage", "060_workspace_updates", "061_product_analytics", "062_mcp_connectors", "064_embed_feedback_sources", "067_card_sort_rounds", "068_card_sort_new_entries", "068_follows_notifications", "068_workspace_id_on_solution_objective", "071_typed_link_tables", "074_portal_home_layout", "079_roadmap_views", "069_background_agent_runs", "082_agent_conversation_participants", "091_entity_links", "092_work_item_ids", "098_agent_kind_and_workspace_owner", "100_saved_views_surface", "100_agent_runs_agent_attribution", "101_agent_default_selection", "104_agent_retention_indexes", "107_workspace_modules", "109_agent_conversation_reviews", "110_agent_ui_control", "110_agent_sandbox_class", "110_artifact_external_share", "120_agent_child_runs", "121_agent_interactive_controls", "122_agent_orchestrator_supervision", "123_agent_orchestrator_wakeups", "113_custom_field_inheritance_rules"].includes(migration.name)) continue
             if (!jobId) throw new Error(`Migration ${migration.name} async DDL returned no job_id.`)
             await client.query("CALL sys.wait_for_job($1)", [jobId])
             const waited = await client.query<{ status: string }>("SELECT status FROM sys.jobs WHERE job_id = $1", [jobId])
