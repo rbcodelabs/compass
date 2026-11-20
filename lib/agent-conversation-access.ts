@@ -32,7 +32,21 @@ import type { AppPrismaClient } from "@/lib/db"
 
 export type ConversationRole = "OWNER" | "PARTICIPANT"
 
-export type ConversationAccess = { role: ConversationRole; ownerUserId: string }
+export type ConversationAccess = {
+  role: ConversationRole
+  ownerUserId: string
+  visibility: string | null
+  /** True once archived (TASK-195 S2). Reads stay open to everyone who could read before; new turns do not. */
+  archived: boolean
+}
+
+/**
+ * An archived SHARED conversation takes no new turns: the sender sees the same 404 as someone who lost access, which the
+ * chat shows as "no longer available". A private chat the owner archived keeps its older behaviour (still sendable).
+ */
+export function isClosedToNewTurns(access: { visibility: string | null; archived: boolean }): boolean {
+  return access.archived && access.visibility === "WORKSPACE"
+}
 
 /** Anything with an `agentConversation` delegate, so a transaction client works too. */
 type ConversationDb = Pick<AppPrismaClient, "agentConversation">
@@ -81,8 +95,13 @@ export async function resolveConversationAccess(
 ): Promise<ConversationAccess | null> {
   const conversation = await prisma.agentConversation.findFirst({
     where: { id: conversationId, ...accessibleConversationsWhere(workspaceId, userId) },
-    select: { userId: true },
+    select: { userId: true, visibility: true, archivedAt: true },
   })
   if (!conversation) return null
-  return { role: conversation.userId === userId ? "OWNER" : "PARTICIPANT", ownerUserId: conversation.userId }
+  return {
+    role: conversation.userId === userId ? "OWNER" : "PARTICIPANT",
+    ownerUserId: conversation.userId,
+    visibility: conversation.visibility ?? null,
+    archived: conversation.archivedAt != null,
+  }
 }

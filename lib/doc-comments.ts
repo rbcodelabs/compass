@@ -20,6 +20,7 @@ import { deleteOriginLinksTo } from "@/lib/task-link-writes"
 import { resolveCommentAuthors } from "@/lib/comment-authors"
 import type { DocComment } from "@prisma/client"
 import { createCommentRows, followAfterComment, type CommentSource } from "@/lib/comments"
+import { mirrorCommentAfterCommit, removeCommentMirrorAfterCommit } from "@/lib/conversation-mirror"
 
 export type CommentStatus = "OPEN" | "RESOLVED"
 export type CommentAuthorType = "AGENT" | "HUMAN"
@@ -94,6 +95,7 @@ export async function createDocCommentCore(
     return { ok: true as const, comment, workspaceId: doc.workspaceId }
   })
   if (!result.ok) return result
+  await mirrorCommentAfterCommit(result.comment.id)
   await followAfterComment({ id: result.comment.id, workspaceId: result.workspaceId, targetType: "DOC", targetId: input.docId, parentId: result.comment.parentId, body: result.comment.body, status: "OPEN", authorId: result.comment.authorId, authorName: result.comment.authorName, authorType: result.comment.authorType as CommentAuthorType, source: result.comment.source as CommentSource }, result.comment.id)
   return { ok: true, comment: (await resolveCommentAuthors([result.comment]))[0] }
 }
@@ -174,7 +176,7 @@ export async function deleteDocCommentCore(
   commentId: string
 ): Promise<{ id: string; wasRoot: boolean; deletedReplies: number } | null> {
   const prisma = getPrisma()
-  return prisma.$transaction(async tx => {
+  const outcome = await prisma.$transaction(async tx => {
     const existing = await tx.docComment.findUnique({ where: { id: commentId }, select: { id: true, parentId: true } })
     if (!existing) return null
     const wasRoot = existing.parentId === null
@@ -191,6 +193,10 @@ export async function deleteDocCommentCore(
     await tx.comment.deleteMany({ where: { id: commentId } })
     if (wasRoot) await tx.docComment.deleteMany({ where: { parentId: commentId } })
     await tx.docComment.delete({ where: { id: commentId } })
-    return { id: existing.id, wasRoot, deletedReplies: replies.length }
+    return { result: { id: existing.id, wasRoot, deletedReplies: replies.length }, mirror: { conversationId: existing.parentId ?? existing.id, commentIds: ids, threadDeleted: wasRoot } }
   })
+  if (!outcome) return null
+  // After the commit and outside the transaction: a failure here is logged, never surfaced to the deleter.
+  await removeCommentMirrorAfterCommit(outcome.mirror)
+  return outcome.result
 }

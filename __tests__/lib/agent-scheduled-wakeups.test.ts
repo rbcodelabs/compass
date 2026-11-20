@@ -108,6 +108,8 @@ describe("lib/agent-scheduled-wakeups", () => {
         }),
       },
       agentConversation: {
+        // No archived shared thread here; that case is covered in conversation-archive-readonly.test.ts.
+        findFirst: vi.fn(async () => null),
         update: vi.fn(async () => ({ id: "conv-1" })),
       },
     } as unknown as AppPrismaClient

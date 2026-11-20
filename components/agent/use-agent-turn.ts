@@ -80,6 +80,12 @@ type Options = {
   onConversationCreated?: (conversationId: string, info: { detached: boolean }) => void
   /** A turn finished and its reply is ready. Not called for turns that errored or were abandoned. */
   onSettled?: (settlement: TurnSettlement) => void
+  /**
+   * The server refused a turn because the conversation was archived (404 with `x-conversation-state: archived`). The
+   * caller shows its read-only archived state; no error banner is raised. Any other 404 (workspace gone, deploy skew)
+   * is NOT this and surfaces as an ordinary error.
+   */
+  onConversationUnavailable?: () => void
 }
 
 /**
@@ -94,7 +100,7 @@ export function readTurnErrorMessage(body: string): string {
   return body
 }
 
-export function useAgentTurn({ workspaceId, onConversationCreated, onSettled }: Options) {
+export function useAgentTurn({ workspaceId, onConversationCreated, onSettled, onConversationUnavailable }: Options) {
   const [phase, setPhase] = useState<StreamPhase>("idle")
   const [streamingText, setStreamingText] = useState("")
   const [liveToolSteps, setLiveToolSteps] = useState<ToolStep[]>([])
@@ -131,10 +137,12 @@ export function useAgentTurn({ workspaceId, onConversationCreated, onSettled }: 
   // precisely because churn there is how you get a double dispatch).
   const onConversationCreatedRef = useRef(onConversationCreated)
   const onSettledRef = useRef(onSettled)
+  const onUnavailableRef = useRef(onConversationUnavailable)
   useEffect(() => {
     onConversationCreatedRef.current = onConversationCreated
     onSettledRef.current = onSettled
-  }, [onConversationCreated, onSettled])
+    onUnavailableRef.current = onConversationUnavailable
+  }, [onConversationCreated, onSettled, onConversationUnavailable])
 
   // Unmount only. A genuine thread switch calls `reset()` instead, which is the
   // one place that can tell adoption of a new conversation from switching.
@@ -371,6 +379,7 @@ export function useAgentTurn({ workspaceId, onConversationCreated, onSettled }: 
     let turn: AgentTurnState = emptyAgentTurnState
     let assembled = ""
     let newConversationId: string | null = null
+    let conversationUnavailable = false
     try {
       const res = await fetch("/api/agent/turn", {
         method: "POST",
@@ -395,6 +404,10 @@ export function useAgentTurn({ workspaceId, onConversationCreated, onSettled }: 
         }),
       })
       if (controller.signal.aborted) return true
+      if (res.status === 404 && params.conversationId && res.headers.get("x-conversation-state") === "archived") {
+        conversationUnavailable = true
+        throw new Error("Conversation archived.")
+      }
       if (!res.ok || !res.body) {
         const serverMsg = readTurnErrorMessage(await res.text().catch(() => ""))
         throw new Error(
@@ -495,6 +508,11 @@ export function useAgentTurn({ workspaceId, onConversationCreated, onSettled }: 
       onSettledRef.current?.({ assistant, detached: false })
     } catch (err) {
       if (controller.signal.aborted) return true
+      if (conversationUnavailable) {
+        clearLive()
+        onUnavailableRef.current?.()
+        return true
+      }
       setError(err instanceof Error ? err.message : "Something went wrong.")
       clearLive()
     } finally {

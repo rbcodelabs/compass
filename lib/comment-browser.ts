@@ -5,6 +5,7 @@ import { resolveCommentAuthors } from "@/lib/comment-authors"
 import { COMMENT_TARGET_TYPES, resolveCommentTarget, type CommentTargetType } from "@/lib/comments"
 import { isOrgAdminRole, normalizeWorkspaceRole } from "@/lib/roles"
 import { CommentHttpError } from "@/lib/comment-http-error"
+import { removeCommentMirrorAfterCommit } from "@/lib/conversation-mirror"
 
 export { CommentHttpError } from "@/lib/comment-http-error"
 
@@ -111,13 +112,18 @@ export async function deleteBrowserComment(commentId: string, actor: Pick<Commen
     await deleteOriginLinksTo(tx, { linkedType: "COMMENT", linkedIds: ids })
     if (replies.length) await tx.comment.deleteMany({ where: { parentId: commentId } })
     await tx.comment.delete({ where: { id: commentId } })
-    return { id: commentId, deletedReplies: replies.length }
+    return { result: { id: commentId, deletedReplies: replies.length }, mirror: { conversationId: current.parentId ?? commentId, commentIds: ids, threadDeleted: !current.parentId } }
   // Aurora DSQL supports Repeatable Read, not Serializable. Keep the checks and
   // dependent deletes in one transaction so failures roll back the whole delete.
   }, { isolationLevel: "RepeatableRead" })
   let lastError: unknown
   for (let attempt = 0; attempt < 3; attempt += 1) {
-    try { return await operation() } catch (error) {
+    try {
+      const { result, mirror } = await operation()
+      // After the commit and outside the transaction: a failure here is logged, never surfaced to the deleter.
+      await removeCommentMirrorAfterCommit(mirror)
+      return result
+    } catch (error) {
       lastError = error
       const value = error as { code?: string; meta?: { code?: string }; message?: string }
       const retryable = value.code === "P2034" || value.code === "40001" || value.meta?.code === "40001" || /OC00\d|serialization/i.test(value.message ?? "")
