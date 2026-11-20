@@ -1,9 +1,13 @@
 import Link from "next/link"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { CalendarDays, Target } from "lucide-react"
 import { DeliveryStatusBadge } from "@/components/roadmap/delivery-status-badge"
 import { HORIZON_META } from "@/lib/roadmap"
 import { buildTimelineLayout, type RoadmapGroup } from "@/lib/roadmap-views/group"
 import type { CrossWorkspaceRoadmapItem } from "@/lib/roadmap-views/query"
+import type { RoadmapFieldFacet } from "@/lib/roadmap-views/fields"
+
+type ShownField = Pick<RoadmapFieldFacet, "key" | "name">
 
 /**
  * Read-only renderers for the cross-workspace roadmap. Server components: nothing
@@ -30,7 +34,29 @@ function GroupDot({ color }: { color?: string }) {
   return color ? <span aria-hidden="true" className="size-2 shrink-0 rounded-full" style={{ backgroundColor: color }} /> : null
 }
 
-function ReadOnlyCard({ orgSlug, item, showWorkspace }: { orgSlug: string; item: CrossWorkspaceRoadmapItem; showWorkspace: boolean }) {
+/** The labels of one custom field on one item, as small chips. Renders nothing when the item has no value. */
+function FieldCells({ item, field, withName }: { item: CrossWorkspaceRoadmapItem; field: ShownField; withName: boolean }) {
+  const cells = item.fieldValues[field.key] ?? []
+  if (cells.length === 0) return null
+  return (
+    <>
+      {cells.map((cell) => (
+        <span
+          key={cell.label}
+          data-testid="cross-roadmap-field-chip"
+          title={field.name}
+          className="inline-flex items-center gap-1 rounded-full border border-border-default px-2 py-0.5 text-[11px] text-text-secondary"
+        >
+          <GroupDot color={cell.color} />
+          {withName && <span className="text-text-subtle">{field.name}:</span>}
+          {cell.label}
+        </span>
+      ))}
+    </>
+  )
+}
+
+function ReadOnlyCard({ orgSlug, item, showWorkspace, fields = [] }: { orgSlug: string; item: CrossWorkspaceRoadmapItem; showWorkspace: boolean; fields?: ShownField[] }) {
   const range = dateRange(item)
   const krPct = item.keyResult && item.keyResult.target > 0 ? Math.round((item.keyResult.current / item.keyResult.target) * 100) : null
   return (
@@ -55,12 +81,17 @@ function ReadOnlyCard({ orgSlug, item, showWorkspace }: { orgSlug: string; item:
           <DeliveryStatusBadge status={item.deliveryStatus} />
           <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${HORIZON_META[item.horizon].badgeClass}`}>{HORIZON_META[item.horizon].label}</span>
         </span>
+        {fields.length > 0 && (
+          <span className="mt-2 flex flex-wrap items-center gap-1">
+            {fields.map((field) => <FieldCells key={field.key} item={item} field={field} withName />)}
+          </span>
+        )}
       </Link>
     </li>
   )
 }
 
-export function RoadmapBoardResults({ orgSlug, groups, groupBy }: { orgSlug: string; groups: RoadmapGroup[]; groupBy: string }) {
+export function RoadmapBoardResults({ orgSlug, groups, groupBy, fields = [] }: { orgSlug: string; groups: RoadmapGroup[]; groupBy: string; fields?: ShownField[] }) {
   return (
     <div className="flex min-h-0 flex-1 gap-4 overflow-x-auto p-4 md:p-6" data-testid="cross-roadmap-board">
       {groups.map((group) => (
@@ -75,7 +106,7 @@ export function RoadmapBoardResults({ orgSlug, groups, groupBy }: { orgSlug: str
           ) : (
             <ul className="flex flex-col gap-2">
               {group.items.map((item) => (
-                <ReadOnlyCard key={item.id} orgSlug={orgSlug} item={item} showWorkspace={groupBy !== "workspace"} />
+                <ReadOnlyCard key={item.id} orgSlug={orgSlug} item={item} showWorkspace={groupBy !== "workspace"} fields={fields} />
               ))}
             </ul>
           )}
@@ -85,8 +116,70 @@ export function RoadmapBoardResults({ orgSlug, groups, groupBy }: { orgSlug: str
   )
 }
 
+/** One row per item per group (a multi-select item appears under each label), one column per shown field. */
+export function RoadmapTableResults({ orgSlug, groups, groupBy, fields }: { orgSlug: string; groups: RoadmapGroup[]; groupBy: string; fields: ShownField[] }) {
+  const showWorkspace = groupBy !== "workspace"
+  const single = groups.length === 1
+  // TableCell defaults to nowrap; titles and chips should wrap.
+  const cell = "whitespace-normal py-2 pr-3 align-top"
+  const head = "h-auto py-2 pr-3 text-xs text-text-subtle"
+  return (
+    <div className="p-4 md:p-6" data-testid="cross-roadmap-table">
+      <Table className="min-w-[720px]">
+        <TableHeader>
+          <TableRow className="hover:bg-transparent">
+            <TableHead scope="col" className={head}>Item</TableHead>
+            {showWorkspace && <TableHead scope="col" className={head}>Workspace</TableHead>}
+            <TableHead scope="col" className={head}>Squad</TableHead>
+            <TableHead scope="col" className={head}>Horizon</TableHead>
+            <TableHead scope="col" className={head}>Dates</TableHead>
+            {fields.map((field) => <TableHead key={field.key} scope="col" className={head}>{field.name}</TableHead>)}
+          </TableRow>
+        </TableHeader>
+        {groups.map((group) => (
+          <TableBody key={group.key} data-testid="cross-roadmap-group" aria-label={group.label}>
+            {!single && (
+              <TableRow className="bg-surface-interactive-hover/40">
+                <TableHead scope="colgroup" colSpan={4 + (showWorkspace ? 1 : 0) + fields.length} className="h-auto py-1.5 pr-3 text-xs font-semibold text-text-primary">
+                  <span className="inline-flex items-center gap-2">
+                    <GroupDot color={group.color} />{group.label}
+                    <span className="font-normal tabular-nums text-text-subtle">{group.items.length}</span>
+                  </span>
+                </TableHead>
+              </TableRow>
+            )}
+            {group.items.map((item) => (
+              <TableRow key={item.id} data-testid="cross-roadmap-row">
+                <TableCell className={cell}>
+                  <Link href={itemHref(orgSlug, item)} className="font-medium text-text-primary hover:underline focus-visible:outline-2 focus-visible:outline-primary">{item.title}</Link>
+                </TableCell>
+                {showWorkspace && <TableCell className={cell + " text-text-secondary"}>{item.workspace.name}</TableCell>}
+                <TableCell className={cell + " text-text-secondary"}>{item.squad ? item.squad.name : <span className="text-text-subtle">—</span>}</TableCell>
+                <TableCell className={cell}>
+                  <span className={"rounded-full px-2 py-0.5 text-[11px] font-medium " + HORIZON_META[item.horizon].badgeClass}>{HORIZON_META[item.horizon].label}</span>
+                </TableCell>
+                <TableCell className={cell + " text-text-secondary"}>{dateRange(item) ?? <span className="text-text-subtle">—</span>}</TableCell>
+                {fields.map((field) => (
+                  <TableCell key={field.key} className={cell}>
+                    <span className="flex flex-wrap gap-1">
+                      {(item.fieldValues[field.key] ?? []).length > 0
+                        ? <FieldCells item={item} field={field} withName={false} />
+                        : <span className="text-text-subtle">—</span>}
+                    </span>
+                  </TableCell>
+                ))}
+              </TableRow>
+            ))}
+          </TableBody>
+        ))}
+      </Table>
+    </div>
+  )
+}
+
 export function RoadmapTimelineResults({ orgSlug, groups, groupBy }: { orgSlug: string; groups: RoadmapGroup[]; groupBy: string }) {
-  const all = groups.flatMap((g) => g.items)
+  // A multi-select field grouping can list an item under several groups; the shared axis and the unscheduled list want each once.
+  const all = [...new Map(groups.flatMap((g) => g.items).map((item) => [item.id, item])).values()]
   const layout = buildTimelineLayout(all)
   const undated = all.filter((item) => layout?.place(item) == null)
 
