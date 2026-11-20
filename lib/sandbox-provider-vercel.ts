@@ -131,16 +131,23 @@ export async function isVercelSandboxQuiescent(name: string, sessionId: string):
   if (found.session) {
     if (found.session.sessionId !== sessionId || found.session.status !== "stopped") return false
   } else {
-    const recent = await found.sandbox.listSessions({ limit: 10, sortOrder: "desc" })
-    if (!recent.sessions.some((session) => session.id === sessionId && session.status === "stopped")) return false
+    const { sessions: [latest] } = await found.sandbox.listSessions({ limit: 1, sortOrder: "desc" })
+    if (latest?.id !== sessionId || latest.status !== "stopped") return false
   }
-  return hasSavedSessionSnapshot(found.sandbox, sessionId)
+  return hasSettledSessionSnapshot(found.sandbox, sessionId)
 }
 
-async function hasSavedSessionSnapshot(sandbox: Sandbox, sessionId: string): Promise<boolean> {
+async function hasSettledSessionSnapshot(sandbox: Sandbox, sessionId: string): Promise<boolean> {
   if (!sandbox.currentSnapshotId) return false
-  const snapshot = await Snapshot.get({ snapshotId: sandbox.currentSnapshotId })
-  return snapshot.sourceSessionId === sessionId && snapshot.status === "created"
+  try {
+    const snapshot = await Snapshot.get({ snapshotId: sandbox.currentSnapshotId })
+    return snapshot.sourceSessionId === sessionId && (snapshot.status === "created" || snapshot.status === "deleted")
+  } catch (error) {
+    // This lookup targets the advertised snapshot of a verified stopped sandbox.
+    // An explicitly absent snapshot leaves the existing launch fallback to replace it.
+    if (error instanceof APIError && [404, 410].includes(error.response.status)) return true
+    throw error
+  }
 }
 
 export async function prepareVercelSandboxStop(name: string): Promise<PreparedPersistentSandboxStop | null> {
@@ -150,7 +157,7 @@ export async function prepareVercelSandboxStop(name: string): Promise<PreparedPe
     const last = found.session
       ? { id: found.session.sessionId, status: found.session.status }
       : (await found.sandbox.listSessions({ limit: 1, sortOrder: "desc" })).sessions[0]
-    if (last?.status !== "stopped" || !(await hasSavedSessionSnapshot(found.sandbox, last.id))) {
+    if (last?.status !== "stopped" || !(await hasSettledSessionSnapshot(found.sandbox, last.id))) {
       throw new Error("Sandbox paused without a confirmed saved snapshot")
     }
     return null

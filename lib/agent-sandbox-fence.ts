@@ -11,7 +11,7 @@ type Candidate = {
   id: string
   conversationId: string
   sandboxName: string
-  createdAt: Date
+  createdAt: Date | null
 }
 
 function schemaTable(name: "agent_runs" | "agent_sandbox_operations" | "agent_sandbox_generations" | "agent_conversations") {
@@ -115,32 +115,36 @@ export async function findPersistentSandboxStopCandidates(
   const operations = schemaTable("agent_sandbox_operations")
   const generations = schemaTable("agent_sandbox_generations")
   return prisma.$queryRaw<Candidate[]>`
-    WITH eligible AS (
-      SELECT r.id, r.conversation_id AS "conversationId", r.sandbox_name AS "sandboxName",
-             r.created_at AS "createdAt", r.finished_at, op.token IS NULL AS fresh, op.retry_at
-      FROM ${runs} r
-      LEFT JOIN ${operations} op ON op.conversation_id = r.conversation_id
-      LEFT JOIN ${generations} gen ON gen.sandbox_name = r.sandbox_name
-      WHERE r.sandbox_name LIKE ${prefix + "%"}
-        AND r.sandbox_stopped_at IS NULL
-        AND r.finished_at IS NOT NULL
-        AND (r.status IN ('FAILED', 'INTERRUPTED', 'CANCELED')
-          OR (r.status = 'SUCCEEDED' AND r.finished_at <= ${idleBefore}))
-        AND (op.token IS NULL OR (op.run_id = r.id AND op.phase IN ('RESERVED', 'RETRY', 'DISPATCHED', 'CONFIRMED')
-          AND op.retry_at <= ${now}))
-        AND NOT EXISTS (
-          SELECT 1 FROM ${runs} active
-          WHERE active.conversation_id = r.conversation_id AND active.status IN ('QUEUED', 'RUNNING')
-        )
-        AND (gen.run_id = r.id OR (gen.run_id IS NULL AND NOT EXISTS (
-          SELECT 1 FROM ${runs} newer
-          WHERE newer.conversation_id = r.conversation_id AND newer.sandbox_name = r.sandbox_name
-            AND (newer.created_at, newer.id) > (r.created_at, r.id)
-        )))
-    )
-    (SELECT id, "conversationId", "sandboxName", "createdAt" FROM eligible WHERE fresh ORDER BY finished_at, id LIMIT ${limit})
+    (SELECT r.id, r.conversation_id AS "conversationId", r.sandbox_name AS "sandboxName", r.created_at AS "createdAt"
+     FROM ${runs} r
+     LEFT JOIN ${generations} gen ON gen.sandbox_name = r.sandbox_name
+     WHERE r.sandbox_name LIKE ${prefix + "%"}
+       AND r.sandbox_stopped_at IS NULL
+       AND r.finished_at IS NOT NULL
+       AND (r.status IN ('FAILED', 'INTERRUPTED', 'CANCELED')
+         OR (r.status = 'SUCCEEDED' AND r.finished_at <= ${idleBefore}))
+       AND NOT EXISTS (
+         SELECT 1 FROM ${operations} op WHERE op.conversation_id = r.conversation_id
+       )
+       AND NOT EXISTS (
+         SELECT 1 FROM ${runs} active
+         WHERE active.conversation_id = r.conversation_id AND active.status IN ('QUEUED', 'RUNNING')
+       )
+       AND (gen.run_id = r.id OR (gen.run_id IS NULL AND NOT EXISTS (
+         SELECT 1 FROM ${runs} newer
+         WHERE newer.conversation_id = r.conversation_id AND newer.sandbox_name = r.sandbox_name
+           AND (newer.created_at, newer.id) > (r.created_at, r.id)
+       )))
+     ORDER BY r.finished_at, r.id LIMIT ${limit})
     UNION ALL
-    (SELECT id, "conversationId", "sandboxName", "createdAt" FROM eligible WHERE NOT fresh ORDER BY retry_at, id LIMIT ${Math.min(limit, 5)})
+    (SELECT op.run_id, op.conversation_id, op.sandbox_name, r.created_at
+     FROM ${operations} op
+     JOIN ${schemaTable("agent_conversations")} c ON c.id = op.conversation_id
+     LEFT JOIN ${runs} r ON r.id = op.run_id
+     WHERE op.sandbox_name LIKE ${prefix + "%"}
+       AND op.phase IN ('RESERVED', 'RETRY', 'DISPATCHED', 'CONFIRMED')
+       AND op.retry_at <= ${now}
+     ORDER BY op.retry_at, op.conversation_id LIMIT ${Math.min(limit, 5)})
   `
 }
 
@@ -161,12 +165,21 @@ export async function stopPersistentSandbox(
   const owner = await withConflictRetry(() => prisma.$transaction(async (tx) => {
     if (!(await lockSandboxConversation(tx, conversationId))) return null
     const operation = await tx.agentSandboxOperation.findUnique({ where: { conversationId } })
+    if (operation && operation.sandboxName !== sandboxName) return null
     if (operation?.runId === runId && ["CONFIRMED", "DISPATCHED"].includes(operation.phase) &&
       operation.retryAt && operation.retryAt <= now) return operation
     if (operation && (operation.runId !== runId || !["RESERVED", "RETRY"].includes(operation.phase) ||
       !operation.retryAt || operation.retryAt > now)) return null
     const current = await tx.agentRun.findUnique({ where: { id: runId }, select: { sandboxStoppedAt: true } })
-    if (!current || current.sandboxStoppedAt) return null
+    if (!current && operation) {
+      // The owning run was removed before any provider mutation was dispatched.
+      // Compare phase and token so an older preparer cannot dispatch after release.
+      await tx.agentSandboxOperation.deleteMany({
+        where: { conversationId, token: operation.token, phase: { in: ["RESERVED", "RETRY"] } },
+      })
+      return null
+    }
+    if (!current || current.sandboxStoppedAt || !createdAt) return null
     const generation = await tx.agentSandboxGeneration.findUnique({ where: { sandboxName }, select: { runId: true } })
     if (generation && generation.runId !== runId) return null
     const newerOrActive = await tx.agentRun.findFirst({
