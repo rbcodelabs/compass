@@ -1121,9 +1121,11 @@ describe.each([
     return { rows: migration.startsWith("129") ? [{...base, is_nullable: "YES"}] : votes.map(column_name => ({
      ...base, column_name,
      data_type: column_name === "chosen_option" ? "character varying" : column_name === "question_index" ? "integer" : column_name.endsWith("_at") ? "timestamp without time zone" : "uuid",
+     column_default: column_name === "id" ? "gen_random_uuid()" : column_name.endsWith("_at") ? "CURRENT_TIMESTAMP" : null, datetime_precision: column_name.endsWith("_at") ? 3 : null,
      character_maximum_length: column_name === "chosen_option" ? 120 : null,
     })) }
    }
+   if (sql.includes("i.indisprimary") && sql.includes("decision_votes")) return { rows: [{columns: ["id"], valid: true, ready: true}] }
    if (sql.includes("pg_get_expr") && params?.[1] === index) {
     trace.push("catalog")
     return { rows: [{ valid: ready, ready, unique: migration.startsWith("127"), table_name: table, columns: keys, column_count: keys.length, predicate: null, expression: null }] }

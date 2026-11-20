@@ -528,7 +528,7 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
     "lib/migrations/schema-first-columns.ts": "8cb404f5e3005487345e2aa4b4f521a37db1f54e972a89ef0d7803f7275765dd",
   },
   "127_decision_votes": {
-    "lib/migrations/decision-votes.ts": "4cc07690fc56312db33cae71ace0b245388392e90363602c0d868a56981ae10b",
+    "lib/migrations/decision-votes.ts": "b18e4ef2886b76c41c9137245aa6d86384ec63372f4e27a41cc796dde2dc0b4d",
   },
   "128_task_start_date": {
     "lib/migrations/schema-first-columns.ts": "8cb404f5e3005487345e2aa4b4f521a37db1f54e972a89ef0d7803f7275765dd",

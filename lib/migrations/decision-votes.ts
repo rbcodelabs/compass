@@ -27,17 +27,38 @@ export const DECISION_VOTES_INDEXES = [
  * drifted table) fails closed instead of letting concurrent votes be counted twice.
  */
 export async function assertDecisionVotesMigration(client: PoolClient, schema: string) {
-  const result = await client.query<{ column_name: string; is_nullable: string; data_type: string; character_maximum_length: number | null; is_generated: string }>(
-    "SELECT column_name, is_nullable, data_type, character_maximum_length, is_generated FROM information_schema.columns WHERE table_schema=$1 AND table_name=$2",
+  const result = await client.query<{ column_name: string; is_nullable: string; data_type: string; character_maximum_length: number | null; is_generated: string; column_default: string | null; datetime_precision: number | null }>(
+    "SELECT column_name, is_nullable, data_type, character_maximum_length, is_generated, column_default, datetime_precision FROM information_schema.columns WHERE table_schema=$1 AND table_name=$2",
     [schema, DECISION_VOTES_TABLE],
   )
   const actual = new Map(result.rows.map((row) => [row.column_name, row]))
   for (const { column, nullable } of EXPECTED_COLUMNS) {
     const row = actual.get(column)
     const type = column === "chosen_option" ? "character varying" : column === "question_index" ? "integer" : column.endsWith("_at") ? "timestamp without time zone" : "uuid"
-    if (!row || (row.is_nullable === "YES") !== nullable || row.data_type !== type || row.is_generated !== "NEVER" || (column === "chosen_option" && row.character_maximum_length !== 120)) {
+    const defaultMatches = column === "id" ? /^(?:[a-z_]+\.)?gen_random_uuid\(\)$/.test(row?.column_default ?? "")
+      : column.endsWith("_at") ? /^(?:CURRENT_TIMESTAMP|now\(\))$/i.test(row?.column_default ?? "")
+      : row?.column_default === null
+    if (!row || !defaultMatches || row.datetime_precision !== (column.endsWith("_at") ? 3 : null) || (row.is_nullable === "YES") !== nullable || row.data_type !== type || row.is_generated !== "NEVER" || (column === "chosen_option" && row.character_maximum_length !== 120)) {
       throw new Error(`migration 127 postcondition failed: ${DECISION_VOTES_TABLE}.${column} is missing or has the wrong shape`)
     }
+  }
+
+  if (result.rows.length !== EXPECTED_COLUMNS.length) {
+    throw new Error("127_decision_votes: unexpected columns")
+  }
+
+  const primaryKey = await client.query<{ columns: string[]; valid: boolean; ready: boolean }>(
+    `SELECT i.indisvalid AS valid, i.indisready AS ready,
+            ARRAY(SELECT a.attname::text FROM unnest(i.indkey) WITH ORDINALITY AS k(attnum, ord)
+                  JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum
+                  WHERE k.ord <= i.indnkeyatts ORDER BY k.ord) AS columns
+       FROM pg_index i JOIN pg_class t ON t.oid = i.indrelid
+       JOIN pg_namespace n ON n.oid = t.relnamespace
+      WHERE n.nspname = $1 AND t.relname = 'decision_votes' AND i.indisprimary`,
+    [schema],
+  )
+  if (primaryKey.rows.length !== 1 || !primaryKey.rows[0].valid || !primaryKey.rows[0].ready || primaryKey.rows[0].columns.join(",") !== "id") {
+    throw new Error("127_decision_votes: primary key postcondition failed")
   }
 
   for (const expected of DECISION_VOTES_INDEXES) {
