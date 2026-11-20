@@ -3,6 +3,7 @@ import type { PoolClient } from "pg"
 import { assertExternalLinksMigration, EXTERNAL_LINKS_INDEXES } from "@/lib/migrations/external-links"
 
 type CatalogColumn = {
+  is_generated: string
   column_name: string
   data_type: string
   is_nullable: string
@@ -12,20 +13,20 @@ type CatalogColumn = {
 }
 
 const columns: CatalogColumn[] = [
-  {"column_name":"id","data_type":"uuid","is_nullable":"NO","character_maximum_length":null,"datetime_precision":null,"column_default":"gen_random_uuid()"},
-  {"column_name":"workspace_id","data_type":"uuid","is_nullable":"NO","character_maximum_length":null,"datetime_precision":null,"column_default":null},
-  {"column_name":"subject_type","data_type":"character varying","is_nullable":"NO","character_maximum_length":40,"datetime_precision":null,"column_default":null},
-  {"column_name":"subject_id","data_type":"uuid","is_nullable":"NO","character_maximum_length":null,"datetime_precision":null,"column_default":null},
-  {"column_name":"provider","data_type":"character varying","is_nullable":"NO","character_maximum_length":30,"datetime_precision":null,"column_default":null},
-  {"column_name":"url","data_type":"character varying","is_nullable":"NO","character_maximum_length":1000,"datetime_precision":null,"column_default":null},
-  {"column_name":"external_key","data_type":"character varying","is_nullable":"NO","character_maximum_length":1000,"datetime_precision":null,"column_default":null},
-  {"column_name":"title","data_type":"character varying","is_nullable":"NO","character_maximum_length":255,"datetime_precision":null,"column_default":null},
-  {"column_name":"relation","data_type":"character varying","is_nullable":"NO","character_maximum_length":20,"datetime_precision":null,"column_default":null},
-  {"column_name":"status_snapshot","data_type":"text","is_nullable":"YES","character_maximum_length":null,"datetime_precision":null,"column_default":null},
-  {"column_name":"source","data_type":"character varying","is_nullable":"NO","character_maximum_length":20,"datetime_precision":null,"column_default":"'UI'::character varying"},
-  {"column_name":"created_by_id","data_type":"uuid","is_nullable":"YES","character_maximum_length":null,"datetime_precision":null,"column_default":null},
-  {"column_name":"created_at","data_type":"timestamp without time zone","is_nullable":"NO","character_maximum_length":null,"datetime_precision":3,"column_default":"CURRENT_TIMESTAMP"},
-  {"column_name":"updated_at","data_type":"timestamp without time zone","is_nullable":"NO","character_maximum_length":null,"datetime_precision":3,"column_default":"CURRENT_TIMESTAMP"},
+  {"is_generated": "NEVER", "column_name":"id","data_type":"uuid","is_nullable":"NO","character_maximum_length":null,"datetime_precision":null,"column_default":"gen_random_uuid()"},
+  {"is_generated": "NEVER", "column_name":"workspace_id","data_type":"uuid","is_nullable":"NO","character_maximum_length":null,"datetime_precision":null,"column_default":null},
+  {"is_generated": "NEVER", "column_name":"subject_type","data_type":"character varying","is_nullable":"NO","character_maximum_length":40,"datetime_precision":null,"column_default":null},
+  {"is_generated": "NEVER", "column_name":"subject_id","data_type":"uuid","is_nullable":"NO","character_maximum_length":null,"datetime_precision":null,"column_default":null},
+  {"is_generated": "NEVER", "column_name":"provider","data_type":"character varying","is_nullable":"NO","character_maximum_length":30,"datetime_precision":null,"column_default":null},
+  {"is_generated": "NEVER", "column_name":"url","data_type":"character varying","is_nullable":"NO","character_maximum_length":1000,"datetime_precision":null,"column_default":null},
+  {"is_generated": "NEVER", "column_name":"external_key","data_type":"character varying","is_nullable":"NO","character_maximum_length":1000,"datetime_precision":null,"column_default":null},
+  {"is_generated": "NEVER", "column_name":"title","data_type":"character varying","is_nullable":"NO","character_maximum_length":255,"datetime_precision":null,"column_default":null},
+  {"is_generated": "NEVER", "column_name":"relation","data_type":"character varying","is_nullable":"NO","character_maximum_length":20,"datetime_precision":null,"column_default":null},
+  {"is_generated": "NEVER", "column_name":"status_snapshot","data_type":"text","is_nullable":"YES","character_maximum_length":null,"datetime_precision":null,"column_default":null},
+  {"is_generated": "NEVER", "column_name":"source","data_type":"character varying","is_nullable":"NO","character_maximum_length":20,"datetime_precision":null,"column_default":"'UI'::character varying"},
+  {"is_generated": "NEVER", "column_name":"created_by_id","data_type":"uuid","is_nullable":"YES","character_maximum_length":null,"datetime_precision":null,"column_default":null},
+  {"is_generated": "NEVER", "column_name":"created_at","data_type":"timestamp without time zone","is_nullable":"NO","character_maximum_length":null,"datetime_precision":3,"column_default":"CURRENT_TIMESTAMP"},
+  {"is_generated": "NEVER", "column_name":"updated_at","data_type":"timestamp without time zone","is_nullable":"NO","character_maximum_length":null,"datetime_precision":3,"column_default":"CURRENT_TIMESTAMP"},
 ]
 
 function client(columnChange?: (rows: typeof columns) => typeof columns, indexChange?: (row: Record<string, unknown>) => Record<string, unknown>, primaryKey = ["id"]): PoolClient {

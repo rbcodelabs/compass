@@ -522,16 +522,22 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
     "lib/migrations/unified-conversations.ts": "5160ebc0955373c955f3c781c2d08089b9b2cd42730ad9a5d7a6e0e6f0ea85ef",
   },
   "126_external_links": {
-    "lib/migrations/external-links.ts": "070ea4d5a971807d704eff074245a0ae87f1d30540728706a1602281855c13f4",
+    "lib/migrations/external-links.ts": "df371c15c9d70de008f2f7fbc72cb6cc72e810a54937460f31ad82a83b1fe89f",
+  },
+  "126_doc_version_numbers": {
+    "lib/migrations/schema-first-columns.ts": "8cb404f5e3005487345e2aa4b4f521a37db1f54e972a89ef0d7803f7275765dd",
   },
   "127_decision_votes": {
-    "lib/migrations/decision-votes.ts": "d1e41d20a8660415762fd599a6aeb7a8d967e39d3618dae26635b7c0fd03a9fe",
+    "lib/migrations/decision-votes.ts": "4cc07690fc56312db33cae71ace0b245388392e90363602c0d868a56981ae10b",
+  },
+  "128_task_start_date": {
+    "lib/migrations/schema-first-columns.ts": "8cb404f5e3005487345e2aa4b4f521a37db1f54e972a89ef0d7803f7275765dd",
   },
   "129_agent_message_run_id": {
     "lib/migrations/agent-message-run-id.ts": "d9b3a9ae84b5a61f52e919c29d51d83bf9268dbbb15ad79f87e6d6727de7921d",
   },
   "130_agent_sandbox_operations": {
-    "lib/migrations/agent-sandbox-operations.ts": "16ccb4d7e2855ca5fd593f812139354124319e05555a07bf3280567f08daf1f8",
+    "lib/migrations/agent-sandbox-operations.ts": "116056a42465597b0d83003ba39be4b6cfb6d2c5115e09c2dfe66435bc76d233",
   },
 };
 

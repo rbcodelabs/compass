@@ -67,9 +67,12 @@ describe.skipIf(!integrationDatabaseUrl)("schema-first migration batch on Postgr
     try {
       if (ownsSchema) await pool.query('DROP SCHEMA "' + schema + '" CASCADE')
     } finally {
-      await pool.end()
-      if (previousDatabaseUrl === undefined) delete process.env.DATABASE_URL
-      else process.env.DATABASE_URL = previousDatabaseUrl
+      try {
+        await pool.end()
+      } finally {
+        if (previousDatabaseUrl === undefined) delete process.env.DATABASE_URL
+        else process.env.DATABASE_URL = previousDatabaseUrl
+      }
     }
   })
 
@@ -105,6 +108,12 @@ describe.skipIf(!integrationDatabaseUrl)("schema-first migration batch on Postgr
   }, 120_000)
 
   it.each([
+    [migrations[0], "ALTER TABLE @schema@.external_links DROP COLUMN title", "ALTER TABLE @schema@.external_links ADD COLUMN title VARCHAR(255) GENERATED ALWAYS AS (relation) STORED NOT NULL", "ALTER TABLE @schema@.external_links DROP COLUMN title, ADD COLUMN title VARCHAR(255) NOT NULL", "external_links.title"],
+    [migrations[1], "ALTER TABLE @schema@.doc_versions DROP COLUMN version_number", "ALTER TABLE @schema@.doc_versions ADD COLUMN version_number TEXT", "ALTER TABLE @schema@.doc_versions DROP COLUMN version_number", "doc_versions.version_number"],
+    [migrations[2], "ALTER TABLE @schema@.decision_votes ALTER COLUMN chosen_option TYPE VARCHAR(1)", "ALTER TABLE @schema@.decision_votes ALTER COLUMN chosen_option TYPE VARCHAR(1)", "ALTER TABLE @schema@.decision_votes ALTER COLUMN chosen_option TYPE VARCHAR(120)", "decision_votes.chosen_option"],
+    [migrations[3], "ALTER TABLE @schema@.tasks DROP COLUMN start_date", "ALTER TABLE @schema@.tasks ADD COLUMN start_date TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP", "ALTER TABLE @schema@.tasks DROP COLUMN start_date", "tasks.start_date"],
+    [migrations[5], "ALTER TABLE @schema@.agent_sandbox_operations DROP COLUMN token", "ALTER TABLE @schema@.agent_sandbox_operations ADD COLUMN token UUID GENERATED ALWAYS AS (run_id) STORED NOT NULL", "ALTER TABLE @schema@.agent_sandbox_operations DROP COLUMN token, ADD COLUMN token UUID NOT NULL", "agent_sandbox_operations.token"],
+    [migrations[5], "ALTER TABLE @schema@.agent_sandbox_operations DROP COLUMN IF EXISTS extra_required", "ALTER TABLE @schema@.agent_sandbox_operations ADD COLUMN extra_required TEXT NOT NULL", "ALTER TABLE @schema@.agent_sandbox_operations DROP COLUMN extra_required", "extra_required"],
     [migrations[0], "DROP INDEX IF EXISTS @schema@.idx_external_links_subject_key", "CREATE INDEX idx_external_links_subject_key ON @schema@.external_links(subject_type)", "DROP INDEX @schema@.idx_external_links_subject_key", "idx_external_links_subject_key"],
     [migrations[2], "DROP INDEX IF EXISTS @schema@.idx_decision_votes_voter", "CREATE INDEX idx_decision_votes_voter ON @schema@.decision_votes(request_id)", "DROP INDEX @schema@.idx_decision_votes_voter", "idx_decision_votes_voter"],
     [migrations[5], "ALTER TABLE @schema@.agent_conversations DROP COLUMN IF EXISTS sandbox_coordination_token", "ALTER TABLE @schema@.agent_conversations ADD COLUMN sandbox_coordination_token UUID GENERATED ALWAYS AS (id) STORED", "ALTER TABLE @schema@.agent_conversations DROP COLUMN sandbox_coordination_token", "conversation coordination token"],

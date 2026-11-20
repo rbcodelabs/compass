@@ -28,8 +28,8 @@ export const EXTERNAL_LINKS_INDEXES = [
 ] as const
 
 export async function assertExternalLinksMigration(client: PoolClient, schema: string) {
-  const result = await client.query<{ column_name: string; data_type: string; is_nullable: string; character_maximum_length: number | null; datetime_precision: number | null; column_default: string | null }>(
-    "SELECT column_name, data_type, is_nullable, character_maximum_length, datetime_precision, column_default FROM information_schema.columns WHERE table_schema = $1 AND table_name = $2",
+  const result = await client.query<{ column_name: string; data_type: string; is_nullable: string; character_maximum_length: number | null; datetime_precision: number | null; column_default: string | null; is_generated: string }>(
+    "SELECT column_name, data_type, is_nullable, character_maximum_length, datetime_precision, column_default, is_generated FROM information_schema.columns WHERE table_schema = $1 AND table_name = $2",
     [schema, EXTERNAL_LINKS_TABLE],
   )
   const actual = new Map(result.rows.map((row) => [row.column_name, row]))
@@ -49,7 +49,7 @@ export async function assertExternalLinksMigration(client: PoolClient, schema: s
       : expectedDefault === "source" ? /^'UI'(?:::character varying)?$/.test(row.column_default ?? "")
       : expectedDefault === "timestamp" ? /^(?:CURRENT_TIMESTAMP|now\(\))$/i.test(row.column_default ?? "")
       : row.column_default === null
-    if (row.character_maximum_length !== (maxLength ?? null) || row.datetime_precision !== (precision ?? null) || !defaultMatches) {
+    if (row.character_maximum_length !== (maxLength ?? null) || row.datetime_precision !== (precision ?? null) || !defaultMatches || row.is_generated !== "NEVER") {
       throw new Error(`126_external_links: shape postcondition failed: external_links.${column}`)
     }
     if ((row.is_nullable === "YES") !== nullable) {

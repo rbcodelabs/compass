@@ -38,7 +38,7 @@ describe(NAME, () => {
   })
 
   describe("postcondition", () => {
-    const columns = ["id", "workspace_id", "request_id", "revision_id", "question_index", "chosen_option", "voter_user_id", "created_at", "updated_at"].map((column_name) => ({ column_name, is_nullable: "NO" }))
+    const columns = ["id", "workspace_id", "request_id", "revision_id", "question_index", "chosen_option", "voter_user_id", "created_at", "updated_at"].map((column_name) => ({ column_name, is_nullable: "NO", is_generated: "NEVER", data_type: column_name === "chosen_option" ? "character varying" : column_name === "question_index" ? "integer" : column_name.endsWith("_at") ? "timestamp without time zone" : "uuid", character_maximum_length: column_name === "chosen_option" ? 120 : null }))
     const index = (overrides: Record<string, unknown> = {}) => ({
       valid: true, ready: true, unique: true, table_name: "decision_votes", columns: ["request_id", "revision_id", "question_index", "voter_user_id"], predicate: null, expression: null, ...overrides,
     })

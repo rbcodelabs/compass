@@ -3,7 +3,7 @@ import type { PoolClient } from "pg"
 export const DECISION_VOTES_MIGRATION = "127_decision_votes"
 export const DECISION_VOTES_TABLE = "decision_votes"
 
-/** Columns 111 must leave behind, with their nullability. */
+/** Writable columns declared by migration 127. */
 const EXPECTED_COLUMNS: { column: string; nullable: boolean }[] = [
   { column: "id", nullable: false },
   { column: "workspace_id", nullable: false },
@@ -27,14 +27,16 @@ export const DECISION_VOTES_INDEXES = [
  * drifted table) fails closed instead of letting concurrent votes be counted twice.
  */
 export async function assertDecisionVotesMigration(client: PoolClient, schema: string) {
-  const result = await client.query<{ column_name: string; is_nullable: string }>(
-    "SELECT column_name, is_nullable FROM information_schema.columns WHERE table_schema=$1 AND table_name=$2",
+  const result = await client.query<{ column_name: string; is_nullable: string; data_type: string; character_maximum_length: number | null; is_generated: string }>(
+    "SELECT column_name, is_nullable, data_type, character_maximum_length, is_generated FROM information_schema.columns WHERE table_schema=$1 AND table_name=$2",
     [schema, DECISION_VOTES_TABLE],
   )
-  const actual = new Map(result.rows.map((row) => [row.column_name, row.is_nullable === "YES"]))
+  const actual = new Map(result.rows.map((row) => [row.column_name, row]))
   for (const { column, nullable } of EXPECTED_COLUMNS) {
-    if (actual.get(column) !== nullable) {
-      throw new Error(`migration 127 postcondition failed: ${DECISION_VOTES_TABLE}.${column} is missing or has the wrong nullability`)
+    const row = actual.get(column)
+    const type = column === "chosen_option" ? "character varying" : column === "question_index" ? "integer" : column.endsWith("_at") ? "timestamp without time zone" : "uuid"
+    if (!row || (row.is_nullable === "YES") !== nullable || row.data_type !== type || row.is_generated !== "NEVER" || (column === "chosen_option" && row.character_maximum_length !== 120)) {
+      throw new Error(`migration 127 postcondition failed: ${DECISION_VOTES_TABLE}.${column} is missing or has the wrong shape`)
     }
   }
 

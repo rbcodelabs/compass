@@ -1,3 +1,4 @@
+import { assertSchemaFirstNullableColumn, SCHEMA_FIRST_NULLABLE_COLUMNS } from "@/lib/migrations/schema-first-columns";
 import { EXTERNAL_LINKS_MIGRATION, assertExternalLinksMigration } from "@/lib/migrations/external-links";
 import { DECISION_VOTES_MIGRATION, assertDecisionVotesMigration } from "@/lib/migrations/decision-votes";
 import { AGENT_MESSAGE_RUN_ID_MIGRATION, assertAgentMessageRunIdMigration } from "@/lib/migrations/agent-message-run-id";
@@ -2502,6 +2503,9 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
       if (migration.name === "110_artifact_external_share") await assertArtifactExternalShareMigration(client, schema)
       if (migration.name === AGENT_SANDBOX_CLASS_MIGRATION) await assertAgentSandboxClassMigration(client, schema)
       if (migration.name === EXTERNAL_LINKS_MIGRATION) await assertExternalLinksMigration(client, schema)
+      if (migration.name === "126_doc_version_numbers" || migration.name === "128_task_start_date") {
+        await assertSchemaFirstNullableColumn(client, schema, SCHEMA_FIRST_NULLABLE_COLUMNS[migration.name])
+      }
       if (migration.name === DECISION_VOTES_MIGRATION) await assertDecisionVotesMigration(client, schema)
       if (migration.name === AGENT_MESSAGE_RUN_ID_MIGRATION) await assertAgentMessageRunIdMigration(client, schema)
       if (migration.name === AGENT_SANDBOX_OPERATIONS_MIGRATION) await assertAgentSandboxOperationsMigration(client, schema)

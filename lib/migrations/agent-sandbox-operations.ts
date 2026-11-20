@@ -2,7 +2,7 @@ import type { PoolClient } from "pg"
 
 export const AGENT_SANDBOX_OPERATIONS_MIGRATION = "130_agent_sandbox_operations"
 
-type Column = { column_name: string; data_type: string; is_nullable: string; column_default: string | null }
+type Column = { column_name: string; data_type: string; is_nullable: string; column_default: string | null; is_generated: string }
 
 async function assertTable(
   client: PoolClient,
@@ -12,14 +12,19 @@ async function assertTable(
   expected: Record<string, [type: string, nullable: boolean]>,
 ) {
   const columns = await client.query<Column>(
-    "SELECT column_name, data_type, is_nullable, column_default FROM information_schema.columns WHERE table_schema=$1 AND table_name=$2",
+    "SELECT column_name, data_type, is_nullable, column_default, is_generated FROM information_schema.columns WHERE table_schema=$1 AND table_name=$2",
     [schema, table],
   )
   const shape = new Map(columns.rows.map((column) => [column.column_name, column]))
   for (const [name, [type, nullable]] of Object.entries(expected)) {
     const column = shape.get(name)
-    if (!column || column.data_type !== type || column.is_nullable !== (nullable ? "YES" : "NO") || column.column_default !== null) {
+    if (!column || column.data_type !== type || column.is_nullable !== (nullable ? "YES" : "NO") || column.column_default !== null || column.is_generated !== "NEVER") {
       throw new Error(`Migration 130 postcondition failed: ${table}.${name} has drifted or is missing`)
+    }
+  }
+  for (const column of columns.rows) {
+    if (!Object.hasOwn(expected, column.column_name) && column.is_nullable === "NO" && column.column_default === null && column.is_generated === "NEVER") {
+      throw new Error(`Migration 130 postcondition failed: unexpected required column ${table}.${column.column_name}`)
     }
   }
   const key = await client.query<{ column_name: string }>(
