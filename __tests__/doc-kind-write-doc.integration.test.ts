@@ -16,7 +16,7 @@ vi.mock("@/lib/following-hooks", () => ({ followAfterCreate: vi.fn(), mcpFollowA
 vi.mock("@/lib/document-mcp-actor", () => ({ documentMcpActor: () => ({ authorId: null, authorName: "MCP Agent" }) }))
 
 import { replayAllMigrations } from "./helpers/replay-migrations"
-import { readPath } from "@/lib/doc-fs"
+import { createPath, readPath } from "@/lib/doc-fs"
 import { listLibraryDocs, writeDoc } from "@/lib/doc-fs-tool-handlers"
 import { safeMatter } from "@/lib/safe-matter"
 import { integrationDatabaseUrl } from "@/__tests__/helpers/integration-database"
@@ -100,6 +100,70 @@ describe.skipIf(!databaseUrl)("write_doc kind and list_docs against a real datab
     await writeDoc({ workspaceId, path: "Frontmatter untyped", content: "---\ncompass_kind: ADR\n---\nbody" })
     expect(await kindOf("Frontmatter untyped")).toBeNull()
     expect(Object.keys(safeMatter((await readPath(workspaceId, "Frontmatter untyped"))!.content).data)).not.toContain("compass_kind")
+  })
+
+
+  // TASK-186: exercise both file creation entry points against the migrated, real Prisma store.
+  // Keeping SQL checks separate from the tool response catches metadata/type persistence mistakes.
+  it.each(["qa-report", "QA_REPORT", "qa report"])("derives a new write_doc kind from frontmatter %s and preserves the claim metadata", async (claim) => {
+    const title = `Claimed report ${claim}`
+    const result = await writeDoc({ workspaceId, path: title, content: `---\nkind: ${claim}\ntopic: persisted\n---\nbody` })
+    expect(result.structuredContent.ok, result.structuredContent.message).toBe(true)
+    expect(data(result).kind).toBe("QA_REPORT")
+    const { rows } = await pool.query<{ kind: string | null; metadata: unknown; doc_type: string; content: string }>(
+      `SELECT kind, metadata, doc_type, content FROM "${schema}".docs WHERE workspace_id=$1 AND title=$2`, [workspaceId, title],
+    )
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toEqual({ kind: "QA_REPORT", metadata: { kind: claim, topic: "persisted" }, doc_type: "STANDARD", content: "body" })
+  })
+
+  it.each(["constructor", "design"])("ignores unwhitelisted frontmatter %s without losing its metadata", async (claim) => {
+    const title = `Ignored claim ${claim}`
+    const result = await writeDoc({ workspaceId, path: title, content: `---\nkind: ${claim}\n---\nbody` })
+    expect(result.structuredContent.ok, result.structuredContent.message).toBe(true)
+    expect(data(result).kind).toBeNull()
+    const { rows } = await pool.query<{ kind: string | null; metadata: unknown; doc_type: string }>(
+      `SELECT kind, metadata, doc_type FROM "${schema}".docs WHERE workspace_id=$1 AND title=$2`, [workspaceId, title],
+    )
+    expect(rows).toEqual([{ kind: null, metadata: { kind: claim }, doc_type: "STANDARD" }])
+  })
+
+  it("explicit kind and explicit null override an eligible creation claim", async () => {
+    for (const kind of ["NOTE", null] as const) {
+      const title = `Explicit claim ${String(kind)}`
+      const result = await writeDoc({ workspaceId, path: title, content: "---\nkind: qa-report\n---\nbody", kind })
+      expect(result.structuredContent.ok, result.structuredContent.message).toBe(true)
+      expect(data(result).kind).toBe(kind)
+      expect(await kindOf(title)).toBe(kind)
+    }
+  })
+
+  it("content updates never derive or retype an existing document from frontmatter", async () => {
+    for (const kind of ["NOTE", null] as const) {
+      const title = `Existing claim ${String(kind)}`
+      const initial = await writeDoc({ workspaceId, path: title, content: "before", kind })
+      expect(initial.structuredContent.ok, initial.structuredContent.message).toBe(true)
+      const updated = await writeDoc({ workspaceId, path: title, content: "---\nkind: qa-report\n---\nafter" })
+      expect(updated.structuredContent.ok, updated.structuredContent.message).toBe(true)
+      expect(data(updated).kind).toBe(kind)
+      const { rows } = await pool.query<{ kind: string | null; metadata: unknown; content: string }>(
+        `SELECT kind, metadata, content FROM "${schema}".docs WHERE workspace_id=$1 AND title=$2`, [workspaceId, title],
+      )
+      expect(rows).toEqual([{ kind, metadata: { kind: "qa-report" }, content: "after" }])
+    }
+  })
+
+  it("createPath persists an eligible claim while leaving implicit parents untyped", async () => {
+    const result = await createPath(workspaceId, "Direct claimed parent/Direct claimed report", "---\nkind: qa_report\n---\nbody", {})
+    expect(result.created).toBe(true)
+    expect(result.kind).toBe("QA_REPORT")
+    const { rows } = await pool.query<{ title: string; kind: string | null; metadata: unknown; doc_type: string }>(
+      `SELECT title, kind, metadata, doc_type FROM "${schema}".docs WHERE workspace_id=$1 AND title IN ('Direct claimed parent','Direct claimed report') ORDER BY title`, [workspaceId],
+    )
+    expect(rows).toEqual([
+      { title: "Direct claimed parent", kind: null, metadata: null, doc_type: "STANDARD" },
+      { title: "Direct claimed report", kind: "QA_REPORT", metadata: { kind: "qa_report" }, doc_type: "STANDARD" },
+    ])
   })
 
   it("list_docs filters by kind, orders newest first and honours the limit", async () => {
