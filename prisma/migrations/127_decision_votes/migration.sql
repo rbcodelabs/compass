@@ -1,7 +1,7 @@
 -- migration 127: advisory votes on tracked Decisions (ADR-0030).
--- Additive: one new table and one unique async index. No backfill or existing table changes.
--- Apply migration 127 before importing a workspace bundle, even if the bundle has no votes.
--- Before the table exists, decision cards omit the tally and workspace exports omit vote rows.
+-- Additive: one new table and one unique async index. No backfill and no existing table touched: a
+-- Decision with no rows here simply has no votes, so the code can ship before this is applied (the
+-- embed card then shows no tally).
 --
 -- decision_votes: one row per (request, revision, question, voter). A vote belongs to the revision it
 -- was cast on, so a revised question starts a fresh tally. chosen_option is the option label, checked

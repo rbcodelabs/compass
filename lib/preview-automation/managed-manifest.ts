@@ -294,7 +294,7 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   "125_unified_conversations": "dc6968e7f3573b5bc5aa9982f59c2f147643c807764c7c2ad768b21182333faf",
   // Advisory votes on tracked Decisions (ADR-0030): one new table (decision_votes) plus one unique ASYNC index. Additive, no backfill, no FK, no existing table touched.
   // The 127 postcondition is pinned in REVIEWED_MIGRATION_CODE_SHA256. Digest recorded from the shipped SQL after reading it.
-  "127_decision_votes": "aca93420eeef7b3608787e9f72d07192c66694d72d96cc1a9603b422c98523af",
+  "127_decision_votes": "acb304bf3fcb4288c2fa0d3298cc04e51bef8958108176b7f3930649d83f0691",
 };
 
 /**
