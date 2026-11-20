@@ -24,8 +24,8 @@ describe(NAME, function () {
   it("is one idempotent table and two async indexes", function () {
     expect(statements).toHaveLength(3)
     expect(statements[0]).toMatch(/^CREATE TABLE IF NOT EXISTS external_links\s*\(/i)
-    expect(statements[1]).toBe("CREATE UNIQUE INDEX ASYNC IF NOT EXISTS idx_external_links_subject_key ON external_links(subject_type, subject_id, provider, external_key)")
-    expect(statements[2]).toBe("CREATE INDEX ASYNC IF NOT EXISTS idx_external_links_workspace_key ON external_links(workspace_id, provider, external_key)")
+    expect(statements[1]).toBe("CREATE UNIQUE INDEX ASYNC IF NOT EXISTS idx_external_links_subject_key ON external_links(subject_type, subject_id, provider, external_key_hash)")
+    expect(statements[2]).toBe("CREATE INDEX ASYNC IF NOT EXISTS idx_external_links_workspace_key ON external_links(workspace_id, provider, external_key_hash)")
   })
 
   it("uses no foreign keys, enums, triggers, alters, serials or index ordering", function () {
@@ -38,6 +38,9 @@ describe(NAME, function () {
   it("keeps the unique key inside a btree entry", function () {
     expect(statements[0]).toContain("url VARCHAR(1000) NOT NULL")
     expect(statements[0]).toContain("external_key VARCHAR(1000) NOT NULL")
+    expect(statements[0]).toContain("external_key_hash VARCHAR(64) NOT NULL")
+    // Even four UTF-8 bytes per declared VARCHAR character stays below DSQL's 1 KiB key limit.
+    expect(4 * (40 + 30 + 64) + 16).toBeLessThan(1024)
   })
 
   it("maps the same table, columns and indexes in schema.prisma, with no relation", function () {

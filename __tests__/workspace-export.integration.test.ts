@@ -1,3 +1,5 @@
+import { addExternalLink } from "@/lib/external-links-service"
+import { externalLinkKeyHash } from "@/lib/external-link-key"
 /**
  * Workspace export -> import round trip against a real PostgreSQL schema.
  * Proves: content is copied with fresh ids and consistent references, secrets
@@ -124,6 +126,7 @@ describe.skipIf(!databaseUrl)("workspace export/import round trip", () => {
     await prisma.solution.create({ data: { workspaceId: ws.id, opportunityId: opp.id, title: "Wizard", createdById: bobId } })
     await prisma.opportunityScore.create({ data: { opportunityId: opp.id, scoringModelId, scoredByUserId: bobId, modelVersion: 1, formulaSnapshot: {}, rawValues: {}, rawScore: 1, normalizedScore: 1 } })
     const task = await prisma.task.create({ data: { workspaceId: wsId, title: "Build wizard", createdById: aliceId, seqPrefix: "TASK", seqNumber: 7 } })
+    await addExternalLink(prisma, {workspaceId: wsId, subjectType: "TASK", subjectId: task.id, url: "https://example.com/" + "a".repeat(1000 - "https://example.com/".length)})
     await prisma.entityLink.create({
       data: { workspaceId: wsId, linkType: "RELATES_TO", fromType: "TASK", fromId: task.id, toType: "OPPORTUNITY", toId: opp.id },
     })
@@ -204,6 +207,11 @@ describe.skipIf(!databaseUrl)("workspace export/import round trip", () => {
     expect(report.workspaceId).not.toBe(wsId)
     expect(report.slug).toBe("alpha-imported")
     expect(report.usersMatched).toBe(2)
+
+    const externalLink = await prisma.externalLink.findFirstOrThrow({where: {workspaceId: report.workspaceId}})
+    expect(externalLink.externalKey).toBe("https://example.com/" + "a".repeat(1000 - "https://example.com/".length))
+    expect(externalLink.externalKeyHash).toBe(externalLinkKeyHash(externalLink.externalKey))
+    expect(await prisma.task.count({where: {id: externalLink.subjectId, workspaceId: report.workspaceId}})).toBe(1)
 
     const ws = await prisma.workspace.findUniqueOrThrow({ where: { id: report.workspaceId } })
     expect(ws.ssoEnabled).toBe(false)

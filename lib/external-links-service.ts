@@ -1,3 +1,4 @@
+import { externalLinkKeyHash } from "@/lib/external-link-key"
 // External links service (ADR-0028). The single read/write module for the external_links table: only this file names the
 // ExternalLink model, so the invariants live in one reviewed place.
 //
@@ -117,9 +118,13 @@ export async function addExternalLink(prisma: AppPrismaClient, input: AddExterna
 
   return runTypedLinkTransaction(prisma, async function (tx) {
     await assertSubject(tx, input.workspaceId, subjectType, input.subjectId)
-    const where = { subjectType, subjectId: input.subjectId, provider: parsed.provider, externalKey: parsed.externalKey }
+    const where = { subjectType, subjectId: input.subjectId, provider: parsed.provider, externalKeyHash: externalLinkKeyHash(parsed.externalKey) }
     const existing = await tx.externalLink.findFirst({ where: { workspaceId: input.workspaceId, ...where }, select: SELECT })
-    if (existing) return { link: toRecord(existing), created: false }
+    if (existing) {
+      // A digest is a lookup key, never proof that two external identities are equal.
+      if (existing.externalKey !== parsed.externalKey) throw new ExternalLinkError("External link key collision; the link was not saved.", "INVALID_INPUT")
+      return { link: toRecord(existing), created: false }
+    }
 
     const count = await tx.externalLink.count({ where: { workspaceId: input.workspaceId, subjectType, subjectId: input.subjectId } })
     if (count >= MAX_EXTERNAL_LINKS_PER_SUBJECT) {
@@ -130,6 +135,7 @@ export async function addExternalLink(prisma: AppPrismaClient, input: AddExterna
       data: {
         workspaceId: input.workspaceId,
         ...where,
+        externalKey: parsed.externalKey,
         url: parsed.url,
         title,
         relation,
@@ -168,7 +174,7 @@ export async function findSubjectsByExternalKey(
   externalKey: string,
 ): Promise<ExternalLinkRecord[]> {
   const rows = await prisma.externalLink.findMany({
-    where: { workspaceId, provider, externalKey },
+    where: { workspaceId, provider, externalKeyHash: externalLinkKeyHash(externalKey), externalKey },
     orderBy: { createdAt: "desc" },
     take: 100,
     select: SELECT,

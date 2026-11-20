@@ -212,3 +212,19 @@ describe("deleteWorkspaceExternalLinks", function () {
     expect(db.links.map(function (row) { return row.id })).toEqual(["theirs"])
   })
 })
+
+describe("external-key digest integrity", () => {
+  it("stores a fixed-width hex digest without truncating a 1000-byte URL", async () => {
+    const db = fresh()
+    const url = "https://example.com/" + "a".repeat(1000 - "https://example.com/".length)
+    const added = await addExternalLink(db as never, {workspaceId: WS, subjectType: "TASK", subjectId: TASK, url})
+    expect(added.link.externalKey).toBe(url)
+    expect(db.links[0].externalKeyHash).toMatch(/^[a-f0-9]{64}$/)
+  })
+  it("fails closed when the digest lookup finds a different full key", async () => {
+    const db = fresh()
+    db.externalLink.findFirst = async () => ({id: "collision", workspaceId: WS, externalKey: "different"})
+    await expect(addExternalLink(db as never, {workspaceId: WS, subjectType: "TASK", subjectId: TASK, url: "https://example.com/a"})).rejects.toThrow(/collision/i)
+    expect(db.links).toHaveLength(0)
+  })
+})

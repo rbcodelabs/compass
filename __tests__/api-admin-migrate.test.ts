@@ -1006,24 +1006,25 @@ describe("/api/admin/migrate rollout observability", () => {
 
 describe("126_external_links runner completion", () => {
  const columns = [
-  {"column_name":"id","data_type":"uuid","is_nullable":"NO","character_maximum_length":null,"datetime_precision":null,"column_default":"gen_random_uuid()"},
-  {"column_name":"workspace_id","data_type":"uuid","is_nullable":"NO","character_maximum_length":null,"datetime_precision":null,"column_default":null},
-  {"column_name":"subject_type","data_type":"character varying","is_nullable":"NO","character_maximum_length":40,"datetime_precision":null,"column_default":null},
-  {"column_name":"subject_id","data_type":"uuid","is_nullable":"NO","character_maximum_length":null,"datetime_precision":null,"column_default":null},
-  {"column_name":"provider","data_type":"character varying","is_nullable":"NO","character_maximum_length":30,"datetime_precision":null,"column_default":null},
-  {"column_name":"url","data_type":"character varying","is_nullable":"NO","character_maximum_length":1000,"datetime_precision":null,"column_default":null},
-  {"column_name":"external_key","data_type":"character varying","is_nullable":"NO","character_maximum_length":1000,"datetime_precision":null,"column_default":null},
-  {"column_name":"title","data_type":"character varying","is_nullable":"NO","character_maximum_length":255,"datetime_precision":null,"column_default":null},
-  {"column_name":"relation","data_type":"character varying","is_nullable":"NO","character_maximum_length":20,"datetime_precision":null,"column_default":null},
-  {"column_name":"status_snapshot","data_type":"text","is_nullable":"YES","character_maximum_length":null,"datetime_precision":null,"column_default":null},
-  {"column_name":"source","data_type":"character varying","is_nullable":"NO","character_maximum_length":20,"datetime_precision":null,"column_default":"'UI'::character varying"},
-  {"column_name":"created_by_id","data_type":"uuid","is_nullable":"YES","character_maximum_length":null,"datetime_precision":null,"column_default":null},
-  {"column_name":"created_at","data_type":"timestamp without time zone","is_nullable":"NO","character_maximum_length":null,"datetime_precision":3,"column_default":"CURRENT_TIMESTAMP"},
-  {"column_name":"updated_at","data_type":"timestamp without time zone","is_nullable":"NO","character_maximum_length":null,"datetime_precision":3,"column_default":"CURRENT_TIMESTAMP"},
+  {"is_identity":"NO","is_generated":"NEVER","column_name":"id","data_type":"uuid","is_nullable":"NO","character_maximum_length":null,"datetime_precision":null,"column_default":"gen_random_uuid()"},
+  {"is_identity":"NO","is_generated":"NEVER","column_name":"workspace_id","data_type":"uuid","is_nullable":"NO","character_maximum_length":null,"datetime_precision":null,"column_default":null},
+  {"is_identity":"NO","is_generated":"NEVER","column_name":"subject_type","data_type":"character varying","is_nullable":"NO","character_maximum_length":40,"datetime_precision":null,"column_default":null},
+  {"is_identity":"NO","is_generated":"NEVER","column_name":"subject_id","data_type":"uuid","is_nullable":"NO","character_maximum_length":null,"datetime_precision":null,"column_default":null},
+  {"is_identity":"NO","is_generated":"NEVER","column_name":"provider","data_type":"character varying","is_nullable":"NO","character_maximum_length":30,"datetime_precision":null,"column_default":null},
+  {"is_identity":"NO","is_generated":"NEVER","column_name":"url","data_type":"character varying","is_nullable":"NO","character_maximum_length":1000,"datetime_precision":null,"column_default":null},
+  {"is_identity":"NO","is_generated":"NEVER","column_name":"external_key","data_type":"character varying","is_nullable":"NO","character_maximum_length":1000,"datetime_precision":null,"column_default":null},
+  {"is_identity":"NO","is_generated":"NEVER","column_name":"external_key_hash","data_type":"character varying","is_nullable":"NO","character_maximum_length":64,"datetime_precision":null,"column_default":null},
+  {"is_identity":"NO","is_generated":"NEVER","column_name":"title","data_type":"character varying","is_nullable":"NO","character_maximum_length":255,"datetime_precision":null,"column_default":null},
+  {"is_identity":"NO","is_generated":"NEVER","column_name":"relation","data_type":"character varying","is_nullable":"NO","character_maximum_length":20,"datetime_precision":null,"column_default":null},
+  {"is_identity":"NO","is_generated":"NEVER","column_name":"status_snapshot","data_type":"text","is_nullable":"YES","character_maximum_length":null,"datetime_precision":null,"column_default":null},
+  {"is_identity":"NO","is_generated":"NEVER","column_name":"source","data_type":"character varying","is_nullable":"NO","character_maximum_length":20,"datetime_precision":null,"column_default":"'UI'::character varying"},
+  {"is_identity":"NO","is_generated":"NEVER","column_name":"created_by_id","data_type":"uuid","is_nullable":"YES","character_maximum_length":null,"datetime_precision":null,"column_default":null},
+  {"is_identity":"NO","is_generated":"NEVER","column_name":"created_at","data_type":"timestamp without time zone","is_nullable":"NO","character_maximum_length":null,"datetime_precision":3,"column_default":"CURRENT_TIMESTAMP"},
+  {"is_identity":"NO","is_generated":"NEVER","column_name":"updated_at","data_type":"timestamp without time zone","is_nullable":"NO","character_maximum_length":null,"datetime_precision":3,"column_default":"CURRENT_TIMESTAMP"},
 ]
  const indexes = [
-  {name: "idx_external_links_subject_key", unique: true, columns: ["subject_type","subject_id","provider","external_key"]},
-  {name: "idx_external_links_workspace_key", unique: false, columns: ["workspace_id","provider","external_key"]},
+  {name: "idx_external_links_subject_key", unique: true, columns: ["subject_type","subject_id","provider","external_key_hash"]},
+  {name: "idx_external_links_workspace_key", unique: false, columns: ["workspace_id","provider","external_key_hash"]},
  ]
  function installExternalLinks({ jobs = true, jobStatus = "completed", ready = true, tableColumns = columns } = {}) {
   delete process.env.DATABASE_URL
@@ -1076,10 +1077,18 @@ describe("126_external_links runner completion", () => {
   expect((await run()).status).toBe(500)
   expect(receipts()).toHaveLength(0)
  })
+ it("leaves the receipt unfinished for a generated digest column", async () => {
+  installExternalLinks({ jobs: false, tableColumns: columns.map(column => ({
+   ...column, is_generated: column.column_name === "external_key_hash" ? "ALWAYS" : "NEVER",
+  })) })
+  const response = await run()
+  expect(receipts()).toHaveLength(0)
+  expect(response.status).toBe(500)
+ })
  it("leaves the receipt unfinished for an extra required column", async () => {
   installExternalLinks({ jobs: false, tableColumns: [
    ...columns,
-   { column_name: "unexpected", data_type: "text", is_nullable: "NO", character_maximum_length: null, datetime_precision: null, column_default: null },
+   { is_identity: "NO", is_generated: "NEVER", column_name: "unexpected", data_type: "text", is_nullable: "NO", character_maximum_length: null, datetime_precision: null, column_default: null },
   ] })
   const response = await run()
   expect(receipts()).toHaveLength(0)
