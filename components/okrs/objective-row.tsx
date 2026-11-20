@@ -22,6 +22,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { ChevronDown, ChevronRight, GripVertical, X } from "lucide-react";
 import type { ObjectiveStatus, CustomFieldDefinitionData, CustomFieldValue, SquadData } from "@/lib/types";
 import { averageProgress, STATUS_BADGE } from "@/lib/okrs";
+import { HighlightMatch } from "@/components/okrs/highlight-match";
 import { KeyResultBar } from "@/components/okrs/key-result-bar";
 import type { SupportingObjectiveOption } from "@/components/okrs/key-result-bar";
 import { AddKeyResultForm } from "@/components/okrs/add-key-result-form";
@@ -99,6 +100,10 @@ interface ObjectiveRowProps {
   hideProgress?: boolean;
   /** Controlled collapsed state. Omit for an uncontrolled row that starts expanded. */
   collapsed?: boolean;
+  /** Keep the row expanded while a name filter is active. */
+  hideCollapseToggle?: boolean;
+  /** Hide a filtered row while preserving its mounted form state. */
+  hidden?: boolean;
   onCollapsedChange?: (collapsed: boolean) => void;
 }
 
@@ -113,6 +118,8 @@ export function ObjectiveRow({
   paceElapsed,
   hideProgress,
   collapsed: collapsedProp,
+  hideCollapseToggle,
+  hidden = false,
   onCollapsedChange,
 }: ObjectiveRowProps) {
   const labels = useLabels();
@@ -147,7 +154,7 @@ export function ObjectiveRow({
     transform,
     transition,
     isDragging,
-  } = useSortable({ id: objective.id });
+  } = useSortable({ id: objective.id, disabled: { draggable: hidden, droppable: hidden } });
 
   const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
@@ -220,6 +227,7 @@ export function ObjectiveRow({
   return (
     <EntityCard
       ref={setNodeRef}
+      hidden={hidden}
       style={style}
       interactive
       selected={isPanelOpen(panel, "objective", objective.id)}
@@ -238,7 +246,7 @@ export function ObjectiveRow({
       }
       title={
         <span className="flex items-center gap-2">
-              <button
+              {!hideCollapseToggle && <button
                 type="button"
                 onClick={toggleCollapsed}
                 aria-expanded={!collapsed}
@@ -247,7 +255,7 @@ export function ObjectiveRow({
                 className="shrink-0 rounded text-text-subtle hover:text-text-default focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-border-focus"
               >
                 {collapsed ? <ChevronRight className="size-4" /> : <ChevronDown className="size-4" />}
-              </button>
+              </button>}
               {objective.squad && (
                 <span
                   className="w-2.5 h-2.5 rounded-full shrink-0"
@@ -260,7 +268,7 @@ export function ObjectiveRow({
                 onClick={() => openPanel("objective", objective.id)}
                 className="text-left font-medium text-base hover:underline underline-offset-2"
               >
-                {objective.title}
+                <HighlightMatch text={objective.title} />
               </button>
         </span>
       }

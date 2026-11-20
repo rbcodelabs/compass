@@ -219,8 +219,8 @@ describe("server actions: OKRs", () => {
     ["updateObjectiveStatus(NULL)", () => okrActions.updateObjectiveStatus("obj-null", "AT_RISK", WS_A.org, WS_A.slug)],
     ["deleteObjective(B)", () => okrActions.deleteObjective("obj-b", "/p")],
     ["deleteObjective(NULL)", () => okrActions.deleteObjective("obj-null", "/p")],
-    ["reorderObjective(B)", () => okrActions.reorderObjective("obj-b", 5, "/p")],
-    ["reorderObjective(NULL)", () => okrActions.reorderObjective("obj-null", 5, "/p")],
+    ["reorderObjective(B)", () => okrActions.reorderObjective("obj-b", { anchorId: "obj-a", position: "after" }, "/p")],
+    ["reorderObjective(NULL)", () => okrActions.reorderObjective("obj-null", { anchorId: "obj-a", position: "after" }, "/p")],
     ["addKeyResult(B)", () => okrActions.addKeyResult("obj-b", WS_A.org, WS_A.slug, form({ title: "KR", target: "5" }))],
     ["addKeyResult(NULL)", () => okrActions.addKeyResult("obj-null", WS_A.org, WS_A.slug, form({ title: "KR", target: "5" }))],
     ["deleteKeyResult(B)", () => okrActions.deleteKeyResult("kr-b", "/p")],
@@ -235,9 +235,10 @@ describe("server actions: OKRs", () => {
   });
 
   it("A's own objective can still be updated, reordered and deleted", async () => {
+    fake.current!.state.objectives.push({ id: "obj-a2", workspaceId: WS_A.id, cycleId: "cycle-a", title: "Another objective", status: "ON_TRACK", sortOrder: 1 });
     await okrActions.updateObjectiveStatus("obj-a", "AT_RISK", WS_A.org, WS_A.slug);
-    await okrActions.reorderObjective("obj-a", 7, "/p");
-    expect(fake.current!.state.objectives.find((o) => o.id === "obj-a")).toMatchObject({ status: "AT_RISK", sortOrder: 7 });
+    await okrActions.reorderObjective("obj-a", { anchorId: "obj-a2", position: "after" }, "/p");
+    expect(fake.current!.state.objectives.find((o) => o.id === "obj-a")).toMatchObject({ status: "AT_RISK", sortOrder: 1 });
     await okrActions.deleteObjective("obj-a", "/p");
     expect(fake.current!.state.objectives.some((o) => o.id === "obj-a")).toBe(false);
   });

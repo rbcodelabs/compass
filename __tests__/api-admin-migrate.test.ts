@@ -1108,3 +1108,51 @@ describe("126_external_links runner completion", () => {
   ])
  })
 })
+
+describe.each([
+ ["127_decision_votes", "decision_votes", "idx_decision_votes_voter", ["request_id", "revision_id", "question_index", "voter_user_id"]],
+ ["129_agent_message_run_id", "agent_messages", "idx_agent_messages_run", ["run_id"]],
+] as const)("%s ASYNC receipt", (migration, table, index, keys) => {
+ const run = async (job: "completed" | "missing" | "none", ready: boolean) => {
+  delete process.env.DATABASE_URL
+  const fallback = mocks.query.getMockImplementation()!
+  const trace: string[] = []
+  mocks.query.mockImplementation(async (value: unknown, params?: unknown[]) => {
+   const sql = String(value)
+   if (sql.includes("INDEX ASYNC") && sql.includes(index)) return { rows: job === "none" ? [] : [{job_id: "job"}] }
+   if (sql === "CALL sys.wait_for_job($1)") trace.push("wait")
+   if (sql === "SELECT status FROM sys.jobs WHERE job_id = $1") {
+    trace.push("status")
+    return { rows: job === "missing" ? [] : [{status: "completed"}] }
+   }
+   if (sql.includes("information_schema.columns") && (params?.[1] === table || sql.includes("table_name='agent_messages'"))) {
+    const base = { is_nullable: "NO", data_type: "uuid", is_generated: "NEVER", is_identity: "NO", column_default: null }
+    const votes = ["id", "workspace_id", "request_id", "revision_id", "question_index", "chosen_option", "voter_user_id", "created_at", "updated_at"]
+    return { rows: migration.startsWith("129") ? [{...base, is_nullable: "YES"}] : votes.map(column_name => ({
+     ...base, column_name,
+     data_type: column_name === "chosen_option" ? "character varying" : column_name === "question_index" ? "integer" : column_name.endsWith("_at") ? "timestamp without time zone" : "uuid",
+     column_default: column_name === "id" ? "gen_random_uuid()" : column_name.endsWith("_at") ? "CURRENT_TIMESTAMP" : null, datetime_precision: column_name.endsWith("_at") ? 3 : null,
+     character_maximum_length: column_name === "chosen_option" ? 120 : null,
+    })) }
+   }
+   if (sql.includes("i.indisprimary") && sql.includes("decision_votes")) return { rows: [{columns: ["id"], valid: true, ready: true}] }
+   if (sql.includes("pg_get_expr") && params?.[1] === index) {
+    trace.push("catalog")
+    return { rows: [{ valid: ready, ready, unique: migration.startsWith("127"), table_name: table, columns: keys, column_count: keys.length, predicate: null, expression: null }] }
+   }
+   if (sql.includes("SET finished_at = CURRENT_TIMESTAMP")) trace.push("receipt")
+   return fallback(value, params)
+  })
+  const result = await applyMigrations(new (class { connect = mocks.connect })() as never, "compass_preview", migration)
+  return { status: result.status, trace }
+ }
+ it("waits for completion before checking the catalog and writing a receipt", async () => {
+  expect(await run("completed", true)).toEqual({ status: 200, trace: ["wait", "status", "catalog", "receipt"] })
+ })
+ it("leaves the receipt unfinished when the job status is missing", async () => {
+  expect(await run("missing", true)).toEqual({ status: 500, trace: ["wait", "status"] })
+ })
+ it("requires a ready catalog on no-job resume", async () => {
+  expect(await run("none", false)).toEqual({ status: 500, trace: ["catalog"] })
+ })
+})
