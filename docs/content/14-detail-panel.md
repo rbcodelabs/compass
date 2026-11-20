@@ -104,9 +104,9 @@ The same editor is available on full-page Tasks, Opportunities and Roadmap items
 
 ![Description editing on mobile](/screenshots/docs/markdown-description-mobile.png)
 
-For anything deeper, use **Open full page** at the top of the panel.
+For anything deeper, use the **Open full page** icon in the panel header.
 
-Task, opportunity and roadmap item panels keep **Open full page** as a compact icon beside the pin and close controls, in both floating and pinned panels.
+Every panel puts its panel-level actions in the header as icon buttons, in the same order: **Follow** (when following is on), **Request decision**, **Open full page**, then **View chain** (when available), pin and close. Hover an icon to see its name. They are the same in floating and pinned panels, and they are not repeated in the panel body.
 Their compact summary puts status, priority, assignee, and due date below the title;
 expand **More properties** below subtasks for the remaining task fields.
 

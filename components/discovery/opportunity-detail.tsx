@@ -28,6 +28,7 @@ import { FleshThisOutLink } from "@/components/research/flesh-this-out-link";
 import { PmInterviewHistory } from "@/components/research/pm-interview-history";
 import type { SolutionCardData } from "./solution-card";
 import type { MemberData, OpportunityScoreData, ScoringModelData } from "@/lib/types";
+import { usePanelHeaderActions } from "@/components/panels/panel-header-actions";
 
 type OpportunityData = ComponentProps<typeof OpportunityHeader>["opportunity"] & {
   workspaceId: string;
@@ -70,6 +71,15 @@ export function OpportunityDetail(props: Props) {
 function OpportunityDetailBody({ opportunityId, orgSlug, workspaceSlug, variant, initialTab, onRetry }: Props & { onRetry: () => void }) {
   const labels = useLabels();
   const { data, error, displayId, mutate, refresh } = useEntityDetail<OpportunityData>("opportunity", opportunityId, orgSlug, workspaceSlug);
+  // In the panel the shell shows Follow / Request decision as header icons; on the full page they stay inline below.
+  const inShell = usePanelHeaderActions(
+    data
+      ? {
+          follow: { subjectType: "OPPORTUNITY", subjectId: data.id },
+          decision: { subjectType: "OPPORTUNITY", subjectId: data.id, subjectTitle: data.title },
+        }
+      : {},
+  );
   const { panel } = usePanelContext();
   const panelKey = panel ? `${panel.type}:${panel.id}` : null;
   const previousPanel = useRef(panelKey);
@@ -99,8 +109,8 @@ function OpportunityDetailBody({ opportunityId, orgSlug, workspaceSlug, variant,
         <div className="flex flex-wrap items-center gap-3">
           {scoringModel && <ScoreBadge score={toScoreSummary(data.score, scoringModel)} scoringHref={`${detailPath}?tab=scoring`} />}
           <Button variant="ghost" size="sm" aria-controls={discussionId} onClick={() => { discussionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }); discussionRef.current?.focus({ preventScroll: true }); }}><MessageSquare className="size-4" /> Discussion</Button>
-          <FollowButton orgSlug={orgSlug} workspaceSlug={workspaceSlug} subjectType="OPPORTUNITY" subjectId={data.id} />
-          <RequestDecisionLink orgSlug={orgSlug} workspaceSlug={workspaceSlug} subjectType="OPPORTUNITY" subjectId={data.id} subjectTitle={data.title} />
+          {!inShell && <FollowButton orgSlug={orgSlug} workspaceSlug={workspaceSlug} subjectType="OPPORTUNITY" subjectId={data.id} />}
+          {!inShell && <RequestDecisionLink orgSlug={orgSlug} workspaceSlug={workspaceSlug} subjectType="OPPORTUNITY" subjectId={data.id} subjectTitle={data.title} />}
           {data.pmInterviewEnabled && <FleshThisOutLink orgSlug={orgSlug} workspaceSlug={workspaceSlug} targetType="OPPORTUNITY" targetId={data.id} />}
         </div>
         <div className="grid min-w-0 grid-cols-1 gap-7 @[801px]:grid-cols-[minmax(0,1fr)_310px] @[801px]:gap-8">
