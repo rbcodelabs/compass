@@ -37,7 +37,7 @@ it("restores only the claimed generation when a new wake-up supersedes another r
   } as unknown as AppPrismaClient
   const startContinuation = vi.fn(async () => {
     expect(rows.map(row => row.state)).toEqual(["DISPATCHED", "DISPATCHED"])
-    Object.assign(rows[0], { generation: 2, state: "QUIET_WAIT" })
+    Object.assign(rows[0], { generation: 2, state: "DISPATCHED" })
     return { status: "already_running" as const, conversationId: "orchestrator-thread" }
   })
 
@@ -45,6 +45,6 @@ it("restores only the claimed generation when a new wake-up supersedes another r
 
   expect(startContinuation).toHaveBeenCalledOnce()
   expect(result).toMatchObject({ heldBusy: 1, dropped: 0 })
-  expect(rows[0]).toMatchObject({ generation: 2, state: "QUIET_WAIT" })
+  expect(rows[0]).toMatchObject({ generation: 2, state: "DISPATCHED" })
   expect(rows[1]).toMatchObject({ generation: 1, state: "BATCH_WAIT" })
 })
