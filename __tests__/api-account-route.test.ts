@@ -87,6 +87,18 @@ describe("DELETE /api/account", () => {
     expect((await del({ confirmEmail: "me@example.com" }, { ...json, origin: "https://compass.example", "x-forwarded-host": "compass.example", host: "internal" })).status, "behind a proxy").toBe(200)
   })
 
+  it("behind an ALB, ignores a client-supplied x-forwarded-host and compares Origin with Host", async () => {
+    const json = { "content-type": "application/json" }
+    deleteAccount.mockResolvedValue({ ok: true, revocation: {} })
+    vi.stubEnv("COMPASS_TRUSTED_PROXY", "alb")
+    try {
+      expect((await del({ confirmEmail: "me@example.com" }, { ...json, origin: "https://evil.example", "x-forwarded-host": "evil.example", host: "compass.example" })).status).toBe(403)
+      expect((await del({ confirmEmail: "me@example.com" }, { ...json, origin: "https://compass.example", host: "compass.example" })).status).toBe(200)
+    } finally {
+      vi.unstubAllEnvs()
+    }
+  })
+
   it("rejects malformed JSON and a missing confirmation", async () => {
     expect((await del("{not json")).status).toBe(400)
     expect((await del({})).status).toBe(400)

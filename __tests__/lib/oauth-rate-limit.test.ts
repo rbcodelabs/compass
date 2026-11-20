@@ -9,7 +9,7 @@
  * registration grants nothing until a human approves a consent screen. What
  * follows tests the speed bump that exists, not a distributed guarantee.
  */
-import { beforeEach, describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import {
   checkRegistrationRateLimit,
   clientAddress,
@@ -76,5 +76,19 @@ describe("clientAddress", () => {
 
   it("buckets everything unattributable together rather than throwing", () => {
     expect(clientAddress(request({}))).toBe("unknown")
+  })
+
+  describe("COMPASS_TRUSTED_PROXY", () => {
+    afterEach(() => vi.unstubAllEnvs())
+
+    it("alb: uses the address the load balancer appended, not a spoofed left-hand entry or x-real-ip", () => {
+      vi.stubEnv("COMPASS_TRUSTED_PROXY", "alb")
+      expect(clientAddress(request({ "x-forwarded-for": "1.1.1.1, 203.0.113.9", "x-real-ip": "2.2.2.2" }))).toBe("203.0.113.9")
+    })
+
+    it("none: ignores forwarded headers", () => {
+      vi.stubEnv("COMPASS_TRUSTED_PROXY", "none")
+      expect(clientAddress(request({ "x-forwarded-for": "203.0.113.9", "x-real-ip": "203.0.113.9" }))).toBe("unknown")
+    })
   })
 })
