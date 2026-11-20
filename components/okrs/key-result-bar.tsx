@@ -1,5 +1,6 @@
 "use client";
 
+import { HighlightMatch } from "@/components/okrs/highlight-match";
 import * as React from "react";
 import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
@@ -172,7 +173,7 @@ export function KeyResultBar({ keyResult, objectiveId, orgSlug, workspaceSlug, s
             <GripVertical className="size-3.5" />
           </button>
           <button type="button" onClick={() => openPanel("keyResult", keyResult.id)} className="okx-kr-name">
-            {keyResult.title}
+            <HighlightMatch text={keyResult.title} />
           </button>
         </div>
         {!hideProgress && (

@@ -416,6 +416,7 @@ const files = walk(ROOT)
  * fails to find) changes these numbers and fails the test, so the inventory can only change on purpose.
  */
 const KNOWN_PRISMA_CREATE_SITES: Record<string, number> = {
+  "__tests__/okr-objective-reorder.integration.test.ts": 1, // Objective reorder fixtures use the disposable workspace row
   "__tests__/preview-automation-qa/postgres-integration.test.ts": 1,
   "__tests__/workspace-export-coverage.integration.test.ts": 2, // solution + objective fixtures for the round trip, each created with the fixture workspace's id
   "__tests__/workspace-export.integration.test.ts": 1, // one solution fixture for the round trip, created with the fixture workspace's id
@@ -428,6 +429,7 @@ const KNOWN_PRISMA_CREATE_SITES: Record<string, number> = {
   "e2e/functional/specs/decisions.spec.ts": 1,
   "e2e/functional/specs/objective-linked-opportunities.spec.ts": 1, // one objective fixture helper, created with the e2e workspace's workspaceId
   "e2e/functional/specs/pm-interview.spec.ts": 1,
+  "e2e/functional/specs/portal-home-internal-widgets.spec.ts": 1, // objective fixture uses the exact seeded workspace row
   "lib/opportunity-batch-create.ts": 1, // the shared Solution create core; workspaceId comes from the authorized workspace
   "lib/rest/execute.ts": 1,
   "scripts/seed-demo-intro.ts": 4, // demo-video sample data: every objective/solution create sets workspaceId

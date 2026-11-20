@@ -92,7 +92,7 @@ describe("OKR drag-to-reorder", () => {
     await keyboardDrag(objectiveHandle);
 
     expect(reorderObjective).toHaveBeenCalledTimes(1);
-    expect(reorderObjective).toHaveBeenCalledWith("o1", 1, "/org/ws/okrs/c1");
+    expect(reorderObjective).toHaveBeenCalledWith("o1", { anchorId: "o2", position: "after" }, "/org/ws/okrs/c1");
     expect(reorderKeyResult).not.toHaveBeenCalled();
   });
 
@@ -108,5 +108,21 @@ describe("OKR drag-to-reorder", () => {
     expect(reorderKeyResult).toHaveBeenCalledTimes(1);
     expect(reorderKeyResult).toHaveBeenCalledWith("k1", 1, "/org/ws/okrs/c1");
     expect(reorderObjective).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { title: "Objective one", selector: '[data-slot="card"]', action: reorderObjective },
+  ])("rolls back a rejected reorder while keeping $title mounted", async ({ title, selector, action }) => {
+    action.mockRejectedValueOnce(new Error("Not found"));
+    stubLayout();
+    renderList();
+    const handle = screen.getAllByRole("button", { name: "Drag to reorder" })
+      .find((candidate) => candidate.closest(selector)?.textContent?.includes(title))!;
+
+    await keyboardDrag(handle);
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Could not save the new order");
+    expect(document.querySelector(selector)).toHaveTextContent(title);
+    expect(handle).toBeInTheDocument();
   });
 });
