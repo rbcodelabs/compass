@@ -69,8 +69,8 @@ test.describe("Create Workspace", () => {
     await page.getByRole("button", { name: "Create Workspace", exact: true }).click();
 
     // The landing route must match the workspace links on /dashboard.
-    await page.waitForURL(`**/${orgSlug}/${expectedSlug}/okrs`, { timeout: 20_000 });
-    await expect(page).toHaveURL(new RegExp(`/${orgSlug}/${expectedSlug}/okrs$`));
+    await page.waitForURL(`**/${orgSlug}/${expectedSlug}/home`, { timeout: 20_000 });
+    await expect(page).toHaveURL(new RegExp(`/${orgSlug}/${expectedSlug}/home$`));
 
     // ── 5. The new workspace is in the sidebar switcher ────────────────────
     // This is what revalidatePath("/", "layout") exists for: without it the

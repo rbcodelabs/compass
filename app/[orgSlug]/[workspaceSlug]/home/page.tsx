@@ -5,6 +5,9 @@ import { EmptyHome, PortalHomeBoard } from "@/components/portal-home/board"
 import { PortalHomeEditor } from "@/components/portal-home/editor"
 import { buildDefaultWidgets } from "@/lib/portal-home/defaults"
 import { resolveCustomerAvailability, resolveHomeForMember, resolveHomeForTeam } from "@/lib/portal-home/resolve"
+import { HubSearch } from "@/components/portal-home/templates/hub-search"
+import { listPublishedDocs } from "@/lib/portal-docs/service"
+import { popularSearchTerms } from "@/lib/portal-docs/format"
 import { loadHomeLayout, loadPublishedHome } from "@/lib/portal-home/service"
 
 export const metadata = {
@@ -53,9 +56,17 @@ export default async function TeamHomePage({ params }: TeamHomePageProps) {
   const { widgets: published, template } = await loadPublishedHome(prisma, workspace.id)
   const baseline = published ?? defaults
   const home = await resolveHomeForTeam(resolveContext, baseline)
+  // Docs hub: the same search-first box the customer portal shows, filtering the docs widget on this page.
+  const hubSearch =
+    template === "docs_hub" && home.widgets.some((widget) => widget.type === "docs")
+      ? popularSearchTerms((await listPublishedDocs(prisma, workspace.id, { limit: 6 })).map((doc) => doc.title))
+      : null
   const board =
     home.widgets.length > 0 ? (
-      <PortalHomeBoard widgets={home.widgets} resolved={home.resolved} />
+      <div className="flex flex-col gap-6">
+        {hubSearch ? <HubSearch tone="light" suggestions={hubSearch} /> : null}
+        <PortalHomeBoard widgets={home.widgets} resolved={home.resolved} template={template} />
+      </div>
     ) : (
       <EmptyHome>Nothing on the team home yet.</EmptyHome>
     )
