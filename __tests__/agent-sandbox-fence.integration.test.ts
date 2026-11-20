@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto"
 import { PrismaClient } from "@prisma/client"
 import { PrismaPg } from "@prisma/adapter-pg"
 import { Pool } from "pg"
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest"
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 import { integrationDatabaseUrl } from "@/__tests__/helpers/integration-database"
 import { createAgentRun, agentConversationSandboxName, reapIdleConversationSandboxes } from "@/lib/agent-runs"
 import { dispatchPersistentSandboxLaunch, releasePersistentSandboxLaunch, reservePersistentSandboxLaunch } from "@/lib/agent-sandbox-fence"
@@ -56,6 +56,14 @@ describe.skipIf(!databaseUrl)("durable sandbox fence on PostgreSQL", () => {
     if (owned) await pool.query(`DROP SCHEMA "${schema}" CASCADE`)
     await prisma?.$disconnect()
     await pool.end()
+  })
+
+  afterEach(async () => {
+    if (!prisma) return
+    await prisma.agentSandboxOperation.deleteMany()
+    await prisma.agentSandboxGeneration.deleteMany()
+    await prisma.agentRun.deleteMany()
+    await prisma.agentConversation.deleteMany()
   })
 
   async function makeConversation() {
@@ -135,7 +143,9 @@ describe.skipIf(!databaseUrl)("durable sandbox fence on PostgreSQL", () => {
     failLookup = false
     const later = new Date(now.getTime() + 60_001)
     const retried = await reapIdleConversationSandboxes({ prisma, now: later, limit: 1, cleanup })
-    expect(retried.stopped.toSorted()).toEqual([shared, developer].toSorted())
+    expect(retried.stopped).toEqual([shared])
+    // A different sandbox class in the same conversation shares the fence.
+    expect((await reapIdleConversationSandboxes({ prisma, now: later, limit: 1, cleanup })).stopped).toEqual([developer])
     expect(await marker(failed)).toEqual({ sandboxStoppedAt: later })
     expect(await marker(dev)).toEqual({ sandboxStoppedAt: later })
     expect(await marker(history[0])).toEqual({ sandboxStoppedAt: null })
@@ -181,10 +191,6 @@ describe.skipIf(!databaseUrl)("durable sandbox fence on PostgreSQL", () => {
     expect(result.stopped).toEqual([freshSandbox])
     expect(result.failed).toMatchObject([{ sandboxName: failedSandbox }])
     expect(stop).toHaveBeenCalledOnce()
-    // This test intentionally leaves a failed retry; remove its fixture before
-    // other cases drive the same isolated schema's chronologically earlier ticks.
-    await prisma.agentSandboxOperation.deleteMany({ where: { conversationId: failedConversation } })
-    await prisma.agentRun.deleteMany({ where: { conversationId: failedConversation } })
   })
 
   it("retries bookkeeping for the exact confirmed generation without sending a second stop", async () => {

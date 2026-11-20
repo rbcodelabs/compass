@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 const m = vi.hoisted(() => ({
@@ -78,6 +78,7 @@ function context(over: Partial<LaunchContext> = {}): LaunchContext {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  vi.stubEnv("AUTH_SECRET", "sandbox-launch-test-fixture")
   vi.spyOn(console, "error").mockImplementation(() => {})
   m.packRows.mockResolvedValue([])
   m.packs.mockResolvedValue({ files: [{ path: "pack.txt", content: "p" }], pluginPaths: ["p1"], skillIds: ["s1"], provenanceJson: '[{"packId":"x"}]', systemPromptAppendices: ["APPENDIX"] })
@@ -96,6 +97,8 @@ beforeEach(() => {
   m.release.mockResolvedValue(undefined)
   m.acquire.mockResolvedValue({ sandbox: { writeFiles: m.writeFiles, runCommand: m.runCommand }, reused: false, reason: "not-found" })
 })
+
+afterEach(() => vi.unstubAllEnvs())
 
 const GITHUB_ENV = { GH_TOKEN: "ghs_x", AGENT_GITHUB_REPOS: "acme/app" }
 
