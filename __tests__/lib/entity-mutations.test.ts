@@ -19,7 +19,7 @@ const models = {
   solution: { findFirst: vi.fn(), update: vi.fn() },
   feedbackItem: { findFirst: vi.fn(), update: vi.fn() },
   roadmapItem: { findFirst: vi.fn(), findUnique: vi.fn(), update: vi.fn() },
-  task: { findFirst: vi.fn(), update: vi.fn() },
+  task: { findFirst: vi.fn(), update: vi.fn(), updateMany: vi.fn(), findUniqueOrThrow: vi.fn() },
 };
 
 // entity_links is the only store of the Key Result pointer and the objective links derived from it.
@@ -365,15 +365,32 @@ describe("updateEntityField — task branch (task-specific field allowlist)", ()
   });
 
   it("accepts a valid ISO dueDate string, coercing to a Date", async () => {
+    models.task.updateMany.mockResolvedValueOnce({ count: 1 });
+    models.task.findUniqueOrThrow.mockResolvedValueOnce({ id: "e1", workspaceId: WS });
     const r = await updateEntityField("task", "e1", WS, "dueDate", "2026-01-15");
     expect(r).toEqual({ ok: true });
-    expect(models.task.update.mock.calls[0][0].data.dueDate).toBeInstanceOf(Date);
+    expect(models.task.updateMany.mock.calls[0][0].data.dueDate).toBeInstanceOf(Date);
   });
 
   it("accepts a null dueDate (clear)", async () => {
+    models.task.updateMany.mockResolvedValueOnce({ count: 1 });
+    models.task.findUniqueOrThrow.mockResolvedValueOnce({ id: "e1", workspaceId: WS });
     const r = await updateEntityField("task", "e1", WS, "dueDate", null);
     expect(r).toEqual({ ok: true });
-    expect(models.task.update.mock.calls[0][0].data.dueDate).toBeNull();
+    expect(models.task.updateMany.mock.calls[0][0].data.dueDate).toBeNull();
+  });
+
+  it("returns a conflict when the current start date prevents a due-date write", async () => {
+    models.task.updateMany.mockResolvedValueOnce({ count: 0 });
+    const dueDate = new Date("2026-01-15");
+    expect(await updateEntityField("task", "e1", WS, "dueDate", "2026-01-15")).toEqual({
+      ok: false, status: 409, error: "Task date range changed; reload and retry",
+    });
+    expect(models.task.updateMany).toHaveBeenCalledWith({
+      where: { id: "e1", workspaceId: WS, OR: [{ startDate: null }, { startDate: { lte: dueDate } }] },
+      data: { dueDate, updatedAt: expect.any(Date) },
+    });
+    expect(models.task.findUniqueOrThrow).not.toHaveBeenCalled();
   });
 
   it("rejects an unparsable dueDate string", async () => {
