@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client"
 import { averageProgress } from "@/lib/okrs"
 import type { OkrSummaryConfig } from "../widgets/okr-summary"
 import type { WidgetResolution } from "../data"
@@ -21,7 +22,7 @@ export async function resolveOkrSummary(ctx: ResolveContext, config: OkrSummaryC
       where: { OR: [{ workspaceId }, { workspaceId: null }] },
       select: { current: true, target: true },
     },
-  } as const
+  } satisfies Prisma.ObjectiveSelect
 
   let cycleTitle: string | null = null
   let objectives
