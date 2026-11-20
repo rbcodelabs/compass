@@ -462,7 +462,9 @@ test.describe("Re-QA a022c39e", () => {
     const submit = page.getByRole("button", { name: /^Comment/ });
     async function selectAgent(name: string) {
       const picker = page.getByTestId("mention-picker");
-      await picker.locator(`[role="option"][data-mention-name=${JSON.stringify(name)}]`).click({ timeout: 15_000 });
+      const option = picker.locator(`[role="option"][data-mention-name=${JSON.stringify(name)}]`);
+      await expect(option).toHaveAttribute("aria-selected", "true");
+      await page.keyboard.press("Enter");
       await expect(page.getByTestId("mention-chip")).toContainText(name);
       await expect(picker).toBeHidden();
     }
