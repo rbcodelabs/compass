@@ -13,9 +13,11 @@
  * for a snapshot should always get one.
  */
 
-import getPrisma from "@/lib/db"
+import getPrisma, { type AppTransactionClient } from "@/lib/db"
 import { Prisma } from "@prisma/client"
 import { randomUUID } from "node:crypto"
+import { getActiveSchema } from "@/lib/schema"
+import { withAtomicRetry } from "@/lib/workspace-updates-capture"
 
 const COALESCE_WINDOW_MS = 5 * 60 * 1000 // 5 minutes
 
@@ -140,9 +142,17 @@ export interface PinDocVersionOptions {
  */
 export async function pinDocVersion(
   docId: string,
-  opts: PinDocVersionOptions
+  opts: PinDocVersionOptions,
+  tx?: AppTransactionClient,
 ): Promise<{ id: string; versionNumber: number; created: boolean } | null> {
-  const prisma = getPrisma()
+  if (!tx) return withAtomicRetry(getPrisma(), (transaction) => pinDocVersion(docId, opts, transaction))
+  const prisma = tx
+  // PostgreSQL locks the parent until commit; DSQL treats FOR UPDATE as a
+  // write-conflict declaration, so the losing transaction retries in full.
+  // This covers the empty-history race without changing the live doc revision.
+  const table = Prisma.raw(`"${getActiveSchema().replaceAll('"', '""')}"."docs"`)
+  const locked = await prisma.$queryRaw<{ id: string }[]>(Prisma.sql`SELECT id FROM ${table} WHERE id = ${docId}::uuid FOR UPDATE`)
+  if (!locked.length) return null
   const doc = await prisma.doc.findUnique({
     where: { id: docId },
     select: { title: true, content: true, metadata: true, icon: true },
