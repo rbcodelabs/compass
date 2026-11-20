@@ -1,5 +1,6 @@
 "use client"
 
+import { parseConversationMessagesResponse, type PanelLoadedMessage } from "@/lib/conversation-panel-messages"
 import {
   useCallback,
   useEffect,
@@ -80,14 +81,7 @@ const VIEWS: { id: RailView; label: string; description: string; Icon: LucideIco
  *    which is the constraint that chose the left side in the first place.
  */
 
-type RailMessage = {
-  id: string
-  role: "user" | "assistant"
-  content: string
-  createdAt?: string
-  authorUserId?: string | null
-  authorName?: string | null
-}
+type RailMessage = PanelLoadedMessage
 type RailThread = { id: string; title: string | null; snippet?: string | null }
 
 /**
@@ -112,23 +106,10 @@ const NO_MESSAGES: RailMessage[] = [];
  * ever mislabel a message as the human's, never attribute one to the agent.
  */
 function toRailMessages(raw: unknown): RailMessage[] {
-  if (!Array.isArray(raw)) return NO_MESSAGES
-  return raw.flatMap((row) => {
-    if (!row || typeof row !== "object") return []
-    const { id, role, content, createdAt, authorUserId, authorName } = row as Record<string, unknown>
-    if (typeof id !== "string" || typeof content !== "string") return []
-    return [
-      {
-        id,
-        content,
-        role: role === "assistant" ? ("assistant" as const) : ("user" as const),
-        // Authorship. Optional: an older server omits all three.
-        ...(typeof createdAt === "string" ? { createdAt } : {}),
-        ...(typeof authorUserId === "string" ? { authorUserId } : {}),
-        ...(typeof authorName === "string" ? { authorName } : {}),
-      },
-    ]
-  })
+  // The same parser as the conversation panel: it keeps everything the server computed for this person (canEdit,
+  // editedAt, ...), which a hand-rolled copy here had silently dropped.
+  const parsed = parseConversationMessagesResponse({ messages: raw })
+  return parsed && parsed.messages.length > 0 ? parsed.messages : NO_MESSAGES
 }
 
 /** Room for the rail, in px, or `null` while unmeasured. */

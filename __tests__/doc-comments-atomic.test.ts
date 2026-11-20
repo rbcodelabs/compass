@@ -18,11 +18,15 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock("@/lib/db", () => ({ default: () => mocks.db }))
+const mirror = vi.hoisted(() => ({ mirrorCommentAfterCommit: vi.fn(), removeCommentMirrorAfterCommit: vi.fn() }))
+vi.mock("@/lib/conversation-mirror", () => mirror)
 vi.mock("@/lib/comment-authors", () => ({ resolveCommentAuthors: async (rows: unknown[]) => rows }))
 
 describe("legacy/shared Doc comment atomic compatibility", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mirror.mirrorCommentAfterCommit.mockResolvedValue(undefined)
+    mirror.removeCommentMirrorAfterCommit.mockResolvedValue(undefined)
     Object.assign(state, { legacyBody: "before", sharedBody: "before", legacyStatus: "OPEN", sharedStatus: "OPEN", legacyExists: true, sharedExists: true, createdLegacy: false, createdShared: false })
     mocks.failSharedUpdate.value = false
     mocks.missingSharedUpdate.value = false
@@ -105,5 +109,33 @@ describe("legacy/shared Doc comment atomic compatibility", () => {
     mocks.failSharedUpdate.value = true
     await expect(setDocCommentStatusCore("comment-1", "RESOLVED")).rejects.toThrow("shared update failed")
     expect(state).toMatchObject({ legacyStatus: "OPEN", sharedStatus: "OPEN" })
+  })
+
+  it("removes the mirrored conversation for a deleted doc thread after the transaction commits", async () => {
+    const { deleteDocCommentCore } = await import("@/lib/doc-comments")
+    await deleteDocCommentCore("comment-1")
+    expect(mirror.removeCommentMirrorAfterCommit).toHaveBeenCalledWith({ conversationId: "comment-1", commentIds: ["comment-1", "reply-1"], threadDeleted: true })
+  })
+
+  it("removes only the reply message when a doc reply is deleted, and nothing when the delete rolls back", async () => {
+    const { deleteDocCommentCore } = await import("@/lib/doc-comments")
+    mocks.tx.docComment.findUnique.mockResolvedValue({ id: "reply-1", parentId: "comment-1" })
+    await deleteDocCommentCore("reply-1")
+    expect(mirror.removeCommentMirrorAfterCommit).toHaveBeenCalledWith({ conversationId: "comment-1", commentIds: ["reply-1"], threadDeleted: false })
+    mirror.removeCommentMirrorAfterCommit.mockClear()
+    mocks.tx.docComment.findUnique.mockResolvedValue({ id: "comment-1", parentId: null })
+    mocks.failLegacyDelete.value = true
+    await expect(deleteDocCommentCore("comment-1")).rejects.toThrow("legacy delete failed")
+    expect(mirror.removeCommentMirrorAfterCommit).not.toHaveBeenCalled()
+  })
+
+  it("mirrors a new doc comment after commit, and not when the shared create rolls back", async () => {
+    const { createDocCommentCore } = await import("@/lib/doc-comments")
+    await createDocCommentCore({ docId: "doc-1", body: "new", authorName: "Alice" })
+    expect(mirror.mirrorCommentAfterCommit).toHaveBeenCalledWith("comment-new")
+    mirror.mirrorCommentAfterCommit.mockClear()
+    mocks.failSharedCreate.value = true
+    await expect(createDocCommentCore({ docId: "doc-1", body: "new", authorName: "Alice" })).rejects.toThrow()
+    expect(mirror.mirrorCommentAfterCommit).not.toHaveBeenCalled()
   })
 })

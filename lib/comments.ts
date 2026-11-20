@@ -8,6 +8,7 @@ import { followingAvailable } from "@/lib/following-flag"
 import { runAfterCommit } from "@/lib/following-commit"
 import { applyFollowingEffects, buildCommentEffects, resolveCommentFollowActor } from "@/lib/following-hooks"
 import { isSubjectTypeActive } from "@/lib/followable"
+import { mirrorCommentAfterCommit, removeCommentMirrorAfterCommit } from "@/lib/conversation-mirror"
 import type { AppTransactionClient } from "@/lib/db"
 
 export const COMMENT_TARGET_TYPES = [
@@ -122,98 +123,7 @@ export async function createCommentRows(
   // validateExtensions has already established targetType === "ARTIFACT".
   if (input.elementAnchor) await tx.commentElementAnchor.create({ data: { commentId: comment.id, artifactId: input.targetId, artifactRevisionId: input.elementAnchor.artifactRevisionId ?? null, pageUrl: input.elementAnchor.pageUrl, pagePath: input.elementAnchor.pagePath, elementSelector: input.elementAnchor.elementSelector ?? null, elementFingerprint: input.elementAnchor.elementFingerprint ?? undefined, screenshotUrl: input.elementAnchor.screenshotUrl ?? null, slideIndex: input.elementAnchor.slideIndex ?? null } })
   if (input.externalAuthor) await tx.commentExternalAuthor.create({ data: { commentId: comment.id, submitterEmail: input.externalAuthor.submitterEmail ?? null, portalAccountId: input.externalAuthor.portalAccountId ?? null, embedTokenId: input.externalAuthor.embedTokenId ?? null } })
-  await dualWriteCommentToUnifiedConversation(tx, comment, Boolean(input.solutionPlan)).catch(() => {})
   return comment
-}
-
-async function dualWriteCommentToUnifiedConversation(
-  tx: AppTransactionClient,
-  comment: {
-    id: string
-    workspaceId: string
-    targetType: string
-    targetId: string
-    parentId: string | null
-    body: string
-    status: string
-    authorId: string | null
-    authorName: string
-    authorType: string
-    source: string
-    createdAt: Date
-    updatedAt: Date
-  },
-  isPlanProposal: boolean,
-) {
-  let ownerUserId = comment.authorId
-  if (!ownerUserId) {
-    const member = await tx.workspaceMember.findFirst({
-      where: { workspaceId: comment.workspaceId },
-      select: { userId: true },
-    })
-    ownerUserId = member?.userId ?? null
-  }
-  if (!ownerUserId) return
-
-  const conversationId = comment.parentId ?? comment.id
-  const plainTitle = comment.body.replace(/[#*`\n]+/g, " ").trim().slice(0, 120) || "Discussion"
-  const plainSummary = comment.body.replace(/[#*`\n]+/g, " ").trim().slice(0, 240)
-
-  if (!comment.parentId) {
-    await tx.agentConversation.upsert({
-      where: { id: conversationId },
-      update: {
-        title: plainTitle,
-        summary: plainSummary,
-        status: comment.status,
-        updatedAt: comment.updatedAt,
-      },
-      create: {
-        id: conversationId,
-        workspaceId: comment.workspaceId,
-        userId: ownerUserId,
-        title: plainTitle,
-        summary: plainSummary,
-        targetType: comment.targetType,
-        targetId: comment.targetId,
-        visibility: "WORKSPACE",
-        status: comment.status,
-        agentMode: "MENTION_ONLY",
-        source: comment.source,
-        createdAt: comment.createdAt,
-        updatedAt: comment.updatedAt,
-      },
-    })
-  } else {
-    await tx.agentConversation
-      .update({
-        where: { id: conversationId },
-        data: {
-          summary: plainSummary,
-          updatedAt: comment.updatedAt,
-        },
-      })
-      .catch(() => {})
-  }
-
-  await tx.agentMessage.upsert({
-    where: { id: comment.id },
-    update: {
-      content: comment.body,
-      editedAt: comment.updatedAt,
-    },
-    create: {
-      id: comment.id,
-      conversationId,
-      role: comment.authorType === "AGENT" ? "assistant" : "user",
-      content: comment.body,
-      authorUserId: comment.authorId,
-      authorName: comment.authorName,
-      authorType: comment.authorType,
-      messageKind: isPlanProposal ? "PLAN_PROPOSAL" : "MESSAGE",
-      createdAt: comment.createdAt,
-    },
-  })
 }
 
 export async function resolveCommentTarget(targetType: CommentTargetType, targetId: string) {
@@ -332,6 +242,8 @@ export async function createComment(input: CreateCommentInput, options: { before
   }
   return comment
   }, { atomic: Boolean(options.beforeCreate) })
+  // The mirror is written after the comment has committed, outside its transaction (never throws).
+  await mirrorCommentAfterCommit(comment.id)
   await followAfterComment(input, comment.id)
   return getComment(comment.id)
 }
@@ -404,5 +316,6 @@ export async function deleteComment(commentId: string) {
   await prisma.commentExternalAuthor.deleteMany({ where: { commentId: { in: ids } } })
   if (!existing.parentId) await prisma.comment.deleteMany({ where: { parentId: commentId } })
   await prisma.comment.delete({ where: { id: commentId } })
+  await removeCommentMirrorAfterCommit({ conversationId: existing.parentId ?? commentId, commentIds: ids, threadDeleted: !existing.parentId })
   return { id: commentId, deletedReplies: replies.length }
 }
