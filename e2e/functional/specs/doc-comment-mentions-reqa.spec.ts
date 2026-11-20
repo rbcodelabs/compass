@@ -460,15 +460,21 @@ test.describe("Re-QA a022c39e", () => {
     const editor = await startComment(page);
     const confirm = page.getByTestId("agent-scope-confirm");
     const submit = page.getByRole("button", { name: /^Comment/ });
-    async function openConfirm(agent: string) {
+    async function selectAgent(name: string) {
+      const picker = page.getByTestId("mention-picker");
+      await picker.getByRole("option").filter({ has: page.getByText(name, { exact: true }) }).click();
+      await expect(page.getByTestId("mention-chip")).toContainText(name);
+      await expect(picker).toBeHidden();
+    }
+    async function openConfirm() {
       await editor.click();
-      await page.keyboard.type(`do it @${agent}`);
-      await page.keyboard.press("Enter");
+      await page.keyboard.type("do it @Adv Agent");
+      await selectAgent(agentName);
       await page.getByRole("button", { name: "Comment & create task" }).click();
       await expect(confirm).toBeVisible();
     }
     // (a) Backspace the chip behind the confirm.
-    await openConfirm("Adv Agent");
+    await openConfirm();
     await editor.click(); await page.keyboard.press("End");
     await page.keyboard.press("Backspace"); await page.keyboard.press("Backspace");
     await expect(page.getByTestId("mention-chip")).toHaveCount(0);
@@ -476,7 +482,8 @@ test.describe("Re-QA a022c39e", () => {
     await expect(submit.first()).toBeVisible();
     await expect(submit.first()).toBeEnabled();
     // (b) Re-mention, open the confirm, then just type more text: the confirm must go away (body changed after the preview).
-    await page.keyboard.type("@Adv Agent"); await page.keyboard.press("Enter");
+    await page.keyboard.type("@Adv Agent");
+    await selectAgent(agentName);
     await page.getByRole("button", { name: "Comment & create task" }).click();
     await expect(confirm).toBeVisible();
     await editor.click(); await page.keyboard.press("End");
@@ -490,7 +497,8 @@ test.describe("Re-QA a022c39e", () => {
     for (let i = 0; i < 12; i++) await page.keyboard.press("Backspace"); // " extra words" removed
     await page.keyboard.press("Backspace"); await page.keyboard.press("Backspace");
     await expect(page.getByTestId("mention-chip")).toHaveCount(0);
-    await page.keyboard.type("@Adv ReadOnly"); await page.keyboard.press("Enter");
+    await page.keyboard.type("@Adv ReadOnly");
+    await selectAgent(readAgentName);
     await expect(confirm).toBeHidden();
     await page.getByRole("button", { name: "Comment & create task" }).click();
     await expect(confirm).toContainText(readAgentName);
@@ -512,7 +520,8 @@ test.describe("Re-QA a022c39e", () => {
     await page.locator(".ProseMirror").click();
     await selectLeadingWord(page, "QUEBEC");
     const editor2 = await startComment(page);
-    await editor2.click(); await page.keyboard.type("again @Adv Agent"); await page.keyboard.press("Enter");
+    await editor2.click(); await page.keyboard.type("again @Adv Agent");
+    await selectAgent(agentName);
     await page.getByRole("button", { name: "Comment & create task" }).click();
     await expect(confirm).toBeVisible();
     await editor2.click(); await page.keyboard.press("Escape");
