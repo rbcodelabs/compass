@@ -492,10 +492,12 @@ test.describe("Re-QA a022c39e", () => {
     await page.keyboard.type(" extra words");
     await expect.soft(confirm, "typing while the confirm is up dismisses it").toBeHidden();
     await expect(page.getByRole("button", { name: "Comment & create task" })).toBeVisible();
-    // (c) Swap the assignee behind an open confirm: read-only agent instead of the write agent. The confirm must reflect the new one, not the old.
-    await page.getByRole("button", { name: "Comment & create task" }).click();
+    // (c) Open confirmation with the editor shortcut and keep focus while swapping the assignee.
+    // Clicking submit would blur the editor and schedule dismissal of the next mention picker.
+    await editor.press("Control+Enter");
     await expect(confirm).toBeVisible();
-    await editor.click(); await page.keyboard.press("End");
+    await expect(editor).toBeFocused();
+    await editor.press("End");
     for (let i = 0; i < 12; i++) await page.keyboard.press("Backspace"); // " extra words" removed
     await page.keyboard.press("Backspace"); await page.keyboard.press("Backspace");
     await expect(page.getByTestId("mention-chip")).toHaveCount(0);
