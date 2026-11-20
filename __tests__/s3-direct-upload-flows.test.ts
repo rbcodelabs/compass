@@ -172,7 +172,7 @@ describe("prepare_artifact_upload on S3", () => {
     const storage = {
       get,
       put: async (pathname: string, bytes: Uint8Array) => {
-        if (failWrite) throw new Error("receipt write failed")
+        if (failWrite && pathname.includes(".result-")) throw new Error("receipt write failed")
         objects.set(pathname, bytes)
         return { pathname, created: true }
       },
@@ -180,23 +180,63 @@ describe("prepare_artifact_upload on S3", () => {
     }
     const result = { workspaceId: WS, slug: "imported", name: "Imported", alreadyImported: false,
       counts: {}, usersMatched: 0, usersFallbackToImporter: 0, referencesCleared: 0, blobsCopied: 0, warnings: [] }
-    const recover = vi.fn<() => Promise<typeof result | undefined>>().mockResolvedValueOnce(undefined).mockResolvedValue(result)
+    const recover = vi.fn<() => Promise<typeof result | undefined>>().mockResolvedValue(result)
     const identity = { nonce: "retry", persistResult: true, recover }
     const staged = await loadStagedBundle(prepared.receipt, WS, OTHER_WS, storage, identity)
     if (!("commit" in staged)) throw new Error("expected staged bytes")
     await expect(staged.commit(async () => result)).rejects.toThrow("receipt write failed")
     failWrite = outagePersists
     await expect(loadStagedBundle(prepared.receipt, WS, OTHER_WS, storage, identity)).resolves.toMatchObject({ result })
-    expect(recover).toHaveBeenCalledTimes(2)
+    expect(recover).toHaveBeenCalledTimes(1)
     expect(objects.has(prepared.pathname)).toBe(outagePersists)
+  })
+
+  it("cannot consume a receipt while a different nonce is committing", async () => {
+    const prepared = await prepareBundleUpload({ organizationId: WS, userId: OTHER_WS, fileSize: 1 })
+    const objects = new Map([[prepared.pathname, new Uint8Array([1])]])
+    const get = vi.fn(async (pathname: string) => objects.get(pathname) ?? null)
+    const storage = {
+      get,
+      put: async (pathname: string, bytes: Uint8Array) => {
+        objects.set(pathname, bytes)
+        return { pathname, created: true }
+      },
+      del: async (pathname: string) => { objects.delete(pathname) },
+    }
+    const result = { workspaceId: WS, slug: "imported", name: "Imported", alreadyImported: false,
+      counts: {}, usersMatched: 0, usersFallbackToImporter: 0, referencesCleared: 0, blobsCopied: 0, warnings: [] }
+    const identity = { nonce: "retry", persistResult: true }
+    const staged = await loadStagedBundle(prepared.receipt, WS, OTHER_WS, storage, identity)
+    if (!("commit" in staged)) throw new Error("expected staged bytes")
+    const entered = Promise.withResolvers<void>()
+    const resume = Promise.withResolvers<void>()
+    const pending = staged.commit(async () => {
+      entered.resolve()
+      await resume.promise
+      return result
+    })
+    await entered.promise
+    try {
+      await expect(loadStagedBundle(prepared.receipt, WS, OTHER_WS, storage, {
+        nonce: "different", persistResult: true, recover: async () => result,
+      })).rejects.toThrow(/bound to a different nonce/)
+      expect(objects.has(prepared.pathname)).toBe(true)
+    } finally {
+      resume.resolve()
+      await pending
+    }
   })
 
   it("keeps the receipt claim if an interrupted import has an unknown outcome", async () => {
     const prepared = await prepareBundleUpload({ organizationId: WS, userId: OTHER_WS, fileSize: 1 })
     const release = vi.fn(async () => undefined)
+    const objects = new Map([[prepared.pathname, new Uint8Array([1])]])
     const storage = {
-      get: async (path: string) => path === prepared.pathname ? new Uint8Array([1]) : null,
-      put: async (pathname: string) => ({ pathname, created: true }),
+      get: async (path: string) => objects.get(path) ?? null,
+      put: async (pathname: string, bytes: Uint8Array) => {
+        objects.set(pathname, bytes)
+        return { pathname, created: true }
+      },
       del: vi.fn(async () => undefined),
       claimStagedUpload: async () => release,
     }

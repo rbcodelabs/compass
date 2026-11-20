@@ -70,10 +70,20 @@ export function loadStagedBundle(receipt: string, organizationId: string, userId
 export async function loadStagedBundle(receipt: string, organizationId: string, userId: string, storage: ArtifactStorage, lookup?: ResultLookup): Promise<StagedBundle | { result: ImportReport }> {
   const p = verifyBundleReceipt(receipt, organizationId, userId)
   const nonce = lookup?.persistResult ? lookup.nonce ?? p.uploadId : undefined
-  const resultPath = nonce !== undefined
-    ? `${p.pathname}.result-${createHash("sha256").update(JSON.stringify(nonce)).digest("hex")}`
-    : undefined
-  if (resultPath) {
+  const nonceHash = nonce === undefined ? undefined : createHash("sha256").update(JSON.stringify(nonce)).digest("hex")
+  const bindingPath = nonceHash === undefined ? undefined : `${p.pathname}.nonce`
+  const assertBinding = async (): Promise<boolean> => {
+    if (!bindingPath) return false
+    const binding = await storage.get(bindingPath)
+    if (!binding) return false
+    if (Buffer.from(binding).toString("utf8") !== nonceHash) {
+      throw new Error("This upload receipt is bound to a different nonce")
+    }
+    return true
+  }
+  const bound = await assertBinding()
+  const resultPath = nonceHash === undefined ? undefined : `${p.pathname}.result-${nonceHash}`
+  if (bound && resultPath) {
     const recorded = await storage.get(resultPath)
     if (recorded) return { result: JSON.parse(Buffer.from(recorded).toString("utf8")) as ImportReport }
   }
@@ -83,7 +93,7 @@ export async function loadStagedBundle(receipt: string, organizationId: string, 
   const record = resultPath ? async (result: ImportReport) => {
     await storage.put(resultPath, Buffer.from(JSON.stringify(result)), "application/json")
   } : undefined
-  if (record && nonce !== undefined) {
+  if (bound && record && nonce !== undefined) {
     const recovered = await lookup?.recover?.(bytes, nonce)
     if (recovered) {
       // The database result is authoritative. Keep the ZIP as recovery evidence
@@ -94,5 +104,11 @@ export async function loadStagedBundle(receipt: string, organizationId: string, 
     }
   }
   const commit = stagedUploadCommit(storage, p.pathname)
-  return { bytes, nonce, commit: (apply) => commit(apply, record, lookup?.canReleaseClaim) }
+  return { bytes, nonce, commit: (apply) => commit(async () => {
+    if (bindingPath && nonceHash !== undefined && !(await assertBinding())) {
+      await storage.put(bindingPath, Buffer.from(nonceHash), "text/plain", { overwrite: false })
+      if (!(await assertBinding())) throw new Error("Could not verify upload receipt binding")
+    }
+    return apply()
+  }, record, lookup?.canReleaseClaim) }
 }
