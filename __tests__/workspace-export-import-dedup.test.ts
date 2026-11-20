@@ -197,6 +197,48 @@ it("aborts an import when the existing private file differs from the bundle", as
   expect(db.tables.Workspace).toHaveLength(1)
 })
 
+it("can retry an import after rolling back a server-written attachment", async () => {
+  const orgId = randomUUID()
+  const wsId = randomUUID()
+  const importerId = randomUUID()
+  const feedbackItemId = randomUUID()
+  const attachmentId = randomUUID()
+  const db = createInMemoryPrisma({
+    Organization: [{ id: orgId, slug: "org", name: "Org" }],
+    User: [{ id: importerId, email: "importer@example.com", name: "Importer" }],
+    OrganizationMember: [{ id: randomUUID(), organizationId: orgId, userId: importerId, role: "ADMIN" }],
+    Workspace: [{ id: wsId, organizationId: orgId, slug: "source", name: "Source", ssoEnabled: false }],
+    FeedbackItem: [{ id: feedbackItemId, workspaceId: wsId, title: "Feedback" }],
+    FeedbackAttachment: [{
+      id: attachmentId, feedbackItemId, filename: "file.png", fileType: "image/png", fileSize: 1,
+      url: `/api/files/public/feedback/${wsId}/${attachmentId}-file.png`,
+    }],
+  })
+  const objects = new Set<string>()
+  const blobs = {
+    ...noopBlobs,
+    async fetchPublic() { return { bytes: new Uint8Array([1]), contentType: "image/png" } },
+    async putPublic(key: string) {
+      const url = `/api/files/public/${key}`
+      if (objects.has(url)) throw new Error("key occupied")
+      objects.add(url)
+      return url
+    },
+    async delPublic(url: string) { objects.add(url) },
+    async rollbackPublic(url: string) { objects.delete(url) },
+  }
+  const bundle = await exportWorkspaceToBuffer(db.client, wsId, blobs)
+  const opts = { organizationId: orgId, importerUserId: importerId, slug: "copy", nonce: "retry", blobs }
+  const transaction = db.client.$transaction
+  db.client.$transaction = async () => {
+    expect(objects.size).toBe(1)
+    throw new Error("commit failed")
+  }
+  await expect(importWorkspaceBundle(db.client, bundle, opts)).rejects.toThrow("commit failed")
+  db.client.$transaction = transaction
+  await expect(importWorkspaceBundle(db.client, bundle, opts)).resolves.toMatchObject({ alreadyImported: false })
+})
+
 it.each(["S3", "Blob"])("%s does not give an imported workspace ownership of a source attachment when no bytes were bundled", async (backend) => {
   const orgId = randomUUID()
   const wsId = randomUUID()

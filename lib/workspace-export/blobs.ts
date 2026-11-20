@@ -1,3 +1,4 @@
+import { parsePublicFileUrl } from "@/lib/public-file-keys"
 import {
   getArtifactStorage,
   getResearchArtifactStorage,
@@ -5,7 +6,7 @@ import {
 } from "@/lib/artifact-storage"
 import { getPublicFileStore } from "@/lib/storage/public-store"
 import { resolveStorageBackend } from "@/lib/storage/config"
-import { createS3Storage } from "@/lib/storage/s3"
+import { createS3Storage, removeServerWrittenPublicObject } from "@/lib/storage/s3"
 import { isOwnFeedbackAttachmentUrl } from "@/lib/workspace-export/path-confinement"
 
 /**
@@ -21,6 +22,7 @@ export interface BlobAdapters {
   fetchPublic(url: string, workspaceId: string): Promise<{ bytes: Uint8Array; contentType: string } | null>
   putPublic(pathname: string, bytes: Uint8Array, contentType: string): Promise<string>
   delPublic(url: string): Promise<void>
+  rollbackPublic?(url: string): Promise<void>
   claimImport?(workspaceId: string): Promise<() => Promise<void>>
 }
 
@@ -42,6 +44,11 @@ export function defaultBlobAdapters(): BlobAdapters {
     },
     async putPublic(pathname, bytes, contentType) {
       return (await getPublicFileStore().put(pathname, bytes, { contentType, addRandomSuffix: false })).url
+    },
+    async rollbackPublic(url) {
+      const key = parsePublicFileUrl(url)
+      if (key?.startsWith("feedback/")) await removeServerWrittenPublicObject(key)
+      else await getPublicFileStore().delete([url])
     },
     async delPublic(url) {
       await getPublicFileStore().delete([url])

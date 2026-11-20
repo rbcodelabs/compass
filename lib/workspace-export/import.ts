@@ -632,7 +632,10 @@ async function rollbackImport(
     pending = next
   }
   for (const u of uploaded) {
-    if (u.store === "feedback") await blobs.delPublic(u.key)
+    if (u.store === "feedback") {
+      if (blobs.rollbackPublic) await blobs.rollbackPublic(u.key)
+      else await blobs.delPublic(u.key)
+    }
     else await (u.store === "research" ? blobs.research : blobs.artifact).del(u.key)
   }
 }

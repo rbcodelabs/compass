@@ -293,7 +293,13 @@ export async function deletePublicObject(key: string): Promise<void> {
       ContentType: DISCARDED_PUBLIC_CONTENT_TYPE, CacheControl: PUBLIC_CACHE_CONTROL }))
     return
   }
-  await client.send(new DeleteObjectCommand({ Bucket: bucket, Key }))
+  await removeServerWrittenPublicObject(key)
+}
+
+/** Remove a server-written object that has never had a presigned PUT. */
+export async function removeServerWrittenPublicObject(key: string): Promise<void> {
+  const { client, bucket } = getS3Client()
+  await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: s3ObjectKey("public", key) }))
 }
 
 export type PublicObjectRead =

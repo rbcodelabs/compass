@@ -80,7 +80,7 @@ describe("POST /api/admin/purge-feedback", () => {
     const foreign = `/api/files/public/feedback/ws-2/${IDS[1]}-b.png`;
     mockWorkspaceFindFirst.mockResolvedValue({ id: "ws-1" });
     mockItemFindMany.mockResolvedValue([{ id: IDS[0] }]);
-    mockAttachmentFindMany.mockResolvedValue([{ url: owned }, { url: foreign }]);
+    mockAttachmentFindMany.mockResolvedValueOnce([{ url: owned }, { url: foreign }]).mockResolvedValueOnce([]);
     mockItemDeleteMany.mockResolvedValue({ count: 1 });
     const body = { orgSlug: "rbcodelabs", workspaceSlug: "hiptrip", feedbackIds: IDS };
     try {
@@ -88,9 +88,26 @@ describe("POST /api/admin/purge-feedback", () => {
       expect(deleteS3PublicFilesByUrl).toHaveBeenCalledWith([owned]);
       expect(deleteS3PublicFilesByUrl.mock.invocationCallOrder[0]).toBeLessThan(mockAttachmentDeleteMany.mock.invocationCallOrder[0]);
       mockAttachmentDeleteMany.mockClear();
+      mockAttachmentFindMany.mockResolvedValueOnce([{ url: owned }]).mockResolvedValueOnce([]);
       deleteS3PublicFilesByUrl.mockRejectedValueOnce(new Error("storage unavailable"));
       await expect(POST(request(body, "test-migration-secret"))).rejects.toThrow("storage unavailable");
       expect(mockAttachmentDeleteMany).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("keeps an attachment shared with a retained feedback item", async () => {
+    vi.stubEnv("COMPASS_S3_BUCKET", "fake-bucket");
+    const shared = `/api/files/public/feedback/ws-1/${IDS[0]}-a.png`;
+    mockWorkspaceFindFirst.mockResolvedValue({ id: "ws-1" });
+    mockItemFindMany.mockResolvedValue([{ id: IDS[0] }]);
+    mockAttachmentFindMany.mockResolvedValueOnce([{ url: shared }]).mockResolvedValueOnce([{ url: shared }]);
+    mockItemDeleteMany.mockResolvedValue({ count: 1 });
+    try {
+      const response = await POST(request({ orgSlug: "rbcodelabs", workspaceSlug: "hiptrip", feedbackIds: [IDS[0]] }, "test-migration-secret"));
+      expect(response.status).toBe(200);
+      expect(deleteS3PublicFilesByUrl).not.toHaveBeenCalled();
     } finally {
       vi.unstubAllEnvs();
     }

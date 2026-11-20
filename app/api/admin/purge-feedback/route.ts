@@ -104,7 +104,15 @@ export async function POST(req: NextRequest) {
       where: { feedbackItemId: { in: scopedIds } }, select: { url: true },
     });
     const urls = ownedS3FeedbackUrls(workspace.id, attachments);
-    if (urls.length) await deleteS3PublicFilesByUrl(urls);
+    if (urls.length) {
+      const retained = await prisma.feedbackAttachment.findMany({
+        where: { url: { in: urls }, feedbackItemId: { notIn: scopedIds }, feedbackItem: { workspaceId: workspace.id } },
+        select: { url: true },
+      });
+      const stillReferenced = new Set(retained.map(({ url }) => url));
+      const retired = urls.filter((url) => !stillReferenced.has(url));
+      if (retired.length) await deleteS3PublicFilesByUrl(retired);
+    }
   }
 
   // Delete children first (votes, attachments), then the items themselves —
