@@ -72,6 +72,7 @@ describe.skipIf(!databaseUrl)("129 agent message run id through the registered r
     await pool.query(`CREATE INDEX idx_agent_messages_run ON "${schema}".agent_messages(conversation_id)`)
     const result = await applyMigrations(pool, schema, MIGRATION)
     expect(result.status).not.toBe(200)
+    expect(await result.text()).toContain("idx_agent_messages_run has drifted")
     const receipt = await pool.query(`SELECT 1 FROM "${schema}"._prisma_migrations WHERE migration_name = $1 AND finished_at IS NOT NULL`, [MIGRATION])
     expect(receipt.rows).toHaveLength(0)
 
@@ -80,5 +81,18 @@ describe.skipIf(!databaseUrl)("129 agent message run id through the registered r
     expect(recovered.status, await recovered.text()).toBe(200)
     const finished = await pool.query(`SELECT 1 FROM "${schema}"._prisma_migrations WHERE migration_name = $1 AND finished_at IS NOT NULL`, [MIGRATION])
     expect(finished.rows).toHaveLength(1)
+    const unfinished = await pool.query(`SELECT 1 FROM "${schema}"._prisma_migrations WHERE migration_name = $1 AND finished_at IS NULL`, [MIGRATION])
+    expect(unfinished.rows).toHaveLength(1)
+  }, 120_000)
+
+  it("refuses a nullable generated UUID because the finalizer must write run_id", async () => {
+    await pool.query(`ALTER TABLE "${schema}".agent_messages DROP COLUMN run_id`)
+    await pool.query(`DELETE FROM "${schema}"._prisma_migrations WHERE migration_name = $1`, [MIGRATION])
+    await pool.query(`ALTER TABLE "${schema}".agent_messages ADD COLUMN run_id UUID GENERATED ALWAYS AS (conversation_id) STORED`)
+    await pool.query(`CREATE INDEX idx_agent_messages_run ON "${schema}".agent_messages(run_id)`)
+    const result = await applyMigrations(pool, schema, MIGRATION)
+    expect(result.status, await result.text()).not.toBe(200)
+    const receipt = await pool.query(`SELECT 1 FROM "${schema}"._prisma_migrations WHERE migration_name = $1 AND finished_at IS NOT NULL`, [MIGRATION])
+    expect(receipt.rows).toHaveLength(0)
   }, 120_000)
 })
