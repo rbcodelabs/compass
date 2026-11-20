@@ -6,6 +6,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import "@testing-library/jest-dom/vitest"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { ChoiceChip, type ChoiceOption } from "@/components/agent/composer/choice-chip"
+import { Sheet, SheetContent } from "@/components/ui/sheet"
 
 const OPTIONS: ChoiceOption[] = [
   { value: "", label: "Default (Compass Agent)" },
@@ -167,6 +168,23 @@ describe("ChoiceChip", () => {
     const sheet = await screen.findByTestId("agent-sheet")
     expect(sheet).toHaveClass("z-[80]")
     expect(document.querySelector('[data-slot="sheet-overlay"]')).toHaveClass("z-[80]")
+  })
+
+  it("still renders its backdrop when the chip sheet is nested inside another sheet (the Conversation panel) (B2)", async () => {
+    mockNarrow(true)
+    render(
+      <Sheet open>
+        <SheetContent aria-label="Panel">
+          <Harness />
+        </SheetContent>
+      </Sheet>,
+    )
+    await click(screen.getByRole("button", { name: /^Agent:/ }))
+    await screen.findByTestId("agent-sheet")
+    const overlays = Array.from(document.querySelectorAll('[data-slot="sheet-overlay"]'))
+    // One for the panel, one forced for the nested chip sheet (Base UI drops a nested dialog's backdrop unless forced).
+    expect(overlays).toHaveLength(2)
+    expect(overlays.some((overlay) => overlay.classList.contains("z-[80]"))).toBe(true)
   })
 
   it("renders a bottom sheet with 44px rows below the sm breakpoint", async () => {
