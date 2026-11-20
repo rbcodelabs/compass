@@ -10,6 +10,7 @@
  * keeps the surface deliberately small — the panel is for quick edits, not a
  * general-purpose entity editor.
  */
+import type { Prisma } from "@prisma/client";
 import { applyInheritanceRules } from "@/lib/custom-field-inheritance";
 import getPrisma from "@/lib/db";
 import { captureWorkspaceMutation } from "@/lib/workspace-update-mutations";
@@ -20,7 +21,7 @@ import { SETTABLE_HORIZONS, isLaunchHorizon } from "@/lib/roadmap";
 import { LAUNCH_WORKFLOW_DISABLED_MESSAGE } from "@/lib/launch-checklist";
 import { isModuleEnabled } from "@/lib/modules/server"
 import { syncRoadmapOnSolutionChange, type SolutionSyncResult } from "@/lib/roadmap/solution-sync";
-import { assignmentUpdate, validateTaskDates, type TaskAssignee } from "@/lib/task-assignment";
+import { assignmentUpdate, TaskDateConflict, updateTaskWithDateGuard, validateTaskDates, type TaskAssignee } from "@/lib/task-assignment";
 import type { TaskPriority, TaskStatus } from "@/lib/types";
 import { BATCH_DESCRIPTION_MAX_LENGTH } from "@/lib/batch-create-limits";
 import { OPPORTUNITY_SEGMENT_MAX_LENGTH } from "@/lib/opportunity-draft";
@@ -130,7 +131,7 @@ async function parseRoadmapItemField(
 
 export type UpdateResult =
   | { ok: true; /** Set when a solution status change reached the roadmap (auto-add or a followed item). */ roadmapSync?: SolutionSyncResult }
-  | { ok: false; status: 400 | 404; error: string };
+  | { ok: false; status: 400 | 404 | 409; error: string };
 
 /**
  * Validate `field`/`value` against EDIT_CONFIG for `type`, then apply the edit
@@ -336,7 +337,7 @@ async function updateTaskField(
   value: unknown,
   actor: MutationActor,
 ): Promise<UpdateResult> {
-  let data: Record<string, unknown>;
+  let data: Prisma.TaskUncheckedUpdateManyInput & { startDate?: Date | null; dueDate?: Date | null };
 
   switch (field) {
     case "title": {
@@ -361,14 +362,14 @@ async function updateTaskField(
       if (typeof value !== "string" || !TASK_STATUSES.includes(value as TaskStatus)) {
         return { ok: false, status: 400, error: "Invalid status" };
       }
-      data = { status: value };
+      data = { status: value as TaskStatus };
       break;
     }
     case "priority": {
       if (typeof value !== "string" || !TASK_PRIORITIES.includes(value as TaskPriority)) {
         return { ok: false, status: 400, error: "Invalid priority" };
       }
-      data = { priority: value };
+      data = { priority: value as TaskPriority };
       break;
     }
     case "assigneeUserId": {
@@ -488,6 +489,13 @@ async function updateTaskField(
     }
   }
 
-  await captureWorkspaceMutation(prisma, "task", "update", { actorType: actor.kind === "USER" ? "USER" : "SYSTEM", actorId: actor.id }, id, tx => tx.task.update({ where: { id }, data }));
+  try {
+    await captureWorkspaceMutation(prisma, "task", "update", { actorType: actor.kind === "USER" ? "USER" : "SYSTEM", actorId: actor.id }, id,
+      tx => updateTaskWithDateGuard(tx, id, workspaceId, data),
+      { atomic: "startDate" in data || "dueDate" in data });
+  } catch (error) {
+    if (error instanceof TaskDateConflict) return { ok: false, status: 409, error: error.message };
+    throw error;
+  }
   return { ok: true };
 }

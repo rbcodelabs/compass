@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client"
 import { displayIdFromRow, displayLine } from "@/lib/work-item-ids"
 /**
  * Handler functions for the Tasks MCP tools (create_task, get_task, list_tasks,
@@ -18,7 +19,7 @@ import { safeEntityUrl, withUrlLine } from "@/lib/compass-url"
 import { ok, fail } from "@/lib/mcp-output"
 import { recencyOrderBy, type RecencySort } from "@/lib/mcp-recency"
 import type { TaskStatus, TaskPriority, TaskLinkedType } from "@/lib/types"
-import { assignmentUpdate, eligibleTaskAssignees, resolveTaskAssignees, taskLinkScope, validateTaskDates, validateTaskLink, validateTaskReferences, type ResolvedTaskAssignee, type TaskAssignee } from "@/lib/task-assignment"
+import { assignmentUpdate, eligibleTaskAssignees, resolveTaskAssignees, taskLinkScope, TaskDateConflict, updateTaskWithDateGuard, validateTaskDates, validateTaskLink, validateTaskReferences, type ResolvedTaskAssignee, type TaskAssignee } from "@/lib/task-assignment"
 import { getMcpActor } from "@/lib/mcp-authz"
 import { workspaceMutationSource, type ProgrammaticSource } from "@/lib/programmatic-source"
 import { allocateOneSeq } from "@/lib/work-item-sequence"
@@ -482,7 +483,7 @@ export async function updateTask({
     return fail(`Task "${taskId}" not found.`)
   }
 
-  const data: Record<string, unknown> = { updatedAt: new Date() }
+  const data: Prisma.TaskUncheckedUpdateManyInput & { startDate?: Date | null; dueDate?: Date | null } = { updatedAt: new Date() }
   if (title !== undefined) data.title = title.trim()
   if (description !== undefined) data.description = description
   if (priority !== undefined) data.priority = priority
@@ -506,7 +507,15 @@ export async function updateTask({
   }
   if (iteration !== undefined) data.iteration = iteration
 
-  const updated = await captureWorkspaceMutation(prisma, "task", "update", workspaceMutationSource(source), taskId, tx => tx.task.update({ where: { id: taskId }, data }))
+  let updated
+  try {
+    updated = await captureWorkspaceMutation(prisma, "task", "update", workspaceMutationSource(source), taskId,
+      tx => updateTaskWithDateGuard(tx, taskId, existing.workspaceId, data),
+      { atomic: startDate !== undefined || dueDate !== undefined })
+  } catch (error) {
+    if (error instanceof TaskDateConflict) return fail(error.message)
+    throw error
+  }
 
   return ok(
     `**Task updated:** ${updated.title}\n` +

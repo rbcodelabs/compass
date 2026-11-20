@@ -1,12 +1,13 @@
 "use server";
 
+import type { Prisma } from "@prisma/client";
 import { captureWorkspaceMutation } from "@/lib/workspace-update-mutations"
 import { revalidatePath } from "next/cache";
 import getPrisma from "@/lib/db";
 import { auth } from "@/auth";
 import { getWorkspace } from "@/lib/workspace";
 import { assertWorkspaceWritable } from "@/lib/workspace-context";
-import { assignmentUpdate, resolveTaskAssignees, validateTaskDates, validateTaskLink, validateTaskReferences, type AssignmentInput, type TaskAssignee } from "@/lib/task-assignment";
+import { assignmentUpdate, resolveTaskAssignees, updateTaskWithDateGuard, validateTaskDates, validateTaskLink, validateTaskReferences, type AssignmentInput, type TaskAssignee } from "@/lib/task-assignment";
 import type { TaskStatus, TaskPriority, TaskLinkedType } from "@/lib/types";
 import { allocateOneSeq } from "@/lib/work-item-sequence"
 import { createWorkspaceTask } from "@/lib/task-create"
@@ -87,7 +88,7 @@ export async function updateTask(
   const prisma = getPrisma();
   const existing = await requireTask(taskId);
   await validateTaskReferences(existing.workspaceId, data);
-  const updateData: Record<string, unknown> = { updatedAt: new Date() };
+  const updateData: Prisma.TaskUncheckedUpdateManyInput & { startDate?: Date | null; dueDate?: Date | null } = { updatedAt: new Date() };
   if (data.title !== undefined) updateData.title = data.title;
   if (data.description !== undefined) updateData.description = data.description;
   if (data.priority !== undefined) updateData.priority = data.priority;
@@ -106,10 +107,9 @@ export async function updateTask(
   }
   if (data.iteration !== undefined) updateData.iteration = data.iteration;
 
-  const task = await captureWorkspaceMutation(prisma, "task", "update", "UI", taskId, tx => tx.task.update({
-    where: { id: taskId },
-    data: updateData,
-  }));
+  const task = await captureWorkspaceMutation(prisma, "task", "update", "UI", taskId,
+    tx => updateTaskWithDateGuard(tx, taskId, existing.workspaceId, updateData),
+    { atomic: data.startDate !== undefined || data.dueDate !== undefined });
 
   // The assignee became a (different) cloud agent: start its run. Re-saving the same assignee starts nothing.
   const agentRun: { agentRun?: AgentRunOutcome } = task.assigneeAgentId && task.assigneeAgentId !== existing.assigneeAgentId
