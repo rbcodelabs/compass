@@ -26,14 +26,7 @@ export const THEME_COLOR_DARK = "#1B1A18"
 
 export function syncThemeColorMeta(resolved: ResolvedTheme) {
   const color = resolved === "dark" ? THEME_COLOR_DARK : THEME_COLOR_LIGHT
-  const tags = document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]')
-  if (tags.length === 0) {
-    const meta = document.createElement("meta")
-    meta.name = "theme-color"
-    document.head.appendChild(meta)
-    meta.content = color
-    return
-  }
+  const tags = document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"][media^="(prefers-color-scheme:"]')
   tags.forEach((tag) => {
     tag.content = color
   })
@@ -48,6 +41,6 @@ export const workspaceThemeInitScript = `(() => {
     document.documentElement.dataset.theme = resolved;
     document.documentElement.style.colorScheme = resolved;
     const color = resolved === 'dark' ? '${THEME_COLOR_DARK}' : '${THEME_COLOR_LIGHT}';
-    document.querySelectorAll('meta[name="theme-color"]').forEach((t) => { t.setAttribute('content', color); });
+    document.querySelectorAll('meta[name="theme-color"][media^="(prefers-color-scheme:"]').forEach((t) => { t.setAttribute('content', color); });
   } catch {}
 })();`

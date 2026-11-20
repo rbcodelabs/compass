@@ -42,21 +42,11 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
       document.documentElement.classList.remove("dark")
       document.documentElement.removeAttribute("data-theme")
       document.documentElement.style.removeProperty("color-scheme")
-      // Leaving the workspace shell: title bar goes back to following the OS.
-      document.querySelectorAll('meta[name="theme-color"]:not([media]), meta[name="theme-color"][media=""]')
-        .forEach((tag) => tag.remove())
+      // Next owns the viewport tags and may replace them during navigation.
       for (const [scheme, color] of [["light", THEME_COLOR_LIGHT], ["dark", THEME_COLOR_DARK]]) {
         const media = `(prefers-color-scheme: ${scheme})`
-        const tags = document.querySelectorAll<HTMLMetaElement>(`meta[name="theme-color"][media="${media}"]`)
-        if (tags.length === 0) {
-          const tag = document.createElement("meta")
-          tag.name = "theme-color"
-          tag.setAttribute("media", media)
-          tag.content = color
-          document.head.appendChild(tag)
-        } else {
-          tags.forEach((tag) => { tag.content = color })
-        }
+        document.querySelectorAll<HTMLMetaElement>(`meta[name="theme-color"][media="${media}"]`)
+          .forEach((tag) => { tag.content = color })
       }
     }
   }, [])

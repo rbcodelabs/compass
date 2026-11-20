@@ -58,17 +58,11 @@ describe("title bar theme-color sync", () => {
     expect(doc.tags.map((t) => t.content)).toEqual([THEME_COLOR_LIGHT, THEME_COLOR_LIGHT])
   })
 
-  it("creates a tag when none exists", () => {
-    const created = { name: "", content: "" }
-    const doc = {
-      querySelectorAll: () => [],
-      createElement: () => created,
-      head: { appendChild: vi.fn() },
-    }
-    vi.stubGlobal("document", doc)
+  it("leaves tag creation to Next when viewport metadata is absent", () => {
+    const createElement = vi.fn()
+    vi.stubGlobal("document", { querySelectorAll: () => [], createElement })
     syncThemeColorMeta("dark")
-    expect(created).toEqual({ name: "theme-color", content: THEME_COLOR_DARK })
-    expect(doc.head.appendChild).toHaveBeenCalledWith(created)
+    expect(createElement).not.toHaveBeenCalled()
   })
 
   it("init script sets the tag colour from a stored dark preference", () => {
