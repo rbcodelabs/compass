@@ -29,7 +29,7 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 
         await page.getByRole("button", { name: viewport.width === 390 ? "Account" : "Account menu", exact: true }).click();
       }
       await guide.click();
-      await expect(page).toHaveURL(/\/help\/?$/);
+      await expect(page).toHaveURL(/\/help\/00-overview\/?$/);
       await expect(page.locator("html")).toHaveAttribute("data-theme-qa-navigation", "same-document");
       await expect(page.locator('meta[data-workspace-theme-color]')).toHaveCount(0);
 
