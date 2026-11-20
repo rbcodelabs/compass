@@ -162,8 +162,8 @@ describe("SendToAgentPicker with cloud agents", () => {
   )
 
   async function openMenu() {
-    const trigger = await screen.findByRole("button", { name: /send to agent/i }, { timeout: 5000 })
-    // Use Base UI's keyboard navigation path with focus on the trigger in jsdom.
+    // The trigger can appear before Base UI attaches its menu interaction props.
+    const trigger = await screen.findByRole("button", { name: /send to agent/i, expanded: false }, { timeout: 5000 })
     await act(async () => {
       trigger.focus()
       fireEvent.keyDown(trigger, { key: "ArrowDown" })
