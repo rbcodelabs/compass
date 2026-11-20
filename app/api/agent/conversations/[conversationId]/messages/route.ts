@@ -10,11 +10,15 @@ import { z } from "zod"
 
 import { auth } from "@/auth"
 import { getAgentConversationMessages } from "@/lib/agent-conversations"
+import { conversationNotFound, NO_STORE_HEADERS } from "@/lib/agent-conversation-not-found"
+import { loadConversationTaskCards } from "@/lib/conversation-task-cards"
 
 // `AgentConversation.id` is `@db.Uuid`. A malformed id would otherwise reach
 // Postgres as a failed cast and surface as a Prisma 500; it names no
 // conversation the caller could own, so it gets the same 404 as any other.
 const conversationIdSchema = z.string().uuid()
+
+const MAX_CARD_LOOKUPS = 500
 
 export async function GET(
   request: Request,
@@ -27,9 +31,7 @@ export async function GET(
   if (!workspaceId) return new Response("Workspace required", { status: 400 })
 
   const { conversationId } = await params
-  if (!conversationIdSchema.safeParse(conversationId).success) {
-    return new Response("Not found", { status: 404 })
-  }
+  if (!conversationIdSchema.safeParse(conversationId).success) return conversationNotFound()
 
   // Access is proven before any message is read, and a conversation the caller
   // may not see is reported as 404 rather than 403 (null here) so existence is
@@ -43,8 +45,20 @@ export async function GET(
     after = new Date(afterParam)
     if (Number.isNaN(after.getTime())) return new Response("Invalid after cursor", { status: 400 })
   }
-  const messages = await getAgentConversationMessages(conversationId, workspaceId, session.user.id, { after })
-  if (!messages) return new Response("Not found", { status: 404 })
+  const messages = await getAgentConversationMessages(conversationId, workspaceId, session.user.id, {
+    after,
+    includeEdited: after ? new URL(request.url).searchParams.get("includeEdited") === "1" : false,
+  })
+  if (!messages) return conversationNotFound()
 
-  return Response.json({ messages })
+  // A task made from a root post is keyed by the post's comment id, which is the message id (the mirror reuses it). Access
+  // was proven above, so cards are only ever read for a conversation this caller may see.
+  // Only person-authored comment-kind messages can carry a task (agent replies, plan proposals and system rows never do), and
+  // only the newest 500 are looked up, so a very long thread cannot turn one read into an unbounded IN list.
+  const cardable = messages
+    .filter((message) => message.role === "user" && (!message.messageKind || message.messageKind === "COMMENT" || message.messageKind === "MESSAGE"))
+    .map((message) => message.id)
+    .slice(-MAX_CARD_LOOKUPS)
+  const taskCards = await loadConversationTaskCards(workspaceId, cardable)
+  return Response.json({ messages, taskCards }, { headers: NO_STORE_HEADERS })
 }

@@ -395,7 +395,7 @@ export function ComposerCard(props: Props) {
           )}
         </div>
         {chips && (
-          <div data-slot="composer-footer" className="flex min-w-0 items-center gap-2 rounded-b-[inherit] border-t border-border bg-muted/60 p-2 @md/composer:px-2.5">
+          <div data-slot="composer-footer" className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1.5 rounded-b-[inherit] border-t border-border bg-muted/60 p-2 @md/composer:px-2.5">
             {chips}
             <span aria-hidden="true" className="ml-auto hidden min-w-0 flex-1 truncate text-right text-[11px] text-muted-foreground @3xl/composer:block">Enter to send · Shift+Enter for a new line</span>
           </div>
