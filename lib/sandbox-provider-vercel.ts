@@ -157,6 +157,9 @@ export async function prepareVercelSandboxStop(name: string): Promise<PreparedPe
     const last = found.session
       ? { id: found.session.sessionId, status: found.session.status }
       : (await found.sandbox.listSessions({ limit: 1, sortOrder: "desc" })).sessions[0]
+    // No stop has been sent. A verified terminal session with no advertised
+    // snapshot can be handed back to the launch path's missing-snapshot fallback.
+    if (last?.status === "stopped" && !found.sandbox.currentSnapshotId) return null
     if (last?.status !== "stopped" || !(await hasSettledSessionSnapshot(found.sandbox, last.id))) {
       throw new Error("Sandbox paused without a confirmed saved snapshot")
     }
