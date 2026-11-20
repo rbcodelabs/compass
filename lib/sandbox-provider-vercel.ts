@@ -127,17 +127,32 @@ async function readVercelSandboxSession(name: string) {
 
 export async function isVercelSandboxQuiescent(name: string, sessionId: string): Promise<boolean> {
   const found = await readVercelSandboxSession(name)
-  if (!found.exists || !found.sandbox.currentSnapshotId) return false
-  if (found.session) return found.session.sessionId === sessionId && found.session.status === "stopped"
-  const recent = await found.sandbox.listSessions({ limit: 10, sortOrder: "desc" })
-  return recent.sessions.some((session) => session.id === sessionId && session.status === "stopped")
+  if (!found.exists) return false
+  if (found.session) {
+    if (found.session.sessionId !== sessionId || found.session.status !== "stopped") return false
+  } else {
+    const recent = await found.sandbox.listSessions({ limit: 10, sortOrder: "desc" })
+    if (!recent.sessions.some((session) => session.id === sessionId && session.status === "stopped")) return false
+  }
+  return hasSavedSessionSnapshot(found.sandbox, sessionId)
+}
+
+async function hasSavedSessionSnapshot(sandbox: Sandbox, sessionId: string): Promise<boolean> {
+  if (!sandbox.currentSnapshotId) return false
+  const snapshot = await Snapshot.get({ snapshotId: sandbox.currentSnapshotId })
+  return snapshot.sourceSessionId === sessionId && snapshot.status === "created"
 }
 
 export async function prepareVercelSandboxStop(name: string): Promise<PreparedPersistentSandboxStop | null> {
   const found = await readVercelSandboxSession(name)
   if (!found.exists) return null
   if (!found.session || found.session.status === "stopped") {
-    if (!found.sandbox.currentSnapshotId) throw new Error("Sandbox paused without a confirmed saved snapshot")
+    const last = found.session
+      ? { id: found.session.sessionId, status: found.session.status }
+      : (await found.sandbox.listSessions({ limit: 1, sortOrder: "desc" })).sessions[0]
+    if (last?.status !== "stopped" || !(await hasSavedSessionSnapshot(found.sandbox, last.id))) {
+      throw new Error("Sandbox paused without a confirmed saved snapshot")
+    }
     return null
   }
   const session = found.session
@@ -146,7 +161,9 @@ export async function prepareVercelSandboxStop(name: string): Promise<PreparedPe
     sessionId: session.sessionId,
     stop: async () => {
       const result = await session.stop()
-      if (result.session.status !== "stopped" || !result.snapshot) throw new Error("Sandbox pause or saved snapshot has not been confirmed")
+      if (result.session.status !== "stopped" || result.snapshot?.sourceSessionId !== session.sessionId || result.snapshot.status !== "created") {
+        throw new Error("Sandbox pause or saved snapshot has not been confirmed")
+      }
     },
   }
 }

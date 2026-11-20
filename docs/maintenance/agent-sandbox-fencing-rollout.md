@@ -33,7 +33,7 @@ fresh stops. It can retire an expired launch reservation that never progressed
 to dispatch, or a launch whose successful settlement was persisted.
 
 An ambiguous stop stays fenced until the provider reports the recorded session
-stopped and a saved snapshot exists. A missing name, an unrelated current
+stopped and identifies it as the source of the current saved snapshot. A missing name, an unrelated current
 session, and the passage of time are insufficient evidence. An ambiguous
 name-based launch remains fenced for investigation. The provider-call
 coordinator may have exited before persisting the result.

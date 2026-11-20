@@ -134,8 +134,8 @@ describe.skipIf(!databaseUrl)("durable sandbox fence on PostgreSQL", () => {
     expect(await marker(separate)).toEqual({ sandboxStoppedAt: now })
     failLookup = false
     const later = new Date(now.getTime() + 60_001)
-    expect(await reapIdleConversationSandboxes({ prisma, now: later, limit: 1, cleanup })).toMatchObject({ stopped: [shared] })
-    expect(await reapIdleConversationSandboxes({ prisma, now: later, limit: 1, cleanup })).toMatchObject({ stopped: [developer] })
+    const retried = await reapIdleConversationSandboxes({ prisma, now: later, limit: 1, cleanup })
+    expect(retried.stopped.toSorted()).toEqual([shared, developer].toSorted())
     expect(await marker(failed)).toEqual({ sandboxStoppedAt: later })
     expect(await marker(dev)).toEqual({ sandboxStoppedAt: later })
     expect(await marker(history[0])).toEqual({ sandboxStoppedAt: null })
@@ -161,6 +161,30 @@ describe.skipIf(!databaseUrl)("durable sandbox fence on PostgreSQL", () => {
     expect(stopSandbox).toHaveBeenCalledTimes(1)
     expect(await marker(runId)).toEqual({ sandboxStoppedAt: confirmed })
     await expect(launch(conversationId, confirmed)).resolves.toMatchObject({ run: { status: "QUEUED" } })
+  })
+
+  it("still stops fresh candidates at the five-minute cron cadence when the retry page is full", async () => {
+    const failedConversation = await makeConversation()
+    const failedSandbox = agentConversationSandboxName(failedConversation)
+    await seedRun(failedConversation, failedSandbox, "FAILED", idle)
+    const freshConversation = await makeConversation()
+    const freshSandbox = agentConversationSandboxName(freshConversation)
+    await seedRun(freshConversation, freshSandbox, "SUCCEEDED", new Date(now.getTime() - 1000))
+    const stop = vi.fn(async () => {})
+    const preparePersistentStop = vi.fn(async (name: string) => {
+      if (name === failedSandbox) throw new Error("provider lookup unavailable")
+      return { sessionId: "fixture", stop }
+    })
+    await reapIdleConversationSandboxes({ prisma, now, limit: 1, cleanup: { preparePersistentStop } })
+    const tick = new Date(now.getTime() + 5 * 60_000 + 1)
+    const result = await reapIdleConversationSandboxes({ prisma, now: tick, limit: 1, cleanup: { preparePersistentStop } })
+    expect(result.stopped).toEqual([freshSandbox])
+    expect(result.failed).toMatchObject([{ sandboxName: failedSandbox }])
+    expect(stop).toHaveBeenCalledOnce()
+    // This test intentionally leaves a failed retry; remove its fixture before
+    // other cases drive the same isolated schema's chronologically earlier ticks.
+    await prisma.agentSandboxOperation.deleteMany({ where: { conversationId: failedConversation } })
+    await prisma.agentRun.deleteMany({ where: { conversationId: failedConversation } })
   })
 
   it("retries bookkeeping for the exact confirmed generation without sending a second stop", async () => {

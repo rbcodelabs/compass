@@ -191,6 +191,8 @@ export async function launchQueuedAgentRun(ctx: LaunchContext): Promise<{ starte
     const manifestFiles = docMaterial
       ? [{ path: DOC_MANIFEST_FILE, content: JSON.stringify(signDocManifest(run.id, ctx.workspace.id, docMaterial.baseline)) }]
       : []
+    const entryScript = readEntryScript(ctx.harness)
+    const entryModules = readEntryModules(ctx.harness)
 
     let sandbox: Awaited<ReturnType<typeof bootSandboxFromSnapshot>>
     if (!reuseTarget) {
@@ -201,6 +203,7 @@ export async function launchQueuedAgentRun(ctx: LaunchContext): Promise<{ starte
         networkPolicy,
       })
     } else {
+      const { acquireConversationSandbox } = await import("@/lib/agent-sandbox")
       const previous = await findPreviousRunForSandboxReuse(prisma, reuseTarget.conversationId, run.id)
       launchReservation = await reservePersistentSandboxLaunch(prisma, reuseTarget.conversationId, run.id, runSandboxName)
       if (!launchReservation || !(await dispatchPersistentSandboxLaunch(prisma, reuseTarget.conversationId, run.id, runSandboxName, launchReservation))) {
@@ -209,7 +212,6 @@ export async function launchQueuedAgentRun(ctx: LaunchContext): Promise<{ starte
       launchMayBeInFlight = true
       const requiredMs = ctx.budgetMs + 2 * RUN_INFRA_GRACE_MS
       const profile = sandboxNetworkProfile(networkPolicy)
-      const { acquireConversationSandbox } = await import("@/lib/agent-sandbox")
       const acquired = await acquireConversationSandbox({
         name: runSandboxName,
         snapshotId: ctx.snapshotId,
@@ -226,8 +228,8 @@ export async function launchQueuedAgentRun(ctx: LaunchContext): Promise<{ starte
     }
 
     await sandbox.writeFiles([
-      { path: "entry.ts", content: readEntryScript(ctx.harness) },
-      ...readEntryModules(ctx.harness),
+      { path: "entry.ts", content: entryScript },
+      ...entryModules,
       ...(docMaterial?.files ?? []),
       ...manifestFiles,
       ...(ctx.extraFiles ?? []),
