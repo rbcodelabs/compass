@@ -1,0 +1,125 @@
+import { randomUUID } from "node:crypto"
+import { Pool } from "pg"
+import { afterAll, beforeAll, describe, expect, it } from "vitest"
+import { applyMigrations, partitionPendingMigrations } from "@/lib/migrations/runner"
+import { assertReviewedManagedManifest } from "@/lib/preview-automation/managed-manifest"
+import { integrationDatabaseUrl } from "./helpers/integration-database"
+import { replayAllMigrations } from "./helpers/replay-migrations"
+
+const migrations = [
+  "126_external_links",
+  "126_doc_version_numbers",
+  "127_decision_votes",
+  "128_task_start_date",
+  "129_agent_message_run_id",
+  "130_agent_sandbox_operations",
+] as const
+
+describe.skipIf(!integrationDatabaseUrl)("schema-first migration batch on PostgreSQL", () => {
+  const schema = "schema_first_" + randomUUID().replaceAll("-", "")
+  const pool = new Pool({ connectionString: integrationDatabaseUrl, max: 2 })
+  const previousDatabaseUrl = process.env.DATABASE_URL
+  const legacyId = randomUUID()
+  const workspaceId = randomUUID()
+  let ownsSchema = false
+
+  async function apply(name: string) {
+    const response = await applyMigrations(pool, schema, name)
+    expect(response.status, await response.text()).toBe(200)
+  }
+
+  function receipts(name: string) {
+    return pool.query<{ finished: boolean }>(
+      'SELECT finished_at IS NOT NULL AS finished FROM "' + schema + '"._prisma_migrations WHERE migration_name = $1 ORDER BY started_at',
+      [name],
+    )
+  }
+
+  async function expectBareNullableColumn(table: string, column: string, type: string) {
+    const result = await pool.query(
+      "SELECT data_type, is_nullable, column_default, is_generated FROM information_schema.columns WHERE table_schema = $1 AND table_name = $2 AND column_name = $3",
+      [schema, table, column],
+    )
+    expect(result.rows).toEqual([{ data_type: type, is_nullable: "YES", column_default: null, is_generated: "NEVER" }])
+  }
+
+  beforeAll(async () => {
+    // The pool owns the disposable target. The runner separately uses DATABASE_URL to
+    // translate historical ASYNC DDL, including 001's users_email_key.
+    process.env.DATABASE_URL = integrationDatabaseUrl
+    await pool.query('CREATE SCHEMA "' + schema + '"')
+    ownsSchema = true
+    const baseline = await replayAllMigrations(pool, schema, { before: migrations[0] })
+    expect(baseline.status, await baseline.text()).toBe(200)
+
+    const emailIndex = await pool.query(
+      "SELECT 1 FROM pg_indexes WHERE schemaname = $1 AND tablename = 'users' AND indexname = 'users_email_key'",
+      [schema],
+    )
+    expect(emailIndex.rowCount).toBe(1)
+    await pool.query('INSERT INTO "' + schema + '".doc_versions (id, doc_id, title) VALUES ($1, $2, $3)', [legacyId, randomUUID(), "Legacy version"])
+    await pool.query('INSERT INTO "' + schema + '".tasks (id, workspace_id, title, seq_prefix, seq_number) VALUES ($1, $2, $3, $4, $5)', [legacyId, workspaceId, "Legacy task", "TASK", 1])
+    await pool.query('INSERT INTO "' + schema + '".agent_conversations (id, workspace_id, user_id, title) VALUES ($1, $2, $3, $4)', [legacyId, workspaceId, randomUUID(), "Legacy conversation"])
+    await pool.query('INSERT INTO "' + schema + '".agent_messages (id, conversation_id, role, content) VALUES ($1, $1, $2, $3)', [legacyId, "assistant", "Legacy message"])
+  }, 120_000)
+
+  afterAll(async () => {
+    try {
+      if (ownsSchema) await pool.query('DROP SCHEMA "' + schema + '" CASCADE')
+    } finally {
+      await pool.end()
+      if (previousDatabaseUrl === undefined) delete process.env.DATABASE_URL
+      else process.env.DATABASE_URL = previousDatabaseUrl
+    }
+  })
+
+  it("applies the six exact migrations in order, preserves existing data, and replays finished receipts", async () => {
+    const manifest = partitionPendingMigrations(schema, new Set()).pending
+    expect(manifest.slice(-migrations.length).map(({ name }) => name)).toEqual(migrations)
+    assertReviewedManagedManifest(manifest)
+
+    for (const name of migrations) {
+      expect((await receipts(name)).rows).toEqual([])
+      await apply(name)
+      expect((await receipts(name)).rows).toEqual([{ finished: true }])
+      await apply(name)
+      expect((await receipts(name)).rows).toEqual([{ finished: true }])
+    }
+
+    await expectBareNullableColumn("doc_versions", "version_number", "integer")
+    await expectBareNullableColumn("tasks", "start_date", "timestamp with time zone")
+    await expectBareNullableColumn("agent_messages", "run_id", "uuid")
+    await expectBareNullableColumn("agent_conversations", "sandbox_coordination_token", "uuid")
+    const legacy = await pool.query(
+      "SELECT d.title AS version_title, d.version_number, t.title AS task_title, t.start_date, m.content, m.run_id, c.title AS conversation_title, c.sandbox_coordination_token " +
+      'FROM "' + schema + '".doc_versions d JOIN "' + schema + '".tasks t USING (id) ' +
+      'JOIN "' + schema + '".agent_messages m USING (id) JOIN "' + schema + '".agent_conversations c USING (id) WHERE d.id = $1',
+      [legacyId],
+    )
+    expect(legacy.rows).toEqual([{
+      version_title: "Legacy version", version_number: null,
+      task_title: "Legacy task", start_date: null,
+      content: "Legacy message", run_id: null,
+      conversation_title: "Legacy conversation", sandbox_coordination_token: null,
+    }])
+  }, 120_000)
+
+  it.each([
+    [migrations[0], "DROP INDEX IF EXISTS @schema@.idx_external_links_subject_key", "CREATE INDEX idx_external_links_subject_key ON @schema@.external_links(subject_type)", "DROP INDEX @schema@.idx_external_links_subject_key", "idx_external_links_subject_key"],
+    [migrations[2], "DROP INDEX IF EXISTS @schema@.idx_decision_votes_voter", "CREATE INDEX idx_decision_votes_voter ON @schema@.decision_votes(request_id)", "DROP INDEX @schema@.idx_decision_votes_voter", "idx_decision_votes_voter"],
+    [migrations[5], "ALTER TABLE @schema@.agent_conversations DROP COLUMN IF EXISTS sandbox_coordination_token", "ALTER TABLE @schema@.agent_conversations ADD COLUMN sandbox_coordination_token UUID GENERATED ALWAYS AS (id) STORED", "ALTER TABLE @schema@.agent_conversations DROP COLUMN sandbox_coordination_token", "conversation coordination token"],
+  ])("rejects drift for %s before receipt and retains the failed attempt on recovery", async (name, remove, drift, repair, error) => {
+    // Install the schema independently so this regression also runs in isolation.
+    await apply(name)
+    await pool.query('DELETE FROM "' + schema + '"._prisma_migrations WHERE migration_name = $1', [name])
+    for (const sql of [remove, drift]) await pool.query(sql.replace("@schema@", '"' + schema + '"'))
+    const rejected = await applyMigrations(pool, schema, name)
+    expect(rejected.status).toBe(500)
+    expect(await rejected.text()).toContain(error)
+    expect((await receipts(name)).rows).toEqual([{ finished: false }])
+
+    await pool.query(repair.replace("@schema@", '"' + schema + '"'))
+    await apply(name)
+    expect((await receipts(name)).rows).toEqual([{ finished: false }, { finished: true }])
+  })
+})
