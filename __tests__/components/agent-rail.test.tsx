@@ -198,6 +198,12 @@ async function selectThread(title: string) {
   fireEvent.click(await screen.findByText(title));
 }
 
+/** Switch the rail to its Library view through the header's view menu. */
+async function selectLibraryView() {
+  fireEvent.click(screen.getByRole("button", { name: "Rail view: Agent" }));
+  fireEvent.click(await screen.findByText("Library"));
+}
+
 beforeEach(() => {
   push.mockClear();
   searchString = "";
@@ -651,11 +657,10 @@ describe("on the full-page Agent route", () => {
 // ── URL mirroring ────────────────────────────────────────────────────────────
 
 describe("rail state in the URL", () => {
-  it("seeds the thread from ?rc= and opens a rail whose cookie says closed", () => {
+  it("no longer owns ?rc= (the legacy redirect does): it neither opens the rail nor seeds a thread", () => {
     searchString = "rc=conv-1";
     renderRail({ pinned: false });
-    expect(rail()).not.toBeNull();
-    expect(lastChatProps.activeConversationId).toBe("conv-1");
+    expect(rail()).toBeNull();
   });
 
   it("seeds the Library view from ?rail=library", () => {
@@ -671,12 +676,14 @@ describe("rail state in the URL", () => {
     expect(rail()).toBeNull();
   });
 
-  it("mirrors the selected thread with replaceState, never router.push", async () => {
+  it("never writes the selected thread to the URL, and mirrors the view with replaceState, never router.push", async () => {
     const replaceState = vi.spyOn(window.history, "replaceState");
     renderRail();
     expect(window.location.search).toBe("");
     await selectThread("First chat");
-    expect(window.location.search).toBe("?rc=conv-1");
+    expect(window.location.search).toBe("");
+    await selectLibraryView();
+    expect(window.location.search).toBe("?rail=library");
     expect(replaceState).toHaveBeenCalled();
     expect(push).not.toHaveBeenCalled();
     replaceState.mockRestore();
@@ -684,13 +691,12 @@ describe("rail state in the URL", () => {
 
   it("re-applies the params when a link-built navigation dropped them, keeping other params", async () => {
     const { rerender } = renderRail();
-    await selectThread("First chat");
+    await selectLibraryView();
     // A sidebar <Link> lands on a URL with its own params and none of ours.
     window.history.replaceState(null, "", "/acme/product/okrs?status=open");
     pathname = "/acme/product/okrs";
     rerender(railTree());
-    expect(window.location.search).toBe("?status=open&rc=conv-1");
-    expect(chatMounts).toBe(1);
+    expect(window.location.search).toBe("?status=open&rail=library");
   });
 
   it("holds URL writes while a link navigation is pending, then applies them once it lands", async () => {
@@ -702,20 +708,20 @@ describe("rail state in the URL", () => {
     // replaceState the old path over that push while it is in flight.
     link.addEventListener("click", (event) => event.preventDefault());
     fireEvent.click(link);
-    await selectThread("First chat");
+    await selectLibraryView();
     expect(window.location.search, "no write mid-navigation").toBe("");
 
     window.history.replaceState(null, "", "/acme/product/okrs");
     pathname = "/acme/product/okrs";
     rerender(railTree());
-    expect(window.location.search).toBe("?rc=conv-1");
+    expect(window.location.search).toBe("?rail=library");
     link.remove();
   });
 
   it("writes no params while the rail is closed, and drops them on close", async () => {
     renderRail();
-    await selectThread("First chat");
-    expect(window.location.search).toBe("?rc=conv-1");
+    await selectLibraryView();
+    expect(window.location.search).toBe("?rail=library");
     fireEvent.click(screen.getByRole("button", { name: "Close agent" }));
     expect(window.location.search).toBe("");
   });
