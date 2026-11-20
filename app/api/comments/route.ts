@@ -94,6 +94,22 @@ function parseAssignee(value: unknown): { kind: "user" | "agent"; id: string } |
   return { kind: input.kind, id: input.id }
 }
 
+/** What the caller is told per service code. The service's own message (it can name tables and columns) is never sent. */
+const POST_ERROR_COPY: Record<string, string> = {
+  FORBIDDEN: "You do not have permission to comment or create tasks in this workspace.",
+  EMPTY_BODY: "Write something before posting.",
+  EMPTY_TITLE: "Give the task a title.",
+  INVALID_PRIORITY: "Choose a priority from the list.",
+  INVALID_DUE_DATE: "That due date is not a real date.",
+  NO_ASSIGNEE: "Mention someone to assign the task to.",
+  ASSIGNEE_NOT_IN_WORKSPACE: "That person is not in this workspace, so a task cannot be assigned to them.",
+  AGENT_SCOPE_CONFIRMATION_REQUIRED: "Confirm what this agent will receive before assigning it.",
+  TASK_FAILED: "The task could not be created, so the comment was not posted.",
+  PARENT_NOT_FOUND: "The comment you are replying to is no longer there.",
+  PARENT_IS_REPLY: "You can only reply to the first comment of a thread.",
+  COMMENT_FAILED: "The comment could not be posted. Please try again.",
+}
+
 const POST_ERROR_STATUS: Record<string, number> = { FORBIDDEN: 403, PARENT_NOT_FOUND: 404, COMMENT_FAILED: 500 }
 
 export async function GET(request: NextRequest) {
@@ -139,7 +155,9 @@ export async function POST(request: NextRequest) {
         body, parentId, task, assignee, agentScopeConfirmed: values.agentScopeConfirmed === true,
       })
       if (!result.ok) {
-        return NextResponse.json({ error: result.message ?? result.error, code: result.error }, { status: POST_ERROR_STATUS[result.error] ?? 422 })
+        // The detail stays server-side, and only as the code: the service message is not safe to log or send.
+        console.error("[api/comments] post failed", result.error)
+        return NextResponse.json({ error: POST_ERROR_COPY[result.error] ?? "The comment could not be posted.", code: result.error }, { status: POST_ERROR_STATUS[result.error] ?? 422 })
       }
       return NextResponse.json({ ...toCommentDto(result.comment, actor), taskCard: result.card }, { status: 201 })
     }

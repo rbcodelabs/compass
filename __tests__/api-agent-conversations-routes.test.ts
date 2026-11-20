@@ -17,6 +17,7 @@ const mockAuth = vi.fn()
 vi.mock("@/auth", () => ({ auth: () => mockAuth() }))
 
 const mockPrisma = {
+  workspace: { findUnique: vi.fn() },
   agentConversation: { findMany: vi.fn(), findFirst: vi.fn() },
   agentMessage: { findMany: vi.fn() },
   agentConversationParticipant: { findFirst: vi.fn() },
@@ -32,6 +33,9 @@ import { GET as listMessages } from "@/app/api/agent/conversations/[conversation
 const SESSION = { user: { id: "user-1" } }
 const WORKSPACE_ID = "0b6f3c9e-6a1d-4c1e-9d3a-2f0c8e7b5a41"
 const CONVERSATION_ID = "5d2a7e14-3b9c-4f60-8a21-c7e9d0f4b312"
+
+/** The conversation in these tests is private (no visibility), so nothing is editable and nothing is deletable. */
+const NO_EDIT_FIELDS = { editedAt: null, authorType: null, messageKind: null, canEdit: false, canDelete: false }
 
 /** The predicate that encodes "the caller is a member of this workspace". */
 const MEMBERSHIP = { workspace: { members: { some: { userId: "user-1" } } } }
@@ -59,6 +63,7 @@ beforeEach(() => {
   mockPrisma.agentMessage.findMany.mockResolvedValue([])
   mockPrisma.agentConversationParticipant.findFirst.mockResolvedValue(null)
   mockPrisma.user.findMany.mockResolvedValue([])
+  mockPrisma.workspace.findUnique.mockResolvedValue({ members: [{ role: "MEMBER" }], organization: { members: [{ role: "MEMBER" }] } })
   resetAgentParticipantsAvailabilityCache()
 })
 
@@ -144,7 +149,7 @@ describe("GET /api/agent/conversations/:conversationId/messages", () => {
     expect(response.status).toBe(404)
     expect(mockPrisma.agentConversation.findFirst).toHaveBeenCalledWith({
       where: { id: CONVERSATION_ID, ...accessibleConversationsWhere(WORKSPACE_ID, "user-1") },
-      select: { userId: true },
+      select: { userId: true, visibility: true, interviewProcessingJson: true, archivedAt: true, title: true, summary: true, updatedAt: true },
     })
     expect(mockPrisma.agentMessage.findMany).not.toHaveBeenCalled()
   })
@@ -157,7 +162,7 @@ describe("GET /api/agent/conversations/:conversationId/messages", () => {
     expect(response.status).toBe(404)
     expect(mockPrisma.agentConversation.findFirst).toHaveBeenCalledWith({
       where: { id: CONVERSATION_ID, ...accessibleConversationsWhere(WORKSPACE_ID, "user-2") },
-      select: { userId: true },
+      select: { userId: true, visibility: true, interviewProcessingJson: true, archivedAt: true, title: true, summary: true, updatedAt: true },
     })
     expect(mockPrisma.agentMessage.findMany).not.toHaveBeenCalled()
   })
@@ -182,16 +187,17 @@ describe("GET /api/agent/conversations/:conversationId/messages", () => {
     expect(await response.json()).toEqual({
       messages: [
         // Pre-sharing message: no author on disk, reported as the owner's.
-        { id: "m-1", role: "user", content: "hello", createdAt: iso, authorUserId: "user-1", authorName: "Dana Admin Reyes" },
+        { id: "m-1", role: "user", content: "hello", createdAt: iso, authorUserId: "user-1", authorName: "Dana Admin Reyes", ...NO_EDIT_FIELDS },
         // The agent is not a participant, even though the row records who asked.
-        { id: "m-2", role: "assistant", content: "hi", createdAt: iso, authorUserId: null, authorName: null },
-        { id: "m-3", role: "user", content: "me too", createdAt: iso, authorUserId: "user-2", authorName: "lee" },
+        { id: "m-2", role: "assistant", content: "hi", createdAt: iso, authorUserId: null, authorName: null, ...NO_EDIT_FIELDS },
+        { id: "m-3", role: "user", content: "me too", createdAt: iso, authorUserId: "user-2", authorName: "lee", ...NO_EDIT_FIELDS },
       ],
+      taskCards: {},
     })
     expect(mockPrisma.agentMessage.findMany).toHaveBeenCalledWith({
       where: { conversationId: CONVERSATION_ID },
       orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-      select: { id: true, role: true, content: true, createdAt: true, authorUserId: true },
+      select: { id: true, role: true, content: true, createdAt: true, authorUserId: true, authorType: true, messageKind: true, editedAt: true },
     })
   })
 
@@ -253,5 +259,67 @@ describe("GET /api/agent/conversations?q= (search)", () => {
     mockPrisma.agentConversation.findMany.mockResolvedValue([])
     await listConversations(listReq({ workspaceId: WORKSPACE_ID, q: "   " }))
     expect(mockPrisma.agentMessage.findMany).not.toHaveBeenCalled()
+  })
+})
+
+describe("GET /api/agent/conversations/:conversationId/messages capabilities (TASK-195 S1)", () => {
+  const createdAt = new Date("2026-09-20T10:00:00.000Z")
+  const editedAt = new Date("2026-09-21T10:00:00.000Z")
+  const sharedRows = [
+    { id: "m-mine", role: "user", content: "mine", createdAt, authorUserId: "user-1", authorType: "HUMAN", messageKind: "COMMENT", editedAt },
+    { id: "m-theirs", role: "user", content: "theirs", createdAt, authorUserId: "user-2", authorType: "HUMAN", messageKind: "COMMENT", editedAt: null },
+    { id: "m-agent", role: "assistant", content: "agent", createdAt, authorUserId: null, authorType: "AGENT", messageKind: "COMMENT", editedAt: null },
+    { id: "m-plan", role: "user", content: "plan", createdAt, authorUserId: "user-1", authorType: "HUMAN", messageKind: "PLAN_PROPOSAL", editedAt: null },
+  ]
+  const byId = (body: { messages: Array<{ id: string; canEdit: boolean; canDelete: boolean; editedAt: string | null }> }) =>
+    Object.fromEntries(body.messages.map((m) => [m.id, m]))
+
+  beforeEach(() => {
+    mockPrisma.agentConversation.findFirst.mockResolvedValue({ userId: "user-1", visibility: "WORKSPACE", interviewProcessingJson: null })
+    mockPrisma.agentMessage.findMany.mockResolvedValue(sharedRows)
+  })
+
+  it("lets a member edit only their own human messages, and reports editedAt", async () => {
+    const body = await (await listMessages(...messagesReq(CONVERSATION_ID, { workspaceId: WORKSPACE_ID }))).json()
+    const m = byId(body)
+    expect(m["m-mine"]).toMatchObject({ canEdit: true, canDelete: false, editedAt: editedAt.toISOString() })
+    expect(m["m-theirs"]).toMatchObject({ canEdit: false, canDelete: false, editedAt: null })
+    expect(m["m-agent"]!.canEdit).toBe(false)
+    expect(m["m-plan"]!.canEdit).toBe(false)
+  })
+
+  it("lets a workspace admin edit other people's human messages but never agent or plan messages", async () => {
+    mockPrisma.agentConversation.findFirst.mockResolvedValue({ userId: "user-2", visibility: "WORKSPACE", interviewProcessingJson: null })
+    mockPrisma.workspace.findUnique.mockResolvedValue({ members: [{ role: "ADMIN" }], organization: { members: [] } })
+    const m = byId(await (await listMessages(...messagesReq(CONVERSATION_ID, { workspaceId: WORKSPACE_ID }))).json())
+    expect(m["m-mine"]!.canEdit).toBe(true)
+    expect(m["m-theirs"]!.canEdit).toBe(true)
+    expect(m["m-agent"]!.canEdit).toBe(false)
+    expect(m["m-plan"]!.canEdit).toBe(false)
+  })
+
+  it("never grants edit in a private conversation", async () => {
+    mockPrisma.agentConversation.findFirst.mockResolvedValue({ userId: "user-1", visibility: "PRIVATE", interviewProcessingJson: null })
+    const m = byId(await (await listMessages(...messagesReq(CONVERSATION_ID, { workspaceId: WORKSPACE_ID }))).json())
+    expect(Object.values(m).every((x) => !x.canEdit)).toBe(true)
+  })
+})
+
+describe("GET /api/agent/conversations/:conversationId/messages?includeEdited=1 (TASK-195 S1)", () => {
+  beforeEach(() => {
+    mockPrisma.agentConversation.findFirst.mockResolvedValue({ userId: "user-1", visibility: "WORKSPACE", interviewProcessingJson: null })
+  })
+  it("with a cursor, also returns every edited message so a poll sees an older message's edit", async () => {
+    const after = "2026-09-20T10:00:00.000Z"
+    await listMessages(...messagesReq(CONVERSATION_ID, { workspaceId: WORKSPACE_ID, after, includeEdited: "1" }))
+    expect(mockPrisma.agentMessage.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { conversationId: CONVERSATION_ID, OR: [{ createdAt: { gte: new Date(after) } }, { editedAt: { not: null } }] },
+      }),
+    )
+  })
+  it("is ignored without a cursor (a full read already has every row)", async () => {
+    await listMessages(...messagesReq(CONVERSATION_ID, { workspaceId: WORKSPACE_ID, includeEdited: "1" }))
+    expect(mockPrisma.agentMessage.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { conversationId: CONVERSATION_ID } }))
   })
 })
