@@ -35,6 +35,7 @@ import {
 import type { AppPrismaClient } from "@/lib/db"
 import {
   McpConnectorError,
+  safeErrorLabel,
   usesVercelConnect,
   vercelConnectUid,
   CONNECTOR_DEFINITIONS,
@@ -220,7 +221,7 @@ export async function listConnections(
           const access = await getConnectAccess(definition, userId)
           return access ? { slug: definition.slug, scope: access.scope } : null
         } catch (error) {
-          console.error("[mcp-connectors] Vercel Connect probe failed", definition.slug, error instanceof McpConnectorError ? error.code : error)
+          console.error("[mcp-connectors] Vercel Connect probe failed", definition.slug, safeErrorLabel(error))
           return null
         }
       },

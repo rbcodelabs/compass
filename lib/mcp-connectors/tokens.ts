@@ -75,7 +75,7 @@ export function buildAuthorizeUrl(
     state: input.state,
     code_challenge: computeS256Challenge(input.codeVerifier),
     code_challenge_method: "S256",
-    resource: connector.resource,
+    ...resourceParameter(connector),
   })
   // Provider-specific extras (Google's access_type/prompt). Set before the
   // standard parameters so a catalog entry can never override `state` or PKCE.
@@ -84,6 +84,9 @@ export function buildAuthorizeUrl(
   // Appended rather than assigned, so a provider whose authorization endpoint
   // already carries query parameters keeps them.
   for (const [key, value] of params) url.searchParams.set(key, value)
+  // The opt-out must hold even when the endpoint's own query or a catalog extra
+  // already carries `resource`.
+  if (connectorDefinition(connector.slug)?.omitResourceParameter) url.searchParams.delete("resource")
   return url.toString()
 }
 
@@ -100,8 +103,13 @@ function tokenRequestBody(connector: ConnectorRecord, fields: Record<string, str
     // `token_endpoint_auth_method: "none"`.
     client_id: credentials?.clientId ?? connector.clientId,
     ...(credentials ? { client_secret: credentials.clientSecret } : {}),
-    resource: connector.resource,
+    ...resourceParameter(connector),
   })
+}
+
+/** `{ resource }` on all three legs unless the catalog entry opts out (see `omitResourceParameter`). */
+function resourceParameter(connector: ConnectorRecord): Record<string, string> {
+  return connectorDefinition(connector.slug)?.omitResourceParameter ? {} : { resource: connector.resource }
 }
 
 export async function exchangeAuthorizationCode(
@@ -306,6 +314,10 @@ export async function revokeAtProvider(connector: ConnectorRecord, token: string
   if (!connector.revocationEndpoint) return false
   try {
     const endpoint = requireHttpsUrl(connector.revocationEndpoint, "revocation_endpoint", "REFRESH_FAILED")
+    // A confidential static client must authenticate here too (RFC 7009 §2.1);
+    // Auth0 refuses a revocation that carries only the client_id.
+    const definition = connectorDefinition(connector.slug)
+    const credentials = definition ? staticClientCredentials(definition) : null
     const response = await outboundFetch(
       endpoint,
       {
@@ -314,7 +326,11 @@ export async function revokeAtProvider(connector: ConnectorRecord, token: string
           "Content-Type": "application/x-www-form-urlencoded",
           Accept: "application/json",
         },
-        body: new URLSearchParams({ token, client_id: connector.clientId }).toString(),
+        body: new URLSearchParams({
+          token,
+          client_id: credentials?.clientId ?? connector.clientId,
+          ...(credentials ? { client_secret: credentials.clientSecret } : {}),
+        }).toString(),
       },
       "REFRESH_FAILED",
     )

@@ -101,3 +101,117 @@ export function pickHeaders(source: Headers, allowed: readonly string[]): Header
   }
   return picked
 }
+
+/**
+ * Logging policy for provider answers: nothing a provider or the request wrote is
+ * ever logged. Provider error text and tool names are arbitrary and can carry
+ * document content, addresses or credentials that no pattern recognises, and
+ * redaction plus truncation is not a confidentiality boundary. A log line is built
+ * only from the connector slug, HTTP verb and status, a content type and JSON-RPC
+ * method chosen from fixed lists, and a numeric error code.
+ */
+
+/** The JSON-RPC methods the MCP spec defines. Anything else logs as "other". */
+const KNOWN_RPC_METHODS: ReadonlySet<string> = new Set([
+  "notifications/initialized",
+  "notifications/cancelled",
+  "notifications/progress",
+  "notifications/roots/list_changed",
+  "notifications/resources/updated",
+  "notifications/resources/list_changed",
+  "notifications/tools/list_changed",
+  "notifications/prompts/list_changed",
+  "notifications/message",
+  "initialize",
+  "ping",
+  "tools/list",
+  "tools/call",
+  "resources/list",
+  "resources/read",
+  "resources/templates/list",
+  "resources/subscribe",
+  "resources/unsubscribe",
+  "prompts/list",
+  "prompts/get",
+  "completion/complete",
+  "logging/setLevel",
+])
+
+function rpcMethodOfParsed(parsed: unknown): string | null {
+  const first = Array.isArray(parsed) ? parsed[0] : parsed
+  const method = (first as { method?: unknown } | null | undefined)?.method
+  if (typeof method !== "string") return null
+  if (KNOWN_RPC_METHODS.has(method)) return method
+  return "other"
+}
+
+/** The JSON-RPC `method` of a request body when it is a known MCP method, "other" when not, null when it is not a request. */
+export function jsonRpcMethodOf(body: ArrayBuffer | undefined): string | null {
+  if (!body || body.byteLength === 0 || body.byteLength > 64 * 1024) return null
+  try {
+    return rpcMethodOfParsed(JSON.parse(new TextDecoder().decode(body)))
+  } catch {
+    return null
+  }
+}
+
+const SAFE_CONTENT_TYPES: ReadonlySet<string> = new Set(["application/json", "text/event-stream", "text/plain", "text/html"])
+
+/** The media type of a Content-Type header if it is a common one, otherwise "other". Parameters are dropped. */
+export function safeContentType(header: string | null): string | null {
+  if (!header) return null
+  const type = header.split(";")[0].trim().toLowerCase()
+  return SAFE_CONTENT_TYPES.has(type) ? type : "other"
+}
+
+/**
+ * How much of a successful response is read looking for an error. A tool error is a
+ * sentence; a result bigger than this is a document, not an error, and is skipped.
+ */
+export const UPSTREAM_RESULT_SCAN_BYTES = 16 * 1024
+
+type JsonRpcMessage = {
+  error?: { code?: unknown }
+  result?: { isError?: unknown }
+}
+
+/** What is logged about a provider error: whether it was one, and its numeric code (never its text). */
+export type UpstreamErrorSignal = { errorCode: number | null }
+
+function signalOfMessage(message: JsonRpcMessage | null | undefined): UpstreamErrorSignal | null {
+  if (!message || typeof message !== "object") return null
+  if (message.error && typeof message.error === "object") {
+    const code = message.error.code
+    // Only the JSON-RPC reserved range: a provider-chosen number elsewhere could encode data.
+    return { errorCode: typeof code === "number" && Number.isInteger(code) && code >= -32768 && code <= -32000 ? code : null }
+  }
+  if (message.result?.isError === true) return { errorCode: null }
+  return null
+}
+
+/**
+ * Whether a response body carries an error, and its numeric code. Reads a plain JSON
+ * body, a batch, or an SSE stream (`data:` lines); returns only the code, never any
+ * text. Google's Drive MCP server reports a tool failure ("The caller does not have
+ * permission") as `{result:{isError:true}}` inside a 200, which the status alone
+ * cannot show. Text that is not complete JSON-RPC (truncated or non-JSON) yields null.
+ */
+export function upstreamErrorSignalOf(raw: string): UpstreamErrorSignal | null {
+  const payloads: string[] = []
+  const trimmed = raw.trim()
+  if (trimmed.startsWith("{") || trimmed.startsWith("[")) payloads.push(trimmed)
+  else for (const line of raw.split(/\r?\n/)) if (line.startsWith("data:")) payloads.push(line.slice(5).trim())
+  for (const payload of payloads) {
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(payload)
+    } catch {
+      continue
+    }
+    for (const message of Array.isArray(parsed) ? parsed : [parsed]) {
+      const signal = signalOfMessage(message as JsonRpcMessage)
+      if (signal) return signal
+    }
+  }
+  return null
+}

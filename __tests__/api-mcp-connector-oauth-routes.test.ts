@@ -420,3 +420,84 @@ describe("callback route", () => {
     expect(mockConsumeAuthRequest).not.toHaveBeenCalled()
   })
 })
+
+describe("connector browser routes — provider-controlled text never reaches the console", () => {
+  const SYNTH = "synthetic-private-note-Heron-41M jane.doe@private.example"
+  // Spied before the route runs, so everything it writes is captured.
+  let warnSpy: ReturnType<typeof vi.spyOn>
+  let logSpy: ReturnType<typeof vi.spyOn>
+  beforeEach(() => {
+    warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+    logSpy = vi.spyOn(console, "log").mockImplementation(() => {})
+  })
+  const consoleText = () => JSON.stringify([...vi.mocked(console.error).mock.calls, ...warnSpy.mock.calls, ...logSpy.mock.calls])
+
+  it("captures error, warn and log output, so the clean assertions below can fail", () => {
+    console.error(SYNTH)
+    console.warn(SYNTH)
+    console.log(SYNTH)
+    expect(consoleText().split("synthetic-private-note").length - 1).toBe(3)
+  })
+
+  it("does not log a crafted ?error= value verbatim, only an allowlisted OAuth code or AUTHORIZATION_FAILED", async () => {
+    const smuggled = "c2VjcmV0LWRhdGEtZXhmaWx0cmF0ZWQ_-Zm9v"
+    const response = await callback(get(`/api/connectors/v0/callback?error=${smuggled}`), params())
+    expect(response.status).toBe(307)
+    expect(consoleText()).not.toContain(smuggled)
+    expect(consoleText()).toContain("AUTHORIZATION_FAILED")
+    for (const code of ["access_denied", "temporarily_unavailable", "consent_required"]) {
+      vi.mocked(console.error).mockClear()
+      await callback(get(`/api/connectors/v0/callback?error=${code}`), params())
+      expect(consoleText()).toContain(code)
+    }
+  })
+  const expectClean = () => {
+    expect(consoleText()).not.toContain("synthetic-private-note")
+    expect(consoleText()).not.toContain("jane.doe")
+  }
+
+  it("logs a refused authorization by slug and sanitized code only, not error_description", async () => {
+    await callback(
+      get(`/api/connectors/v0/callback?error=access_denied&error_description=${encodeURIComponent(SYNTH)}`),
+      params(),
+    )
+    expect(consoleText()).toContain("access_denied")
+    expectClean()
+    await callback(get(`/api/connectors/v0/callback?error=${encodeURIComponent(SYNTH)}`), params())
+    expectClean()
+    expect(consoleText()).toContain("AUTHORIZATION_FAILED")
+  })
+
+  it("logs a failed token exchange by code only", async () => {
+    mockExchange.mockRejectedValue(new McpConnectorError("TOKEN_EXCHANGE_FAILED", `v0 said ${SYNTH}`))
+    await callback(get("/api/connectors/v0/callback?state=state-abc&code=code-1"), params())
+    expect(consoleText()).toContain("TOKEN_EXCHANGE_FAILED")
+    expectClean()
+  })
+
+  describe("Vercel Connect", () => {
+    beforeEach(() => {
+      resetConnectMocks()
+      vi.stubEnv("COMPASS_GOOGLE_CONNECTOR", "google/compass")
+    })
+    afterEach(() => vi.unstubAllEnvs())
+
+    it("logs a failed landing check without the error's message", async () => {
+      connectMocks.getToken.mockRejectedValue(new Error(`boom ${SYNTH}`))
+      await callback(get("/api/connectors/google-drive/callback"), params("google-drive"))
+      expectClean()
+      const { ConnectError } = await import("./helpers/mock-vercel-connect")
+      connectMocks.getToken.mockRejectedValue(new ConnectError(`bad ${SYNTH}`, { code: "client_not_linked", status: 403 }))
+      await callback(get("/api/connectors/google-drive/callback"), params("google-drive"))
+      expectClean()
+    })
+
+    it("logs a failed consent start by code only", async () => {
+      const { ConnectError } = await import("./helpers/mock-vercel-connect")
+      connectMocks.startAuthorization.mockRejectedValue(new ConnectError(`bad ${SYNTH}`, { code: "client_not_linked", status: 403 }))
+      await connect(get("/api/connectors/google-drive/connect"), params("google-drive"))
+      expect(consoleText()).toContain("CONNECT_MISCONFIGURED")
+      expectClean()
+    })
+  })
+})

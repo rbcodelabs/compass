@@ -22,6 +22,8 @@ import {
   connectorAccessView,
   connectorDefinition,
   connectorGuidance,
+  connectorRedirectUri,
+  safeErrorLabel,
   connectorEncryptionKey,
   isConnectorConfigured,
   staticClientCredentials,
@@ -50,6 +52,7 @@ import {
   exchangeAuthorizationCode,
   refreshGrant,
   refreshTokens,
+  revokeAtProvider,
 } from "@/lib/mcp-connectors/tokens"
 
 // `refreshGrant` writes through `rotateGrantTokens`, which defaults to the shared
@@ -1347,5 +1350,133 @@ describe("access levels", () => {
     it("is empty for a connector with a single fixed access", () => {
       expect(connectorAccessView(v0, "mcp")).toEqual({ accessLevels: [], defaultAccessLevel: null, accessLevel: null })
     })
+  })
+})
+
+describe("redirectPath, omitResourceParameter and static-client revocation (fixture entry)", () => {
+  const catalog = CONNECTOR_DEFINITIONS as ConnectorDefinition[]
+  const shipped = catalog.find(definition => definition.slug === "google-drive")!
+  const original = catalog.indexOf(shipped)
+  const redirectUri = "https://compass.example/auth/custom-callback"
+  const fixture: ConnectorRecord = {
+    ...connector,
+    id: "connector-fixture",
+    slug: "google-drive",
+    revocationEndpoint: "https://idp.example/oauth/revoke",
+    clientId: "stored-client-id",
+  }
+
+  afterEach(() => {
+    catalog[original] = shipped
+  })
+
+  function declare(extra: Partial<ConnectorDefinition>) {
+    catalog[original] = {
+      ...shipped,
+      tokenSource: undefined,
+      staticClient: { clientIdEnv: "GOOGLE_CLIENT_ID", clientSecretEnv: "GOOGLE_CLIENT_SECRET" },
+      ...extra,
+    }
+    vi.stubEnv("GOOGLE_CLIENT_ID", "env-client-id")
+    vi.stubEnv("GOOGLE_CLIENT_SECRET", "env-client-secret")
+  }
+
+  it("defaults: the callback path and the resource parameter are unchanged when the fields are absent", async () => {
+    expect(connectorRedirectUri("v0", "https://compass.example")).toBe("https://compass.example/api/connectors/v0/callback")
+    expect(connectorRedirectUri("unknown-slug", "https://compass.example")).toBe(
+      "https://compass.example/api/connectors/unknown-slug/callback",
+    )
+    declare({})
+    expect(connectorRedirectUri("google-drive", "https://compass.example")).toBe(
+      "https://compass.example/api/connectors/google-drive/callback",
+    )
+    const url = new URL(buildAuthorizeUrl(fixture, { state: "s", codeVerifier: "v", redirectUri }))
+    expect(url.searchParams.get("resource")).toBe(fixture.resource)
+  })
+
+  it("uses redirectPath for the redirect_uri, resolved against the trusted origin", () => {
+    declare({ redirectPath: "/auth/custom-callback" })
+    expect(connectorRedirectUri("google-drive", "https://compass.example")).toBe(redirectUri)
+  })
+
+  it("omits resource from the authorize, exchange and refresh requests when asked", async () => {
+    declare({ omitResourceParameter: true })
+    const url = new URL(buildAuthorizeUrl(fixture, { state: "s", codeVerifier: "v", redirectUri }))
+    expect(url.searchParams.has("resource")).toBe(false)
+
+    const calls = routeFetch({
+      [fixture.tokenEndpoint]: () => json({ access_token: "at", expires_in: 3599, token_type: "Bearer" }),
+    })
+    await exchangeAuthorizationCode(fixture, { code: "c", codeVerifier: "v", redirectUri })
+    await refreshTokens(fixture, "rt-old")
+    expect(calls).toHaveLength(2)
+    for (const call of calls) expect(new URLSearchParams(call.init.body as string).has("resource")).toBe(false)
+  })
+
+  it("revokes with the static client's credentials, and with only the stored client_id otherwise", async () => {
+    declare({})
+    const calls = routeFetch({ [fixture.revocationEndpoint!]: () => json({}) })
+    expect(await revokeAtProvider(fixture, "rt-1")).toBe(true)
+    const confidential = new URLSearchParams(calls[0].init.body as string)
+    expect(confidential.get("client_id")).toBe("env-client-id")
+    expect(confidential.get("client_secret")).toBe("env-client-secret")
+    expect(confidential.get("token")).toBe("rt-1")
+
+    catalog[original] = shipped
+    expect(await revokeAtProvider({ ...fixture, slug: "v0" }, "rt-2")).toBe(true)
+    const publicClient = new URLSearchParams(calls[1].init.body as string)
+    expect(publicClient.get("client_id")).toBe(fixture.clientId)
+    expect(publicClient.has("client_secret")).toBe(false)
+  })
+})
+
+describe("redirectPath validation and resource opt-out collisions", () => {
+  const catalog = CONNECTOR_DEFINITIONS as ConnectorDefinition[]
+  const shipped = catalog.find(definition => definition.slug === "google-drive")!
+  const index = catalog.indexOf(shipped)
+  afterEach(() => {
+    catalog[index] = shipped
+  })
+
+  it.each(["//evil.example/cb", "/\\evil.example/cb", "https://evil.example/cb", "cb", "/cb?x=1", "/cb#frag", "/a/../../b", ""])(
+    "rejects the hostile or unsupported redirectPath %j",
+    redirectPath => {
+      catalog[index] = { ...shipped, redirectPath }
+      expect(() => connectorRedirectUri("google-drive", "https://compass.example")).toThrow(McpConnectorError)
+    },
+  )
+
+  it("still accepts a plain root-relative path on the trusted origin", () => {
+    catalog[index] = { ...shipped, redirectPath: "/auth/custom-callback" }
+    expect(connectorRedirectUri("google-drive", "https://compass.example")).toBe("https://compass.example/auth/custom-callback")
+  })
+
+  it("removes a resource parameter that came from the endpoint query or authorizeParams when opted out", () => {
+    catalog[index] = { ...shipped, omitResourceParameter: true, staticClient: { clientIdEnv: "A", clientSecretEnv: "B", authorizeParams: { resource: "https://extra.example" } } }
+    const record: ConnectorRecord = { ...connector, slug: "google-drive", authorizationEndpoint: "https://idp.example/authorize?resource=https%3A%2F%2Fendpoint.example" }
+    const url = new URL(buildAuthorizeUrl(record, { state: "s", codeVerifier: "v", redirectUri: "https://compass.example/cb" }))
+    expect(url.searchParams.has("resource")).toBe(false)
+  })
+})
+
+describe("safeErrorLabel", () => {
+  it("returns a connector error's code, never its message", () => {
+    expect(safeErrorLabel(new McpConnectorError("REFRESH_FAILED", "private provider text"))).toBe("REFRESH_FAILED")
+  })
+
+  it("returns the class name of a plain error or subclass, not its message", () => {
+    class CustomProviderError extends Error {}
+    expect(safeErrorLabel(new Error("private"))).toBe("Error")
+    expect(safeErrorLabel(new TypeError("private"))).toBe("TypeError")
+    expect(safeErrorLabel(new CustomProviderError("private"))).toBe("CustomProviderError")
+  })
+
+  it("returns UnknownError for a non-Error throw or an unsafe class name", () => {
+    expect(safeErrorLabel("a string with private text")).toBe("UnknownError")
+    expect(safeErrorLabel({ message: "private" })).toBe("UnknownError")
+    expect(safeErrorLabel(null)).toBe("UnknownError")
+    const Odd = class extends Error {}
+    Object.defineProperty(Odd, "name", { value: "bad name with spaces & private" })
+    expect(safeErrorLabel(new Odd("x"))).toBe("UnknownError")
   })
 })
