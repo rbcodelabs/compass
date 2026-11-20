@@ -19,6 +19,7 @@ describe.skipIf(!databaseUrl)("129 agent message run id through the registered r
   const pool = new Pool({ connectionString: databaseUrl, max: 2 })
   const previous = process.env.DATABASE_URL
   let owned = false
+  const existingMessage = randomUUID()
 
   beforeAll(async () => {
     const url = new URL(databaseUrl!)
@@ -28,7 +29,10 @@ describe.skipIf(!databaseUrl)("129 agent message run id through the registered r
     process.env.DATABASE_URL = databaseUrl
     await pool.query(`CREATE SCHEMA "${schema}"`)
     owned = true
-  }, 120_000)
+    const baseline = await replayAllMigrations(pool, schema, { before: MIGRATION })
+    expect(baseline.status, await baseline.text()).toBe(200)
+    await pool.query(`INSERT INTO "${schema}".agent_messages (id, conversation_id, role, content) VALUES ($1, $2, 'assistant', 'legacy message')`, [existingMessage, randomUUID()])
+  }, 600_000)
 
   afterAll(async () => {
     if (owned) await pool.query(`DROP SCHEMA "${schema}" CASCADE`)
@@ -37,11 +41,13 @@ describe.skipIf(!databaseUrl)("129 agent message run id through the registered r
     else process.env.DATABASE_URL = previous
   })
 
-  it("replays every migration, satisfies the postcondition and earns the receipt", async () => {
-    const result = await replayAllMigrations(pool, schema)
+  it("upgrades prior migrations, preserves a legacy message and earns the receipt", async () => {
+    const result = await applyMigrations(pool, schema, MIGRATION)
     const body = await result.json()
     expect(body.error).toBeUndefined()
     expect(result.status).toBe(200)
+    const legacy = await pool.query(`SELECT run_id, content FROM "${schema}".agent_messages WHERE id = $1`, [existingMessage])
+    expect(legacy.rows).toEqual([{ run_id: null, content: "legacy message" }])
     const client = await pool.connect()
     try {
       await assertAgentMessageRunIdMigration(client, schema)
@@ -52,13 +58,6 @@ describe.skipIf(!databaseUrl)("129 agent message run id through the registered r
     expect(receipt.rows).toHaveLength(1)
     expect(receipt.rows[0].finished_at).not.toBeNull()
   }, 600_000)
-
-  it("leaves existing messages with a NULL run_id", async () => {
-    const cols = await pool.query(`SELECT column_name FROM information_schema.columns WHERE table_schema=$1 AND table_name='agent_messages' AND column_name='run_id'`, [schema])
-    expect(cols.rows).toHaveLength(1)
-    const nonNull = await pool.query(`SELECT count(*)::int AS n FROM "${schema}".agent_messages WHERE run_id IS NOT NULL`)
-    expect(nonNull.rows[0].n).toBe(0)
-  })
 
   it("is idempotent: a second run succeeds and adds no second receipt", async () => {
     const again = await applyMigrations(pool, schema, MIGRATION)
@@ -75,5 +74,11 @@ describe.skipIf(!databaseUrl)("129 agent message run id through the registered r
     expect(result.status).not.toBe(200)
     const receipt = await pool.query(`SELECT 1 FROM "${schema}"._prisma_migrations WHERE migration_name = $1 AND finished_at IS NOT NULL`, [MIGRATION])
     expect(receipt.rows).toHaveLength(0)
+
+    await pool.query(`DROP INDEX "${schema}".idx_agent_messages_run`)
+    const recovered = await applyMigrations(pool, schema, MIGRATION)
+    expect(recovered.status, await recovered.text()).toBe(200)
+    const finished = await pool.query(`SELECT 1 FROM "${schema}"._prisma_migrations WHERE migration_name = $1 AND finished_at IS NOT NULL`, [MIGRATION])
+    expect(finished.rows).toHaveLength(1)
   }, 120_000)
 })

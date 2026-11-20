@@ -441,6 +441,10 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
   "109_agent_conversation_reviews": {
     "lib/migrations/agent-conversation-reviews.ts": "970ff2d900951977feefd21dc9592b49b5d59dc0819c9b2e66e0e911718503ed",
   },
+  // The 129 postcondition (agent_messages.run_id is a bare nullable uuid; idx_agent_messages_run is valid, ready, non-unique, on run_id only); editing it re-reviews the migration.
+  "129_agent_message_run_id": {
+    "lib/migrations/agent-message-run-id.ts": "f4656e60cd96e4610ff07183dc98bc144de4cafa1f4d6025f5a60dfaf4dc29e9",
+  },
   // The 110 postcondition (columns, plus every index valid and ready); editing it re-reviews the migration.
   "110_artifact_external_share": {
     "lib/migrations/artifact-external-share.ts": "b8b882fe110ef9d7b3e633d4910df18a577642fd8d5bf81cf95c5199facb36f8",
