@@ -11,30 +11,32 @@ afterEach(() => {
   document.head.innerHTML = ""
 })
 
-it("restores OS-specific theme colors after leaving the workspace", () => {
-  document.head.innerHTML = `<meta name="theme-color" media="(prefers-color-scheme: light)" content="${THEME_COLOR_LIGHT}"><meta name="theme-color" media="(prefers-color-scheme: dark)" content="${THEME_COLOR_DARK}">`
-  vi.stubGlobal("localStorage", { getItem: () => "dark" })
-  vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })))
+it.each(["light", "dark"] as const)(
+  "keeps one framework tag per mode when leaving a workspace with a %s override",
+  (preference) => {
+    const modes = [["light", THEME_COLOR_LIGHT], ["dark", THEME_COLOR_DARK]]
+    for (const [scheme, color] of modes) {
+      document.head.insertAdjacentHTML("beforeend", `<meta name="theme-color" media="(prefers-color-scheme: ${scheme})" content="${color}">`)
+    }
+    vi.stubGlobal("localStorage", { getItem: () => preference })
+    vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })))
 
-  const view = render(<ThemeProvider><div>Workspace</div></ThemeProvider>)
-  const colors = () => Array.from(document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]'), (tag) => tag.content)
-  expect(colors()).toEqual([THEME_COLOR_DARK, THEME_COLOR_DARK])
+    const view = render(<ThemeProvider><div>Workspace</div></ThemeProvider>)
+    const tags = () => Array.from(document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]'))
 
-  view.unmount()
-  expect(colors()).toEqual([THEME_COLOR_LIGHT, THEME_COLOR_DARK])
-})
+    // Model destination metadata arriving in the same document before passive
+    // cleanup. React's hoistable-meta lookup requires the expected content.
+    for (const [scheme, color] of modes) {
+      const media = `(prefers-color-scheme: ${scheme})`
+      if (!tags().some((tag) => tag.getAttribute("media") === media && tag.content === color)) {
+        document.head.insertAdjacentHTML("beforeend", `<meta name="theme-color" media="${media}" content="${color}">`)
+      }
+    }
+    view.unmount()
 
-it("leaves room for Next to insert its viewport tags after cleanup", () => {
-  vi.stubGlobal("localStorage", { getItem: () => "dark" })
-  vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })))
-
-  const view = render(<ThemeProvider><div>Workspace</div></ThemeProvider>)
-  view.unmount()
-
-  document.head.insertAdjacentHTML("beforeend", `<meta name="theme-color" media="(prefers-color-scheme: light)" content="${THEME_COLOR_LIGHT}"><meta name="theme-color" media="(prefers-color-scheme: dark)" content="${THEME_COLOR_DARK}">`)
-  const tags = Array.from(document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]'))
-  expect(tags.map((tag) => [tag.getAttribute("media"), tag.content])).toEqual([
-    ["(prefers-color-scheme: light)", THEME_COLOR_LIGHT],
-    ["(prefers-color-scheme: dark)", THEME_COLOR_DARK],
-  ])
-})
+    for (const [scheme, color] of modes) {
+      expect(tags().filter((tag) => tag.getAttribute("media") === `(prefers-color-scheme: ${scheme})`).map((tag) => tag.content)).toEqual([color])
+    }
+    expect(tags()).toHaveLength(2)
+  }
+)

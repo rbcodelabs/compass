@@ -16,20 +16,28 @@ export function getResolvedTheme(
   return preference === "system" ? (systemPrefersDark ? "dark" : "light") : preference
 }
 
-// Title bar / status bar colours (PWA window chrome, mobile browsers). Must
-// match --surface-navigation in globals.css and the viewport themeColor pair in
-// app/layout.tsx. The static tags there follow the OS setting only, so when the
-// in-app preference overrides it we rewrite every theme-color tag to the
-// resolved value.
 export const THEME_COLOR_LIGHT = "#F4F2ED"
 export const THEME_COLOR_DARK = "#1B1A18"
 
+const OVERRIDE_SELECTOR = 'meta[name="theme-color"][data-workspace-theme-color]'
+const OVERRIDE_LIGHT = "rgb(244, 242, 237)"
+const OVERRIDE_DARK = "rgb(27, 26, 24)"
+
 export function syncThemeColorMeta(resolved: ResolvedTheme) {
-  const color = resolved === "dark" ? THEME_COLOR_DARK : THEME_COLOR_LIGHT
-  const tags = document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"][media^="(prefers-color-scheme:"]')
-  tags.forEach((tag) => {
-    tag.content = color
-  })
+  let tag = document.querySelector<HTMLMetaElement>(OVERRIDE_SELECTOR)
+  if (!tag) {
+    tag = document.createElement("meta")
+    tag.name = "theme-color"
+    tag.setAttribute("data-workspace-theme-color", "")
+    document.head.prepend(tag)
+  }
+  // The browser uses the first matching tag. A distinct color serialization
+  // keeps React from adopting this tag when it matches metadata by content.
+  tag.content = resolved === "dark" ? OVERRIDE_DARK : OVERRIDE_LIGHT
+}
+
+export function clearThemeColorMeta() {
+  document.querySelector(OVERRIDE_SELECTOR)?.remove()
 }
 
 export const workspaceThemeInitScript = `(() => {
@@ -40,7 +48,13 @@ export const workspaceThemeInitScript = `(() => {
     document.documentElement.classList.toggle('dark', resolved === 'dark');
     document.documentElement.dataset.theme = resolved;
     document.documentElement.style.colorScheme = resolved;
-    const color = resolved === 'dark' ? '${THEME_COLOR_DARK}' : '${THEME_COLOR_LIGHT}';
-    document.querySelectorAll('meta[name="theme-color"][media^="(prefers-color-scheme:"]').forEach((t) => { t.setAttribute('content', color); });
+    let tag = document.querySelector('${OVERRIDE_SELECTOR}');
+    if (!tag) {
+      tag = document.createElement('meta');
+      tag.name = 'theme-color';
+      tag.setAttribute('data-workspace-theme-color', '');
+      document.head.prepend(tag);
+    }
+    tag.content = resolved === 'dark' ? '${OVERRIDE_DARK}' : '${OVERRIDE_LIGHT}';
   } catch {}
 })();`

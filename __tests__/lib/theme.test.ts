@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import {
@@ -34,45 +35,27 @@ describe("theme preferences", () => {
 describe("title bar theme-color sync", () => {
   afterEach(() => vi.unstubAllGlobals())
 
-  function fakeDocument(tags: { content: string; setAttribute?: unknown }[]) {
-    const withAttr = tags.map((t) => ({
-      content: t.content,
-      setAttribute(_: string, v: string) {
-        this.content = v
-      },
-    }))
-    return {
-      tags: withAttr,
-      querySelectorAll: () => withAttr,
-      createElement: () => ({ name: "", content: "" }),
-      head: { appendChild: vi.fn() },
-    }
-  }
+  afterEach(() => {
+    document.head.innerHTML = ""
+    document.documentElement.classList.remove("dark")
+    document.documentElement.removeAttribute("data-theme")
+    document.documentElement.style.removeProperty("color-scheme")
+  })
 
-  it("rewrites every theme-color tag, overriding the OS media pair", () => {
-    const doc = fakeDocument([{ content: THEME_COLOR_LIGHT }, { content: THEME_COLOR_DARK }])
-    vi.stubGlobal("document", doc)
+  it("keeps a single leading workspace override without changing Next metadata", () => {
+    document.head.innerHTML = `<meta name="theme-color" media="(prefers-color-scheme: light)" content="${THEME_COLOR_LIGHT}"><meta name="theme-color" media="(prefers-color-scheme: dark)" content="${THEME_COLOR_DARK}">`
     syncThemeColorMeta("dark")
-    expect(doc.tags.map((t) => t.content)).toEqual([THEME_COLOR_DARK, THEME_COLOR_DARK])
+    const tags = () => Array.from(document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]'))
+    expect(tags().map((tag) => tag.content)).toEqual(["rgb(27, 26, 24)", THEME_COLOR_LIGHT, THEME_COLOR_DARK])
     syncThemeColorMeta("light")
-    expect(doc.tags.map((t) => t.content)).toEqual([THEME_COLOR_LIGHT, THEME_COLOR_LIGHT])
+    expect(tags().map((tag) => tag.content)).toEqual(["rgb(244, 242, 237)", THEME_COLOR_LIGHT, THEME_COLOR_DARK])
   })
 
-  it("leaves tag creation to Next when viewport metadata is absent", () => {
-    const createElement = vi.fn()
-    vi.stubGlobal("document", { querySelectorAll: () => [], createElement })
-    syncThemeColorMeta("dark")
-    expect(createElement).not.toHaveBeenCalled()
-  })
-
-  it("init script sets the tag colour from a stored dark preference", () => {
-    const tag = { content: THEME_COLOR_LIGHT, setAttribute(_: string, v: string) { this.content = v } }
-    const root = { classList: { toggle: vi.fn() }, dataset: {} as Record<string, string>, style: {} as Record<string, string> }
-    vi.stubGlobal("document", { documentElement: root, querySelectorAll: () => [tag] })
+  it("init script sets the workspace override before hydration", () => {
     vi.stubGlobal("localStorage", { getItem: () => "dark" })
     vi.stubGlobal("matchMedia", () => ({ matches: false }))
     new Function(workspaceThemeInitScript)()
-    expect(tag.content).toBe(THEME_COLOR_DARK)
-    expect(root.dataset.theme).toBe("dark")
+    expect(document.head.firstElementChild?.getAttribute("content")).toBe("rgb(27, 26, 24)")
+    expect(document.documentElement.dataset.theme).toBe("dark")
   })
 })

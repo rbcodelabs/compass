@@ -4,8 +4,7 @@ import * as React from "react"
 
 import {
   THEME_STORAGE_KEY,
-  THEME_COLOR_LIGHT,
-  THEME_COLOR_DARK,
+  clearThemeColorMeta,
   getResolvedTheme,
   syncThemeColorMeta,
   isThemePreference,
@@ -42,12 +41,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
       document.documentElement.classList.remove("dark")
       document.documentElement.removeAttribute("data-theme")
       document.documentElement.style.removeProperty("color-scheme")
-      // Next owns the viewport tags and may replace them during navigation.
-      for (const [scheme, color] of [["light", THEME_COLOR_LIGHT], ["dark", THEME_COLOR_DARK]]) {
-        const media = `(prefers-color-scheme: ${scheme})`
-        document.querySelectorAll<HTMLMetaElement>(`meta[name="theme-color"][media="${media}"]`)
-          .forEach((tag) => { tag.content = color })
-      }
+      clearThemeColorMeta()
     }
   }, [])
 
