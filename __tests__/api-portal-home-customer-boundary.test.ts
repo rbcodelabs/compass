@@ -24,7 +24,7 @@ const prisma = {
   doc: { findMany: vi.fn(async () => []) },
   artifact: { findMany: vi.fn(async () => [{ id: "a1", title: "Deck", kind: "SLIDE_DECK", sourceType: "HTML_UPLOAD" }]) },
   oKRCycle: { findMany: vi.fn(async () => [{ id: "c1", title: "Q4", status: "ACTIVE" }]) },
-  objective: { findMany: vi.fn(async () => [{ id: "o1", title: "Grow", cycle: { title: "Q4" } }, { id: "o2", title: "Loose", cycle: null }]) },
+  objective: { findMany: vi.fn(async () => [{ id: "o1", title: "Grow", cycle: { title: "Q4", workspaceId: WS } }, { id: "o2", title: "Loose", cycle: null }]) },
 }
 
 vi.mock("@/lib/permissions", async (importOriginal) => ({
@@ -95,6 +95,7 @@ describe("internal pickers (artifact gallery / OKR widgets)", () => {
   it("the customer resolve route returns neither widget, even when both are visible to everyone", async () => {
     const { POST } = await import("@/app/api/portal-home/[orgSlug]/[workspaceSlug]/resolve/route")
     const widgets = [createWidget("artifact_gallery", 0), createWidget("okr_summary", 1)]
+      .map((widget) => ({ ...widget, visibility: "everyone" }))
     const body = (await (await POST(post({ widgets, audience: "customer" }), route)).json()) as { widgets: unknown[]; resolved: Record<string, unknown> }
     expect(body.widgets ?? []).toEqual([])
     expect(JSON.stringify(body)).not.toContain("Deck")
