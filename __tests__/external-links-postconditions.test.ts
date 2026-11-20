@@ -2,7 +2,16 @@ import { describe, expect, it } from "vitest"
 import type { PoolClient } from "pg"
 import { assertExternalLinksMigration, EXTERNAL_LINKS_INDEXES } from "@/lib/migrations/external-links"
 
-const columns = [
+type CatalogColumn = {
+  column_name: string
+  data_type: string
+  is_nullable: string
+  character_maximum_length: number | null
+  datetime_precision: number | null
+  column_default: string | null
+}
+
+const columns: CatalogColumn[] = [
   {"column_name":"id","data_type":"uuid","is_nullable":"NO","character_maximum_length":null,"datetime_precision":null,"column_default":"gen_random_uuid()"},
   {"column_name":"workspace_id","data_type":"uuid","is_nullable":"NO","character_maximum_length":null,"datetime_precision":null,"column_default":null},
   {"column_name":"subject_type","data_type":"character varying","is_nullable":"NO","character_maximum_length":40,"datetime_precision":null,"column_default":null},
