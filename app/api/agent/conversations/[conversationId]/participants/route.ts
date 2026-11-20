@@ -15,6 +15,7 @@ import { z } from "zod"
 
 import { auth } from "@/auth"
 import getPrisma from "@/lib/db"
+import { isClosedToNewTurns, resolveConversationAccess } from "@/lib/agent-conversation-access"
 import { AgentParticipantError, addConversationParticipant, listConversationParticipants } from "@/lib/agent-conversation-participants"
 
 export const runtime = "nodejs"
@@ -58,6 +59,10 @@ export async function POST(request: Request, context: { params: Promise<{ conver
 
   const body = bodySchema.safeParse(await request.json().catch(() => null))
   if (!body.success) return json({ error: "userId is required" }, 400)
+
+  // An archived shared thread is read-only (TASK-195 S2). The caller can see it, so say why instead of a 404.
+  const access = await resolveConversationAccess(getPrisma(), { conversationId, workspaceId, userId: session.user.id })
+  if (access && isClosedToNewTurns(access)) return json({ error: "This conversation is archived. Restore it to invite people.", code: "ARCHIVED" }, 409)
 
   try {
     const result = await addConversationParticipant(getPrisma(), {

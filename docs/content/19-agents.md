@@ -261,8 +261,16 @@ Every discussion thread and AI chat in Compass shares one **Unified Conversation
 When the in-app agent creates an opportunity, solution or task in a chat, Compass links that conversation to it automatically. If the agent only reads or updates an existing opportunity, solution or task, the link is recorded as "Mentioned". A later read or update never downgrades a "Created here" link.
 
 - **In the chat**, a "Linked objects" card lists each linked item with its title, whether the conversation created or mentioned it, and a link to open it.
-- **On an opportunity, solution or task**, a "Conversations" section lists the conversations anchored to or touching it. You see a conversation there only if you can open it. A private conversation of a teammate never appears, and its title is never sent to your browser.
-- **To remove an automatic link**, use the X on its row. The agent adds it again only if it touches that item again. Removing a link never deletes the conversation or the item.
+- **On an opportunity, solution or task**, a "Conversations" section lists the conversations anchored to or touching it. **On this item** identifies a thread started on that item; **Created here** and **Mentioned** describe linked activity. One thread may have both an anchor and a link. You see a conversation there only if you can open it. A private conversation of a teammate never appears, and its title is never sent to your browser.
+- **To remove an automatic link**, choose **Remove link** beside its label and confirm. The conversation and item are kept; an anchored thread remains **On this item**. Manual links and anchors do not offer this automatic-link removal control. Failed removal keeps the link visible and offers **Retry removal**. The agent adds an automatic link again only if it touches that item again.
+
+### Recovering a conversation request
+
+If the item's conversation list cannot load, an error offers **Retry** instead of showing a misleading empty list. If a refresh fails, the last loaded list stays visible.
+
+A failed send keeps your exact draft, including mentions, while you remain on that item. Sending disables the composer until the request finishes. If Compass cannot confirm whether the message was sent, use **Refresh conversations** to check the list before choosing **Retry send**. Refreshing only reads the list; Compass never automatically resends an uncertain message. A deliberate retry can duplicate a message if the earlier request reached the server.
+
+Once a send is confirmed, the composer clears. A subsequent list-refresh failure offers a list retry and does not ask you to send the message again. Drafts are local to the mounted item: navigating away or reloading does not save them.
 
 Conversations are linked only by what the agent's tools actually did or by the object a thread was started on; Compass does not read chat text to guess at links.
 

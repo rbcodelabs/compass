@@ -43,14 +43,14 @@ describe("resolveConversationAccess", () => {
     findFirst.mockResolvedValue({ userId: "user-1" })
     await expect(
       resolveConversationAccess(prisma, { conversationId: "c1", workspaceId: "ws-1", userId: "user-1" })
-    ).resolves.toEqual({ role: "OWNER", ownerUserId: "user-1" })
+    ).resolves.toEqual({ role: "OWNER", ownerUserId: "user-1", visibility: null, archived: false })
   })
 
   it("returns the PARTICIPANT role when the conversation belongs to someone else", async () => {
     findFirst.mockResolvedValue({ userId: "owner-9" })
     await expect(
       resolveConversationAccess(prisma, { conversationId: "c1", workspaceId: "ws-1", userId: "user-1" })
-    ).resolves.toEqual({ role: "PARTICIPANT", ownerUserId: "owner-9" })
+    ).resolves.toEqual({ role: "PARTICIPANT", ownerUserId: "owner-9", visibility: null, archived: false })
   })
 
   it("returns null when no row matches, so callers answer 404 rather than 403", async () => {
@@ -60,12 +60,12 @@ describe("resolveConversationAccess", () => {
     ).resolves.toBeNull()
   })
 
-  it("queries by id with the accessible predicate, selecting only the owner id", async () => {
+  it("queries by id with the accessible predicate, selecting only the owner, visibility and archive state", async () => {
     findFirst.mockResolvedValue(null)
     await resolveConversationAccess(prisma, { conversationId: "c-x", workspaceId: "ws-1", userId: "user-1" })
     expect(findFirst).toHaveBeenCalledWith({
       where: { id: "c-x", ...accessibleConversationsWhere("ws-1", "user-1") },
-      select: { userId: true },
+      select: { userId: true, visibility: true, archivedAt: true },
     })
   })
 })

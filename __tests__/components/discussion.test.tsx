@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+// Unit tests do not run Next's Server Action transform; keep its server dependencies outside this client boundary.
+vi.mock("@/app/[orgSlug]/[workspaceSlug]/links/conversation-actions", () => ({ removeObjectConversationLink: vi.fn() }))
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import "@testing-library/jest-dom/vitest"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"

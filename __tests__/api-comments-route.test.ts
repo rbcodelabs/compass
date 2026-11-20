@@ -123,9 +123,26 @@ describe("POST /api/comments with mentions", () => {
     postTargetComment.mockResolvedValue({ ok: false, error: "FORBIDDEN" })
     const forbidden = await post({ body: MENTION, task: { title: "T" } })
     expect(forbidden.status).toBe(403)
-    expect(await forbidden.json()).toEqual({ error: "FORBIDDEN", code: "FORBIDDEN" })
+    expect(await forbidden.json()).toEqual({ error: "You do not have permission to comment or create tasks in this workspace.", code: "FORBIDDEN" })
     postTargetComment.mockResolvedValue({ ok: false, error: "ASSIGNEE_NOT_IN_WORKSPACE" })
     expect((await post({ body: MENTION, task: { title: "T" } })).status).toBe(422)
+  })
+
+  it("answers with fixed copy per code and never the service's raw message", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {})
+    for (const code of ["TASK_FAILED", "COMMENT_FAILED"]) {
+      postTargetComment.mockResolvedValue({ ok: false, error: code, message: "Invalid `prisma.task.create()` invocation: column secret_col" })
+      const response = await post({ body: MENTION, task: { title: "T" } })
+      const body = await response.json()
+      expect(body.code).toBe(code)
+      expect(body.error).not.toMatch(/prisma|secret_col/)
+      expect(body.error.length).toBeGreaterThan(10)
+    }
+    for (const code of ["AGENT_SCOPE_CONFIRMATION_REQUIRED", "PARENT_IS_REPLY", "EMPTY_BODY", "NO_ASSIGNEE"]) {
+      postTargetComment.mockResolvedValue({ ok: false, error: code })
+      const body = await (await post({ body: MENTION, task: { title: "T" } })).json()
+      expect(body.error).not.toBe(code)
+    }
   })
 
   it("rejects a malformed task or assignee", async () => {
