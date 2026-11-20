@@ -18,8 +18,17 @@ describe.skipIf(!integrationDatabaseUrl)("decision votes on PostgreSQL", () => {
 
   beforeAll(async () => {
     pool = new Pool({ connectionString: integrationDatabaseUrl, max: 8 })
-    const replay = await replayAllMigrations(pool, schema)
-    if (replay.status !== 200) throw new Error(await replay.text())
+    // The pool selects the server. The runner uses DATABASE_URL to select
+    // PostgreSQL syntax instead of sending DSQL-only ASYNC DDL to that server.
+    const previous = process.env.DATABASE_URL
+    process.env.DATABASE_URL = integrationDatabaseUrl!
+    try {
+      const replay = await replayAllMigrations(pool, schema)
+      if (replay.status !== 200) throw new Error(await replay.text())
+    } finally {
+      if (previous === undefined) delete process.env.DATABASE_URL
+      else process.env.DATABASE_URL = previous
+    }
     prisma = new PrismaClient({ adapter: new PrismaPg(pool, { schema }) })
     db.current = prisma
   }, 120_000)
