@@ -101,6 +101,15 @@ test.describe("OKRs", () => {
     await page.getByLabel("Title").fill(krTitle);
     await page.getByLabel("Target").fill("100");
     await page.getByLabel("Unit (optional)").fill("%");
+
+    const filter = page.getByRole("searchbox", { name: "Filter objectives by name" });
+    await filter.fill("unmatched objective");
+    await expect(page.getByText("0 of 1")).toBeVisible();
+    await expect(page.getByLabel("Target")).toBeHidden();
+    await filter.press("Escape");
+    await expect(page.getByLabel("Title")).toHaveValue(krTitle);
+    await expect(page.getByLabel("Target")).toHaveValue("100");
+
     await page.getByRole("button", { name: "Add key result" }).click();
 
     // The form closes once the server action completes (setOpen(false) is called
@@ -117,6 +126,15 @@ test.describe("OKRs", () => {
 
     // KR title appears in the row
     await expect(page.getByText(krTitle)).toBeVisible({ timeout: 10_000 });
+
+    await page.getByRole("button", { name: `Collapse ${objectiveTitle}` }).click();
+    await filter.fill(krTitle);
+    await expect(page.getByRole("button", { name: krTitle }).locator("mark")).toBeVisible();
+    await expect(page.getByText("1 of 1")).toBeVisible();
+    await expect(page.getByRole("button", { name: `Collapse ${objectiveTitle}` })).toHaveCount(0);
+    await page.getByRole("button", { name: "Clear filter" }).click();
+    await expect(filter).toBeFocused();
+    await page.getByRole("button", { name: `Expand ${objectiveTitle}` }).click();
 
     // ── 6. Log a check-in ───────────────────────────────────────────────────
     // KR bar shows initial progress "0 / 100 %"

@@ -28,7 +28,26 @@ export function objectiveMatches(
 export function splitMatch(title: string, query: string): { before: string; match: string; after: string } | null {
   const q = normalizeQuery(query);
   if (q === "") return null;
-  const index = title.toLowerCase().indexOf(q);
+  const lowerTitle = title.toLowerCase();
+  const index = lowerTitle.indexOf(q);
   if (index < 0) return null;
-  return { before: title.slice(0, index), match: title.slice(index, index + q.length), after: title.slice(index + q.length) };
+
+  let start = index;
+  let end = index + q.length;
+  if (lowerTitle.length !== title.length) {
+    // Map lowercase offsets back to whole source characters (e.g. İ → i + combining dot).
+    let sourceOffset = 0;
+    let lowerOffset = 0;
+    for (const char of title) {
+      const nextLowerOffset = lowerOffset + char.toLowerCase().length;
+      if (lowerOffset <= index && index < nextLowerOffset) start = sourceOffset;
+      sourceOffset += char.length;
+      lowerOffset = nextLowerOffset;
+      if (lowerOffset >= index + q.length) {
+        end = sourceOffset;
+        break;
+      }
+    }
+  }
+  return { before: title.slice(0, start), match: title.slice(start, end), after: title.slice(end) };
 }

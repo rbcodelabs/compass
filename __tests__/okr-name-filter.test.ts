@@ -41,4 +41,9 @@ describe("okr name filter", () => {
     expect(splitMatch("Median quote time", "")).toBeNull();
     expect(splitMatch("Median quote time", "nps")).toBeNull();
   });
+
+  it("highlights original characters when lowercasing expands a preceding character", () => {
+    expect(splitMatch("İX", "x")).toEqual({ before: "İ", match: "X", after: "" });
+    expect(splitMatch("İX", "i")).toEqual({ before: "", match: "İ", after: "X" });
+  });
 });

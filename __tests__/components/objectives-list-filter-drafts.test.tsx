@@ -123,4 +123,16 @@ describe.each([false, true])("filter drafts (grouped=%s)", (grouped) => {
     expect(restored.getByLabelText("Note (optional)")).toHaveValue("Unsaved note");
     expect(beta.getByLabelText("Current value")).toHaveValue(3);
   });
+
+  it("preserves the user's collapse preference while a match is forced open", () => {
+    const alpha = renderCycle(grouped);
+    fireEvent.click(alpha.getByRole("button", { name: "Collapse Alpha" }));
+    const filter = screen.getByRole("searchbox", { name: /filter objectives by name/i });
+    fireEvent.change(filter, { target: { value: "Alpha result" } });
+    expect(alpha.getByRole("button", { name: "Alpha result" })).toBeVisible();
+    expect(alpha.queryByRole("button", { name: /^(collapse|expand) Alpha$/i })).toBeNull();
+
+    fireEvent.keyDown(filter, { key: "Escape" });
+    expect(alpha.getByRole("button", { name: "Expand Alpha" })).toHaveAttribute("aria-expanded", "false");
+  });
 });

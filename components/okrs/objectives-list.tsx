@@ -190,6 +190,7 @@ export function ObjectivesList({
       hideProgress={hideProgress}
       // While filtering, matches stay expanded so a key-result hit is visible.
       collapsed={filterActive ? false : collapsedIds.has(obj.id)}
+      hideCollapseToggle={filterActive}
       onCollapsedChange={(c) => setCollapsed(obj.id, c)}
     />
   );

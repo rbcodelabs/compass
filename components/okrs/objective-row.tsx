@@ -100,6 +100,8 @@ interface ObjectiveRowProps {
   hideProgress?: boolean;
   /** Controlled collapsed state. Omit for an uncontrolled row that starts expanded. */
   collapsed?: boolean;
+  /** Keep the row expanded while a name filter is active. */
+  hideCollapseToggle?: boolean;
   /** Hide a filtered row while preserving its mounted form state. */
   hidden?: boolean;
   onCollapsedChange?: (collapsed: boolean) => void;
@@ -116,6 +118,7 @@ export function ObjectiveRow({
   paceElapsed,
   hideProgress,
   collapsed: collapsedProp,
+  hideCollapseToggle,
   hidden = false,
   onCollapsedChange,
 }: ObjectiveRowProps) {
@@ -243,7 +246,7 @@ export function ObjectiveRow({
       }
       title={
         <span className="flex items-center gap-2">
-              <button
+              {!hideCollapseToggle && <button
                 type="button"
                 onClick={toggleCollapsed}
                 aria-expanded={!collapsed}
@@ -252,7 +255,7 @@ export function ObjectiveRow({
                 className="shrink-0 rounded text-text-subtle hover:text-text-default focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-border-focus"
               >
                 {collapsed ? <ChevronRight className="size-4" /> : <ChevronDown className="size-4" />}
-              </button>
+              </button>}
               {objective.squad && (
                 <span
                   className="w-2.5 h-2.5 rounded-full shrink-0"
