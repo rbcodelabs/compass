@@ -44,6 +44,28 @@ function recordingPrisma(results: Record<string, unknown[]> = {}) {
 
 const WS = "ws-1";
 
+const deleteS3PublicFilesByUrl = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/storage/public-files", () => ({ deleteS3PublicFilesByUrl }));
+
+it("retains attachment rows when workspace-scoped S3 cleanup fails", async () => {
+  vi.stubEnv("COMPASS_S3_BUCKET", "fake-bucket");
+  const owned = "/api/files/public/feedback/ws-1/65923984-916a-4633-9986-0f96f0759fc9-a.png";
+  const foreign = "/api/files/public/feedback/ws-2/c246d9f3-00f7-4ea0-98c2-9bbf5cbe304e-b.png";
+  const { client, calls } = recordingPrisma({
+    "feedbackItem.findMany": [[{ id: "feedback-1" }]],
+    "feedbackAttachment.findMany": [[{ url: owned }, { url: foreign }]],
+  });
+  deleteS3PublicFilesByUrl.mockRejectedValueOnce(new Error("storage unavailable"));
+  try {
+    await expect(deleteWorkspaceCascade(client, WS)).rejects.toThrow("storage unavailable");
+    expect(deleteS3PublicFilesByUrl).toHaveBeenCalledWith([owned]);
+    expect(calls.some((call) => call.model === "feedbackAttachment" && call.op === "deleteMany")).toBe(false);
+  } finally {
+    vi.unstubAllEnvs();
+  }
+});
+
+
 /**
  * Behavior, not query shape: the tenant fake honours where clauses (OR, in, null equality), so this shows WHICH rows
  * the cascade actually removes. Models the fake does not hold are recording no-ops.

@@ -21,6 +21,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { NextRequest } from "next/server";
 
+const deleteS3PublicFilesByUrl = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/storage/public-files", () => ({ deleteS3PublicFilesByUrl }));
+const mockAttachmentFindMany = vi.fn();
+
 const mockWorkspaceFindFirst = vi.fn();
 const mockVoteDeleteMany = vi.fn();
 const mockAttachmentDeleteMany = vi.fn();
@@ -30,7 +34,7 @@ const mockItemFindMany = vi.fn();
 const mockPrisma = {
   workspace: { findFirst: mockWorkspaceFindFirst },
   feedbackVote: { deleteMany: mockVoteDeleteMany },
-  feedbackAttachment: { deleteMany: mockAttachmentDeleteMany },
+  feedbackAttachment: { findMany: mockAttachmentFindMany, deleteMany: mockAttachmentDeleteMany },
   feedbackItem: { deleteMany: mockItemDeleteMany, findMany: mockItemFindMany },
 };
 
@@ -60,6 +64,8 @@ function request(body: unknown, secret?: string) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockAttachmentFindMany.mockResolvedValue([]);
+  deleteS3PublicFilesByUrl.mockResolvedValue(undefined);
   process.env.MIGRATION_SECRET = "test-migration-secret";
 });
 
@@ -68,6 +74,28 @@ afterEach(() => {
 });
 
 describe("POST /api/admin/purge-feedback", () => {
+  it("reserves only owned feedback keys before deleting their retryable references", async () => {
+    vi.stubEnv("COMPASS_S3_BUCKET", "fake-bucket");
+    const owned = `/api/files/public/feedback/ws-1/${IDS[0]}-a.png`;
+    const foreign = `/api/files/public/feedback/ws-2/${IDS[1]}-b.png`;
+    mockWorkspaceFindFirst.mockResolvedValue({ id: "ws-1" });
+    mockItemFindMany.mockResolvedValue([{ id: IDS[0] }]);
+    mockAttachmentFindMany.mockResolvedValue([{ url: owned }, { url: foreign }]);
+    mockItemDeleteMany.mockResolvedValue({ count: 1 });
+    const body = { orgSlug: "rbcodelabs", workspaceSlug: "hiptrip", feedbackIds: IDS };
+    try {
+      await POST(request(body, "test-migration-secret"));
+      expect(deleteS3PublicFilesByUrl).toHaveBeenCalledWith([owned]);
+      expect(deleteS3PublicFilesByUrl.mock.invocationCallOrder[0]).toBeLessThan(mockAttachmentDeleteMany.mock.invocationCallOrder[0]);
+      mockAttachmentDeleteMany.mockClear();
+      deleteS3PublicFilesByUrl.mockRejectedValueOnce(new Error("storage unavailable"));
+      await expect(POST(request(body, "test-migration-secret"))).rejects.toThrow("storage unavailable");
+      expect(mockAttachmentDeleteMany).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it("rejects a request without the correct x-migration-secret header", async () => {
     const res = await POST(
       request({ orgSlug: "rbcodelabs", workspaceSlug: "hiptrip", feedbackIds: IDS }, "wrong-secret")

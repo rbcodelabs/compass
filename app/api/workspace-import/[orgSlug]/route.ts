@@ -1,9 +1,10 @@
+import { resolveStorageBackend } from "@/lib/storage/config"
 import { NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { getArtifactStorage } from "@/lib/artifact-storage"
 import { isPermissionError, resolveOrgAdmin } from "@/lib/permissions"
 import { defaultBlobAdapters } from "@/lib/workspace-export/blobs"
-import { WorkspaceImportError, importWorkspaceBundle } from "@/lib/workspace-export/import"
+import { WorkspaceImportError, importWorkspaceBundle, type ImportReport } from "@/lib/workspace-export/import"
 import { MAX_BUNDLE_BYTES, loadStagedBundle } from "@/lib/workspace-export/upload"
 
 export const maxDuration = 300
@@ -31,13 +32,17 @@ export async function POST(req: Request, { params }: { params: Promise<{ orgSlug
   const userId = session!.user!.id!
 
   let bytes: Uint8Array
-  let commit: Awaited<ReturnType<typeof loadStagedBundle>>["commit"] | undefined
+  let commit: ((apply: () => Promise<ImportReport>) => Promise<ImportReport>) | undefined
   let fields: { name?: string; slug?: string; nonce?: string } = {}
   try {
     if ((req.headers.get("content-type") ?? "").includes("application/json")) {
       const body = (await req.json()) as { receipt?: string; name?: string; slug?: string; nonce?: string }
       if (!body.receipt) return NextResponse.json({ error: "receipt is required" }, { status: 400 })
-      const staged = await loadStagedBundle(body.receipt, organizationId, userId, getArtifactStorage())
+      if (body.nonce !== undefined && typeof body.nonce !== "string") return NextResponse.json({ error: "Invalid nonce" }, { status: 400 })
+      const staged = await loadStagedBundle(body.receipt, organizationId, userId, getArtifactStorage(), {
+        nonce: body.nonce, persistResult: resolveStorageBackend() === "s3",
+      })
+      if ("result" in staged) return NextResponse.json({ ok: true, ...staged.result })
       bytes = staged.bytes
       commit = staged.commit
       fields = body

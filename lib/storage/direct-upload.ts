@@ -40,7 +40,7 @@ export function privateUploadReceiptSecret(): string | null {
 
 /** Bind a storage claim to the caller's actual commit, after it validates the staged bytes. */
 export function stagedUploadCommit(storage: ArtifactStorage, pathname: string) {
-  return async function commit<T>(apply: () => Promise<T>): Promise<T> {
+  return async function commit<T>(apply: () => Promise<T>, record?: (result: T) => Promise<void>): Promise<T> {
     const release = await storage.claimStagedUpload?.(pathname)
     let result: T
     try {
@@ -49,6 +49,7 @@ export function stagedUploadCommit(storage: ArtifactStorage, pathname: string) {
       await release?.().catch(() => undefined)
       throw error
     }
+    await record?.(result)
     await storage.del(pathname).catch(() => undefined)
     return result
   }

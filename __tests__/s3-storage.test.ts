@@ -201,13 +201,13 @@ describe("createS3Storage", () => {
 })
 
 describe("public store helpers", () => {
-  it("putS3PublicFile writes under public/ with immutable caching and returns the app route, not a bucket URL", async () => {
+  it("putS3PublicFile writes under public/ with non-cacheable responses and returns the app route, not a bucket URL", async () => {
     s3.on(PutObjectCommand).resolves({})
     const key = `feedback/ws1/${UUID}-shot.png`
     const result = await putS3PublicFile({ key, body: new Uint8Array([1]), contentType: "image/png" })
     expect(result).toEqual({ url: `/api/files/public/${key}` })
     expect(s3.commandCalls(PutObjectCommand)[0]!.args[0].input).toMatchObject({
-      Key: `public/${key}`, ContentType: "image/png", CacheControl: "public, max-age=31536000, immutable", ContentDisposition: "attachment", IfNoneMatch: "*",
+      Key: `public/${key}`, ContentType: "image/png", CacheControl: "no-store", ContentDisposition: "attachment", IfNoneMatch: "*",
     })
   })
 
@@ -217,11 +217,22 @@ describe("public store helpers", () => {
     expect(s3.calls()).toHaveLength(0)
   })
 
-  it("deletes only app-route URLs, skipping Blob URLs and foreign values", async () => {
-    s3.on(DeleteObjectCommand).resolves({})
+  it("keeps discarded feedback keys occupied while hiding their replacement bytes", async () => {
     const key = `feedback/ws1/${UUID}-shot.png`
+    s3.on(PutObjectCommand).resolves({})
+    s3.on(DeleteObjectCommand).resolves({})
     await deleteS3PublicFilesByUrl([`/api/files/public/${key}`, "https://x.public.blob.vercel-storage.com/feedback/a.png", "/api/files/public/artifacts/ws/a.html"])
-    expect(s3.commandCalls(DeleteObjectCommand).map((c) => c.args[0].input.Key)).toEqual([`public/${key}`])
+    expect(s3.commandCalls(DeleteObjectCommand)).toHaveLength(0)
+    const [write] = s3.commandCalls(PutObjectCommand)
+    expect(write.args[0].input).toMatchObject({
+      Key: `public/${key}`, Body: new Uint8Array(), CacheControl: "no-store",
+    })
+    const ContentType = write.args[0].input.ContentType
+    expect(ContentType).toBeDefined()
+    s3.on(HeadObjectCommand).resolves({ ContentType })
+    s3.on(GetObjectCommand).resolves({ ContentType })
+    expect(await headPublicObject(key)).toBeNull()
+    expect(await getPublicObject(key)).toEqual({ kind: "not-found" })
   })
 
   it("head and get fold 403 into not-found, never leaking the difference", async () => {
@@ -265,12 +276,12 @@ describe("createPresignedUpload", () => {
     ]))
   })
 
-  it("public uploads carry immutable caching in the signed headers", async () => {
+  it("public uploads carry non-cacheable responses in the signed headers", async () => {
     const target = await createPresignedUpload({
       store: "public", pathname: `feedback/ws/${UUID}-a.png`, contentType: "image/png", fileSize: 10, expiresInSeconds: 600,
     })
     expect(new URL(target.url).pathname).toBe(`/public/feedback/ws/${UUID}-a.png`)
-    expect(target.headers["Cache-Control"]).toBe("public, max-age=31536000, immutable")
+    expect(target.headers["Cache-Control"]).toBe("no-store")
   })
 
   it("refuses an empty size and a traversal path", async () => {

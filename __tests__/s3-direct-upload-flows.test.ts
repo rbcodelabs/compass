@@ -141,6 +141,29 @@ describe("prepare_artifact_upload on S3", () => {
     expect(apply).toHaveBeenCalledOnce()
   })
 
+  it("recovers the recorded workspace result before reading a consumed ZIP", async () => {
+    const prepared = await prepareBundleUpload({ organizationId: WS, userId: OTHER_WS, fileSize: 1 })
+    const objects = new Map([[prepared.pathname, new Uint8Array([1])]])
+    const get = vi.fn(async (pathname: string) => objects.get(pathname) ?? null)
+    const storage = {
+      get,
+      put: async (pathname: string, bytes: Uint8Array) => {
+        objects.set(pathname, bytes)
+        return { pathname, created: true }
+      },
+      del: async (pathname: string) => { objects.delete(pathname) },
+    }
+    const result = { workspaceId: WS, slug: "imported", name: "Imported", alreadyImported: false,
+      counts: {}, usersMatched: 0, usersFallbackToImporter: 0, referencesCleared: 0, blobsCopied: 0, warnings: [] }
+    const identity = { nonce: "retry", persistResult: true }
+    const staged = await loadStagedBundle(prepared.receipt, WS, OTHER_WS, storage, identity)
+    if (!("commit" in staged)) throw new Error("expected staged bytes")
+    await staged.commit(async () => result)
+    get.mockClear()
+    await expect(loadStagedBundle(prepared.receipt, WS, OTHER_WS, storage, identity)).resolves.toMatchObject({ result })
+    expect(get).not.toHaveBeenCalledWith(prepared.pathname)
+  })
+
   it("uses an expiring S3 staging key for a workspace import receipt", async () => {
     const prepared = await prepareBundleUpload({ organizationId: WS, userId: OTHER_WS, fileSize: 1 })
     if (!("upload" in prepared)) throw new Error("expected an S3 upload target")
@@ -277,19 +300,19 @@ describe("public-store writes on S3", () => {
     expect(isEmbedScreenshotUrl(first.url)).toBe(true)
   })
 
-  it("cleanup deletes route-URL objects from S3 and leaves Blob URLs to Blob", async () => {
+  it("cleanup reserves discarded S3 feedback keys and leaves Blob URLs to Blob", async () => {
     vi.stubEnv("BLOB_READ_WRITE_TOKEN", "vercel_blob_rw_abc123_test")
-    s3.on(DeleteObjectCommand).resolves({})
+    s3.on(PutObjectCommand).resolves({})
     blobDel.mockImplementation(() => Promise.resolve() as never)
     const route = "/api/files/public/feedback/ws_1/0f8fad5b-d9cb-469f-a165-70867728950e-a.png"
     const legacy = "https://abc123.public.blob.vercel-storage.com/feedback/ws/a.png"
     await deleteFeedbackBlobs([route, legacy])
-    expect(s3.commandCalls(DeleteObjectCommand).map((c) => c.args[0].input.Key)).toEqual([`public/${route.replace("/api/files/public/", "")}`])
+    expect(s3.commandCalls(PutObjectCommand).map((c) => c.args[0].input.Key)).toEqual([`public/${route.replace("/api/files/public/", "")}`])
     expect(blobDel).toHaveBeenCalledWith([legacy])
   })
 
   it("cleanup is best-effort: a storage failure does not throw", async () => {
-    s3.on(DeleteObjectCommand).rejects(new Error("boom"))
+    s3.on(PutObjectCommand).rejects(new Error("boom"))
     await expect(deleteFeedbackBlobs(["/api/files/public/feedback/ws_1/0f8fad5b-d9cb-469f-a165-70867728950e-a.png"])).resolves.toBeUndefined()
   })
 })

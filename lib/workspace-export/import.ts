@@ -369,6 +369,7 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
   // workspace. Check for a completed retry again after acquiring its claim.
   const releaseImport = await opts.blobs.claimImport?.(newWorkspaceId)
   let writesStarted = false
+  let canReleaseClaim = true
   try {
     if (releaseImport) {
       const [committed] = await wsDelegate.findMany({ where: { id: newWorkspaceId }, take: 1 })
@@ -565,20 +566,22 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
     // The Workspace row is the commit point. If it exists, a request with the same nonce finished first (two concurrent
     // submissions derive identical ids, and the loser fails at the Workspace insert). Rolling back would delete the
     // winner's rows, so treat it as "already imported" and leave everything alone.
+    canReleaseClaim = false
     const committed = await delegateFor(client, "Workspace").findMany({ where: { id: newWorkspaceId }, take: 1 }).catch((statusError) => {
       if (releaseImport) throw new AggregateError([error, statusError], "Could not verify the import outcome before rollback")
       return []
     })
     if (committed[0]) {
+      canReleaseClaim = true
       if ((error as { code?: string }).code === "P2002") return alreadyImportedReport(committed[0], manifest)
       throw error
     }
-    await rollbackImport(client, reader, importKey, newWorkspaceId, uploaded, opts.blobs).catch((rollbackError) => {
+    await rollbackImport(client, reader, importKey, newWorkspaceId, uploaded, opts.blobs).then(() => { canReleaseClaim = true }).catch((rollbackError) => {
       console.error("[workspace-import] rollback failed; partial rows may remain for workspace", newWorkspaceId, rollbackError)
     })
     throw error
   } finally {
-    await releaseImport?.().catch((error: unknown) => {
+    if (canReleaseClaim) await releaseImport?.().catch((error: unknown) => {
       console.error("[workspace-import] could not release import claim", error)
     })
   }
@@ -630,7 +633,7 @@ async function rollbackImport(
   }
   for (const u of uploaded) {
     if (u.store === "feedback") await blobs.delPublic(u.key)
-    else await (u.store === "research" ? blobs.research : blobs.artifact).del(u.key).catch(() => undefined)
+    else await (u.store === "research" ? blobs.research : blobs.artifact).del(u.key)
   }
 }
 

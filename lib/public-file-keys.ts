@@ -71,3 +71,10 @@ export function parsePublicFileUrl(value: unknown): string | null {
 export function isPublicFilePath(pathname: string): boolean {
   return parsePublicFileUrl(pathname) !== null
 }
+
+/** Accept only attachment keys owned by the workspace being purged. */
+export function ownedS3FeedbackUrls(workspaceId: string, attachments: { url: string }[]): string[] {
+  return [...new Set(attachments.map(({ url }) => url).filter((url) =>
+    parsePublicFileUrl(url)?.startsWith(`feedback/${workspaceId}/`),
+  ))]
+}

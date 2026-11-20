@@ -129,8 +129,9 @@ async function putObjectIfAbsent(client: S3Client, input: PutObjectCommandInput)
 }
 
 export const PRIVATE_CACHE_CONTROL = "private, no-store"
-/** Public-store keys carry a random UUID and are never overwritten, so they are immutable. */
-export const PUBLIC_CACHE_CONTROL = "public, max-age=31536000, immutable"
+/** Public objects can be removed while their URLs are still known. */
+export const PUBLIC_CACHE_CONTROL = "no-store"
+const DISCARDED_PUBLIC_CONTENT_TYPE = "application/x-compass-discarded"
 /** Stored on every object so a stray direct GET downloads rather than renders. */
 export const SAFE_CONTENT_DISPOSITION = "attachment"
 
@@ -261,6 +262,7 @@ export async function headPublicObject(key: string): Promise<S3ObjectHead | null
   const { client, bucket } = getS3Client()
   try {
     const result = await client.send(new HeadObjectCommand({ Bucket: bucket, Key: s3ObjectKey("public", key) }))
+    if (result.ContentType === DISCARDED_PUBLIC_CONTENT_TYPE) return null
     return { contentType: result.ContentType, contentLength: result.ContentLength, etag: result.ETag }
   } catch (error) {
     if (isMissing(error)) return null
@@ -284,7 +286,14 @@ export async function putPublicObject(key: string, body: Uint8Array, contentType
 
 export async function deletePublicObject(key: string): Promise<void> {
   const { client, bucket } = getS3Client()
-  await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: s3ObjectKey("public", key) }))
+  const Key = s3ObjectKey("public", key)
+  if (key.startsWith("feedback/")) {
+    // Reserve the key even if the client never used its create-only signed PUT.
+    await client.send(new PutObjectCommand({ Bucket: bucket, Key, Body: new Uint8Array(),
+      ContentType: DISCARDED_PUBLIC_CONTENT_TYPE, CacheControl: PUBLIC_CACHE_CONTROL }))
+    return
+  }
+  await client.send(new DeleteObjectCommand({ Bucket: bucket, Key }))
 }
 
 export type PublicObjectRead =
@@ -303,6 +312,10 @@ export async function getPublicObject(key: string, options: { range?: string; if
       ...(options.range ? { Range: options.range } : {}),
       ...(options.ifNoneMatch ? { IfNoneMatch: options.ifNoneMatch } : {}),
     }))
+    if (result.ContentType === DISCARDED_PUBLIC_CONTENT_TYPE) {
+      await result.Body?.transformToByteArray()
+      return { kind: "not-found" }
+    }
     return { kind: "ok", result }
   } catch (error) {
     const status = (error as { $metadata?: { httpStatusCode?: number } } | null)?.$metadata?.httpStatusCode

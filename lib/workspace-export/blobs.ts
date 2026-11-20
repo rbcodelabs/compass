@@ -44,7 +44,7 @@ export function defaultBlobAdapters(): BlobAdapters {
       return (await getPublicFileStore().put(pathname, bytes, { contentType, addRandomSuffix: false })).url
     },
     async delPublic(url) {
-      await getPublicFileStore().delete([url]).catch(() => undefined)
+      await getPublicFileStore().delete([url])
     },
   }
 }

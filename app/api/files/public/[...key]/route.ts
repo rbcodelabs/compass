@@ -59,7 +59,7 @@ function safeHeaders(key: string, storedType: string | undefined, etag: string |
   headers.set("Referrer-Policy", "no-referrer")
   headers.set("Cross-Origin-Resource-Policy", key.startsWith("embed-feedback/") ? "cross-origin" : "same-site")
   // Keys carry a random UUID and are never rewritten, so the bytes behind one never change.
-  headers.set("Cache-Control", "public, max-age=31536000, immutable")
+  headers.set("Cache-Control", "no-store")
   headers.set("Accept-Ranges", "bytes")
   if (etag) headers.set("ETag", etag)
   return headers

@@ -56,13 +56,13 @@ describe("GET /api/files/public/<key>: what is served", () => {
     expect((await call(key.split("/"), { method: "HEAD" })).status).toBe(200)
   })
 
-  it("sets type, length, validators, immutable caching and the active-content defences", async () => {
+  it("sets type, length, validators, non-cacheable responses and the active-content defences", async () => {
     s3.on(GetObjectCommand).resolves({ Body: bodyOf("PNGDATA") as never, ContentType: "image/png", ContentLength: 7, ETag: '"e1"' })
     const response = await call(FEEDBACK.split("/"))
     expect(response.headers.get("content-type")).toBe("image/png")
     expect(response.headers.get("content-length")).toBe("7")
     expect(response.headers.get("etag")).toBe('"e1"')
-    expect(response.headers.get("cache-control")).toBe("public, max-age=31536000, immutable")
+    expect(response.headers.get("cache-control")).toBe("no-store")
     expect(response.headers.get("accept-ranges")).toBe("bytes")
     expect(response.headers.get("x-content-type-options")).toBe("nosniff")
     expect(response.headers.get("content-security-policy")).toMatch(/^sandbox;/)
@@ -207,7 +207,7 @@ describe("conditional and ranged requests", () => {
     const response = await call(FEEDBACK.split("/"), { headers: { "if-none-match": '"e1"' } })
     expect(response.status).toBe(304)
     expect(response.headers.get("etag")).toBe('"e1"')
-    expect(response.headers.get("cache-control")).toBe("public, max-age=31536000, immutable")
+    expect(response.headers.get("cache-control")).toBe("no-store")
     expect(s3.commandCalls(GetObjectCommand)[0]!.args[0].input.IfNoneMatch).toBe('"e1"')
     expect(await response.text()).toBe("")
   })

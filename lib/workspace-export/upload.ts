@@ -1,4 +1,5 @@
-import { createHmac, randomUUID, timingSafeEqual } from "node:crypto"
+import type { ImportReport } from "@/lib/workspace-export/import"
+import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto"
 import { shouldUseLocalStorage, type ArtifactStorage } from "@/lib/artifact-storage"
 import { createDirectUpload, privateDirectUploadConfigured, privateUploadReceiptSecret, stagedUploadCommit } from "@/lib/storage/direct-upload"
 
@@ -62,10 +63,24 @@ export function verifyBundleReceipt(receipt: string, organizationId: string, use
   return p
 }
 
-export async function loadStagedBundle(receipt: string, organizationId: string, userId: string, storage: ArtifactStorage) {
+type ResultLookup = { nonce?: string; persistResult: boolean }
+type StagedBundle = { bytes: Uint8Array; commit: (apply: () => Promise<ImportReport>) => Promise<ImportReport> }
+export function loadStagedBundle(receipt: string, organizationId: string, userId: string, storage: ArtifactStorage): Promise<StagedBundle>
+export function loadStagedBundle(receipt: string, organizationId: string, userId: string, storage: ArtifactStorage, lookup: ResultLookup): Promise<StagedBundle | { result: ImportReport }>
+export async function loadStagedBundle(receipt: string, organizationId: string, userId: string, storage: ArtifactStorage, lookup?: ResultLookup): Promise<StagedBundle | { result: ImportReport }> {
   const p = verifyBundleReceipt(receipt, organizationId, userId)
+  const resultPath = lookup?.persistResult
+    ? `${p.pathname}.result-${createHash("sha256").update(JSON.stringify(lookup.nonce ?? null)).digest("hex")}`
+    : undefined
+  if (resultPath) {
+    const recorded = await storage.get(resultPath)
+    if (recorded) return { result: JSON.parse(Buffer.from(recorded).toString("utf8")) as ImportReport }
+  }
   const bytes = await storage.get(p.pathname)
   if (!bytes) throw new Error("No uploaded bundle found for this receipt")
   if (bytes.byteLength !== p.fileSize) throw new Error("Uploaded bundle size does not match the prepared upload")
-  return { bytes, commit: stagedUploadCommit(storage, p.pathname) }
+  const commit = stagedUploadCommit(storage, p.pathname)
+  return { bytes, commit: (apply) => commit(apply, resultPath ? async (result) => {
+    await storage.put(resultPath, Buffer.from(JSON.stringify(result)), "application/json")
+  } : undefined) }
 }

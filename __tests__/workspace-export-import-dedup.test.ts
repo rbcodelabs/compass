@@ -276,6 +276,44 @@ it("returns a committed retry before checking its occupied slug", async () => {
   await expect(importWorkspaceBundle(db.client, bundle, opts)).resolves.toMatchObject({ alreadyImported: true, slug: "copy" })
 })
 
+it.each(["unknown commit", "failed rollback", "complete rollback"])("releases the import claim only when safe after %s", async (failure) => {
+  const orgId = randomUUID()
+  const wsId = randomUUID()
+  const importerId = randomUUID()
+  const db = createInMemoryPrisma({
+    Organization: [{ id: orgId, slug: "org", name: "Org" }],
+    User: [{ id: importerId, email: "importer@example.com", name: "Importer" }],
+    OrganizationMember: [{ id: randomUUID(), organizationId: orgId, userId: importerId, role: "ADMIN" }],
+    Workspace: [{ id: wsId, organizationId: orgId, slug: "source", name: "Source", ssoEnabled: false }],
+    Doc: [{ id: randomUUID(), workspaceId: wsId, title: "Doc", content: `![image](/api/docs/images/${wsId}/${randomUUID()}.png)` }],
+  })
+  const release = vi.fn(async () => undefined)
+  const artifact = {
+    ...noopBlobs.artifact,
+    get: async () => new Uint8Array([1]),
+    del: vi.fn(async () => {
+      if (failure === "failed rollback") throw new Error("delete failed")
+    }),
+  }
+  const blobs = { ...noopBlobs, artifact, claimImport: async () => release }
+  const bundle = await exportWorkspaceToBuffer(db.client, wsId, blobs)
+  let commitAttempted = false
+  const workspace = db.client.workspace as { findMany: (args: unknown) => Promise<Row[]> }
+  db.client.workspace = { ...workspace, findMany: async (args: unknown) => {
+    if (commitAttempted && failure === "unknown commit") throw new Error("status unavailable")
+    return workspace.findMany(args)
+  } }
+  db.client.$transaction = async () => {
+    commitAttempted = true
+    throw new Error("commit failed")
+  }
+  await expect(importWorkspaceBundle(db.client, bundle, {
+    organizationId: orgId, importerUserId: importerId, slug: "copy", nonce: "one-import", blobs,
+  })).rejects.toThrow()
+  expect(commitAttempted).toBe(true)
+  expect(release).toHaveBeenCalledTimes(failure === "complete rollback" ? 1 : 0)
+})
+
 it("reserves an import identity before either invocation writes bundle assets", async () => {
   const orgId = randomUUID()
   const wsId = randomUUID()
