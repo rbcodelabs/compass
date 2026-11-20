@@ -12,6 +12,7 @@ import {
   LEGACY_DECISION_REVIEW_REPAIR_MIGRATION,
 } from "@/lib/migrations/legacy-decision-review-repair";
 import type { LegacyDecisionRepairManifest } from "@/lib/legacy-decision-repair";
+import type { InspectionPoolFactory } from "@/lib/migrations/inspection-pool";
 import { describeInspectionFailure } from "@/lib/migrations/error-chain";
 import { assertAgentIdentityMigration } from "@/lib/migrations/agent-identity";
 import { assertSharedFieldOptionSetsMigration } from "@/lib/migrations/shared-field-option-sets";
@@ -2030,19 +2031,19 @@ async function getResearchCaptureHardeningReport(
  *     getLegacyDecisionReviewRepairStatus itself; this adds the same for everything else (connection errors included).
  * Applying 048 explicitly (applyLegacyDecisionReviewRepair) stays strict and still throws.
  */
-export async function inspectLegacyDecisionReviewRepairForStatus(pool: Pool, schema: string, appliedNames: readonly string[]) {
+export async function inspectLegacyDecisionReviewRepairForStatus(pool: Pool, schema: string, appliedNames: readonly string[], inspectionPoolFactory?: InspectionPoolFactory) {
   if (appliedNames.includes(LEGACY_DECISION_REVIEW_REPAIR_MIGRATION)) {
     return { available: false as const, skipped: true as const, reason: `${LEGACY_DECISION_REVIEW_REPAIR_MIGRATION} is already applied; inspection skipped.` }
   }
   try {
-    return await getLegacyDecisionReviewRepairStatus(pool, schema)
+    return await getLegacyDecisionReviewRepairStatus(pool, schema, inspectionPoolFactory)
   } catch (error) {
     return { available: false as const, reason: "Inspection failed; the status check continued without it.", error: describeInspectionFailure(error) }
   }
 }
 
 // GET — check migration status
-export async function getMigrationStatus(pool: Pool, schema: string) {
+export async function getMigrationStatus(pool: Pool, schema: string, inspectionPoolFactory?: InspectionPoolFactory) {
   const client = await pool.connect();
 
   try {
@@ -2070,7 +2071,7 @@ export async function getMigrationStatus(pool: Pool, schema: string) {
       getResearchVoiceControlPlaneReport(client, schema),
       getDecisionGateInfrastructureHealth(client, schema, appliedNames, unresolvedNames),
       client.query(`SELECT migration_name, attempt_id, plan_version, plan_fingerprint, next_step, executing_step, executing_started_at, pending_step, pending_job_id, claim_epoch, claimed_by IS NOT NULL AND claim_expires_at >= CURRENT_TIMESTAMP AS claimed, last_error, updated_at FROM "${schema}"._migration_execution_state ORDER BY updated_at DESC`).then(({ rows }) => rows).catch(() => []),
-      inspectLegacyDecisionReviewRepairForStatus(pool, schema, appliedNames),
+      inspectLegacyDecisionReviewRepairForStatus(pool, schema, appliedNames, inspectionPoolFactory),
     ]);
 
     // Counts only. linkIntegrity is null while the 071 tables do not exist; the

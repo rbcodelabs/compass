@@ -1,6 +1,7 @@
 import { PrismaPg } from "@prisma/adapter-pg"
 import { PrismaClient } from "@prisma/client"
-import { Pool } from "pg"
+import type { Pool } from "pg"
+import { createInspectionPool, type InspectionPoolFactory } from "@/lib/migrations/inspection-pool"
 import manifestJson from "./048-legacy-decision-review-repair-manifest.json"
 import {
   parseLegacyDecisionRepairManifest,
@@ -54,12 +55,11 @@ async function run(
   apply: boolean,
   manifestOverride?: LegacyDecisionRepairManifest,
   boundedInspection = false,
+  inspectionPoolFactory?: InspectionPoolFactory,
 ): Promise<LegacyDecisionReviewRepairReport> {
   const manifest = parseLegacyDecisionRepairManifest(manifestOverride ?? productionManifest)
   // Status already holds a caller-pool connection. A separate, bounded pool prevents a max=1 caller from waiting on itself.
-  const inspectionPool = boundedInspection ? new Pool({
-    ...pool.options, max: 1, connectionTimeoutMillis: 1000, query_timeout: 2000, statement_timeout: 2000,
-  }) : undefined
+  const inspectionPool = boundedInspection ? await (inspectionPoolFactory?.() ?? createInspectionPool(pool.options ?? {})) : undefined
   let prisma: PrismaClient | undefined
   try {
     prisma = createClient(inspectionPool ?? pool, schema)
@@ -78,7 +78,7 @@ async function run(
       )
       return summarize(report, "PRESENT")
     }
-    // Dry-run performs no nested transactions. The deadline covers the entire sequence of inspection reads.
+    // Dry-run performs no nested transactions. Cleanup/rollback may extend beyond the transaction deadline.
     return boundedInspection
       ? await prisma.$transaction((tx) => execute(tx as unknown as LegacyDecisionRepairClient), { maxWait: 1000, timeout: 5000 })
       : await execute(prisma as unknown as LegacyDecisionRepairClient)
@@ -91,13 +91,14 @@ export function inspectLegacyDecisionReviewRepair(
   pool: Pool,
   schema: string,
   manifestOverride?: LegacyDecisionRepairManifest,
+  inspectionPoolFactory?: InspectionPoolFactory,
 ) {
-  return run(pool, schema, false, manifestOverride, true)
+  return run(pool, schema, false, manifestOverride, true, inspectionPoolFactory)
 }
 
-export async function getLegacyDecisionReviewRepairStatus(pool: Pool, schema: string) {
+export async function getLegacyDecisionReviewRepairStatus(pool: Pool, schema: string, inspectionPoolFactory?: InspectionPoolFactory) {
   try {
-    return { available: true as const, ...(await inspectLegacyDecisionReviewRepair(pool, schema)) }
+    return { available: true as const, ...(await inspectLegacyDecisionReviewRepair(pool, schema, undefined, inspectionPoolFactory)) }
   } catch (error) {
     const code = typeof error === "object" && error !== null && "code" in error ? String(error.code) : ""
     if (code === "P2021" || code === "42P01") {
