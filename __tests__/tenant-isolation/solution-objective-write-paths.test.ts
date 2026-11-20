@@ -416,6 +416,7 @@ const files = walk(ROOT)
  * fails to find) changes these numbers and fails the test, so the inventory can only change on purpose.
  */
 const KNOWN_PRISMA_CREATE_SITES: Record<string, number> = {
+  "__tests__/okr-objective-reorder.integration.test.ts": 1, // Objective reorder fixtures use the disposable workspace row
   "__tests__/preview-automation-qa/postgres-integration.test.ts": 1,
   "__tests__/workspace-export-coverage.integration.test.ts": 2, // solution + objective fixtures for the round trip, each created with the fixture workspace's id
   "__tests__/workspace-export.integration.test.ts": 1, // one solution fixture for the round trip, created with the fixture workspace's id
