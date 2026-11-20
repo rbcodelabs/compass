@@ -59,7 +59,10 @@ async function shot(page: Page, state: string, locator?: Locator) {
 }
 
 const dragTo = async (page: Page, source: Locator, target: Locator) => {
-  await source.scrollIntoViewIfNeeded();
+  // dnd-kit animates the dropped card into place for ~250ms, and during that time the drag handle is not where the layout says it is
+  // (a second drag started in that window put mouse-down on the card title and never activated). hover() waits until the handle is
+  // visible, has stopped moving and is the element that would receive the press, so the pointer is only pressed once it is reachable.
+  await source.hover();
   const from = (await source.boundingBox())!;
   await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
   await page.mouse.down();

@@ -1,5 +1,5 @@
 /**
- * Discussion comment @mentions that become Tasks (Roadmap Item discussion).
+ * Conversation @mentions that become Tasks (Roadmap Item Conversations; #593 replaced the Discussion).
  *
  * The same picker / "Assign as task" row as Doc comments, in the generic
  * Discussion panel. Drives the real UI: open a Roadmap Item, type "@" in the
@@ -59,6 +59,12 @@ test.describe("Discussion comment @mention -> task", () => {
     await pool?.end();
   });
 
+  const conversationPanel = (page: Page) =>
+    page
+      .locator('[data-slot="pinned-panel"]')
+      .filter({ has: page.getByRole("heading", { name: "Conversation", exact: true }) })
+      .or(page.getByRole("dialog", { name: "Conversation", exact: true }));
+
   async function openRoadmapItem(page: Page, base: string, title: string) {
     await page.goto(`${base}/roadmap`);
     await page.waitForLoadState("networkidle");
@@ -69,7 +75,7 @@ test.describe("Discussion comment @mention -> task", () => {
     await expect(card).toBeVisible({ timeout: 10_000 });
     await card.getByRole("button", { name: title }).click();
     const panel = page.locator('[data-slot="sheet-content"]');
-    await expect(panel.getByText("No comments yet.")).toBeVisible({ timeout: 10_000 });
+    await expect(panel.getByTestId("object-conversations-section").getByText(/No conversations on this item yet/)).toBeVisible({ timeout: 10_000 });
     return panel;
   }
 
@@ -77,16 +83,21 @@ test.describe("Discussion comment @mention -> task", () => {
     const title = `E2E Discussion Mention ${suffix}`;
     const panel = await openRoadmapItem(page, base, title);
 
-    const editor = panel.getByRole("textbox", { name: "Add comment", exact: true });
+    const section = panel.getByTestId("object-conversations-section");
+    const editor = section.getByTestId("object-conversation-composer");
     await editor.click();
     await page.keyboard.type("Can you pick this up? @Quinn Disc");
-    await panel.getByTestId("mention-option").filter({ hasText: bName }).first().click();
+    await section.getByTestId("mention-option").filter({ hasText: bName }).first().click();
     await expect(editor.getByTestId("mention-chip")).toContainText(bName);
 
-    await expect(panel.getByTestId("comment-task-box")).toContainText(`Assign as task to @${bName}`);
-    await panel.getByRole("button", { name: "Comment & create task" }).click();
+    // The task row is opt-in: tick the toggle, then "Comment & create task".
+    await expect(section.getByTestId("comment-task-box")).toContainText(`Assign as task to @${bName}`);
+    await section.getByTestId("create-task-toggle").check();
+    await section.getByRole("button", { name: "Comment & create task" }).click();
 
-    const comment = panel.getByRole("article").filter({ hasText: "Can you pick this up?" });
+    // Send opens the new conversation in the Conversation panel; chip and task card sit on the message.
+    const thread = conversationPanel(page);
+    const comment = thread.getByTestId("conversation-message").filter({ hasText: "Can you pick this up?" });
     await expect(comment.getByTestId("comment-mention")).toContainText(`@${bName}`, { timeout: 10_000 });
     await expect(comment.getByTestId("comment-task-card")).toBeVisible();
 
@@ -98,24 +109,22 @@ test.describe("Discussion comment @mention -> task", () => {
     );
     expect(rows.map((row) => row.linked_type)).toEqual(["ROADMAP_ITEM"]);
 
-    // Reload: chip and card come back from the server.
+    // Reload: chip and card come back from the server. The open panel is URL state (?detail=conversation:<id>), so the reload
+    // re-opens the conversation.
     await page.reload();
     await page.waitForLoadState("networkidle");
-    // The open panel is URL state (?detail=), so the reload re-opens it; the
-    // modal sheet also hides the board behind it from the accessibility tree, so
-    // the card button cannot (and need not) be clicked again.
-    await expect(page.locator('[data-slot="sheet-content"]')).toBeVisible({ timeout: 15_000 });
-    const reopened = page.locator('[data-slot="sheet-content"]').getByRole("article").filter({ hasText: "Can you pick this up?" });
+    await expect(conversationPanel(page)).toBeVisible({ timeout: 15_000 });
+    const reopened = conversationPanel(page).getByTestId("conversation-message").filter({ hasText: "Can you pick this up?" });
     await expect(reopened.getByTestId("comment-mention")).toContainText(`@${bName}`, { timeout: 10_000 });
     await expect(reopened.getByTestId("comment-task-card")).toBeVisible();
 
     // Edit loads the mention back as a chip and saves it as a token.
     await reopened.getByRole("button", { name: /Edit comment by / }).click();
-    const edit = page.locator('[data-slot="sheet-content"]').getByRole("textbox", { name: /Edit comment by / });
+    const edit = conversationPanel(page).getByRole("textbox", { name: /Edit comment by / });
     await expect(edit.getByTestId("mention-chip")).toContainText(bName);
     await edit.press("End");
     await page.keyboard.type(" Thanks!");
-    await page.locator('[data-slot="sheet-content"]').getByRole("button", { name: "Save edit" }).click();
+    await conversationPanel(page).getByRole("button", { name: "Save edit" }).click();
     await expect(reopened.getByText("Thanks!")).toBeVisible({ timeout: 10_000 });
     await expect(reopened.getByTestId("comment-mention")).toContainText(`@${bName}`);
   });

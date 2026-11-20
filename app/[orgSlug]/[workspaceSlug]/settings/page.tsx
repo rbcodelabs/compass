@@ -7,7 +7,7 @@ import { ManageFieldsPanel } from "@/components/custom-fields/manage-fields-pane
 import { SharedOptionSetsPanel } from "@/components/custom-fields/shared-option-sets-panel";
 import { toCustomFieldDefinitionData } from "@/lib/custom-field-definitions";
 import { listInheritanceRules } from "@/lib/custom-field-inheritance-admin";
-import { customFieldInheritanceTableExists } from "@/lib/feature-tables";
+import { readIfInheritanceTableExists } from "@/lib/feature-tables";
 import { InheritanceRulesPanel } from "@/components/custom-fields/inheritance-rules-panel";
 import { parseSelectOptions } from "@/lib/shared-field-options";
 import { ManageSquadsPanel } from "@/components/squads/manage-squads-panel";
@@ -161,9 +161,10 @@ export default async function SettingsPage({ params }: Props) {
   const fields: CustomFieldDefinitionData[] = rawFields.map(toCustomFieldDefinitionData);
 
   // A missing table (migration 113 not applied yet) reads as "no rules", never a broken page.
-  const inheritanceAvailable = await customFieldInheritanceTableExists(prisma);
-  const inheritanceRules = inheritanceAvailable
-    ? (await listInheritanceRules(prisma, workspace.id)).map((rule) => ({
+  const loadedInheritanceRules = await readIfInheritanceTableExists(prisma, () => listInheritanceRules(prisma, workspace.id));
+  const inheritanceAvailable = loadedInheritanceRules !== undefined;
+  const inheritanceRules = loadedInheritanceRules
+    ? loadedInheritanceRules.map((rule) => ({
         id: rule.id,
         priority: rule.priority,
         enabled: rule.enabled,

@@ -14,8 +14,10 @@ async function fits(container: Locator) {
 }
 
 async function capture(page: Page, name: string) {
-  await expect(page.getByText("Loading discussion…", { exact: true })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Post comment", exact: true })).toBeVisible();
+  const conversations = page.locator('[data-slot="task-detail"]').getByTestId("object-conversations-section");
+  await expect(conversations.getByRole("heading", { name: "Conversations", exact: true })).toBeVisible();
+  await expect(conversations.getByText("Loading conversations…", { exact: true })).toHaveCount(0);
+  await expect(conversations.getByTestId("object-conversation-composer")).toBeVisible();
   // Hide only development-tool chrome; do not mask application content/errors.
   await page.screenshot({ path: `public/screenshots/docs/task-compact-${name}.png`, fullPage: true, style: "nextjs-portal { display: none !important; }" });
 }

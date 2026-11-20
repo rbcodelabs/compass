@@ -17,7 +17,8 @@ function initials(name: string): string {
 }
 
 /** The live task embedded under the Doc comment it was created from. */
-export function CommentTaskCard({ card, taskHref }: { card: CommentTaskCardData; taskHref: string }) {
+/** `startsRun` is false where the path that made the task starts no run (a comment on an item): the card then claims none. */
+export function CommentTaskCard({ card, taskHref, startsRun = true }: { card: CommentTaskCardData; taskHref: string; startsRun?: boolean }) {
   const agent = card.assignee?.type === "AGENT"
   const status = cardStatus(card.status, card.assignee?.type ?? null)
   const due = formatDue(card.dueDate)
@@ -63,7 +64,7 @@ export function CommentTaskCard({ card, taskHref }: { card: CommentTaskCardData;
       </div>
       {agent && (card.status === "TODO" || card.status === "BACKLOG") && (
         <p className="m-0 text-xs text-text-subtle">
-          {card.assignee?.agentKind === "CLOUD" ? "Assigned to a cloud agent: assigning starts a run. Open the task to follow it." : "Waiting in the agent’s task queue."}
+          {card.assignee?.agentKind === "CLOUD" ? (startsRun ? "Assigned to a cloud agent: assigning starts a run. Open the task to follow it." : "Assigned to a cloud agent. Open the task to follow it.") : "Waiting in the agent’s task queue."}
         </p>
       )}
       <Link href={taskHref} className="text-xs font-semibold text-status-info hover:underline" data-testid="open-task-link">
