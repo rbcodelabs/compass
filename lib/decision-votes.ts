@@ -12,7 +12,8 @@
  * (by display name, never by email) once it is DECIDED. Votes are stored with the voter id (one vote per person), so this is anonymity toward
  * readers and API clients, not toward database administrators.
  */
-import getPrisma from "@/lib/db"
+import getPrisma, { type AppTransactionClient } from "@/lib/db"
+import { withConflictRetry } from "@/lib/transaction-conflict"
 import { excludeToolApprovals } from "@/lib/tool-approval/gate"
 import { isUuid } from "@/lib/canvas-cards"
 import { parsePacketQuestions } from "@/lib/tracked-decision-types"
@@ -139,6 +140,37 @@ export async function getDecisionTally(input: { workspaceId: string; requestId: 
   }
 }
 
+/** Serialize vote mutations with changes to the request without changing its visible fields. */
+async function mutateCurrentVote(
+  input: { workspaceId: string; requestId: string; revisionId: string },
+  write: (tx: Pick<AppTransactionClient, "decisionVote">) => Promise<unknown>,
+): Promise<void> {
+  const db = getPrisma()
+  await withConflictRetry(() => db.$transaction(async (tx) => {
+    // The guarded write makes Postgres lock the request and gives DSQL a shared
+    // write-conflict target. A read alone would not fence a concurrent revision.
+    const guard = await tx.reviewRequest.updateMany({
+      where: {
+        id: input.requestId, workspaceId: input.workspaceId, state: VOTABLE_STATE,
+        currentRevisionId: input.revisionId, ...excludeToolApprovals,
+      },
+      data: { currentRevisionId: input.revisionId, updatedAt: undefined },
+    })
+    if (guard.count !== 1) {
+      const current = await tx.reviewRequest.findFirst({
+        where: { id: input.requestId, workspaceId: input.workspaceId, ...excludeToolApprovals },
+        select: { currentRevisionId: true },
+      })
+      if (!current) throw new DecisionVoteError("NOT_FOUND", "Decision not found.")
+      if (current.currentRevisionId !== input.revisionId) {
+        throw new DecisionVoteError("STALE_REVISION", "This decision has changed. Refresh the card before voting.")
+      }
+      throw new DecisionVoteError("CLOSED", "Voting is closed for this decision.")
+    }
+    await write(tx)
+  }))
+}
+
 /**
  * Cast or change the vote of the caller on one question. The caller must already have been authorized to vote in the workspace (a direct
  * workspace member); this function re-checks that the request belongs to that workspace, is still open, and that the option is one the
@@ -157,7 +189,7 @@ export async function castDecisionVote(input: { workspaceId: string; requestId: 
     throw new DecisionVoteError("INVALID_OPTION", "That option is not offered by this decision.")
   }
   const now = new Date()
-  await getPrisma().decisionVote.upsert({
+  await mutateCurrentVote({ ...input, requestId: request.id }, tx => tx.decisionVote.upsert({
     where: {
       requestId_revisionId_questionIndex_voterUserId: {
         requestId: request.id,
@@ -177,7 +209,7 @@ export async function castDecisionVote(input: { workspaceId: string; requestId: 
       updatedAt: now,
     },
     update: { chosenOption: input.option, updatedAt: now },
-  })
+  }))
 }
 
 /** Remove the vote of the caller on one question. Idempotent. A closed request refuses, so a tally cannot be altered after the outcome. */
@@ -187,7 +219,7 @@ export async function retractDecisionVote(input: { workspaceId: string; requestI
   if (input.revisionId !== request.currentRevision.id) throw new DecisionVoteError("STALE_REVISION", "This decision has changed. Refresh the card before voting.")
   if (request.state !== VOTABLE_STATE) throw new DecisionVoteError("CLOSED", "Voting is closed for this decision.")
   if (!Number.isInteger(input.questionIndex) || input.questionIndex < 0) throw new DecisionVoteError("INVALID_QUESTION", "That question is not part of this decision.")
-  await getPrisma().decisionVote.deleteMany({
+  await mutateCurrentVote({ ...input, requestId: request.id }, tx => tx.decisionVote.deleteMany({
     where: { workspaceId: input.workspaceId, requestId: request.id, revisionId: request.currentRevision.id, questionIndex: input.questionIndex, voterUserId: input.voterUserId },
-  })
+  }))
 }

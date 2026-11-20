@@ -14,8 +14,12 @@ const state = vi.hoisted(() => ({
 }))
 
 vi.mock("@/lib/db", () => ({
-  default: () => ({
+  default: () => {
+  const db = {
     reviewRequest: {
+      updateMany: async ({ where }: { where: { id: string; workspaceId: string; state: string; currentRevisionId: string } }) => ({
+        count: state.requests.filter(r => r.id === where.id && r.workspaceId === where.workspaceId && r.state === where.state && r.currentRevisionId === where.currentRevisionId).length,
+      }),
       findFirst: async ({ where }: { where: { id: string; workspaceId: string } }) => {
         const r = state.requests.find((x) => x.id === where.id && x.workspaceId === where.workspaceId)
         return r ? { id: r.id, state: r.state, currentRevisionId: r.currentRevisionId, currentRevision: { id: r.currentRevisionId, packetJson: r.packetJson } } : null
@@ -55,7 +59,9 @@ vi.mock("@/lib/db", () => ({
       },
     },
     user: { findMany: async ({ where }: { where: { id: { in: string[] } } }) => state.users.filter((u) => where.id.in.includes(u.id)) },
-  }),
+  }
+  return { ...db, $transaction: async (work: (tx: typeof db) => Promise<unknown>) => work(db) }
+  },
 }))
 
 import { castDecisionVote, getDecisionTally, retractDecisionVote, voteQuestionsOf, DecisionVoteError } from "@/lib/decision-votes"
