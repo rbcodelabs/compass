@@ -134,10 +134,18 @@ describe.skipIf(!integrationDatabaseUrl)("numbered doc pins and decision atomici
         const row = await query(args)
         // Query extensions may select a partial row. Check the real result at
         // runtime before using it as evidence; never cast away missing fields.
-        if (row !== null && (typeof row !== "object" || !("id" in row) || typeof row.id !== "string" || !("versionNumber" in row) || (row.versionNumber !== null && typeof row.versionNumber !== "number"))) {
+        if (row === null) {
+          await barrier.wait(args.where?.docId, null)
+        } else if (typeof row === "object" && "id" in row && "versionNumber" in row) {
+          const id = row.id, versionNumber = row.versionNumber
+          if (typeof id === "string" && (versionNumber === null || typeof versionNumber === "number")) {
+            await barrier.wait(args.where?.docId, { id, versionNumber })
+          } else {
+            throw new Error("Latest-version query did not return id and nullable versionNumber")
+          }
+        } else {
           throw new Error("Latest-version query did not return id and nullable versionNumber")
         }
-        await barrier.wait(args.where?.docId, row === null ? null : { id: row.id, versionNumber: row.versionNumber })
         return row
       } } },
     })
