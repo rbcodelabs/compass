@@ -19,6 +19,8 @@ const mockDocVersion = {
 const mockPrisma = {
   doc: mockDoc,
   docVersion: mockDocVersion,
+  $queryRaw: vi.fn(),
+  $transaction: vi.fn(),
 }
 
 vi.mock("@/lib/db", () => ({ default: () => mockPrisma }))
@@ -42,6 +44,8 @@ beforeEach(() => {
   mockDoc.findUnique.mockResolvedValue(CURRENT_DOC_ROW)
   mockDocVersion.findFirst.mockResolvedValue(null)
   mockDocVersion.create.mockResolvedValue({ id: "version-new" })
+  mockPrisma.$queryRaw.mockResolvedValue([{ id: DOC_ID }])
+  mockPrisma.$transaction.mockImplementation(async (work: (tx: typeof mockPrisma) => unknown) => work(mockPrisma))
 })
 
 afterAll(() => {

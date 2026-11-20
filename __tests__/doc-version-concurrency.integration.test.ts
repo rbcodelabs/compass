@@ -12,9 +12,11 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest"
 import { injectUpdatedAtExtension } from "@/lib/prisma-updated-at"
 import { replayAllMigrations } from "./helpers/replay-migrations"
 import { integrationDatabaseUrl } from "./helpers/integration-database"
+import { withToolTransaction } from "@/lib/mcp-tool-db"
 
-const holder = vi.hoisted(() => ({ client: null as unknown }))
+const holder = vi.hoisted(() => ({ client: null as unknown, schema: "" }))
 vi.mock("@/lib/db", () => ({ default: () => holder.client }))
+vi.mock("@/lib/schema", () => ({ getActiveSchema: () => holder.schema }))
 
 import { pinDocVersion } from "@/lib/doc-versions"
 import { createTrackedDecisionRequest, reviseTrackedDecisionRequest } from "@/lib/tracked-decisions"
@@ -100,6 +102,7 @@ describe.skipIf(!integrationDatabaseUrl)("numbered doc pins and decision atomici
     const replay = await replayAllMigrations(admin, schema)
     expect(replay.status, JSON.stringify(await replay.json())).toBe(200)
     base = new PrismaClient({ adapter: new PrismaPg(appPool, { schema }) })
+    holder.schema = schema
     holder.client = client()
     await admin.query(`INSERT INTO "${schema}".organizations (id,name,slug) VALUES ($1,'Pin QA','pin-qa')`, [orgId])
     await admin.query(`INSERT INTO "${schema}".workspaces (id,organization_id,name,slug) VALUES ($1,$2,'Pin QA','pin-qa')`, [workspaceId, orgId])
@@ -129,7 +132,12 @@ describe.skipIf(!integrationDatabaseUrl)("numbered doc pins and decision atomici
       name: "qa-delay-real-latest-read",
       query: { docVersion: { async findFirst({ args, query }) {
         const row = await query(args)
-        await barrier.wait(args.where?.docId, row)
+        // Query extensions may select a partial row. Check the real result at
+        // runtime before using it as evidence; never cast away missing fields.
+        if (row !== null && (typeof row !== "object" || !("id" in row) || typeof row.id !== "string" || !("versionNumber" in row) || (row.versionNumber !== null && typeof row.versionNumber !== "number"))) {
+          throw new Error("Latest-version query did not return id and nullable versionNumber")
+        }
+        await barrier.wait(args.where?.docId, row === null ? null : { id: row.id, versionNumber: row.versionNumber })
         return row
       } } },
     })
@@ -157,6 +165,7 @@ describe.skipIf(!integrationDatabaseUrl)("numbered doc pins and decision atomici
       await pinDocVersion(doc.id, { authorName: "Synthetic QA" })
       await client().doc.update({ where: { id: doc.id }, data: { content: "second content", updatedAt: new Date() } })
     }
+    const before = await client().doc.findUniqueOrThrow({ where: { id: doc.id } })
     const results = await withReadBarrier(doc.id, () => settleTogether([
       pinDocVersion(doc.id, { authorName: "Synthetic A" }),
       pinDocVersion(doc.id, { authorName: "Synthetic B" }),
@@ -167,6 +176,8 @@ describe.skipIf(!integrationDatabaseUrl)("numbered doc pins and decision atomici
     expect(rows.map((row) => row.versionNumber)).toEqual(priorPin ? [1, 2] : [1])
     expect(results[0]!.id).toBe(results[1]!.id)
     expect(results.map((result) => result!.created).sort()).toEqual([false, true])
+    const after = await client().doc.findUniqueOrThrow({ where: { id: doc.id } })
+    expect(after).toEqual(before)
   })
 
   it("two independent concurrent decision requests pin the same unchanged doc only once", async () => {
@@ -220,6 +231,16 @@ describe.skipIf(!integrationDatabaseUrl)("numbered doc pins and decision atomici
     const doc = await newDoc()
     await expect(reviseTrackedDecisionRequest({ ...requestInput(doc.id), requestId: randomUUID(), expectedDecisionId: randomUUID(), reason: "Synthetic revision" })).rejects.toMatchObject({ code: "REQUEST_NOT_FOUND" })
     expect(await numbered(doc.id)).toHaveLength(0)
+  })
+
+  it("rolls back the pin and request with their enclosing MCP tool transaction", async () => {
+    const doc = await newDoc(), input = requestInput(doc.id)
+    await expect(client().$transaction(async (tx) => withToolTransaction(tx, async () => {
+      await createTrackedDecisionRequest(input)
+      throw new Error("Synthetic outer tool rollback")
+    }))).rejects.toThrow("Synthetic outer tool rollback")
+    expect(await numbered(doc.id)).toHaveLength(0)
+    expect(await client().reviewRequest.count({ where: { workspaceId, subjectId: input.idempotencyKey } })).toBe(0)
   })
 
   it("preserves history when a revision conflicts with a pending request", async () => {

@@ -208,7 +208,7 @@ describe("tracked decisions", () => {
 
       await createDocDecision()
 
-      expect(pinDocVersion).toHaveBeenCalledWith("doc-1", { authorId: "user-1", authorName: "Decision request" })
+      expect(pinDocVersion).toHaveBeenCalledWith("doc-1", { authorId: "user-1", authorName: "Decision request" }, prisma)
       const packet = JSON.parse(prisma.reviewRevision.create.mock.calls[0][0].data.packetJson)
       expect(packet.entity.docVersion).toEqual({ id: "docver-3", number: 3 })
     })

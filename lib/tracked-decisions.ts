@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto"
 import { excludeToolApprovals } from "@/lib/tool-approval/gate"
 import { getLinkedTargetIds } from "@/lib/task-links-read"
-import getPrisma from "@/lib/db"
+import getPrisma, { type AppTransactionClient } from "@/lib/db"
 import { pinDocVersion } from "@/lib/doc-versions"
 
 // Re-exported (not redefined) so this stays the single source of truth for
@@ -141,9 +141,9 @@ async function resolveSources(prisma: ReturnType<typeof getPrisma>, workspaceId:
  * For a DOC subject, pin the doc live content as the next numbered version so the decision can name the exact version it covers.
  * Other subject types return an empty object, keeping their packets byte-identical to before.
  */
-async function docVersionPin(type: TrackedSubjectType, docId: string, requestedById: string | null | undefined): Promise<{ docVersion?: TrackedDecisionDocVersionRef }> {
+async function docVersionPin(type: TrackedSubjectType, docId: string, requestedById: string | null | undefined, tx: AppTransactionClient): Promise<{ docVersion?: TrackedDecisionDocVersionRef }> {
   if (type !== "DOC") return {}
-  const pinned = await pinDocVersion(docId, { authorId: requestedById ?? null, authorName: "Decision request" })
+  const pinned = await pinDocVersion(docId, { authorId: requestedById ?? null, authorName: "Decision request" }, tx)
   return pinned ? { docVersion: { id: pinned.id, number: pinned.versionNumber } } : {}
 }
 function isUnique(error: unknown) { return typeof error === "object" && error !== null && "code" in error && (error as { code?: string }).code === "P2002" }
@@ -180,15 +180,16 @@ export async function createTrackedDecisionRequest(input: { workspaceId: string;
   const replay = async () => { const found = await prisma.reviewRequest.findFirst({ where: identityWhere, include: { currentRevision: true } }); if (found?.currentRevision && samePacket(found.currentRevision.packetJson, packet)) return found.currentRevision; throw new TrackedDecisionError("IDEMPOTENCY_KEY_CONFLICT", "That idempotency key belongs to a different decision request.") }
   const existing = await prisma.reviewRequest.findFirst({ where: identityWhere, include: { currentRevision: true } })
   if (existing) return replay()
-  // Only a genuinely new request pins a version; an idempotent replay returns above without touching the doc history.
-  const pin = await docVersionPin(input.subjectType, entity.id, input.requestedById)
-  if (pin.docVersion) packet.entity.docVersion = pin.docVersion
   try {
     return await withSequenceTransaction(prisma, async tx => {
+      // Keep the pin and request in one rollback boundary. Rebuild the packet
+      // on every retry so it cannot retain a rolled-back version reference.
+      const pin = await docVersionPin(input.subjectType, entity.id, input.requestedById, tx)
+      const pinnedPacket: PacketV2 = { ...packet, entity: { ...packet.entity, ...pin } }
       const request = await tx.reviewRequest.create({ data: { ...identityWhere, ...(await allocateOneSeq(tx, input.workspaceId, "reviewRequest")), state: "DRAFT", requestedById: input.requestedById ?? null, requestedByAgentId: input.requestedByAgentId ?? null, assignedToId: input.assignedToId ?? null } })
       const revisionNumber = 1, decisionCycle = 1
-      const fingerprint = createHash("sha256").update(JSON.stringify({ requestId: request.id, decisionCycle, revisionNumber, packet })).digest("hex")
-      const revision = await tx.reviewRevision.create({ data: { requestId: request.id, revisionNumber, fingerprint, title: question, summary: context, packetJson: JSON.stringify(packet), requiredRole: "ADMIN", options: { create: reviewOptionRows(customOptions, Boolean(customQuestions)) } } })
+      const fingerprint = createHash("sha256").update(JSON.stringify({ requestId: request.id, decisionCycle, revisionNumber, packet: pinnedPacket })).digest("hex")
+      const revision = await tx.reviewRevision.create({ data: { requestId: request.id, revisionNumber, fingerprint, title: question, summary: context, packetJson: JSON.stringify(pinnedPacket), requiredRole: "ADMIN", options: { create: reviewOptionRows(customOptions, Boolean(customQuestions)) } } })
       await tx.reviewRequest.update({ where: { id: request.id }, data: { state: "PENDING", currentRevisionId: revision.id, revisionCount: 1, decisionCycle: 1, updatedAt: new Date() } })
       return revision
     })
@@ -198,11 +199,8 @@ export async function createTrackedDecisionRequest(input: { workspaceId: string;
 export async function reviseTrackedDecisionRequest(input: { workspaceId: string; requestId: string; subjectType: TrackedSubjectType; subjectId: string; question: string; context: string; expectedDecisionId: string; reason: string; options?: TrackedDecisionOptionInput[] | null; questions?: TrackedDecisionQuestionInput[] | null; requestedById?: string | null; requestedByAgentId?: string | null; assignedToId?: string | null }) {
   const question = required(input.question, "Question", 255), context = required(input.context, "Context", 20_000), reason = required(input.reason, "Revision reason", 2_000)
   const prisma = getPrisma(), entity = await resolveEntity(prisma, input.workspaceId, input.subjectType, input.subjectId)
-  // A revision is a new decision cycle, so it covers the doc as it is now (reuses the latest version if the doc is unchanged).
-  const pin = await docVersionPin(input.subjectType, entity.id, input.requestedById)
-  let packet: Packet
   try {
-    return await prisma.$transaction(async tx => {
+    return await withSequenceTransaction(prisma, async tx => {
       const request = await tx.reviewRequest.findUnique({ where: { id: input.requestId }, include: { currentRevision: true } })
       if (!request || request.workspaceId !== input.workspaceId || request.gateType !== TRACKED_GATE) throw new TrackedDecisionError("REQUEST_NOT_FOUND", "The decision to revise was not found.")
       if (request.state !== "DECIDED" || !request.currentRevisionId) throw new TrackedDecisionError("REVISION_CONFLICT", "The decision changed before the revision could be created.")
@@ -223,12 +221,13 @@ export async function reviseTrackedDecisionRequest(input: { workspaceId: string;
         throw error
       }
       const { customOptions, customQuestions } = mode
-      packet = currentPacket.schemaVersion === "tracked-decision/v2"
-        ? { schemaVersion: "tracked-decision/v2", question, context, entity: { type: input.subjectType, id: entity.id, title: entity.title, updatedAt: entity.updatedAt?.toISOString?.() ?? new Date(0).toISOString(), ...pin }, sources: currentPacket.sources, ...(customOptions ? { options: customOptions } : {}), ...(customQuestions ? { questions: customQuestions } : {}) }
-        : { schemaVersion: "tracked-decision/v1", question, context, entity: { type: input.subjectType, id: entity.id, title: entity.title, ...pin }, ...(customOptions ? { options: customOptions } : {}), ...(customQuestions ? { questions: customQuestions } : {}) }
       const prior = await tx.decisionRecord.findUnique({ where: { id: input.expectedDecisionId }, include: { option: true } })
       if (!prior || prior.requestId !== request.id || prior.revisionId !== request.currentRevisionId) throw new TrackedDecisionError("DECISION_MISMATCH", "The selected decision does not belong to the current revision.")
       if (prior.option.outcomeClass !== "REQUEST_CHANGES") throw new TrackedDecisionError("OUTCOME_NOT_REVISABLE", "Only a request-changes decision can be revised.")
+      const pin = await docVersionPin(input.subjectType, entity.id, input.requestedById, tx)
+      const packet: Packet = currentPacket.schemaVersion === "tracked-decision/v2"
+        ? { schemaVersion: "tracked-decision/v2", question, context, entity: { type: input.subjectType, id: entity.id, title: entity.title, updatedAt: entity.updatedAt?.toISOString?.() ?? new Date(0).toISOString(), ...pin }, sources: currentPacket.sources, ...(customOptions ? { options: customOptions } : {}), ...(customQuestions ? { questions: customQuestions } : {}) }
+        : { schemaVersion: "tracked-decision/v1", question, context, entity: { type: input.subjectType, id: entity.id, title: entity.title, ...pin }, ...(customOptions ? { options: customOptions } : {}), ...(customQuestions ? { questions: customQuestions } : {}) }
       const revisionNumber = request.revisionCount + 1, decisionCycle = request.decisionCycle + 1
       const fingerprint = createHash("sha256").update(JSON.stringify({ requestId: request.id, decisionCycle, revisionNumber, packet })).digest("hex")
       const revision = await tx.reviewRevision.create({ data: { requestId: request.id, revisionNumber, fingerprint, title: question, summary: context, packetJson: JSON.stringify(packet), requiredRole: "ADMIN", options: { create: reviewOptionRows(customOptions, Boolean(customQuestions)) } } })
