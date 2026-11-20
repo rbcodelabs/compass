@@ -35,8 +35,8 @@ describe(NAME, () => {
   })
 
   describe("postcondition", () => {
-    const column = (overrides: Record<string, unknown> = {}) => ({ data_type: "uuid", is_nullable: "YES", column_default: null, ...overrides })
-    const index = (overrides: Record<string, unknown> = {}) => ({ valid: true, ready: true, unique: false, table_name: "agent_messages", columns: ["run_id"], predicate: null, expression: null, ...overrides })
+    const column = (overrides: Record<string, unknown> = {}) => ({ data_type: "uuid", is_nullable: "YES", column_default: null, is_generated: "NEVER", ...overrides })
+    const index = (overrides: Record<string, unknown> = {}) => ({ valid: true, ready: true, unique: false, table_name: "agent_messages", column_count: 1, columns: ["run_id"], predicate: null, expression: null, ...overrides })
     const client = (cols: unknown[], indexRows: unknown[]) => ({ query: vi.fn().mockResolvedValueOnce({ rows: cols }).mockResolvedValueOnce({ rows: indexRows }) }) as never
 
     it("passes for the shape the migration creates", async () => {
@@ -48,6 +48,7 @@ describe(NAME, () => {
       await expect(assertAgentMessageRunIdMigration(client([column({ data_type: "text" })], [index()]), "compass")).rejects.toThrow(/agent_messages\.run_id/)
       await expect(assertAgentMessageRunIdMigration(client([column({ is_nullable: "NO" })], [index()]), "compass")).rejects.toThrow(/agent_messages\.run_id/)
       await expect(assertAgentMessageRunIdMigration(client([column({ column_default: "gen_random_uuid()" })], [index()]), "compass")).rejects.toThrow(/agent_messages\.run_id/)
+      await expect(assertAgentMessageRunIdMigration(client([column({ is_generated: "ALWAYS" })], [index()]), "compass")).rejects.toThrow(/writable nullable uuid/)
     })
 
     it("fails closed on an index that is missing, still building, or a same-named object with the wrong definition", async () => {
@@ -56,6 +57,7 @@ describe(NAME, () => {
       await expect(assertAgentMessageRunIdMigration(client([column()], [index({ ready: false })]), "compass")).rejects.toThrow(/not ready/)
       await expect(assertAgentMessageRunIdMigration(client([column()], [index({ unique: true })]), "compass")).rejects.toThrow(/drifted/)
       await expect(assertAgentMessageRunIdMigration(client([column()], [index({ columns: ["conversation_id"] })]), "compass")).rejects.toThrow(/drifted/)
+      await expect(assertAgentMessageRunIdMigration(client([column()], [index({ column_count: 2 })]), "compass")).rejects.toThrow(/drifted/)
       await expect(assertAgentMessageRunIdMigration(client([column()], [index({ table_name: "agent_runs" })]), "compass")).rejects.toThrow(/drifted/)
       await expect(assertAgentMessageRunIdMigration(client([column()], [index({ predicate: "(run_id IS NOT NULL)" })]), "compass")).rejects.toThrow(/drifted/)
     })

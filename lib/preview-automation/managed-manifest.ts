@@ -443,7 +443,7 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
   },
   // The 129 postcondition (agent_messages.run_id is a bare nullable uuid; idx_agent_messages_run is valid, ready, non-unique, on run_id only); editing it re-reviews the migration.
   "129_agent_message_run_id": {
-    "lib/migrations/agent-message-run-id.ts": "f4656e60cd96e4610ff07183dc98bc144de4cafa1f4d6025f5a60dfaf4dc29e9",
+    "lib/migrations/agent-message-run-id.ts": "d9b3a9ae84b5a61f52e919c29d51d83bf9268dbbb15ad79f87e6d6727de7921d",
   },
   // The 110 postcondition (columns, plus every index valid and ready); editing it re-reviews the migration.
   "110_artifact_external_share": {
