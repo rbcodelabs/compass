@@ -52,7 +52,7 @@ export async function assertAgentSandboxOperationsMigration(client: PoolClient, 
     run_id: ["uuid", false],
   })
   const latch = await client.query(
-    "SELECT 1 FROM information_schema.columns WHERE table_schema=$1 AND table_name='agent_conversations' AND column_name='sandbox_coordination_token' AND data_type='uuid' AND is_nullable='YES' AND column_default IS NULL",
+    "SELECT 1 FROM information_schema.columns WHERE table_schema=$1 AND table_name='agent_conversations' AND column_name='sandbox_coordination_token' AND data_type='uuid' AND is_nullable='YES' AND column_default IS NULL AND is_generated='NEVER'",
     [schema],
   )
   if (latch.rows.length !== 1) throw new Error("Migration 130 postcondition failed: conversation coordination token has drifted or is missing")

@@ -444,7 +444,7 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
   },
   // The fence depends on one operation per conversation.
   "130_agent_sandbox_operations": {
-    "lib/migrations/agent-sandbox-operations.ts": "67b9c49a4bc0a10829a309aecd2e68d356b986a17af676493a2e68290f1c7e00",
+    "lib/migrations/agent-sandbox-operations.ts": "16ccb4d7e2855ca5fd593f812139354124319e05555a07bf3280567f08daf1f8",
   },
   // The 129 postcondition (agent_messages.run_id is a bare nullable uuid; idx_agent_messages_run is valid, ready, non-unique, on run_id only); editing it re-reviews the migration.
   "129_agent_message_run_id": {

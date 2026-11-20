@@ -213,6 +213,58 @@ describe.skipIf(!databaseUrl)("durable sandbox fence on PostgreSQL", () => {
     expect(await marker(runId)).toEqual({ sandboxStoppedAt: later })
   })
 
+  it.each(["DISPATCHED", "CONFIRMED"] as const)("recovers a %s stop after its owning run is deleted", async (phase) => {
+    const conversationId = await makeConversation()
+    const sandboxName = agentConversationSandboxName(conversationId)
+    const runId = await seedRun(conversationId, sandboxName)
+    const stop = vi.fn(async () => { throw new Error("stop response lost") })
+    const preparePersistentStop = vi.fn(async () => ({ sessionId: "recorded-session", stop }))
+    const isPersistentSandboxQuiescent = vi.fn().mockResolvedValue(false)
+    const cleanup = { preparePersistentStop, isPersistentSandboxQuiescent }
+    expect((await reapIdleConversationSandboxes({ prisma, now, cleanup })).failed).toHaveLength(1)
+    if (phase === "CONFIRMED") {
+      await prisma.agentSandboxOperation.update({ where: { conversationId }, data: { phase } })
+    }
+    await prisma.agentRun.delete({ where: { id: runId } })
+
+    const later = new Date(now.getTime() + 5 * 60_000)
+    await expect(launch(conversationId, later)).rejects.toMatchObject({ code: "SANDBOX_OPERATION_IN_FLIGHT" })
+    if (phase === "DISPATCHED") {
+      expect((await reapIdleConversationSandboxes({ prisma, now: later, cleanup })).stopped).toEqual([])
+      expect(isPersistentSandboxQuiescent).toHaveBeenCalledWith(sandboxName, "recorded-session")
+      await expect(launch(conversationId, later)).rejects.toMatchObject({ code: "SANDBOX_OPERATION_IN_FLIGHT" })
+      isPersistentSandboxQuiescent.mockResolvedValue(true)
+    }
+
+    const settled = new Date(later.getTime() + 5 * 60_000)
+    expect((await reapIdleConversationSandboxes({ prisma, now: settled, cleanup })).stopped).toEqual([sandboxName])
+    expect(preparePersistentStop).toHaveBeenCalledOnce()
+    expect(stop).toHaveBeenCalledOnce()
+    if (phase === "CONFIRMED") expect(isPersistentSandboxQuiescent).not.toHaveBeenCalled()
+    await expect(launch(conversationId, settled)).resolves.toMatchObject({ run: { status: "QUEUED" } })
+  })
+
+  it("refuses a migration 130 receipt for a generated coordination token", async () => {
+    const driftSchema = schema + "_drift"
+    await pool.query(`CREATE SCHEMA "${driftSchema}"`)
+    const previous = process.env.DATABASE_URL
+    process.env.DATABASE_URL = databaseUrl
+    try {
+      await pool.query(`CREATE TABLE "${driftSchema}".agent_conversations (
+        id uuid PRIMARY KEY, sandbox_coordination_token uuid GENERATED ALWAYS AS (id) STORED
+      )`)
+      const result = await applyMigrations(pool, driftSchema, AGENT_SANDBOX_OPERATIONS_MIGRATION)
+      expect(result.status, await result.text()).not.toBe(200)
+      const receipt = await pool.query(`SELECT 1 FROM "${driftSchema}"._prisma_migrations
+        WHERE migration_name = $1 AND finished_at IS NOT NULL`, [AGENT_SANDBOX_OPERATIONS_MIGRATION])
+      expect(receipt.rows).toHaveLength(0)
+    } finally {
+      if (previous === undefined) delete process.env.DATABASE_URL
+      else process.env.DATABASE_URL = previous
+      await pool.query(`DROP SCHEMA "${driftSchema}" CASCADE`)
+    }
+  })
+
   it("does not sweep a named sandbox while an in-flight launch owns it", async () => {
     const conversationId = await makeConversation()
     const sandboxName = agentConversationSandboxName(conversationId)

@@ -32,11 +32,15 @@ pre-dispatch lookup failures and receipt writes in a separate bounded page from
 fresh stops. It can retire an expired launch reservation that never progressed
 to dispatch, or a launch whose successful settlement was persisted.
 
-An ambiguous stop stays fenced until the provider reports the recorded session
-stopped and identifies it as the source of the current saved snapshot. A missing name, an unrelated current
-session, and the passage of time are insufficient evidence. An ambiguous
-name-based launch remains fenced for investigation. The provider-call
-coordinator may have exited before persisting the result.
+Stop recovery reads the operation record even after the owning run is deleted.
+A confirmed stop can finish bookkeeping from its durable receipt. A dispatched
+stop requires the provider to identify the recorded session as stopped and
+confirm either its saved snapshot or that the advertised snapshot is gone.
+A missing sandbox name, missing snapshot metadata after dispatch, an unrelated
+session or snapshot, and elapsed time leave the operation fenced. Before
+dispatch, a verified stopped session without an advertised snapshot can proceed
+to the existing launch fallback. An ambiguous name-based launch remains fenced
+for investigation if the coordinator exited before persisting the result.
 
 When a fence remains, correlate the operation with the provider's session and
 snapshot history and the application invocation logs. Before approving a

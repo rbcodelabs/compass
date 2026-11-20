@@ -83,6 +83,38 @@ describe("persistent sandbox stop", () => {
     expect(sdk.snapshotGet).not.toHaveBeenCalled()
   })
 
+  it.each([404, 410])("settles a stopped session whose advertised snapshot is gone (%s)", async (status) => {
+    const sandbox = fakeSandbox({
+      currentSnapshotId: "expired-snapshot",
+      currentSession: () => ({ sessionId: "target", status: "stopped" }),
+    })
+    sdk.get.mockResolvedValue(sandbox)
+    sdk.snapshotGet.mockRejectedValueOnce(new sdk.APIError(status))
+    await expect(prepareVercelSandboxStop("conv")).resolves.toBeNull()
+    sdk.snapshotGet.mockRejectedValueOnce(new sdk.APIError(status))
+    await expect(isVercelSandboxQuiescent("conv", "target")).resolves.toBe(true)
+    expect(sandbox.stop).not.toHaveBeenCalled()
+  })
+
+  it("allows a fresh launch when the stopped sandbox has no advertised snapshot before dispatch", async () => {
+    sdk.get.mockResolvedValue(fakeSandbox({
+      currentSession: () => ({ sessionId: "target", status: "stopped" }),
+    }))
+    await expect(prepareVercelSandboxStop("conv")).resolves.toBeNull()
+    // For a dispatched stop, missing metadata alone does not prove preservation or expiry.
+    await expect(isVercelSandboxQuiescent("conv", "target")).resolves.toBe(false)
+    expect(sdk.snapshotGet).not.toHaveBeenCalled()
+  })
+
+  it("keeps a stopped session fenced if snapshot lookup fails without proving absence", async () => {
+    sdk.get.mockResolvedValueOnce(fakeSandbox({
+      currentSnapshotId: "unverified-snapshot",
+      currentSession: () => ({ sessionId: "target", status: "stopped" }),
+    }))
+    sdk.snapshotGet.mockRejectedValueOnce(new sdk.APIError(503))
+    await expect(prepareVercelSandboxStop("conv")).rejects.toThrow("503")
+  })
+
   it("requires the current saved snapshot to belong to the stopped target session", async () => {
     const sandbox = fakeSandbox({
       currentSnapshotId: "snap",
