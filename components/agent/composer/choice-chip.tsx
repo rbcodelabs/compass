@@ -155,7 +155,7 @@ export function ChoiceChip({ kind, icon, options, value, onChange, disabled = fa
           {triggerBody}
         </button>
         <Sheet open={open} onOpenChange={setOpen}>
-          <SheetContent id={listId} aria-label={`${kind} options`} side="bottom" showCloseButton={false} initialFocus={focusSelected} className="max-h-[80dvh] gap-0 overflow-auto rounded-t-2xl p-2 pb-6" data-testid={`${kind.toLowerCase()}-sheet`}>
+          <SheetContent id={listId} aria-label={`${kind} options`} side="bottom" showCloseButton={false} initialFocus={focusSelected} overlayClassName="z-[80]" className="z-[80] max-h-[80dvh] gap-0 overflow-auto rounded-t-2xl p-2 pb-6" data-testid={`${kind.toLowerCase()}-sheet`}>
             <div aria-hidden="true" className="mx-auto mt-0.5 mb-2 h-1 w-9 rounded bg-border-strong" />
             <SheetTitle className="px-2.5 pt-2 pb-1 text-[10.5px] font-semibold tracking-[0.07em] text-muted-foreground uppercase">{kind}</SheetTitle>
             <OptionList kind={kind} options={options} value={value} onSelect={select} sheet listRef={listRef} />

@@ -47,6 +47,8 @@ const LAYER_OWNERS = {
     "components/ui/popover.tsx",
     "components/ui/context-menu.tsx",
     "components/ui/tooltip.tsx",
+    // The composer's phone bottom-sheet pickers (Agent, Participation, Model): transient popups opened from inside the detail panel (60), so backdrop and sheet must clear it.
+    "components/agent/composer/choice-chip.tsx",
     // Transient floating actions beside a text selection; may sit over the detail panel (60) and dialogs (70).
     "components/selection-ask-pill.tsx",
     // Hover card for entity pills; a transient popup opened from chat, docs and panels (60), so it must clear the detail panel and dialogs (70).

@@ -154,6 +154,21 @@ describe("ChoiceChip", () => {
     expect(shared).not.toHaveClass("truncate")
   })
 
+  // Class assertions only: the real layout guard is e2e/functional/specs/composer-mention-only-mobile.spec.ts (jsdom has no layout).
+  it("gives the wrapper a 7rem floor on a narrow card so the footer wraps instead of squashing it", () => {
+    const { container } = render(<Harness />)
+    expect(container.firstElementChild).toHaveClass("@max-md/composer:min-w-28", "@max-md/composer:flex-1")
+  })
+
+  it("lifts the phone bottom sheet and its backdrop to the popup layer (z-80) so it paints above the z-60 detail panel (B1)", async () => {
+    mockNarrow(true)
+    render(<Harness />)
+    await click(screen.getByRole("button", { name: /^Agent:/ }))
+    const sheet = await screen.findByTestId("agent-sheet")
+    expect(sheet).toHaveClass("z-[80]")
+    expect(document.querySelector('[data-slot="sheet-overlay"]')).toHaveClass("z-[80]")
+  })
+
   it("renders a bottom sheet with 44px rows below the sm breakpoint", async () => {
     mockNarrow(true)
     render(<Harness />)
