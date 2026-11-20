@@ -21,7 +21,7 @@ export async function resolveArtifactGallery(ctx: ResolveContext, config: Artifa
       sourceType: true,
       updatedAt: true,
       currentRevisionId: true,
-      currentRevision: { select: { thumbnailPathname: true } },
+      currentRevision: { select: { artifactId: true, thumbnailPathname: true } },
     },
   })
   const rows = selected
@@ -41,7 +41,7 @@ export async function resolveArtifactGallery(ctx: ResolveContext, config: Artifa
         sourceType: row.sourceType,
         updatedAt: row.updatedAt.toISOString(),
         href: `${base}/docs/artifacts/${row.id}`,
-        thumbnailSrc: row.currentRevisionId && row.currentRevision?.thumbnailPathname ? `/api/artifacts/${row.id}/revisions/${row.currentRevisionId}/thumbnail` : null,
+        thumbnailSrc: row.currentRevisionId && row.currentRevision?.artifactId === row.id && row.currentRevision.thumbnailPathname ? `/api/artifacts/${row.id}/revisions/${row.currentRevisionId}/thumbnail` : null,
       })),
     },
   }

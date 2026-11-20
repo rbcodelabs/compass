@@ -14,7 +14,7 @@ export interface PickerItem {
  * (archived or deleted) stay listed as "Unavailable" so the admin can remove them.
  */
 export function OrderedPicker({
-  idPrefix, heading, noun, items, selectedIds, max, loading, onChange,
+  idPrefix, heading, noun, items, selectedIds, max, loading, unavailable, onChange,
 }: {
   idPrefix: string
   heading: string
@@ -23,6 +23,7 @@ export function OrderedPicker({
   selectedIds: string[]
   max: number
   loading: boolean
+  unavailable?: boolean
   onChange: (ids: string[]) => void
 }) {
   const byId = new Map(items.map((item) => [item.id, item]))
@@ -39,7 +40,7 @@ export function OrderedPicker({
     <div className="flex flex-col gap-2">
       <span className="text-sm font-medium">{heading}</span>
       {loading ? <p className="text-xs text-text-subtle">Loading {noun}s…</p> : null}
-      {!loading && items.length === 0 ? <p className="text-xs leading-5 text-text-subtle">No {noun}s yet.</p> : null}
+      {!loading && !unavailable && items.length === 0 ? <p className="text-xs leading-5 text-text-subtle">No {noun}s yet.</p> : null}
       {selectedIds.length > 0 ? (
         <ol className="flex flex-col gap-1" aria-label={`Selected ${noun}s, in display order`}>
           {selectedIds.map((id, index) => {

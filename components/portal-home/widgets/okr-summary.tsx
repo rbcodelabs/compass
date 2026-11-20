@@ -100,9 +100,9 @@ export function OkrSummaryForm({ config, onChange, options }: ConfigFormProps<Ok
             onChange={(cycleId) => onChange({ ...config, cycleId: cycleId || null })}
             options={[{ value: "", label: `Choose a ${labels.cycle.lower}…` }, ...(omittedCycle ? [{ value: omittedCycle, label: `Selected ${labels.cycle.lower} outside this list` }] : []), ...cycles.map((cycle) => ({ value: cycle.id, label: cycle.title }))]}
           />
-        ) : (
+        ) : !options?.unavailable ? (
           <p className="text-xs leading-5 text-text-subtle">{options === null ? `Loading ${labels.cycle.lowerPlural}…` : `No ${labels.sections.okr} ${labels.cycle.lowerPlural} yet.`}</p>
-        )
+        ) : null
       ) : null}
       {config.mode === "selected" ? (
         <OrderedPicker
@@ -113,6 +113,7 @@ export function OkrSummaryForm({ config, onChange, options }: ConfigFormProps<Ok
           selectedIds={config.objectiveIds}
           max={OKR_SUMMARY_MAX_OBJECTIVES}
           loading={options === null}
+          unavailable={options?.unavailable}
           onChange={(objectiveIds) => onChange({ ...config, objectiveIds })}
         />
       ) : null}

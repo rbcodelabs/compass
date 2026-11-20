@@ -56,9 +56,10 @@ test("Portal Home publishes and removes team-only widgets without exposing them 
     await chooseWidget(/^Artifact gallery/);
     await expect(settings.getByText("Could not load widget options.")).toBeVisible();
     await expect(settings.getByRole("textbox", { name: "Title" })).toBeEditable();
-    await settings.getByRole("button", { name: "Retry" }).click();
     await settings.getByRole("combobox", { name: "Which artifacts" }).click();
     await page.getByRole("option", { name: "Selected artifacts" }).click();
+    await expect(settings.getByText("No artifacts yet.", { exact: true })).toHaveCount(0);
+    await settings.getByRole("button", { name: "Retry" }).click();
     for (const title of artifactTitles) {
       await settings.getByRole("checkbox", { name: new RegExp(title) }).click();
     }
@@ -137,6 +138,8 @@ test("Portal Home publishes and removes team-only widgets without exposing them 
     await customerPage.goto(`${baseURL}${verification.pathname}${verification.search}`);
     expect((await customer.cookies()).some(({ name }) => name === "compass_portal_session")).toBe(true);
     await checkCustomerHome();
+    await expect(customerPage.getByText(email, { exact: true })).toBeVisible();
+    await expect(customerPage.getByRole("button", { name: "Sign out", exact: true })).toBeVisible();
 
     expect((await page.request.put(api, { data: { widgets: [pending] } })).ok()).toBe(true);
     expect((await page.request.post(`${api}/publish`)).ok()).toBe(true);

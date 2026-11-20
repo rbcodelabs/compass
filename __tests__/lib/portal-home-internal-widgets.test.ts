@@ -15,15 +15,15 @@ function fakePrisma() {
   return {
     artifact: {
       findMany: vi.fn(async () => [
-        { id: "a1", title: "Prototype", kind: null, sourceType: "HTML_UPLOAD", updatedAt: new Date(Date.UTC(2026, 8, 1)), currentRevisionId: "r1", currentRevision: { thumbnailPathname: "x" } },
-        { id: "a2", title: "Deck", kind: "SLIDE_DECK", sourceType: "HTML_UPLOAD", updatedAt: new Date(Date.UTC(2026, 8, 2)), currentRevisionId: null, currentRevision: null },
+        { id: "a1", title: "Prototype", kind: null, sourceType: "HTML_UPLOAD", updatedAt: new Date(Date.UTC(2026, 8, 1)), currentRevisionId: "r1", currentRevision: { artifactId: "a1", thumbnailPathname: "x" } },
+        { id: "a2", title: "Deck", kind: "SLIDE_DECK", sourceType: "HTML_UPLOAD", updatedAt: new Date(Date.UTC(2026, 8, 2)), currentRevisionId: "r2", currentRevision: { artifactId: "other-artifact", thumbnailPathname: "x" } },
       ]),
     },
     oKRCycle: { findFirst: vi.fn(async () => ({ id: "c1", title: "Q4" })) },
     objective: {
       findMany: vi.fn(async () => [
-        { id: "o1", title: "Grow", status: "ON_TRACK", keyResults: [{ target: 10, current: 5 }, { target: 100, current: 100 }] },
-        { id: "o2", title: "Empty", status: "AT_RISK", keyResults: [] },
+        { id: "o1", title: "Grow", status: "ON_TRACK", cycle: { title: "Q4", workspaceId: WS }, keyResults: [{ target: 10, current: 5 }, { target: 100, current: 100 }] },
+        { id: "o2", title: "Empty", status: "AT_RISK", cycle: null, keyResults: [] },
       ]),
     },
   }
@@ -61,11 +61,11 @@ describe("artifact gallery and OKR widgets", () => {
   it("uses shared progress math and keeps legacy key results without a workspace", async () => {
     const prisma = fakePrisma()
     prisma.objective.findMany.mockResolvedValueOnce([
-      { id: "o1", title: "Reduce churn", status: "ON_TRACK", keyResults: [{ current: -5, target: -10 }] },
+      { id: "o1", title: "Reduce churn", status: "ON_TRACK", cycle: { title: "Other cycle", workspaceId: "other-workspace" }, keyResults: [{ current: -5, target: -10 }] },
     ])
     const widget = okrWidget({ mode: "selected", objectiveIds: ["o1"] })
     const home = await resolveHomeForTeam(ctx(prisma), [widget])
-    expect(home.resolved[widget.id]).toMatchObject({ data: { objectives: [{ progress: 50, keyResultCount: 1 }] } })
+    expect(home.resolved[widget.id]).toMatchObject({ data: { objectives: [{ progress: 50, keyResultCount: 1, cycleTitle: null }] } })
     expect(prisma.objective.findMany).toHaveBeenCalledWith(expect.objectContaining({
       select: expect.objectContaining({
         keyResults: { where: { OR: [{ workspaceId: WS }, { workspaceId: null }] }, select: { current: true, target: true } },

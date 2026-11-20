@@ -48,7 +48,7 @@ interface Props {
   initialCustomerAvailability: Record<string, CustomerAvailability>
 }
 
-const EMPTY_OPTIONS: HomeOptions = { roadmapItems: [], docs: [] }
+const UNAVAILABLE_OPTIONS: HomeOptions = { roadmapItems: [], docs: [], unavailable: true }
 
 const VISIBILITY_LABEL = { everyone: "Everyone", signed_in: "Signed-in customers", segments: "Segments", team: "Team only" } as const
 
@@ -392,7 +392,7 @@ export function PortalHomeEditor({ orgSlug, workspaceSlug, children, initialDraf
                     <Button type="button" variant="outline" onClick={() => setOptionsByScope((current) => ({ ...current, [optionsScope]: undefined }))}>Retry</Button>
                   </div>
                 ) : null}
-                {renderWidgetForm(selected, updateWidget, options === "error" ? EMPTY_OPTIONS : options ?? null)}
+                {renderWidgetForm(selected, updateWidget, options === "error" ? UNAVAILABLE_OPTIONS : options ?? null)}
                 {isTeamOnlyWidgetType(selected.type) ? (
                   <p className="text-sm text-text-secondary">Visible to: Team only</p>
                 ) : (

@@ -101,6 +101,7 @@ export function ArtifactGalleryForm({ config, onChange, options }: ConfigFormPro
           selectedIds={config.artifactIds}
           max={ARTIFACT_GALLERY_MAX_ITEMS}
           loading={options === null}
+          unavailable={options?.unavailable}
           onChange={(artifactIds) => onChange({ ...config, artifactIds })}
         />
       ) : (

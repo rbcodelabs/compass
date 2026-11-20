@@ -1,4 +1,5 @@
 export interface HomeOptions {
+  unavailable?: true
   roadmapItems: { id: string; title: string; horizon: string; isPrivate: boolean }[]
   docs: { id: string; title: string; isPublished?: boolean }[]
   /** Optional so older cached responses still type-check; the forms treat a missing list as empty. */
