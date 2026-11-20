@@ -108,6 +108,9 @@ describe.skipIf(!integrationDatabaseUrl)("schema-first migration batch on Postgr
   }, 120_000)
 
   it.each([
+    [migrations[2], "ALTER TABLE @schema@.decision_votes ALTER COLUMN id DROP DEFAULT", "ALTER TABLE @schema@.decision_votes ALTER COLUMN updated_at DROP DEFAULT", "ALTER TABLE @schema@.decision_votes ALTER COLUMN id SET DEFAULT gen_random_uuid(), ALTER COLUMN updated_at SET DEFAULT CURRENT_TIMESTAMP", "decision_votes.id"],
+    [migrations[2], "ALTER TABLE @schema@.decision_votes ALTER COLUMN created_at DROP DEFAULT", "ALTER TABLE @schema@.decision_votes ALTER COLUMN updated_at DROP DEFAULT", "ALTER TABLE @schema@.decision_votes ALTER COLUMN created_at SET DEFAULT CURRENT_TIMESTAMP, ALTER COLUMN updated_at SET DEFAULT CURRENT_TIMESTAMP", "decision_votes.created_at"],
+    [migrations[2], "ALTER TABLE @schema@.decision_votes DROP CONSTRAINT decision_votes_pkey", "ALTER TABLE @schema@.decision_votes ADD PRIMARY KEY (request_id)", "ALTER TABLE @schema@.decision_votes DROP CONSTRAINT decision_votes_pkey, ADD PRIMARY KEY (id)", "primary key"],
     [migrations[0], "ALTER TABLE @schema@.external_links DROP COLUMN title", "ALTER TABLE @schema@.external_links ADD COLUMN title VARCHAR(255) GENERATED ALWAYS AS (relation) STORED NOT NULL", "ALTER TABLE @schema@.external_links DROP COLUMN title, ADD COLUMN title VARCHAR(255) NOT NULL", "external_links.title"],
     [migrations[1], "ALTER TABLE @schema@.doc_versions DROP COLUMN version_number", "ALTER TABLE @schema@.doc_versions ADD COLUMN version_number TEXT", "ALTER TABLE @schema@.doc_versions DROP COLUMN version_number", "doc_versions.version_number"],
     [migrations[2], "ALTER TABLE @schema@.decision_votes ALTER COLUMN chosen_option TYPE VARCHAR(1)", "ALTER TABLE @schema@.decision_votes ALTER COLUMN chosen_option TYPE VARCHAR(1)", "ALTER TABLE @schema@.decision_votes ALTER COLUMN chosen_option TYPE VARCHAR(120)", "decision_votes.chosen_option"],
