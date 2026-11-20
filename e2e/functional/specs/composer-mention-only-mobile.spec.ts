@@ -83,15 +83,16 @@ for (const width of [390, 320]) {
         [convId, ids.workspace_id, ids.owner_id, `Composer layout thread ${suffix}`, oppId],
       );
 
-      // A running sub-agent makes the composer's team pill (another phone bottom sheet) appear.
+      // A finished run with a sub-agent makes the composer's team pill (another phone bottom sheet) appear. The run must not be
+      // active: an active run disables the composer's chips.
       await pool.query(
         `INSERT INTO "${S}".agent_runs (id, conversation_id, workspace_id, user_id, status, current_activity, worker_token_hash, last_heartbeat_at, deadline_at, status_changed_at)
-         VALUES ($1, $2, $3, $4, 'RUNNING', 'Working', $5, NOW(), NOW() + interval '1 hour', NOW())`,
+         VALUES ($1, $2, $3, $4, 'SUCCEEDED', NULL, $5, NOW(), NOW() + interval '1 hour', NOW())`,
         [runId, convId, ids.workspace_id, ids.owner_id, randomUUID().replaceAll("-", "").padEnd(64, "1")],
       );
       await pool.query(
         `INSERT INTO "${S}".agent_child_runs (id, conversation_id, run_id, workspace_id, native_agent_id, parent_child_run_id, parent_native_agent_id, role, description, status, current_activity, step_count, steps_json, result_summary, started_at, finished_at, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, 'toolu_layout', NULL, NULL, 'Layout Checker', 'Check the composer layout', 'RUNNING', 'Reading', 0, '[]', NULL, NOW(), NULL, NOW(), NOW())`,
+         VALUES ($1, $2, $3, $4, 'toolu_layout', NULL, NULL, 'Layout Checker', 'Check the composer layout', 'SUCCEEDED', NULL, 0, '[]', 'Checked.', NOW(), NOW(), NOW(), NOW())`,
         [childId, convId, runId, ids.workspace_id],
       );
 
