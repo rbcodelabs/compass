@@ -380,8 +380,7 @@ describe.skipIf(!databaseUrl)("existing CRUD works against a schema without the 
     }
   });
 
-  // TODO(integration-ci): schema is built from an early-migration subset that lacks the work-item seq_prefix columns the generated Prisma client now selects (adding 092_work_item_ids needs review_requests and its prerequisites), found when enabling in CI
-  it.skip("creates, updates and deletes opportunities, objectives, solutions and key results without touching link tables", async () => {
+  it("creates, updates and deletes opportunities, objectives, solutions and key results without touching link tables", async () => {
     const url = new URL(databaseUrl!);
     if (!["localhost", "127.0.0.1"].includes(url.hostname) || url.pathname !== "/compass_e2e") {
       throw new Error("Requires the local compass_e2e database");
@@ -402,6 +401,16 @@ describe.skipIf(!databaseUrl)("existing CRUD works against a schema without the 
       const body = (await applied.json()) as { error?: string };
       expect(applied.status, `${name}: ${body.error}`).toBe(200);
     }
+
+    // Match the current Prisma client with the columns from 092 that this CRUD fixture needs.
+    // The full migration depends on decision-gate tables outside this fixture.
+    for (const table of ["objectives", "key_results", "opportunities", "solutions"]) {
+      await pool.query(`ALTER TABLE "${schema}".${table}
+        ADD COLUMN seq_prefix VARCHAR(8),
+        ADD COLUMN seq_number INTEGER`);
+    }
+    await pool.query(`ALTER TABLE "${schema}".key_results ADD COLUMN workspace_id UUID`);
+
     const linkTables = await pool.query(`SELECT count(*)::int AS n FROM information_schema.tables WHERE table_schema = $1 AND table_name IN ('opportunity_objective_links','solution_key_result_links')`, [schema]);
     expect(linkTables.rows[0].n).toBe(0);
 
