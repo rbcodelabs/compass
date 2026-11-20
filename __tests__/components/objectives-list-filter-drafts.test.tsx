@@ -102,6 +102,33 @@ it("recomputes matches after remote objective and key result renames without los
   expect(screen.getByLabelText("Note (optional)")).toHaveValue("Draft across refresh");
 });
 
+it("preserves an open draft when a live custom-field change moves its objective between groups", async () => {
+  params.set("groupBy", "field:priority");
+  const tree = (currentValue: string) => (
+    <ObjectivesList
+      orgSlug="org"
+      workspaceSlug="workspace"
+      cyclePath="/org/workspace/okrs/cycle"
+      objectives={[{
+        id: "objective", title: "Alpha", status: "ON_TRACK", owner: null,
+        keyResults: [],
+        customFields: [{
+          id: "priority", name: "Priority", fieldType: "SELECT", objectType: "OBJECTIVE",
+          options: [{ value: "first", label: "First" }, { value: "second", label: "Second" }],
+          sharedOptionSetId: null, sharedOptionSetName: null, required: false, order: 0, currentValue,
+        }],
+      }]}
+    />
+  );
+  const { rerender } = render(tree("first"));
+  fireEvent.click(screen.getByRole("button", { name: "Add key result" }));
+  fireEvent.change(await screen.findByLabelText("Title"), { target: { value: "Draft across groups" } });
+  rerender(tree("second"));
+
+  expect(screen.getByRole("heading", { name: /Second/ })).toBeVisible();
+  expect(screen.getByLabelText("Title")).toHaveValue("Draft across groups");
+});
+
 describe.each([false, true])("filter drafts (grouped=%s)", (grouped) => {
   function hideAlpha() {
     const filter = screen.getByRole("searchbox", { name: /filter objectives by name/i });

@@ -142,7 +142,7 @@ export default async function CyclePage({ params, searchParams }: CyclePageProps
               orderBy: [{ cycle: { startDate: "asc" } }, { sortOrder: "asc" }],
             },
           },
-          orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+          orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }, { id: "asc" }],
         })
       : [];
 

@@ -428,6 +428,7 @@ export function SortableKeyResults({
   hideProgress?: boolean;
 }) {
   const [isSaving, startTransition] = useTransition();
+  const [reorderFailed, setReorderFailed] = useState(false);
   // A drag in progress also defers adoption: the list must not change under the pointer.
   const [isDragging, setIsDragging] = useState(false);
   const { state: keyResults, setState: setKeyResults } = useServerSyncedState(initialKeyResults, (k) => k, isSaving || isDragging);
@@ -443,7 +444,7 @@ export function SortableKeyResults({
   function handleDragEnd(event: DragEndEvent) {
     setIsDragging(false);
     const { active, over } = event;
-    if (!over || active.id === over.id) return;
+    if (isSaving || !over || active.id === over.id) return;
 
     const activeId = active.id as string;
     const oldIndex = keyResults.findIndex((kr) => kr.id === activeId);
@@ -451,8 +452,14 @@ export function SortableKeyResults({
 
     if (oldIndex !== -1 && newIndex !== -1 && oldIndex !== newIndex) {
       setKeyResults(arrayMove(keyResults, oldIndex, newIndex));
+      setReorderFailed(false);
       startTransition(async () => {
-        await reorderKeyResult(activeId, newIndex, revalidatePathStr);
+        try {
+          await reorderKeyResult(activeId, newIndex, revalidatePathStr);
+        } catch {
+          setKeyResults(keyResults);
+          setReorderFailed(true);
+        }
       });
     }
   }
@@ -461,6 +468,7 @@ export function SortableKeyResults({
     <DndContext id={dndId} sensors={sensors} collisionDetection={closestCenter} onDragStart={() => setIsDragging(true)} onDragCancel={() => setIsDragging(false)} onDragEnd={handleDragEnd}>
       <SortableContext items={keyResults.map((kr) => kr.id)} strategy={verticalListSortingStrategy}>
         <div className="okx-krs">
+          {reorderFailed && <p role="alert" className="text-sm text-destructive">Could not save the new order. Try moving the row again.</p>}
           {keyResults.map((kr) => (
             <KeyResultBar
               key={kr.id}
