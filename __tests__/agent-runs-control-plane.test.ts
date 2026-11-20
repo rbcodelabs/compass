@@ -617,3 +617,58 @@ describe("reapIdleConversationSandboxes", () => {
     expect(result.stopped).toEqual([])
   })
 })
+
+describe("persistent sandbox stop fencing", () => {
+  const sandboxName = agentConversationSandboxName("c-1")
+  const finishedAt = new Date(NOW.getTime() - 20 * 60_000)
+
+  function idleRun() {
+    const prisma = fakePrisma()
+    prisma.agentRun.findMany.mockResolvedValue([{ id: RUN_ID, conversationId: "c-1", sandboxName, finishedAt, status: "SUCCEEDED" }])
+    prisma.agentRun.findFirst.mockResolvedValue(null)
+    prisma.agentRun.create.mockImplementation(({ data }: Any) => Promise.resolve(data))
+    return prisma
+  }
+
+  it("holds off a queued launch while the stop can still affect the named sandbox", async () => {
+    const prisma = idleRun()
+    const dispatched = Promise.withResolvers<void>()
+    const response = Promise.withResolvers<void>()
+    const stopSandbox = vi.fn(async () => {
+      dispatched.resolve()
+      await response.promise
+    })
+    const sweep = reapIdleConversationSandboxes({ prisma, now: NOW, cleanup: { stopSandbox } })
+    try {
+      await Promise.race([dispatched.promise, sweep.then(() => { throw new Error("stop did not start") })])
+      await expect(createAgentRun({
+        prisma, conversationId: "c-1", workspaceId: "ws-1", userId: "user-1", now: NOW,
+      })).rejects.toMatchObject({ status: 409 })
+      expect(prisma.agentRun.create).not.toHaveBeenCalled()
+    } finally {
+      response.resolve()
+      await sweep
+    }
+  })
+
+  it("sends only one stop when two sweepers observe the same idle run", async () => {
+    const prisma = idleRun()
+    const dispatched = Promise.withResolvers<void>()
+    const response = Promise.withResolvers<void>()
+    const stopSandbox = vi.fn(async () => {
+      if (stopSandbox.mock.calls.length > 1) return
+      dispatched.resolve()
+      await response.promise
+    })
+    const sweep = reapIdleConversationSandboxes({ prisma, now: NOW, cleanup: { stopSandbox } })
+    try {
+      await Promise.race([dispatched.promise, sweep.then(() => { throw new Error("stop did not start") })])
+      const second = await reapIdleConversationSandboxes({ prisma, now: NOW, cleanup: { stopSandbox } })
+      expect(second.stopped).toEqual([])
+      expect(stopSandbox).toHaveBeenCalledTimes(1)
+    } finally {
+      response.resolve()
+      await sweep
+    }
+  })
+})
