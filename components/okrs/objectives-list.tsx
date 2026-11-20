@@ -98,7 +98,8 @@ export function ObjectivesList({
   }, [shownCount, totalCount, setCounts]);
   // Collapsed ids are view state only (not persisted); everything starts expanded.
   const [collapsedIds, setCollapsedIds] = useState<ReadonlySet<string>>(() => new Set());
-  const [, startTransition] = useTransition();
+  const [isSaving, startTransition] = useTransition();
+  const [reorderFailed, setReorderFailed] = useState(false);
   const searchParams = useSearchParams();
 
   // The picker lives in the page header (OkrGroupByToggle); this list only reads
@@ -140,7 +141,7 @@ export function ObjectivesList({
 
   function handleDragEnd(event: DragEndEvent) {
     const { active, over } = event;
-    if (!over || active.id === over.id) return;
+    if (isSaving || !over || active.id === over.id) return;
     if (!visibleIds.has(String(active.id)) || !visibleIds.has(String(over.id))) return;
 
     const activeId = active.id as string;
@@ -155,9 +156,15 @@ export function ObjectivesList({
         sortOrder: idx,
       }));
       setObjectives(reordered);
+      setReorderFailed(false);
 
       startTransition(async () => {
-        await reorderObjective(activeId, newIndex, cyclePath);
+        try {
+          await reorderObjective(activeId, { anchorId: overId, position: oldIndex < newIndex ? "after" : "before" }, cyclePath);
+        } catch {
+          setObjectives(objectives);
+          setReorderFailed(true);
+        }
       });
     }
   }
@@ -197,6 +204,7 @@ export function ObjectivesList({
 
   return (
     <>
+    {reorderFailed && <p role="alert" className="text-sm text-destructive">Could not save the new order. Try moving the row again.</p>}
     {filterActive && visibleObjectives.length === 0 && (
       <div className="rounded-lg border border-dashed border-border-default p-8 text-center text-sm text-text-secondary">
         No {labels.objective.lowerPlural} or {labels.keyResult.lowerPlural} match &ldquo;{query.trim()}&rdquo;.

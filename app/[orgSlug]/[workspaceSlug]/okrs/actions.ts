@@ -12,6 +12,7 @@ import { getKeyResultMoveTargets, moveKeyResultToObjective, OKRHierarchyError, s
 import { drainAfterParentDelete, drainLegacyLinksForOpportunities, drainLinksFor } from "@/lib/typed-links";
 import { readEntityLinksOpportunityKeyResultPointer } from "@/lib/links/readers";
 import { requireProductEntity, requireProductWorkspace, requireProductWorkspaceBySlug } from "@/lib/product-action-auth";
+import { withConflictRetry } from "@/lib/transaction-conflict";
 import { allocateOneSeq, withSequenceTransaction } from "@/lib/work-item-sequence"
 
 // ─── Create Cycle ─────────────────────────────────────────────────────────────
@@ -342,15 +343,32 @@ export async function deleteKeyResult(
 
 export async function reorderObjective(
   objectiveId: string,
-  sortOrder: number,
+  move: { anchorId: string; position: "before" | "after" },
   revalidatePathStr: string
 ) {
-  await requireProductEntity("objective", objectiveId);
+  const { workspaceId } = await requireProductEntity("objective", objectiveId);
+  if (move.position !== "before" && move.position !== "after") throw new Error("Invalid position");
+  if (objectiveId === move.anchorId) return;
   const prisma = getPrisma();
-  await prisma.objective.update({
-    where: { id: objectiveId },
-    data: { sortOrder },
-  });
+  await withConflictRetry(() => prisma.$transaction(async (tx) => {
+    const moved = await tx.objective.findFirst({ where: { id: objectiveId, workspaceId }, select: { cycleId: true } });
+    if (!moved) throw new Error("Not found");
+    const scope = { workspaceId, cycleId: moved.cycleId };
+    const siblings = await tx.objective.findMany({
+      where: scope,
+      orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }, { id: "asc" }],
+      select: { id: true, sortOrder: true },
+    });
+    const item = siblings.find(({ id }) => id === objectiveId);
+    const order = siblings.filter(({ id }) => id !== objectiveId);
+    const anchor = order.findIndex(({ id }) => id === move.anchorId);
+    if (!item || anchor < 0) throw new Error("Not found");
+    order.splice(anchor + (move.position === "after" ? 1 : 0), 0, item);
+    for (const [index, sibling] of order.entries()) {
+      if (sibling.sortOrder === index) continue;
+      await tx.objective.update({ where: { id: sibling.id, ...scope }, data: { sortOrder: index } });
+    }
+  }, { isolationLevel: "RepeatableRead" }));
   revalidatePath(revalidatePathStr);
 }
 
