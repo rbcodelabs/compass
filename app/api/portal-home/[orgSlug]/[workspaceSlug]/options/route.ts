@@ -40,7 +40,7 @@ export async function GET(_req: Request, route: HomeRouteParams) {
         where: { workspaceId },
         orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
         take: 200,
-        select: { id: true, title: true, cycle: { select: { title: true } } },
+        select: { id: true, title: true, cycle: { select: { title: true, workspaceId: true } } },
       }),
     ])
     // isPublished lets the Docs widget picker flag docs customers cannot see yet. The timestamp itself stays server-side.
@@ -49,7 +49,7 @@ export async function GET(_req: Request, route: HomeRouteParams) {
       docs: docs.map((doc) => ({ id: doc.id, title: doc.title, isPublished: doc.publishedAt !== null })),
       artifacts,
       okrCycles,
-      objectives: objectives.map((objective) => ({ id: objective.id, title: objective.title, cycleTitle: objective.cycle ? objective.cycle.title : null })),
+      objectives: objectives.map((objective) => ({ id: objective.id, title: objective.title, cycleTitle: objective.cycle?.workspaceId === workspaceId ? objective.cycle.title : null })),
     })
   })
 }

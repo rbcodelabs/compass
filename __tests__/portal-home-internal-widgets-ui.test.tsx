@@ -83,10 +83,10 @@ describe("Artifact gallery form", () => {
     expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ artifactIds: [id(1)] }))
   })
 
-  it("keeps an archived or deleted pick visible as Unavailable so it can be removed", () => {
+  it("keeps a selection outside the options list visible so it can be removed", () => {
     const onChange = vi.fn()
     render(<ArtifactGalleryForm config={{ ...galleryConfig, mode: "selected", artifactIds: [id(99)] }} options={options} onChange={onChange} />)
-    fireEvent.click(screen.getByRole("button", { name: "Remove Unavailable artifact" }))
+    fireEvent.click(screen.getByRole("button", { name: "Remove Selected artifact outside this list" }))
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ artifactIds: [] }))
   })
 

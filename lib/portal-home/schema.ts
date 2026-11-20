@@ -40,6 +40,8 @@ const base = {
   visibility: z.enum(WIDGET_VISIBILITIES).default("everyone"),
 }
 
+const teamVisibility = base.visibility.transform((): WidgetVisibility => "team")
+
 export const widgetSchema = z.discriminatedUnion("type", [
   z.object({ ...base, type: z.literal("announcement"), config: announcementConfig }),
   z.object({ ...base, type: z.literal("key_links"), config: keyLinksConfig }),
@@ -48,8 +50,8 @@ export const widgetSchema = z.discriminatedUnion("type", [
   z.object({ ...base, type: z.literal("recent_updates"), config: recentUpdatesConfig }),
   z.object({ ...base, type: z.literal("rich_text"), config: richTextConfig }),
   z.object({ ...base, type: z.literal("docs"), config: docsConfig }),
-  z.object({ ...base, type: z.literal("artifact_gallery"), config: artifactGalleryConfig }),
-  z.object({ ...base, type: z.literal("okr_summary"), config: okrSummaryConfig }),
+  z.object({ ...base, type: z.literal("artifact_gallery"), visibility: teamVisibility, config: artifactGalleryConfig }),
+  z.object({ ...base, type: z.literal("okr_summary"), visibility: teamVisibility, config: okrSummaryConfig }),
 ])
 export type PortalHomeWidget = z.infer<typeof widgetSchema>
 export type WidgetType = PortalHomeWidget["type"]
@@ -74,6 +76,10 @@ export const WIDGET_DEFINITIONS = {
 
 export const WIDGET_TYPES = Object.keys(WIDGET_DEFINITIONS) as WidgetType[]
 
+export function isTeamOnlyWidgetType(type: WidgetType): boolean {
+  return type === "artifact_gallery" || type === "okr_summary"
+}
+
 export function newWidgetId(): string {
   return `w_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`
 }
@@ -86,7 +92,7 @@ export function createWidget(type: WidgetType, order: number): PortalHomeWidget 
     type,
     size: definition.defaultSize,
     order,
-    visibility: "everyone",
+    visibility: isTeamOnlyWidgetType(type) ? "team" : "everyone",
     config: definition.defaultConfig(),
   } as PortalHomeWidget
 }

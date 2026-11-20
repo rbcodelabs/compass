@@ -45,11 +45,42 @@ const widgets = () => [createWidget("artifact_gallery", 0), createWidget("okr_su
 describe("artifact gallery and OKR widgets", () => {
   it("never query or resolve for a customer, even when visible to everyone", async () => {
     const prisma = fakePrisma()
-    const home = await resolveHomeForCustomer(ctx(prisma), widgets(), { signedIn: true })
+    const home = await resolveHomeForCustomer(ctx(prisma), widgets().map((widget) => ({ ...widget, visibility: "everyone" })), { signedIn: true })
     expect(home.widgets).toEqual([])
     expect(prisma.artifact.findMany).not.toHaveBeenCalled()
     expect(prisma.objective.findMany).not.toHaveBeenCalled()
     expect(prisma.oKRCycle.findFirst).not.toHaveBeenCalled()
+  })
+
+  it.each(["artifact_gallery", "okr_summary"] as const)("always treats %s as team-only, including stored drafts", (type) => {
+    const widget = createWidget(type, 0)
+    expect(widget.visibility).toBe("team")
+    expect(widgetSchema.parse({ ...widget, visibility: "everyone" }).visibility).toBe("team")
+  })
+
+  it("uses shared progress math and keeps legacy key results without a workspace", async () => {
+    const prisma = fakePrisma()
+    prisma.objective.findMany.mockResolvedValueOnce([
+      { id: "o1", title: "Reduce churn", status: "ON_TRACK", keyResults: [{ current: -5, target: -10 }] },
+    ])
+    const widget = okrWidget({ mode: "selected", objectiveIds: ["o1"] })
+    const home = await resolveHomeForTeam(ctx(prisma), [widget])
+    expect(home.resolved[widget.id]).toMatchObject({ data: { objectives: [{ progress: 50, keyResultCount: 1 }] } })
+    expect(prisma.objective.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      select: expect.objectContaining({
+        keyResults: { where: { OR: [{ workspaceId: WS }, { workspaceId: null }] }, select: { current: true, target: true } },
+      }),
+    }))
+  })
+
+  it("uses the newest active cycle, matching the OKRs index", async () => {
+    const prisma = fakePrisma()
+    await resolveHomeForTeam(ctx(prisma), [okrWidget({ mode: "active" })])
+    expect(prisma.oKRCycle.findFirst).toHaveBeenCalledTimes(1)
+    expect(prisma.oKRCycle.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: { workspaceId: WS, status: "ACTIVE" },
+      orderBy: [{ startDate: "desc" }],
+    }))
   })
 
   it("selected mode keeps the admin's order, drops missing ids, and scopes the query to the workspace", async () => {

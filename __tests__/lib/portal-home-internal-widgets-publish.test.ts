@@ -8,7 +8,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { ZodError } from "zod"
 import type { AppPrismaClient } from "@/lib/db"
 import { resolveCustomerAvailability, resolveHomeForCustomer, resolveHomeForTeam } from "@/lib/portal-home/resolve"
-import { createWidget, hasUnpublishedChanges, parseStoredWidgets, type PortalHomeWidget } from "@/lib/portal-home/schema"
+import { createWidget, hasUnpublishedChanges, type PortalHomeWidget } from "@/lib/portal-home/schema"
 import { loadHomeLayout, loadPublishedHome, publishDraft, saveDraft } from "@/lib/portal-home/service"
 
 const WS = "11111111-1111-4111-8111-111111111111"
@@ -149,30 +149,31 @@ describe("rolling back internal widgets", () => {
     expect(hasUnpublishedChanges(after.draft, after.published)).toBe(false)
   })
 
-  it("a code rollback is safe for what is already stored: a build that does not know a widget type drops it on read and keeps the rest", () => {
-    // Stand-in for the older build's lenient read: a stored widget whose type it has no schema for.
-    const unknownToOlderBuild = { id: "w_future", type: "future_widget", size: "M", order: 5, visibility: "everyone", config: {} }
-    const stored = [richText(0), gallery(1), unknownToOlderBuild, okr(2)]
-    const parsed = parseStoredWidgets(stored)
-    expect(parsed.map((w) => w.type)).toEqual(["rich_text", "artifact_gallery", "okr_summary"])
-    // An internal widget whose config no longer validates is dropped alone; the page does not fail.
-    const bad = { ...gallery(3), config: { ...gallery(3).config, maxItems: 999 } }
-    expect(parseStoredWidgets([richText(0), bad]).map((w) => w.type)).toEqual(["rich_text"])
-  })
+  it("restores the customer publication and the pending draft with their own templates", async () => {
+    const live = richText(0)
+    const next = richText(0)
+    next.config.title = "Pending customer edit"
 
-  it("republishing after a revert of only the draft (rollback to the previously published layout) restores exactly that layout", async () => {
-    await saveDraft(prisma, WS, [richText(0)])
+    await saveDraft(prisma, WS, [live, gallery(1)], "bento")
     await publishDraft(prisma, WS, "user-1")
-    const previouslyPublished = structuredClone(row!.publishedWidgets)
+    await saveDraft(prisma, WS, [next, okr(1)], "docs_hub")
+    const snapshot = await loadHomeLayout(prisma, WS)
+    expect(snapshot.published?.map((widget) => widget.type)).toEqual(["rich_text", "artifact_gallery"])
+    expect(snapshot.draft.map((widget) => widget.type)).toEqual(["rich_text", "okr_summary"])
 
-    await saveDraft(prisma, WS, [richText(0), gallery(1), okr(2)])
+    // Remove the feature's widgets from each snapshot independently. Restore
+    // the customer publication first, then restore the filtered pending draft.
+    const publicWidgets = (widgets: PortalHomeWidget[]) => widgets.filter(({ type }) => type !== "artifact_gallery" && type !== "okr_summary")
+    await saveDraft(prisma, WS, publicWidgets(snapshot.published ?? []), snapshot.publishedTemplate)
     await publishDraft(prisma, WS, "user-1")
-    expect(row!.publishedWidgets).not.toEqual(previouslyPublished)
+    await saveDraft(prisma, WS, publicWidgets(snapshot.draft), snapshot.draftTemplate)
 
-    const layout = await loadHomeLayout(prisma, WS)
-    await saveDraft(prisma, WS, previouslyPublished)
-    await publishDraft(prisma, WS, "user-1")
-    expect(layout.published?.length).toBe(3)
-    expect(row!.publishedWidgets).toEqual(previouslyPublished)
+    expect(await loadPublishedHome(prisma, WS)).toEqual({ widgets: [live], template: "bento" })
+    const restored = await loadHomeLayout(prisma, WS)
+    expect(restored.draft).toEqual([next])
+    expect(restored.draftTemplate).toBe("docs_hub")
+    expect(hasUnpublishedChanges(restored.draft, restored.published, {
+      draft: restored.draftTemplate, published: restored.publishedTemplate,
+    })).toBe(true)
   })
 })

@@ -106,7 +106,6 @@ export function ArtifactGalleryForm({ config, onChange, options }: ConfigFormPro
       ) : (
         <p className="text-xs leading-5 text-text-subtle">Shows your most recently updated active artifacts. Add more than one gallery to group different artifacts.</p>
       )}
-      <p className="text-xs leading-5 text-text-subtle">Artifacts are internal: this widget is never shown to customers, whatever its visibility setting.</p>
     </div>
   )
 }

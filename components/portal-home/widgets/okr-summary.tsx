@@ -67,6 +67,8 @@ export function OkrSummaryRenderer({ config, data }: RendererProps<OkrSummaryCon
 export function OkrSummaryForm({ config, onChange, options }: ConfigFormProps<OkrSummaryConfig>) {
   const labels = useLabels()
   const cycles = options?.okrCycles ?? []
+  const savedCycle = config.cycleId
+  const omittedCycle = savedCycle && !cycles.some((cycle) => cycle.id === savedCycle) ? savedCycle : null
   const objectives = (options?.objectives ?? []).map((objective) => ({ id: objective.id, label: objective.title, hint: objective.cycleTitle ?? `No ${labels.cycle.lower}` }))
   return (
     <div className="flex flex-col gap-3">
@@ -90,13 +92,13 @@ export function OkrSummaryForm({ config, onChange, options }: ConfigFormProps<Ok
         options={Array.from({ length: OKR_SUMMARY_MAX_OBJECTIVES }, (_, i) => ({ value: String(i + 1), label: String(i + 1) }))}
       />
       {config.mode === "cycle" ? (
-        cycles.length > 0 ? (
+        cycles.length > 0 || omittedCycle ? (
           <SelectField
             id="okr-cycle"
             label={labels.cycle.singular}
             value={config.cycleId ?? ""}
             onChange={(cycleId) => onChange({ ...config, cycleId: cycleId || null })}
-            options={[{ value: "", label: `Choose a ${labels.cycle.lower}…` }, ...cycles.map((cycle) => ({ value: cycle.id, label: cycle.title }))]}
+            options={[{ value: "", label: `Choose a ${labels.cycle.lower}…` }, ...(omittedCycle ? [{ value: omittedCycle, label: `Selected ${labels.cycle.lower} outside this list` }] : []), ...cycles.map((cycle) => ({ value: cycle.id, label: cycle.title }))]}
           />
         ) : (
           <p className="text-xs leading-5 text-text-subtle">{options === null ? `Loading ${labels.cycle.lowerPlural}…` : `No ${labels.sections.okr} ${labels.cycle.lowerPlural} yet.`}</p>
@@ -114,8 +116,7 @@ export function OkrSummaryForm({ config, onChange, options }: ConfigFormProps<Ok
           onChange={(objectiveIds) => onChange({ ...config, objectiveIds })}
         />
       ) : null}
-      {config.mode === "active" ? <p className="text-xs leading-5 text-text-subtle">Shows {labels.objective.lowerPlural} from the active {labels.sections.okr} {labels.cycle.lower}. Add more than one card to show different {labels.cycle.lowerPlural} or groups.</p> : null}
-      <p className="text-xs leading-5 text-text-subtle">{labels.sections.okrs} are internal: this widget is never shown to customers, whatever its visibility setting.</p>
+      {config.mode === "active" ? <p className="text-xs leading-5 text-text-subtle">Shows {labels.objective.lowerPlural} from the newest active {labels.cycle.lower}, or {labels.objective.lowerPlural} without a {labels.cycle.lower} if none is active.</p> : null}
     </div>
   )
 }

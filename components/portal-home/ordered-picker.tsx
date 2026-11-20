@@ -44,7 +44,7 @@ export function OrderedPicker({
         <ol className="flex flex-col gap-1" aria-label={`Selected ${noun}s, in display order`}>
           {selectedIds.map((id, index) => {
             const item = byId.get(id)
-            const name = item ? item.label || "Untitled" : `Unavailable ${noun}`
+            const name = item ? item.label || "Untitled" : `Selected ${noun} outside this list`
             return (
               <li key={id} className="flex items-center gap-1.5 rounded-md border border-border-default bg-surface-inset px-2 py-1 text-xs">
                 <span className="min-w-0 flex-1 truncate">{name}</span>

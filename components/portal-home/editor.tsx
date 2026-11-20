@@ -9,7 +9,7 @@ import { SortableContext, arrayMove, rectSortingStrategy, sortableKeyboardCoordi
 import { CSS } from "@dnd-kit/utilities"
 import { Eye, GripVertical, Pencil, Plus, Trash2, X } from "lucide-react"
 import {
-  WIDGET_DEFINITIONS, WIDGET_SIZES, WIDGET_TYPES, createWidget, hasUnpublishedChanges, layoutSchema, normalizeOrder,
+  WIDGET_DEFINITIONS, WIDGET_SIZES, WIDGET_TYPES, createWidget, hasUnpublishedChanges, isTeamOnlyWidgetType, layoutSchema, normalizeOrder,
   type PortalHomeWidget, type WidgetSize, type WidgetType,
 } from "@/lib/portal-home/schema"
 import type { WidgetResolution } from "@/lib/portal-home/data"
@@ -95,6 +95,7 @@ export function PortalHomeEditor({ orgSlug, workspaceSlug, children, initialDraf
   const [message, setMessage] = useState<string | null>(null)
   const [publishing, setPublishing] = useState(false)
   const [options, setOptions] = useState<HomeOptions | null>(null)
+  const [optionsFailed, setOptionsFailed] = useState(false)
   const [preview, setPreview] = useState<{ widgets: PortalHomeWidget[]; resolved: Record<string, WidgetResolution> } | null>(null)
 
   const widgetsRef = useRef(widgets)
@@ -195,11 +196,14 @@ export function PortalHomeEditor({ orgSlug, workspaceSlug, children, initialDraf
     }
   }, [widgets, mode, endpoint])
 
-  // Pickers load once, when editing starts.
   useEffect(() => {
-    if (mode !== "edit" || options) return
-    api<HomeOptions>(`${endpoint}/options`).then(setOptions).catch(() => undefined)
-  }, [mode, options, endpoint])
+    if (mode !== "edit" || options || optionsFailed) return
+    let cancelled = false
+    api<HomeOptions>(`${endpoint}/options`)
+      .then((result) => { if (!cancelled) setOptions(result) })
+      .catch(() => { if (!cancelled) setOptionsFailed(true) })
+    return () => { cancelled = true }
+  }, [mode, options, optionsFailed, endpoint])
 
   const startPreview = async () => {
     if (!(await saveNow())) return
@@ -308,6 +312,10 @@ export function PortalHomeEditor({ orgSlug, workspaceSlug, children, initialDraf
         </div>
       </div>
 
+      {mode !== "view" && unpublished ? (
+        <p className="text-sm text-text-secondary">Publish applies the entire draft, including customer-facing widgets and the template. Both homes share a 24-widget limit.</p>
+      ) : null}
+
       {message ? (
         <p role="status" className="rounded-lg border border-border-default bg-surface-inset px-3 py-2 text-sm text-text-secondary">{message}</p>
       ) : null}
@@ -369,29 +377,38 @@ export function PortalHomeEditor({ orgSlug, workspaceSlug, children, initialDraf
                     <X />
                   </Button>
                 </div>
-                {renderWidgetForm(selected, updateWidget, options)}
-                <fieldset className="flex flex-col gap-2">
-                  <legend className="mb-1 text-sm font-medium text-text-primary">Visible to</legend>
-                  {(["everyone", "signed_in", "team", "segments"] as const).map((value) => (
-                    <label key={value} className={cn("flex items-center gap-2 text-sm", value === "segments" && "text-text-disabled")}>
-                      <input
-                        type="radio"
-                        name={`visibility-${selected.id}`}
-                        value={value}
-                        checked={selected.visibility === value}
-                        disabled={value === "segments" && selected.visibility !== "segments"}
-                        onChange={() => updateWidget({ ...selected, visibility: value })}
-                        className="accent-[var(--color-primary)]"
-                      />
-                      {VISIBILITY_LABEL[value]}
-                      {value === "segments" ? <span className="text-xs">(coming soon)</span> : null}
-                    </label>
-                  ))}
-                  {selected.visibility === "segments" ? (
-                    <p className="text-xs leading-5 text-status-warning">Segments are not available yet, so no customer sees this widget. Pick Everyone or Signed-in customers.</p>
-                  ) : null}
-                  <p className="text-xs leading-5 text-text-subtle">Team only widgets show on the team Home tab and are never sent to customers. Enforced on the server. Items you have not made public never appear to customers, even if pinned here.</p>
-                </fieldset>
+                {optionsFailed && isTeamOnlyWidgetType(selected.type) ? (
+                  <div>
+                    <p role="status" className="text-sm text-text-secondary">Could not load widget options.</p>
+                    <Button type="button" variant="outline" onClick={() => setOptionsFailed(false)}>Retry</Button>
+                  </div>
+                ) : renderWidgetForm(selected, updateWidget, options)}
+                {isTeamOnlyWidgetType(selected.type) ? (
+                  <p className="text-sm text-text-secondary">Visible to: Team only</p>
+                ) : (
+                  <fieldset className="flex flex-col gap-2">
+                    <legend className="mb-1 text-sm font-medium text-text-primary">Visible to</legend>
+                    {(["everyone", "signed_in", "team", "segments"] as const).map((value) => (
+                      <label key={value} className={cn("flex items-center gap-2 text-sm", value === "segments" && "text-text-disabled")}>
+                        <input
+                          type="radio"
+                          name={`visibility-${selected.id}`}
+                          value={value}
+                          checked={selected.visibility === value}
+                          disabled={value === "segments" && selected.visibility !== "segments"}
+                          onChange={() => updateWidget({ ...selected, visibility: value })}
+                          className="accent-[var(--color-primary)]"
+                        />
+                        {VISIBILITY_LABEL[value]}
+                        {value === "segments" ? <span className="text-xs">(coming soon)</span> : null}
+                      </label>
+                    ))}
+                    {selected.visibility === "segments" ? (
+                      <p className="text-xs leading-5 text-status-warning">Segments are not available yet, so no customer sees this widget. Pick Everyone or Signed-in customers.</p>
+                    ) : null}
+                    <p className="text-xs leading-5 text-text-subtle">Team only widgets show on the team Home tab and are never sent to customers. Enforced on the server. Items you have not made public never appear to customers, even if pinned here.</p>
+                  </fieldset>
+                )}
                 <Button type="button" variant="destructive" onClick={() => removeWidget(selected.id)}>
                   <Trash2 /> Remove widget
                 </Button>
