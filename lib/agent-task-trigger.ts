@@ -287,7 +287,6 @@ async function run(input: TriggerInput, deps: TriggerDeps): Promise<AgentRunOutc
       invokedByUserId: input.actingUserId,
       kind: "TASK_ASSIGNMENT",
       budgetMs: DEFAULT_AGENT_RUN_BUDGET_MS,
-      fenceConversation: true,
     })
   } catch (error) {
     if (error instanceof AgentRunError) {

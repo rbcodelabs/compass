@@ -101,6 +101,45 @@ class VercelSandboxHandle implements SandboxHandle {
   }
 }
 
+/**
+ * Resolve the named sandbox without resuming it, then keep the specific session
+ * for dispatch. A prepared stop can only refer to that session.
+ */
+async function readVercelSandboxSession(name: string) {
+  let sandbox: Sandbox
+  try {
+    sandbox = await Sandbox.get({ name, resume: false })
+  } catch (error) {
+    if (error instanceof APIError && error.response.status === 404) return { exists: false as const }
+    throw error
+  }
+  try {
+    return { exists: true as const, session: sandbox.currentSession() }
+  } catch (error) {
+    // currentSession() throws when the fresh lookup returned no session.
+    if (error instanceof Error && error.message.startsWith("No active session.")) {
+      return { exists: true as const, session: null }
+    }
+    throw error
+  }
+}
+
+export async function isVercelSandboxQuiescent(name: string): Promise<boolean> {
+  const found = await readVercelSandboxSession(name)
+  return found.exists && (found.session === null || found.session.status === "stopped")
+}
+
+export async function prepareVercelSandboxStop(name: string): Promise<(() => Promise<void>) | null> {
+  const found = await readVercelSandboxSession(name)
+  if (!found.exists || !found.session || found.session.status === "stopped") return null
+  const session = found.session
+  if (session.status !== "running") throw new Error("Sandbox session has not settled")
+  return async () => {
+    const result = await session.stop()
+    if (result.session.status !== "stopped") throw new Error("Sandbox stop has not been confirmed")
+  }
+}
+
 /** Wrap an SDK sandbox that a Vercel-specific code path created itself (the golden-image builds). */
 export function wrapVercelSandbox(sandbox: Sandbox): SandboxHandle {
   return new VercelSandboxHandle(sandbox)

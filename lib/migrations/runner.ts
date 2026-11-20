@@ -69,6 +69,7 @@ import { assertArtifactScreenshotsMigration } from "@/lib/migrations/artifact-sc
 import { AGENT_RETENTION_INDEXES_MIGRATION, assertAgentRetentionIndexesMigration } from "@/lib/migrations/agent-retention-indexes";
 import { AGENT_CONVERSATION_REVIEWS_MIGRATION, assertAgentConversationReviewsMigration } from "@/lib/migrations/agent-conversation-reviews";
 import { AGENT_SANDBOX_CLASS_MIGRATION, assertAgentSandboxClassMigration } from "@/lib/migrations/agent-sandbox-class";
+import { AGENT_SANDBOX_OPERATIONS_MIGRATION, assertAgentSandboxOperationsMigration } from "@/lib/migrations/agent-sandbox-operations";
 import { AGENT_MESSAGE_RUN_ID_MIGRATION, assertAgentMessageRunIdMigration } from "@/lib/migrations/agent-message-run-id";
 import { AGENT_BOARD_RICH_CARDS_MIGRATION, assertAgentBoardRichCardsMigration } from "@/lib/migrations/agent-board-rich-cards";
 import { AGENT_CHILD_RUNS_MIGRATION, assertAgentChildRunsMigration } from "@/lib/migrations/agent-child-runs";
@@ -896,6 +897,10 @@ const MIGRATIONS: readonly MigrationEntry[] = [
     // spend is counted once (ADR-0032). Additive, no backfill, no FK. Apply BEFORE the code that maps the column ships.
     name: "129_agent_message_run_id",
     filePath: path.join(process.cwd(), "prisma/migrations/129_agent_message_run_id/migration.sql"),
+  },
+  {
+    name: AGENT_SANDBOX_OPERATIONS_MIGRATION,
+    filePath: path.join(process.cwd(), "prisma/migrations/130_agent_sandbox_operations/migration.sql"),
   },
 ];
 
@@ -2472,6 +2477,7 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
       if (migration.name === UNIFIED_CONVERSATIONS_MIGRATION) await assertUnifiedConversationsMigration(client, schema)
       if (migration.name === "110_artifact_external_share") await assertArtifactExternalShareMigration(client, schema)
       if (migration.name === AGENT_SANDBOX_CLASS_MIGRATION) await assertAgentSandboxClassMigration(client, schema)
+      if (migration.name === AGENT_SANDBOX_OPERATIONS_MIGRATION) await assertAgentSandboxOperationsMigration(client, schema)
       if (migration.name === AGENT_MESSAGE_RUN_ID_MIGRATION) await assertAgentMessageRunIdMigration(client, schema)
       if (migration.name === WORKSPACE_ID_MIGRATION || migration.name === WORKSPACE_ID_RESIDUAL_MIGRATION) {
         // Data half: backfill from the parent in bounded batches, then prove it.

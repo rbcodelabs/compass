@@ -314,7 +314,7 @@ export async function startConversationContinuationRun(
       model: turnModel,
       budgetMs,
       now,
-      fenceConversation: true,
+
     })
   } catch (error) {
     if (error instanceof AgentRunError && error.code === "RUN_IN_FLIGHT") {

@@ -16,12 +16,19 @@ const m = vi.hoisted(() => ({
   stop: vi.fn(),
   acquire: vi.fn(),
   previous: vi.fn(),
+  reserve: vi.fn(),
+  release: vi.fn(),
 }))
 
 vi.mock("@/lib/agent-sandbox", () => ({
   bootSandboxFromSnapshot: (...a: unknown[]) => m.boot(...a),
   stopSandboxByName: (...a: unknown[]) => m.stop(...a),
   acquireConversationSandbox: (...a: unknown[]) => m.acquire(...a),
+}))
+vi.mock("@/lib/agent-sandbox-fence", async (original) => ({
+  ...(await original<object>()),
+  reservePersistentSandboxLaunch: (...a: unknown[]) => m.reserve(...a),
+  releasePersistentSandboxLaunch: (...a: unknown[]) => m.release(...a),
 }))
 vi.mock("@/lib/doc-fs", () => ({ listPaths: async () => [], readDocById: async () => null }))
 vi.mock("@/lib/agent-mcp-key", () => ({ mintAgentMcpKey: (...a: unknown[]) => m.mint(...a), revokeAgentMcpKey: (...a: unknown[]) => m.revoke(...a) }))
@@ -82,6 +89,8 @@ beforeEach(() => {
   m.boot.mockResolvedValue({ writeFiles: m.writeFiles, runCommand: m.runCommand })
   m.stop.mockResolvedValue(undefined)
   m.previous.mockResolvedValue(null)
+  m.reserve.mockResolvedValue("reservation-id")
+  m.release.mockResolvedValue(undefined)
   m.acquire.mockResolvedValue({ sandbox: { writeFiles: m.writeFiles, runCommand: m.runCommand }, reused: false, reason: "not-found" })
 })
 
@@ -123,6 +132,8 @@ describe("launchQueuedAgentRun egress policy", () => {
   it("a shell-off run that reuses a conversation sandbox acquires it WITH a policy and a matching profile tag", async () => {
     await launchQueuedAgentRun(context({ reuseConversationSandbox: { conversationId: "conv-1", developer: false } }))
     expect(m.boot).not.toHaveBeenCalled()
+    expect(m.reserve.mock.invocationCallOrder[0]).toBeLessThan(m.acquire.mock.invocationCallOrder[0])
+    expect(m.runCommand.mock.invocationCallOrder[0]).toBeLessThan(m.release.mock.invocationCallOrder[0])
     const arg = m.acquire.mock.calls[0][0]
     expect(arg.boot.networkPolicy.allow).toEqual(["compass.test", "api.anthropic.com"])
     expect(arg.profile).toBe(sandboxNetworkProfile(arg.boot.networkPolicy))

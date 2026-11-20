@@ -61,6 +61,7 @@ import { resolveRunSnapshot } from "@/lib/agent-sandbox-class"
 import { agentCapReachedBody, checkAgentRunCaps, checkAgentUsageLimit } from "@/lib/agent-limits"
 import { isMutationTool, bareToolName } from "@/lib/agent-mutations"
 import { acquireConversationSandbox, bootSandboxFromSnapshot } from "@/lib/agent-sandbox"
+import { releasePersistentSandboxLaunch, reservePersistentSandboxLaunch } from "@/lib/agent-sandbox-fence"
 import { AGENT_SANDBOX_IDLE_MS, agentSandboxReuseEnabled, sandboxNetworkProfile } from "@/lib/agent-sandbox-reuse"
 import { resolveGatewayCredential, resolveAgentHarness, agentModelForHarness } from "@/lib/agent-harness"
 import { AgentSelectionError, resolveRunAgent } from "@/lib/agent-run-identity"
@@ -793,6 +794,7 @@ export async function POST(request: NextRequest) {
     logAgentRunCredentialSource({ runId: run.id, workspaceId, source: agentRunCredentialSource({ harness, model: resolved?.ok ? resolved : undefined }) })
 
     let apiKeyId: string | undefined
+    let launchReservation: string | null = null
     try {
       // The key and the sandbox both have to outlive `deadlineAt`, or a run that
       // finishes in its last second loses its tool access mid-sentence. The
@@ -829,9 +831,8 @@ export async function POST(request: NextRequest) {
           ...(networkPolicy ? { networkPolicy } : {}),
         })
       } else {
-        // The run must name the sandbox before it exists, so finalize and the sweeper can reach it even if this
-        // request dies mid-boot (they derive the per-run name otherwise).
-        await prisma.agentRun.updateMany({ where: { id: run.id, status: "QUEUED" }, data: { sandboxName: runSandboxName } })
+        launchReservation = await reservePersistentSandboxLaunch(prisma, conversationIdResolved, run.id, runSandboxName)
+        if (!launchReservation) throw new Error("The persistent sandbox launch could not be reserved")
         const previous = await findPreviousRunForSandboxReuse(prisma, conversationIdResolved, run.id)
         const requiredMs = budgetMs + 2 * RUN_INFRA_GRACE_MS
         const profile = sandboxNetworkProfile(networkPolicy)
@@ -896,11 +897,14 @@ export async function POST(request: NextRequest) {
         detached: true,
         timeoutMs: budgetMs,
       })
+      if (launchReservation) {
+        await releasePersistentSandboxLaunch(prisma, conversationIdResolved, launchReservation)
+      }
       // QUEUED → RUNNING only now: before this, there was nothing to revoke or
       // stop, and a run that dies short of here is collected off `statusChangedAt`.
       await markAgentRunStarted({ prisma, runId: run.id, apiKeyId, sandboxName: runSandboxName })
     } catch (error) {
-      console.error("[agent-turn] detached run failed to start", { runId: run.id, error })
+      console.error("[agent-turn] detached run failed to start", { runId: run.id, persistentSandboxReserved: Boolean(launchReservation), error })
       // `apiKeyId` is not on the row yet, so finalize's own revocation cannot see
       // it — revoke here, then let finalize write the failure transcript, release
       // the interview claim, and stop the sandbox by its derived name.

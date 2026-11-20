@@ -562,7 +562,7 @@ export async function acquireConversationSandbox(opts: {
     let snapshotGone = false
     if (decision.action === "resume") {
       // Pause a running-but-untrusted sandbox first: that ends its processes and snapshots its disk.
-      if (existing.status === "running") await existing.stop().catch(() => {})
+      if (existing.status === "running") await existing.stop()
       try {
         sandbox = await provider.getByName(opts.name) // resume
         await sandbox.updateNetworkPolicy(opts.boot.networkPolicy)
