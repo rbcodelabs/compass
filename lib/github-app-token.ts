@@ -82,6 +82,12 @@ export async function mintRepoInstallationToken(
   return requestInstallationToken(repo.owner, repo.names, repo.permissions ?? permissionsForAccess(access))
 }
 
+class InstallationTokenError extends Error {
+  constructor(message: string, readonly reason: "probe_failed" | "not_installed" | "scope_rejected" = "probe_failed") {
+    super(message)
+  }
+}
+
 async function requestInstallationToken(owner: string, names: string[], permissions: readonly string[]): Promise<{ token: string; expiresAt: number }> {
   const uid = githubConnectorUid()
   if (uid) {
@@ -94,14 +100,22 @@ async function requestInstallationToken(owner: string, names: string[], permissi
       })
       return { token: minted.token, expiresAt: minted.expiresAt }
     } catch (error) {
-      // Never echo upstream bodies: surface only the Connect error code/status.
-      if (error instanceof ConnectError) throw new Error(`Vercel Connect GitHub token request failed (${error.code ?? error.status ?? "error"})`)
-      throw new Error("Vercel Connect GitHub token request failed")
+      // Never propagate upstream messages or bodies.
+      const status = error instanceof ConnectError ? error.status : undefined
+      const message = typeof status === "number" ? `Vercel Connect GitHub token request failed (${status})` : "Vercel Connect GitHub token request failed"
+      if (status === 422) throw new InstallationTokenError(message, "scope_rejected")
+      throw new Error(message)
     }
   }
   const credentials = directAppCredentials()
   if (!credentials) throw new Error("The GitHub App is not configured for this deployment")
-  return mintDirectInstallationToken(credentials, owner, names, permissions)
+  try {
+    return await mintDirectInstallationToken(credentials, owner, names, permissions)
+  } catch (error) {
+    if (error instanceof InstallationTokenError) throw error
+    // Network and JSON parser exceptions can contain upstream request or response data.
+    throw new InstallationTokenError("GitHub App token request failed")
+  }
 }
 
 const GITHUB_API = "https://api.github.com"
@@ -131,13 +145,13 @@ async function installationIdFor(owner: string, jwt: string): Promise<number> {
   for (const kind of ["orgs", "users"]) {
     const res = await fetch(`${GITHUB_API}/${kind}/${owner}/installation`, { headers: githubHeaders(jwt), cache: "no-store" })
     if (res.status === 404) continue
-    if (!res.ok) throw new Error(`GitHub App installation lookup failed (${res.status})`)
+    if (!res.ok) throw new InstallationTokenError(`GitHub App installation lookup failed (${res.status})`)
     const id = ((await res.json()) as { id?: number }).id
-    if (!id) throw new Error("GitHub App installation lookup failed")
+    if (!id) throw new InstallationTokenError("GitHub App installation lookup failed")
     installationIds.set(key, id)
     return id
   }
-  throw new Error(`GitHub App is not installed on ${owner}`)
+  throw new InstallationTokenError(`GitHub App is not installed on ${owner}`, "not_installed")
 }
 
 /**
@@ -155,7 +169,7 @@ async function mintDirectInstallationToken(
   try {
     jwt = signAppJwt(credentials.appId, credentials.privateKey)
   } catch {
-    throw new Error(`${GITHUB_APP_PRIVATE_KEY_ENV} is not a valid private key`)
+    throw new InstallationTokenError(`${GITHUB_APP_PRIVATE_KEY_ENV} is not a valid private key`)
   }
   const id = await installationIdFor(owner, jwt)
   const res = await fetch(`${GITHUB_API}/app/installations/${id}/access_tokens`, {
@@ -165,9 +179,11 @@ async function mintDirectInstallationToken(
     cache: "no-store",
   })
   if (res.status === 404) installationIds.delete(owner.toLowerCase())
-  if (!res.ok) throw new Error(`GitHub App token request failed (${res.status})`)
+  const failureMessage = `GitHub App token request failed (${res.status})`
+  if (res.status === 422) throw new InstallationTokenError(failureMessage, "scope_rejected")
+  if (!res.ok) throw new InstallationTokenError(failureMessage)
   const body = (await res.json()) as { token?: string; expires_at?: string }
-  if (!body.token || !body.expires_at) throw new Error("GitHub App token request failed")
+  if (!body.token || !body.expires_at) throw new InstallationTokenError("GitHub App token request failed")
   return { token: body.token, expiresAt: Date.parse(body.expires_at) }
 }
 
@@ -179,24 +195,27 @@ export function resetGithubAppInstallationCache(): void {
 /**
  * Whether the GitHub App can be granted this repo at the given access level.
  * Connect's refined token request fails when the repo is outside the installation
- * AND when the App itself lacks a requested permission, and GitHub returns the same
- * error for both. So on failure, probe with metadata:read only: if that mints, the
- * install is fine and the missing piece is the permission. Never throws.
+ * and when the app lacks a requested permission. After a scope rejection, try a
+ * metadata-only token. A successful retry confirms that the requested access
+ * level is the problem. Other failures leave the installation status unknown.
  */
-export type RepoAccessCheck = "ok" | "not_installed" | "missing_permission"
+export type RepoAccessCheck = "ok" | "not_installed" | "missing_permission" | "probe_failed"
 
 export async function checkAppAccessOn(repo: { owner: string; name: string }, access: AgentGithubAccess): Promise<RepoAccessCheck> {
   const target = { owner: repo.owner, names: [repo.name] }
   try {
     await mintRepoInstallationToken(target, access)
     return "ok"
-  } catch {
-    try {
-      await mintRepoInstallationToken({ ...target, permissions: ["metadata:read"] }, access)
-      return "missing_permission"
-    } catch {
-      return "not_installed"
-    }
+  } catch (error) {
+    if (!(error instanceof InstallationTokenError) || error.reason === "probe_failed") return "probe_failed"
+    if (error.reason === "not_installed") return "not_installed"
+  }
+
+  try {
+    await mintRepoInstallationToken({ ...target, permissions: ["metadata:read"] }, access)
+    return "missing_permission"
+  } catch (error) {
+    return error instanceof InstallationTokenError && error.reason === "not_installed" ? "not_installed" : "probe_failed"
   }
 }
 

@@ -23,7 +23,7 @@ describe("mintRepoInstallationToken", () => {
   })
   it("fails closed without leaking upstream detail", async () => {
     connectMocks.getTokenResponse.mockRejectedValue(new ConnectError("secret detail", { code: "forbidden", status: 403 }))
-    await expect(mintRepoInstallationToken({ owner: "a", names: ["b"] })).rejects.toThrow(/^Vercel Connect GitHub token request failed \(forbidden\)$/)
+    await expect(mintRepoInstallationToken({ owner: "a", names: ["b"] })).rejects.toThrow(/^Vercel Connect GitHub token request failed \(403\)$/)
     vi.stubEnv("COMPASS_GITHUB_CONNECTOR", "")
     await expect(mintRepoInstallationToken({ owner: "a", names: ["b"] })).rejects.toThrow(/must be configured/)
     vi.stubEnv("COMPASS_GITHUB_CONNECTOR", "github/compass")
@@ -41,9 +41,16 @@ describe("checkAppAccessOn", () => {
     await expect(checkAppAccessOn({ owner: "acme", name: "a" }, "write")).resolves.toBe("missing_permission")
     expect(connectMocks.getTokenResponse.mock.calls[1][1].authorizationDetails[0].permissions).toEqual(["metadata:read"])
   })
-  it("is not_installed when even the metadata-only request fails", async () => {
+  it.each([401, 429, 500])("keeps Connect HTTP %s failures distinct from missing installation", async (status) => {
+    connectMocks.getTokenResponse.mockRejectedValue(new ConnectError("upstream detail", { status }))
+    await expect(checkAppAccessOn({ owner: "acme", name: "a" }, "read")).resolves.toBe("probe_failed")
+    expect(connectMocks.getTokenResponse).toHaveBeenCalledTimes(1)
+  })
+
+  it("reports an inconclusive Connect metadata probe as a failed check", async () => {
     connectMocks.getTokenResponse.mockRejectedValue(new ConnectError("nope", { status: 422 }))
-    await expect(checkAppAccessOn({ owner: "acme", name: "a" }, "read")).resolves.toBe("not_installed")
+    await expect(checkAppAccessOn({ owner: "acme", name: "a" }, "read")).resolves.toBe("probe_failed")
+    expect(connectMocks.getTokenResponse).toHaveBeenCalledTimes(2)
   })
 })
 
@@ -163,9 +170,37 @@ describe("direct GitHub App path (no Connect)", () => {
     await expect(mintRepoInstallationToken({ owner: "acme", names: ["a"] })).rejects.toThrow(/^GitHub App token request failed \(422\)$/)
   })
 
+  it("distinguishes a rejected signing key from a missing installation", async () => {
+    vi.stubEnv("COMPASS_GITHUB_APP_PRIVATE_KEY", "not-a-key")
+    await expect(checkAppAccessOn({ owner: "acme", name: "a" }, "read")).resolves.toBe("probe_failed")
+  })
+
+  it("reports not_installed when both installation lookups return 404", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(json(404, {}))
+    vi.stubGlobal("fetch", fetchMock)
+    await expect(checkAppAccessOn({ owner: "acme", name: "a" }, "read")).resolves.toBe("not_installed")
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it("reports missing_permission when the direct metadata-only token mints", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(json(200, { id: 42 }))
+      .mockResolvedValueOnce(json(422, {}))
+      .mockResolvedValueOnce(json(201, { token: "ghs_metadata", expires_at: "2030-01-01T00:00:00Z" }))
+    vi.stubGlobal("fetch", fetchMock)
+    await expect(checkAppAccessOn({ owner: "acme", name: "a" }, "read")).resolves.toBe("missing_permission")
+  })
+
   it("rejects an unusable key without leaking it", async () => {
     vi.stubEnv("COMPASS_GITHUB_APP_PRIVATE_KEY", "not-a-key")
     await expect(mintRepoInstallationToken({ owner: "acme", names: ["a"] })).rejects.toThrow(/^COMPASS_GITHUB_APP_PRIVATE_KEY is not a valid private key$/)
+  })
+
+  it("redacts upstream JSON parser failures before they reach callers or logs", async () => {
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(json(200, { id: 42 }))
+      .mockResolvedValueOnce({ ok: true, status: 201, json: async () => { throw new SyntaxError("upstream detail") } }))
+    await expect(mintRepoInstallationToken({ owner: "acme", names: ["a"] })).rejects.toThrow(/^GitHub App token request failed$/)
   })
 
   it("feeds mintAgentGithubEnv with the signed token and the access level", async () => {

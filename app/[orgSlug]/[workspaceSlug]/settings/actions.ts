@@ -1049,6 +1049,9 @@ export async function updateAgentGithubRepos(
       if (check === "not_installed") {
         return { ok: false, error: `The GitHub App is not installed on ${repo}` };
       }
+      if (check === "probe_failed") {
+        return { ok: false, error: `Could not verify GitHub App access to ${repo}. Check the deployment’s GitHub App configuration and the app’s repository access, then try again.` };
+      }
       if (check === "missing_permission") {
         return {
           ok: false,
