@@ -829,3 +829,37 @@ it("refuses to publish a document that would read unverified private bytes from 
   })).rejects.toThrow(/private asset/i)
   expect(db.tables.Workspace).toHaveLength(1)
 })
+
+it("bounds member batches and rolls back staged memberships when final publication fails", async () => {
+  const organizationId = randomUUID(), workspaceId = randomUUID(), importerUserId = randomUUID()
+  const members = Array.from({ length: 245 }, () => ({
+    id: randomUUID(), organizationId, userId: randomUUID(), role: "MEMBER",
+  }))
+  const db = createInMemoryPrisma({
+    Organization: [{ id: organizationId, name: "Org", slug: "org" }],
+    Workspace: [{ id: workspaceId, organizationId, name: "Source", slug: "src", ssoEnabled: false }],
+    User: [{ id: importerUserId, name: "User", email: "user@example.com" }],
+    OrganizationMember: members,
+  })
+  const bytes = await exportWorkspaceToBuffer(db.client, workspaceId, noopBlobs)
+  const sizes: number[] = []
+  const member = db.client.workspaceMember as {createMany(args: {data: Row[]}): Promise<unknown>}
+  db.client.workspaceMember = { ...member, async createMany(args: {data: Row[]}) {
+    sizes.push(args.data.length)
+    return member.createMany(args)
+  } }
+  db.client.$transaction = async (fn: (tx: unknown) => Promise<unknown>) => {
+    const snapshot = structuredClone(db.tables)
+    try { return await fn(db.client) } catch (error) {
+      for (const key of Object.keys(db.tables)) db.tables[key] = snapshot[key] ?? []
+      throw error
+    }
+  }
+  await expect(importWorkspaceBundle(db.client, bytes, {
+    organizationId, importerUserId, nonce: "members", blobs: noopBlobs, fenceWrite: async () => {},
+    publishResult: async () => { throw new Error("publication interrupted") },
+  })).rejects.toThrow("publication interrupted")
+  expect(sizes.reduce((sum,n) => sum+n, 0)).toBe(246)
+  expect(Math.max(...sizes)).toBeLessThanOrEqual(100)
+  expect(db.tables.WorkspaceMember).toHaveLength(0)
+})

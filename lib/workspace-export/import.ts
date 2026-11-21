@@ -628,6 +628,11 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
     for (const [m, n] of Object.entries(deduped)) {
       warnings.push(`Skipped ${n} ${m} row(s) that would duplicate another row once people without an account in this organization were attributed to you`)
     }
+    const batches = chunks(memberRows, 100)
+    const finalMembers = batches.pop() ?? []
+    for (const data of batches) {
+      await write("applying", tx => delegateFor(tx, "WorkspaceMember").createMany({ data, skipDuplicates: true }))
+    }
     const report: ImportReport = {
       workspaceId: newWorkspaceId,
       slug,
@@ -644,7 +649,7 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
       (client as { $transaction<T>(fn: (tx: unknown) => Promise<T>): Promise<T> }).$transaction(async (tx) => {
         await opts.fenceWrite?.(tx, "applying")
         await delegateFor(tx, "Workspace").createMany({ data: [wsRow] })
-        await delegateFor(tx, "WorkspaceMember").createMany({ data: memberRows, skipDuplicates: true })
+        await delegateFor(tx, "WorkspaceMember").createMany({ data: finalMembers, skipDuplicates: true })
         await opts.publishResult?.(tx, report)
       }),
     )
@@ -752,6 +757,9 @@ async function rollbackImport(
     if (next.length === pending.length) throw lastError
     pending = next
   }
+  await deleteScopedImportRows({ workspaceId: newWorkspaceId }, args =>
+    write(tx => delegateFor(tx, "WorkspaceMember").deleteMany(args)),
+  )
   for (const u of uploaded) {
     if (u.store === "feedback") await blobs.delPublic(u.key)
     else await (u.store === "research" ? blobs.research : blobs.artifact).del(u.key).catch(() => undefined)
