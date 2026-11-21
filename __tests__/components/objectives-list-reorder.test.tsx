@@ -112,6 +112,7 @@ describe("OKR drag-to-reorder", () => {
 
   it.each([
     { title: "Objective one", selector: '[data-slot="card"]', action: reorderObjective },
+    { title: "KR one", selector: ".okx-krow", action: reorderKeyResult },
   ])("rolls back a rejected reorder while keeping $title mounted", async ({ title, selector, action }) => {
     action.mockRejectedValueOnce(new Error("Not found"));
     stubLayout();

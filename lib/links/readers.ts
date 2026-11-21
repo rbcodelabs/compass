@@ -38,6 +38,14 @@ const ARTIFACT_EXPERIMENT = "ARTIFACT_ATTACHED_TO_EXPERIMENT"
 
 const ID_CHUNK = 500
 
+/** Minimal workspace-scoped rows for the OKR refresh fingerprint, never rendered as links. */
+export function listOutcomeOpportunityLinkTokenRows(tx: Tx, workspaceId: string) {
+  return tx.entityLink.findMany({
+    where: { workspaceId, linkType: { in: [OPPORTUNITY_OBJECTIVE, OPPORTUNITY_KEY_RESULT] } },
+    select: { id: true, linkType: true, fromId: true, toId: true },
+  })
+}
+
 const isTaskOriginType = (value: string): value is (typeof TASK_ORIGIN_TARGET_TYPES)[number] => (TASK_ORIGIN_TARGET_TYPES as readonly string[]).includes(value)
 
 const isTaskTargetType = (value: string): value is (typeof TASK_REFERENCE_TARGET_TYPES)[number] => (TASK_REFERENCE_TARGET_TYPES as readonly string[]).includes(value)

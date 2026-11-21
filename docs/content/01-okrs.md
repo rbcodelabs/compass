@@ -32,6 +32,8 @@ To scan many Objectives at once, collapse them. Each Objective card has a chevro
 
 Use **Filter objectives by name** in the cycle header to find an Objective or one of its Key Results. Matches stay expanded, and the count shows how many Objectives match. Press **Escape** in the search box or click **Clear filter** to restore the list and its previous expansion state. In-progress Add Key Result and check-in drafts are preserved while their cards are hidden.
 
+The OKR list and cycle screens refresh while the tab is visible. Changes made elsewhere, such as a renamed Key Result or a new check-in, appear without reloading the page. A rename can change which Objectives match the current filter while open form drafts stay in their rows.
+
 ## Key Results
 
 Key Results are the measurable outcomes that tell you whether you've hit your Objective. Each KR has:

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import getPrisma from "@/lib/db";
 import { loadCardSortBoard } from "@/lib/card-sort";
 import { listCardSortNewEntries } from "@/lib/card-sort-new-entries";
+import { listOutcomeOpportunityLinkTokenRows } from "@/lib/links/readers";
 
 /**
  * Cheap "did anything on this board change?" fingerprint for live refresh.
@@ -18,7 +19,7 @@ import { listCardSortNewEntries } from "@/lib/card-sort-new-entries";
  * page filter: it is a superset signal, so a filtered board may refresh once
  * for a change it cannot see (a harmless no-op re-render), never miss one.
  */
-export const LIVE_SCOPES = ["opportunities", "solutions", "tasks", "experiments", "roadmap", "cardSort"] as const;
+export const LIVE_SCOPES = ["opportunities", "solutions", "tasks", "experiments", "roadmap", "cardSort", "okrs"] as const;
 export type LiveScope = (typeof LIVE_SCOPES)[number];
 
 export function isLiveScope(value: string | null): value is LiveScope {
@@ -123,6 +124,46 @@ export async function computeChangeToken(
         prisma.evidence.count({ where: { workspaceId } }),
       ]);
       return hashRows([opportunities, solutions, [evidenceCount]]);
+    }
+    case "okrs": {
+      // The cycle pages also show squads and objective fields. The Outcomes index shows linked opportunity counts.
+      const [cycles, objectives, keyResults, checkInCount, squads, fieldDefinitions, opportunities, opportunityLinks] = await Promise.all([
+        prisma.oKRCycle.findMany({
+          where: { workspaceId },
+          select: { id: true, title: true, status: true, startDate: true, endDate: true, updatedAt: true },
+        }),
+        prisma.objective.findMany({
+          where: { workspaceId },
+          select: {
+            id: true, cycleId: true, squadId: true, parentKeyResultId: true, title: true, description: true,
+            owner: true, status: true, sortOrder: true, updatedAt: true,
+          },
+        }),
+        prisma.keyResult.findMany({
+          where: { objective: { workspaceId } },
+          select: { id: true, objectiveId: true, title: true, target: true, current: true, unit: true, sortOrder: true, updatedAt: true },
+        }),
+        prisma.checkIn.count({ where: { keyResult: { objective: { workspaceId } } } }),
+        prisma.squad.findMany({ where: { workspaceId }, select: { id: true, name: true, color: true } }),
+        prisma.customFieldDefinition.findMany({
+          where: { workspaceId, objectType: "OBJECTIVE" },
+          select: {
+            id: true, name: true, fieldType: true, options: true, required: true, order: true,
+            sharedOptionSet: { select: { id: true, name: true, options: true } },
+          },
+        }),
+        prisma.opportunity.findMany({ where: { workspaceId, status: { not: "ARCHIVED" } }, select: { id: true } }),
+        listOutcomeOpportunityLinkTokenRows(prisma, workspaceId),
+      ]);
+      const fieldValues = objectives.length === 0
+        ? []
+        : await prisma.customFieldValue.findMany({
+            where: { objectId: { in: objectives.map((objective) => objective.id) } },
+            select: { fieldId: true, objectId: true, value: true, updatedAt: true },
+          });
+      const activeOpportunityIds = new Set(opportunities.map(({ id }) => id));
+      const activeLinks = opportunityLinks.filter(({ fromId }) => activeOpportunityIds.has(fromId));
+      return hashRows([cycles, objectives, keyResults, [checkInCount], fieldValues, squads, fieldDefinitions, activeLinks]);
     }
     case "solutions": {
       const [solutions, opportunities] = await Promise.all([
