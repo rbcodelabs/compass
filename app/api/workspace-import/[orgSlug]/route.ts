@@ -85,7 +85,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ orgSlug
           if (await readImportReceiptResult(tx, binding)) return
           const workspace = await tx.workspace.findFirst({ where: { id: report.workspaceId, organizationId }, select: { id: true } })
           if (!workspace) throw new WorkspaceImportRecoveryRequired("Imported workspace is unavailable")
-          const existingOwner = await startImportOperation(tx, workspace.id, organizationId)
+          if (owner && owner.workspaceId !== workspace.id) {
+            throw new WorkspaceImportRecoveryRequired("Imported workspace does not match the active operation")
+          }
+          const existingOwner = owner ?? await startImportOperation(tx, workspace.id, organizationId)
           await commitImportReport(tx, existingOwner, report)
         })
       },

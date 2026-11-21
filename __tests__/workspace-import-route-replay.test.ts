@@ -47,3 +47,32 @@ it("keeps the ZIP when a duplicate publication has no durable report", async () 
   expect(discard).not.toHaveBeenCalled()
   expect(res.status).toBe(503)
 })
+
+it("uses the held operation after duplicate publication and verifies the winner in its transaction", async () => {
+  const workspaceId = "b82be3e8-6553-4181-b216-fe32421b57fb"
+  const owner = { workspaceId, attemptId: "7238c0cf-3418-4764-bc50-876af6686108", epoch: 3 }
+  const report = { workspaceId, alreadyImported: true }
+  const findFirst = vi.fn().mockResolvedValue({ id: workspaceId })
+  const query = vi.fn().mockResolvedValue([{ epoch: owner.epoch }])
+  const tx = { workspace: { findFirst }, $queryRawUnsafe: query }
+  const claim = vi.fn().mockResolvedValueOnce([{ epoch: owner.epoch }]).mockResolvedValue([])
+  Object.assign(state.db, { $queryRawUnsafe: claim, $transaction: (run: (client: typeof tx) => Promise<void>) => run(tx) })
+  state.result.mockReset().mockResolvedValueOnce(null).mockResolvedValueOnce(null).mockResolvedValue(report)
+  const discard = vi.fn()
+  state.load.mockResolvedValue({ bytes: new Uint8Array([1]), discard })
+  state.apply.mockImplementation(async (_db, _bytes, callbacks) => {
+    await callbacks.startOperation(workspaceId)
+    await callbacks.recordExisting(report)
+    return report
+  })
+  const { POST } = await import("@/app/api/workspace-import/[orgSlug]/route")
+  const res = await POST(new Request("http://localhost/import", {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ receipt: "signed" }),
+  }), { params: Promise.resolve({ orgSlug: "org" }) })
+  expect(findFirst).toHaveBeenCalledWith({ where: { id: workspaceId, organizationId: "org" }, select: { id: true } })
+  expect(query.mock.calls.filter(([sql]) => sql.includes("INSERT INTO"))).toHaveLength(0)
+  const attempt = claim.mock.calls[0][3]
+  expect(query).toHaveBeenCalledWith(expect.stringContaining("UPDATE"), workspaceId, attempt, owner.epoch, JSON.stringify(report))
+  expect(res.status).toBe(200)
+  expect(discard).toHaveBeenCalledOnce()
+})
