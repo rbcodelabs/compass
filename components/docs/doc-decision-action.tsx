@@ -7,8 +7,9 @@ import { StatusBadge } from "@/components/patterns/status-badge"
 import { buttonVariants } from "@/components/ui/button"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuLabel, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import type { DecidedDocDecision, DocDecisions } from "@/lib/tracked-decisions"
+import type { DocVersionStatus } from "@/lib/doc-version-status"
 
-type Props = { orgSlug: string; workspaceSlug: string; docId: string; docTitle: string; decisions: DocDecisions | null }
+type Props = { orgSlug: string; workspaceSlug: string; docId: string; docTitle: string; decisions: DocDecisions | null; versionStatus?: DocVersionStatus | null }
 const actionClass = "inline-flex max-w-full items-center gap-2 rounded-md border border-status-warning/30 bg-status-warning-surface px-3 py-2 text-sm font-medium text-status-warning hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
 
 /**
@@ -32,13 +33,21 @@ function outcomeBadge(decided: DecidedDocDecision) {
   }
 }
 
-function decidedSummary(decided: DecidedDocDecision) {
-  const outcome = decided.outcome === "APPROVE" ? "Approved" : decided.outcome === "REQUEST_CHANGES" ? "Changes requested" : decided.outcome === "REJECT" ? "Rejected" : decided.outcomeLabel
-  const when = decided.decidedAt.toLocaleDateString(undefined, { month: "short", day: "numeric" })
-  return decided.reviewerName ? `${outcome} by ${decided.reviewerName} · ${when}` : `${outcome} · ${when}`
+/** "v3" or "v3 · edited since" (empty for decisions made before versions were pinned). */
+function versionNote(decided: DecidedDocDecision, status?: DocVersionStatus | null) {
+  if (!decided.docVersion) return ""
+  return status?.editedSince ? `v${decided.docVersion.number} · edited since` : `v${decided.docVersion.number}`
 }
 
-export function DocDecisionAction({ orgSlug, workspaceSlug, docId, docTitle, decisions }: Props) {
+function decidedSummary(decided: DecidedDocDecision, status?: DocVersionStatus | null) {
+  const outcome = decided.outcome === "APPROVE" ? "Approved" : decided.outcome === "REQUEST_CHANGES" ? "Changes requested" : decided.outcome === "REJECT" ? "Rejected" : decided.outcomeLabel
+  const when = decided.decidedAt.toLocaleDateString(undefined, { month: "short", day: "numeric" })
+  const note = versionNote(decided, status)
+  const base = decided.reviewerName ? `${outcome} by ${decided.reviewerName} · ${when}` : `${outcome} · ${when}`
+  return note ? `${base} · ${note}` : base
+}
+
+export function DocDecisionAction({ orgSlug, workspaceSlug, docId, docTitle, decisions, versionStatus = null }: Props) {
   const base = `/${orgSlug}/${workspaceSlug}`
   if (decisions === null) return <Link href={`${base}/decisions`} className={actionClass} aria-label="Decision status unavailable"><CircleAlert className="size-4 shrink-0" aria-hidden="true" /><span className="hidden sm:inline">Decision status unavailable</span></Link>
 
@@ -79,8 +88,10 @@ export function DocDecisionAction({ orgSlug, workspaceSlug, docId, docTitle, dec
   // of the zero state, which read as though the call had never been made.
   if (latestDecided) {
     return <DropdownMenu>
-      <DropdownMenuTrigger className={`${buttonVariants({ variant: "outline" })} gap-2`} aria-label={`${decidedSummary(latestDecided)} — decision actions`}>
+      <DropdownMenuTrigger className={`${buttonVariants({ variant: "outline" })} gap-2`} aria-label={`${decidedSummary(latestDecided, versionStatus)} — decision actions`}>
         {outcomeBadge(latestDecided)}
+        {latestDecided.docVersion && <span className="text-xs tabular-nums text-text-subtle">v{latestDecided.docVersion.number}</span>}
+        {versionStatus?.editedSince && <StatusBadge status="warning" icon={<PencilLine />}><span className="hidden sm:inline">Edited since</span></StatusBadge>}
         <ChevronDown className="size-3 shrink-0 text-text-subtle" aria-hidden="true" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" sideOffset={8} className="w-80 max-w-[calc(100vw-2rem)] p-2 shadow-lg">
@@ -89,14 +100,14 @@ export function DocDecisionAction({ orgSlug, workspaceSlug, docId, docTitle, dec
           <DropdownMenuItem aria-label={latestDecided.title} render={<Link href={`${base}/reviews/${latestDecided.id}`} />} className="mb-1 cursor-pointer items-center gap-3 whitespace-normal rounded-lg border border-border-default bg-surface-panel px-3 py-3 hover:bg-accent data-highlighted:bg-accent focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
             <span className="min-w-0 flex-1 space-y-1">
               <span className="block font-medium leading-5 [overflow-wrap:anywhere]">{latestDecided.title}</span>
-              <span className="block text-xs text-text-subtle">{decidedSummary(latestDecided)}</span>
+              <span className="block text-xs text-text-subtle">{decidedSummary(latestDecided, versionStatus)}</span>
             </span>
             <ArrowRight className="size-4 text-popover-foreground" aria-hidden="true" />
           </DropdownMenuItem>
           <DropdownMenuSeparator />
-          <DropdownMenuItem aria-label="Request another decision" render={<Link href={requestDecisionHref({ orgSlug, workspaceSlug, subjectType: "DOC", subjectId: docId, subjectTitle: docTitle })} />} className="cursor-pointer gap-2">
+          <DropdownMenuItem aria-label={versionStatus?.editedSince ? "Request a new decision on the edited doc" : "Request another decision"} render={<Link href={requestDecisionHref({ orgSlug, workspaceSlug, subjectType: "DOC", subjectId: docId, subjectTitle: docTitle })} />} className="cursor-pointer gap-2">
             <PencilLine className="size-4" aria-hidden="true" />
-            Request another decision
+            {versionStatus?.editedSince ? `Request a new decision on the edited doc` : "Request another decision"}
           </DropdownMenuItem>
         </DropdownMenuGroup>
       </DropdownMenuContent>
