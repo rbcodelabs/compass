@@ -34,10 +34,10 @@ export const BOARD_FADE_END_TRACK_CLASS = "md:pr-8";
  * `BoardPinnedRegion` sits beside the scroller. Add `BOARD_FADE_END_TRACK_CLASS` to the board's inner track alongside it.
  * Use it only while pinned columns are rendered.
  */
-export function Board({ children, label = "Board", className, fadeEnd = false, wheelSnapControl = false }: { children: ReactNode; label?: string; className?: string; fadeEnd?: boolean; wheelSnapControl?: boolean }) {
+export function Board({ children, label = "Board", className, fadeEnd = false, wheelSnapControl = false, dragActive = false }: { children: ReactNode; label?: string; className?: string; fadeEnd?: boolean; wheelSnapControl?: boolean; dragActive?: boolean }) {
   // Mobile columns size against this scrollport, including nested swimlanes,
   // rather than the viewport (which may also contain panels or lane gutters).
-  return <BoardScroller wheelSnapControl={wheelSnapControl} label={label} className={cn("@container flex min-w-0 snap-x gap-4 overflow-x-auto pb-3 md:snap-none", fadeEnd && BOARD_FADE_END_CLASS, className)}>{children}</BoardScroller>;
+  return <BoardScroller dragActive={dragActive} wheelSnapControl={wheelSnapControl} label={label} className={cn("@container flex min-w-0 snap-x gap-4 overflow-x-auto pb-3 md:snap-none", fadeEnd && BOARD_FADE_END_CLASS, className)}>{children}</BoardScroller>;
 }
 
 type BoardColumnProps = Omit<ComponentProps<"section">, "title"> & {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, type ReactNode } from "react";
+import { useLayoutEffect, useRef, type ReactNode } from "react";
 
 /** Nearest scrollport, including the Board itself, with vertical overflow. */
 function overflowingVerticalScroller(start: EventTarget | null, stop: HTMLElement): Element | null {
@@ -22,12 +22,13 @@ function overflowingVerticalScroller(start: EventTarget | null, stop: HTMLElemen
  * scrollport under the cursor (including the Board) owns vertical scrolling. Nested horizontal scrollports
  * also keep their wheel input. Narrow screens retain native vertical navigation through tall columns.
  */
-export function BoardScroller({ children, className, label, wheelSnapControl }: { children: ReactNode; className?: string; label: string; wheelSnapControl?: boolean }) {
+export function BoardScroller({ children, className, label, wheelSnapControl, dragActive }: { children: ReactNode; className?: string; label: string; wheelSnapControl?: boolean; dragActive?: boolean }) {
   const ref = useRef(null as HTMLDivElement | null);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const board = ref.current;
-    if (!board) return;
+    // Cleanup restores snap before paint when a drag takes ownership.
+    if (!board || dragActive) return;
     let wheelIdle: ReturnType<typeof setTimeout> | undefined;
     function restoreSnap() {
       clearTimeout(wheelIdle);
@@ -72,7 +73,7 @@ export function BoardScroller({ children, className, label, wheelSnapControl }: 
       restoreSnap();
       board.removeEventListener("wheel", onWheel);
     };
-  }, []);
+  }, [dragActive]);
 
   return (
     <div ref={ref} role="region" data-wheel-snap-control={wheelSnapControl || undefined} aria-label={label} className={className}>

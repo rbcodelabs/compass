@@ -766,6 +766,7 @@ export function RoadmapBoard({
         <div className="flex min-h-0 min-w-0 flex-1 flex-col md:flex-row">
         <Board
           label="Roadmap board"
+          dragActive={activeItem !== null || activeUnscheduledItem !== null}
           wheelSnapControl={!spec}
           fadeEnd={dockedColumnIds.length > 0}
           className={cn(
