@@ -292,6 +292,9 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   // Unified Conversations model (OPP-67 / SOL-117): twelve nullable ADD COLUMN IF NOT EXISTS statements across agent_conversations and agent_messages; no default, backfill, index or FK.
   // Postcondition pinned in REVIEWED_MIGRATION_CODE_SHA256. Digest recorded from the shipped SQL after reading it.
   "125_unified_conversations": "dc6968e7f3573b5bc5aa9982f59c2f147643c807764c7c2ad768b21182333faf",
+  // External links (ADR-0028): one additive CREATE TABLE IF NOT EXISTS (external_links) plus two ASYNC indexes (one unique); no existing table altered, no backfill, no FK.
+  // Fresh-install revision uses bounded SHA-256 hex index keys. Existing receipts require a separate reviewed recovery path.
+  "126_external_links": "537bceb830cab509929d7258864e7c3af544fe6c3cea19d02379d5a3524a8fa0",
   "126_doc_version_numbers": "e1082457e986ef1968b13f7460aec087f595fc3e7dfd35f38610d1902f1da58b",
   "127_decision_votes": "acb304bf3fcb4288c2fa0d3298cc04e51bef8958108176b7f3930649d83f0691",
   "128_task_start_date": "e357da11f90dbf6030030ee0ba16df9153e2ef2e85bbb5c53ef7db666e5ce66e",
@@ -519,6 +522,10 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
   // The 125 postcondition (twelve nullable columns across agent_conversations and agent_messages exist and carry expected types); editing it re-reviews the migration.
   "125_unified_conversations": {
     "lib/migrations/unified-conversations.ts": "5160ebc0955373c955f3c781c2d08089b9b2cd42730ad9a5d7a6e0e6f0ea85ef",
+  },
+  // Candidate pin: requires explicit code review before adoption.
+  "126_external_links": {
+    "lib/migrations/external-links.ts": "26b233e3a2231c515cf7cb13155a8968d955d3f8a65c52630fe46394e293e2f4",
   },
   "126_doc_version_numbers": {
     "lib/migrations/schema-first-columns.ts": "8cb404f5e3005487345e2aa4b4f521a37db1f54e972a89ef0d7803f7275765dd",
