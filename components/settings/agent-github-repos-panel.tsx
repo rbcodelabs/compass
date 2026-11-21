@@ -70,7 +70,7 @@ export function AgentGithubReposPanel({ orgSlug, workspaceSlug, initialConfig, c
         </label>
         <label className="flex items-start gap-2 text-xs">
           <input type="radio" name="agent-github-access" value="read" data-testid="agent-github-access-read" checked={access === "read"} onChange={() => setAccess("read")} className="mt-0.5" />
-          <span><span className="font-medium">Read-only, with pull requests</span> <span className="text-muted-foreground">— clone and inspect code, pull requests and issues. Cannot push or open pull requests.</span></span>
+          <span><span className="font-medium">Read-only, with pull requests</span> <span className="text-muted-foreground">— clone and inspect code and pull requests. Cannot push or open pull requests.</span></span>
         </label>
         <label className="flex items-start gap-2 text-xs">
           <input type="radio" name="agent-github-access" value="write" data-testid="agent-github-access-write" checked={access === "write"} onChange={() => setAccess("write")} className="mt-0.5" />

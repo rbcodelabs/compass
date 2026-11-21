@@ -97,7 +97,7 @@ export function githubShellPrompt(repos: string[], developer = false, access: Ag
     (access === "code-read"
       ? `- Access is READ-ONLY and covers code only. You can clone and read repositories, but pushing fails and pull requests and issues are not available to you (gh pr / gh issue will fail). Do not try; if the user wants a change, describe it or write the patch in your reply.\n`
       : access === "read"
-        ? `- Access is READ-ONLY. You can clone, read, and inspect repositories, pull requests and issues, but pushing and creating pull requests will fail. Do not try; if the user wants a change, describe it or write the patch in your reply.\n`
+        ? `- Access is READ-ONLY. You can clone, read, and inspect repositories and pull requests, but pushing and creating pull requests will fail. Do not try; if the user wants a change, describe it or write the patch in your reply.\n`
         : `- To change code: create a branch (\`git switch -c agent/<short-topic>\`), commit, \`git push -u origin <branch>\`, then open a pull request with \`gh pr create\`. ` +
           `If \`gh\` is not installed, push the branch and give the user the link \`https://github.com/<owner>/<name>/compare/<branch>\`. Commits are authored as "Compass Agent".\n`) +
     (access !== "write"

@@ -6,7 +6,7 @@ import getPrisma from "@/lib/db";
 import { Prisma } from "@prisma/client";
 import { randomBytes, createHash } from "crypto";
 import { checkAppAccessOn, githubAppConfigured, parseAgentRepos } from "@/lib/github-app-token";
-import { DEFAULT_AGENT_GITHUB_ACCESS, isAgentGithubAccess, type AgentGithubAccess } from "@/lib/agent-github-access-level";
+import { isAgentGithubAccess, type AgentGithubAccess } from "@/lib/agent-github-access-level";
 import { serializeConfig } from "@/lib/agent-github-repos";
 import { isPermissionError, resolveOrgAdmin, resolveWorkspaceAdmin } from "@/lib/permissions";
 import { countWorkspaceAdmins, isOrgAdminRole, normalizeWorkspaceRole } from "@/lib/roles";
@@ -1030,14 +1030,14 @@ export async function updateWorkspaceLimits(
 export async function updateAgentGithubRepos(
   orgSlug: string,
   workspaceSlug: string,
-  input: { repos: string[]; access?: AgentGithubAccess }
+  input: { repos: string[]; access: AgentGithubAccess }
 ): Promise<{ ok: true; repos: string[]; access: AgentGithubAccess } | { ok: false; error: string }> {
   const { prisma, workspaceId } = await resolveWorkspaceAdmin(orgSlug, workspaceSlug);
 
   const parsed = parseAgentRepos(input.repos);
   if (!parsed.ok) return parsed;
-  if (input.access !== undefined && !isAgentGithubAccess(input.access)) return { ok: false, error: "Access must be code-read, read or write" };
-  const access = input.access ?? DEFAULT_AGENT_GITHUB_ACCESS;
+  const { access } = input;
+  if (!isAgentGithubAccess(access)) return { ok: false, error: "Access must be code-read, read or write" };
 
   if (parsed.repos.length) {
     if (!githubAppConfigured()) {

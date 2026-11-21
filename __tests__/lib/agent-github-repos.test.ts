@@ -5,9 +5,10 @@ describe("agent github stored config", () => {
   it("reads the legacy array as write access", () => {
     expect(parseStoredConfig('["a/b","a/c"]')).toEqual({ repos: ["a/b", "a/c"], access: "write" })
   })
-  it("reads the object shape and defaults an unknown access to write", () => {
+  it("reads the object shape and denies repositories for unknown or omitted access", () => {
     expect(parseStoredConfig('{"repos":["a/b"],"access":"read"}')).toEqual({ repos: ["a/b"], access: "read" })
-    expect(parseStoredConfig('{"repos":["a/b"],"access":"admin"}')).toEqual({ repos: ["a/b"], access: "write" })
+    expect(parseStoredConfig('{"repos":["a/b"],"access":"admin"}').repos).toEqual([])
+    expect(parseStoredConfig('{"repos":["a/b"]}').repos).toEqual([])
   })
   it("treats null and malformed values as no repos", () => {
     expect(parseStoredConfig(null).repos).toEqual([])

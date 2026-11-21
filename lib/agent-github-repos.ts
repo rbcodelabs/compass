@@ -8,7 +8,7 @@ export type AgentGithubConfig = { repos: string[]; access: AgentGithubAccess }
 
 /**
  * Stored shape lives in the existing text column (no migration): a legacy JSON array of
- * "owner/name" strings means write access; `{"repos":[...],"access":"read"|"write"}` is the
+ * "owner/name" strings means write access; objects carry an explicit access level in the
  * current shape. Anything malformed reads as "no repos".
  */
 export function parseStoredConfig(stored: string | null | undefined): AgentGithubConfig {
@@ -20,7 +20,7 @@ export function parseStoredConfig(stored: string | null | undefined): AgentGithu
     if (Array.isArray(value)) return { repos: strings(value), access: DEFAULT_AGENT_GITHUB_ACCESS }
     if (value && typeof value === "object") {
       const { repos, access } = value as { repos?: unknown; access?: unknown }
-      return { repos: strings(repos), access: isAgentGithubAccess(access) ? access : DEFAULT_AGENT_GITHUB_ACCESS }
+      return isAgentGithubAccess(access) ? { repos: strings(repos), access } : empty
     }
     return empty
   } catch {
