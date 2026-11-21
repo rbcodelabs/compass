@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import { hostname } from "node:os"
 import { del, get, put } from "@vercel/blob"
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises"
@@ -153,23 +154,29 @@ export function privateProviderIdentity(store: "artifact" | "research") {
 function mappedStorage(provider: ArtifactStorage, store: "artifact" | "research"): ArtifactStorage {
   async function resolve(path: string) {
     const [root, workspaceId] = path.split("/")
-    if (!(store === "research" ? root === "research" : root === "docs" || root === "artifacts")) return path
-    if (!workspaceId || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(workspaceId)) return path
-    const [{ default: getPrisma }, { lookupImportAsset }] = await Promise.all([
+    if (!(store === "research" ? root === "research" : root === "docs" || root === "artifacts")) return null
+    if (!workspaceId || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(workspaceId)) return null
+    const [{ default: getPrisma }, { lookupImportAssetMapping }] = await Promise.all([
       import("@/lib/db"), import("@/lib/workspace-export/asset-journal"),
     ])
-    return await lookupImportAsset(getPrisma(), workspaceId, store, path, () => privateProviderIdentity(store)) ?? path
+    return await lookupImportAssetMapping(getPrisma(), workspaceId, store, path, () => privateProviderIdentity(store))
   }
   return {
     async put(path, bytes, contentType, options) {
-      if (await resolve(path) !== path) {
-        if (options?.overwrite === false) return { pathname: path, created: false }
-        throw new Error("Cannot overwrite a published import asset")
+      const mapping = await resolve(path)
+      if (mapping) {
+        if (options?.overwrite !== false) throw new Error("Cannot overwrite a published import asset")
+        if (createHash("sha256").update(bytes).digest("hex") !== mapping.digest) {
+          if (await provider.get(mapping.path)) return { pathname: path, created: false }
+          throw new Error("Recreated import asset differs from its verified content")
+        }
+        const result = await provider.put(mapping.path, bytes, contentType, options)
+        return { pathname: path, created: result.created }
       }
       return provider.put(path, bytes, contentType, options)
     },
-    async get(path) { return provider.get(await resolve(path)) },
-    async del(path) { await provider.del(await resolve(path)) },
+    async get(path) { return provider.get((await resolve(path))?.path ?? path) },
+    async del(path) { await provider.del((await resolve(path))?.path ?? path) },
   }
 }
 

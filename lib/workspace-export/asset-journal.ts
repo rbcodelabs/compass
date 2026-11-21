@@ -42,9 +42,9 @@ export async function verifyImportAsset(tx: ImportDatabase, owner: ImportLeaseOw
   if (rows.length !== 1) throw new Error("Import asset reservation is unavailable")
 }
 
-export async function lookupImportAsset(db: ImportDatabase, workspaceId: string, store: AssetStore, path: string, currentProvider?: () => ProviderIdentity) {
-  const [row] = await db.$queryRawUnsafe<{ physical_key: string | null; provider_id: string; namespace_id: string }[]>(
-    `SELECT a.physical_key, a.provider_id, a.namespace_id FROM ${importSchema()}.workspace_import_operations o
+export async function lookupImportAssetMapping(db: ImportDatabase, workspaceId: string, store: AssetStore, path: string, currentProvider?: () => ProviderIdentity) {
+  const [row] = await db.$queryRawUnsafe<{ physical_key: string | null; expected_sha256: string; provider_id: string; namespace_id: string }[]>(
+    `SELECT a.physical_key, a.expected_sha256, a.provider_id, a.namespace_id FROM ${importSchema()}.workspace_import_operations o
      JOIN ${importSchema()}.workspace_import_required_assets r ON r.attempt_id=o.attempt_id
      LEFT JOIN ${importSchema()}.workspace_import_assets a
        ON a.workspace_id=o.workspace_id AND a.attempt_id=r.attempt_id AND a.logical_key=r.logical_key
@@ -59,5 +59,9 @@ export async function lookupImportAsset(db: ImportDatabase, workspaceId: string,
       throw new Error("Import asset provider namespace is unavailable")
     }
   }
-  return row?.physical_key ?? null
+  return row?.physical_key ? { path: row.physical_key, digest: row.expected_sha256 } : null
+}
+
+export async function lookupImportAsset(...args: Parameters<typeof lookupImportAssetMapping>) {
+  return (await lookupImportAssetMapping(...args))?.path ?? null
 }
