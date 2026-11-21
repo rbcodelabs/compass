@@ -45,6 +45,7 @@ import { createHash } from "node:crypto"
 import { Sandbox } from "@vercel/sandbox"
 import type { NetworkPolicy, SandboxHandle } from "@/lib/sandbox-provider"
 import { vercelSandboxProvider, wrapVercelSandbox } from "@/lib/sandbox-provider-vercel"
+import { PERSISTENT_SANDBOX_LOOKUP_FAILED } from "@/lib/agent-sandbox-fence"
 
 /** The active substrate. Swapping this is the single switch the AWS migration flips (per the Sandbox substrate ADR). */
 const provider = vercelSandboxProvider
@@ -546,7 +547,11 @@ export async function acquireConversationSandbox(opts: {
   }
   // Without a successful lookup we cannot tell "no sandbox" from "sandbox we cannot see"; creating under the
   // name could collide with (or, worse, shadow) someone's saved work. Fail the turn instead.
-  if (lookupFailed) throw new Error("Could not look up this conversation's sandbox; try again.")
+  if (lookupFailed) {
+    const error = new Error("Could not look up this conversation's sandbox; try again.")
+    error.name = PERSISTENT_SANDBOX_LOOKUP_FAILED
+    throw error
+  }
 
   const decision = decideSandboxReuse({
     enabled: true,
@@ -562,7 +567,7 @@ export async function acquireConversationSandbox(opts: {
     let snapshotGone = false
     if (decision.action === "resume") {
       // Pause a running-but-untrusted sandbox first: that ends its processes and snapshots its disk.
-      if (existing.status === "running") await existing.stop().catch(() => {})
+      if (existing.status === "running") await existing.stop()
       try {
         sandbox = await provider.getByName(opts.name) // resume
         await sandbox.updateNetworkPolicy(opts.boot.networkPolicy)
@@ -580,7 +585,7 @@ export async function acquireConversationSandbox(opts: {
     if (snapshotGone) {
       // Unrecoverable: free the name and fall through to a fresh boot rather than failing every future turn of this chat.
       console.warn("[agent-sandbox] conversation sandbox has no snapshot to resume; booting a fresh one", { name: opts.name })
-      await existing.delete().catch(() => {})
+      await existing.delete()
     } else {
       resumed = sandbox
     }

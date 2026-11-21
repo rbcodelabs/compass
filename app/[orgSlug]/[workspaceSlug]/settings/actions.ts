@@ -5,7 +5,9 @@ import { auth } from "@/auth";
 import getPrisma from "@/lib/db";
 import { Prisma } from "@prisma/client";
 import { randomBytes, createHash } from "crypto";
-import { githubConnectorUid, isAppInstalledOn, parseAgentRepos } from "@/lib/github-app-token";
+import { checkAppAccessOn, githubAppConfigured, parseAgentRepos } from "@/lib/github-app-token";
+import { isAgentGithubAccess, type AgentGithubAccess } from "@/lib/agent-github-access-level";
+import { serializeConfig } from "@/lib/agent-github-repos";
 import { isPermissionError, resolveOrgAdmin, resolveWorkspaceAdmin } from "@/lib/permissions";
 import { countWorkspaceAdmins, isOrgAdminRole, normalizeWorkspaceRole } from "@/lib/roles";
 import { isOwnBrandingLogoUrl } from "@/lib/branding-logo";
@@ -1028,33 +1030,50 @@ export async function updateWorkspaceLimits(
 export async function updateAgentGithubRepos(
   orgSlug: string,
   workspaceSlug: string,
-  input: { repos: string[] }
-): Promise<{ ok: true; repos: string[] } | { ok: false; error: string }> {
+  input: { repos: string[]; access: AgentGithubAccess }
+): Promise<{ ok: true; repos: string[]; access: AgentGithubAccess } | { ok: false; error: string }> {
   const { prisma, workspaceId } = await resolveWorkspaceAdmin(orgSlug, workspaceSlug);
 
   const parsed = parseAgentRepos(input.repos);
   if (!parsed.ok) return parsed;
+  const { access } = input;
+  if (!isAgentGithubAccess(access)) return { ok: false, error: "Access must be code-read, read or write" };
 
   if (parsed.repos.length) {
-    if (!githubConnectorUid()) {
+    if (!githubAppConfigured()) {
       return { ok: false, error: "The GitHub App is not configured for this deployment" };
     }
     for (const repo of parsed.repos) {
       const [owner, name] = repo.split("/");
-      if (!(await isAppInstalledOn({ owner, name }))) {
+      const check = await checkAppAccessOn({ owner, name }, access);
+      if (check === "not_installed") {
         return { ok: false, error: `The GitHub App is not installed on ${repo}` };
+      }
+      if (check === "probe_failed") {
+        return { ok: false, error: `Could not verify GitHub App access to ${repo}. Check the deployment’s GitHub App configuration and the app’s repository access, then try again.` };
+      }
+      if (check === "missing_permission") {
+        return {
+          ok: false,
+          error:
+            access === "write"
+              ? `The GitHub App is installed on ${repo} but isn't granted Contents and Pull requests write permission. Grant it in the App's settings (an org owner must accept the change), or choose a read-only level.`
+              : access === "read"
+                ? `The GitHub App is installed on ${repo} but isn't granted read permission for Contents and Pull requests. Grant it in the App's settings (an org owner must accept the change), or choose code-only read-only.`
+                : `The GitHub App is installed on ${repo} but isn't granted read permission for Contents. Grant it in the App's settings (an org owner must accept the change).`,
+        };
       }
     }
   }
 
   await prisma.workspace.update({
     where: { id: workspaceId },
-    data: { agentGithubRepos: parsed.repos.length ? JSON.stringify(parsed.repos) : null },
+    data: { agentGithubRepos: serializeConfig({ repos: parsed.repos, access }) },
     select: { id: true },
   });
 
   revalidatePath(`/${orgSlug}/${workspaceSlug}/settings`);
-  return { ok: true, repos: parsed.repos };
+  return { ok: true, repos: parsed.repos, access };
 }
 
 // ─── Agent Anthropic API key (BYOK) ───────────────────────────────────────────

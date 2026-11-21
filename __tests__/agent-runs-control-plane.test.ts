@@ -33,6 +33,7 @@ import {
   MAX_AGENT_RUN_CALLBACK_EVENTS,
   MIN_AGENT_RUN_BUDGET_MS,
   agentRunFailureMessage,
+  agentConversationSandboxName,
   agentRunSandboxName,
   agentRunWorkerTokenIsBound,
   agentRunsAvailable,
@@ -44,6 +45,7 @@ import {
   hashAgentRunWorkerToken,
   isTerminalAgentRunStatus,
   markAgentRunStarted,
+  reapIdleConversationSandboxes,
   resetAgentRunsAvailabilityCache,
   resolveAgentRunBudgetMs,
   sweepAgentRuns,
@@ -82,6 +84,10 @@ function runRow(overrides: Record<string, unknown> = {}) {
 /** Stub prisma: only the delegates the function under test actually touches. */
 function fakePrisma(overrides: Record<string, Any> = {}) {
   const prisma: Any = {
+    $queryRaw: vi.fn().mockResolvedValue([]),
+    $executeRaw: vi.fn().mockResolvedValue(1),
+    agentSandboxOperation: { findUnique: vi.fn().mockResolvedValue(null), findMany: vi.fn().mockResolvedValue([]) },
+    agentSandboxGeneration: { findUnique: vi.fn().mockResolvedValue(null) },
     agentRun: {
       findUnique: vi.fn(),
       findFirst: vi.fn(),
@@ -223,21 +229,13 @@ describe("createAgentRun", () => {
     expect(prisma.agentRun.findFirst.mock.calls[0][0].where.status.in).toEqual(["QUEUED", "RUNNING"])
   })
 
-  it("with fenceConversation, writes the conversation row BEFORE the in-flight check, inside the same transaction", async () => {
+  it("writes the conversation latch before the in-flight check, inside the same transaction", async () => {
     const prisma = fakePrisma()
     prisma.agentRun.findFirst.mockResolvedValue(null)
     prisma.agentRun.create.mockResolvedValue({ id: "run-1" })
-    await createAgentRun({ prisma, conversationId: "c-1", workspaceId: "ws-1", userId: "user-1", fenceConversation: true, now: NOW })
-    expect(prisma.agentConversation.updateMany).toHaveBeenCalledWith({ where: { id: "c-1" }, data: { updatedAt: NOW } })
-    expect(prisma.agentConversation.updateMany.mock.invocationCallOrder[0]).toBeLessThan(prisma.agentRun.findFirst.mock.invocationCallOrder[0])
-  })
-
-  it("does not touch the conversation by default (chat's path is unchanged)", async () => {
-    const prisma = fakePrisma()
-    prisma.agentRun.findFirst.mockResolvedValue(null)
-    prisma.agentRun.create.mockResolvedValue({ id: "run-1" })
-    await createAgentRun({ prisma, conversationId: "c-1", workspaceId: "ws-1", userId: "user-1" })
-    expect(prisma.agentConversation.updateMany).not.toHaveBeenCalled()
+    await createAgentRun({ prisma, conversationId: "c-1", workspaceId: "ws-1", userId: "user-1", now: NOW })
+    expect(prisma.$executeRaw).toHaveBeenCalledTimes(1)
+    expect(prisma.$executeRaw.mock.invocationCallOrder[0]).toBeLessThan(prisma.agentRun.findFirst.mock.invocationCallOrder[0])
   })
 
   it("rejects a kind that is neither CHAT nor a registered handoff", async () => {
@@ -604,5 +602,120 @@ describe("isTerminalAgentRunStatus", () => {
   it("treats only the four end states as terminal, and an unknown string as non-terminal", () => {
     expect(["SUCCEEDED", "FAILED", "INTERRUPTED", "CANCELED"].every(isTerminalAgentRunStatus)).toBe(true)
     expect(["QUEUED", "RUNNING", "", "PENDING"].some(isTerminalAgentRunStatus)).toBe(false)
+  })
+})
+
+function fakePersistentSandboxPrisma() {
+  let operation: Any = null
+  const matches = (where: Record<string, unknown>) =>
+    operation && Object.entries(where).every(([key, value]) => operation[key] === value)
+  const prisma = fakePrisma({
+    agentSandboxOperation: {
+      findUnique: vi.fn(async () => operation),
+      findMany: vi.fn().mockResolvedValue([]),
+      create: vi.fn(async ({ data }) => operation = data),
+      update: vi.fn(async ({ data }) => operation = { ...operation, ...data }),
+      updateMany: vi.fn(async ({ where, data }) => {
+        if (!matches(where)) return { count: 0 }
+        operation = { ...operation, ...data }
+        return { count: 1 }
+      }),
+      deleteMany: vi.fn(async ({ where }) => {
+        if (!matches(where)) return { count: 0 }
+        operation = null
+        return { count: 1 }
+      }),
+    },
+  })
+  prisma.agentRun.findUnique.mockResolvedValue({ sandboxStoppedAt: null })
+  return prisma
+}
+
+describe("reapIdleConversationSandboxes", () => {
+  const CONV = agentConversationSandboxName("c-1")
+  const idleFor = (ms: number) => new Date(NOW.getTime() - ms)
+  const candidate = (over: Record<string, unknown> = {}) => ({ id: "run-a", conversationId: "c-1", sandboxName: CONV, createdAt: idleFor(7 * 60_000), finishedAt: idleFor(6 * 60_000), ...over })
+  const cleanup = { stopSandbox: mockStopSandbox }
+  // Earlier tests leave a rejecting implementation on the shared mock; clearAllMocks keeps implementations.
+  beforeEach(() => mockStopSandbox.mockReset().mockResolvedValue(undefined))
+
+  it("reaps a conversation with several finished turns: the newest run decides, even though the older ones each have a newer run", async () => {
+    // Three SUCCEEDED turns left warm on one sandbox, oldest first (the sweeper orders by finishedAt ascending).
+    const prisma = fakePersistentSandboxPrisma()
+    prisma.$queryRaw.mockResolvedValue([
+      candidate({ id: "run-1", finishedAt: idleFor(40 * 60_000) }),
+      candidate({ id: "run-2", finishedAt: idleFor(30 * 60_000) }),
+      candidate({ id: "run-3", finishedAt: idleFor(20 * 60_000) }),
+    ])
+    // run-1 and run-2 each have a newer run; run-3 has none.
+    prisma.agentRun.findFirst.mockImplementation(({ where }: Any) => Promise.resolve(where.id.not !== "run-3" ? { id: "newer" } : null))
+    const result = await reapIdleConversationSandboxes({ prisma, now: NOW, cleanup })
+    expect(mockStopSandbox).toHaveBeenCalledTimes(1)
+    expect(mockStopSandbox).toHaveBeenCalledWith(CONV)
+    expect(result).toMatchObject({ examined: 3, stopped: [CONV], failed: [] })
+  })
+
+  it("never stops the sandbox while a later run exists", async () => {
+    const prisma = fakePersistentSandboxPrisma()
+    prisma.$queryRaw.mockResolvedValue([candidate({ id: "run-1" }), candidate({ id: "run-2" })])
+    prisma.agentRun.findFirst.mockResolvedValue({ id: "run-3-active" })
+    const result = await reapIdleConversationSandboxes({ prisma, now: NOW, cleanup })
+    expect(mockStopSandbox).not.toHaveBeenCalled()
+    expect(result.stopped).toEqual([])
+  })
+})
+
+describe("persistent sandbox stop fencing", () => {
+  const sandboxName = agentConversationSandboxName("c-1")
+  const finishedAt = new Date(NOW.getTime() - 20 * 60_000)
+
+  function idleRun() {
+    const prisma = fakePersistentSandboxPrisma()
+    prisma.$queryRaw.mockResolvedValue([{ id: RUN_ID, conversationId: "c-1", sandboxName, createdAt: finishedAt, finishedAt, status: "SUCCEEDED" }])
+    prisma.agentRun.findFirst.mockResolvedValue(null)
+    prisma.agentRun.create.mockImplementation(({ data }: Any) => Promise.resolve(data))
+    return prisma
+  }
+
+  it("holds off a queued launch while the stop can still affect the named sandbox", async () => {
+    const prisma = idleRun()
+    const dispatched = Promise.withResolvers<void>()
+    const response = Promise.withResolvers<void>()
+    const stopSandbox = vi.fn(async () => {
+      dispatched.resolve()
+      await response.promise
+    })
+    const sweep = reapIdleConversationSandboxes({ prisma, now: NOW, cleanup: { stopSandbox } })
+    try {
+      await Promise.race([dispatched.promise, sweep.then(() => { throw new Error("stop did not start") })])
+      await expect(createAgentRun({
+        prisma, conversationId: "c-1", workspaceId: "ws-1", userId: "user-1", now: NOW,
+      })).rejects.toMatchObject({ status: 409 })
+      expect(prisma.agentRun.create).not.toHaveBeenCalled()
+    } finally {
+      response.resolve()
+      await sweep
+    }
+  })
+
+  it("sends only one stop when two sweepers observe the same idle run", async () => {
+    const prisma = idleRun()
+    const dispatched = Promise.withResolvers<void>()
+    const response = Promise.withResolvers<void>()
+    const stopSandbox = vi.fn(async () => {
+      if (stopSandbox.mock.calls.length > 1) return
+      dispatched.resolve()
+      await response.promise
+    })
+    const sweep = reapIdleConversationSandboxes({ prisma, now: NOW, cleanup: { stopSandbox } })
+    try {
+      await Promise.race([dispatched.promise, sweep.then(() => { throw new Error("stop did not start") })])
+      const second = await reapIdleConversationSandboxes({ prisma, now: NOW, cleanup: { stopSandbox } })
+      expect(second.stopped).toEqual([])
+      expect(stopSandbox).toHaveBeenCalledTimes(1)
+    } finally {
+      response.resolve()
+      await sweep
+    }
   })
 })

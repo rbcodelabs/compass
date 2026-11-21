@@ -7,7 +7,7 @@
 import { describe, expect, it } from "vitest"
 import { buildAgentEnv } from "@/lib/agent-run-sandbox"
 import { resolveAgentModel } from "@/lib/agent-model"
-import { agentEgressPolicy, turnEgressPolicy, githubShellEnabled, githubShellPrompt, githubSandboxEnv } from "@/lib/agent-github-access"
+import { agentEgressPolicy, turnEgressPolicy, githubShellEnabled, githubShellPrompt, githubSandboxEnv, githubAccessFromEnvValue } from "@/lib/agent-github-access"
 
 const base = { connectors: [], mcpBaseUrl: "https://compass.test", mcpToken: "t", prompt: "hi", workspaceId: "ws-1", systemPromptAppendices: [], pluginPaths: [], skillIds: [] }
 const anthropic = (() => {
@@ -94,8 +94,22 @@ describe("buildAgentEnv with the GitHub shell", () => {
     expect(githubSandboxEnv(false, githubEnv)).toEqual({})
   })
 
+  it("passes the access level through only when one was minted", () => {
+    expect(githubSandboxEnv(true, { ...githubEnv, AGENT_GITHUB_ACCESS: "read" } as Record<string, string>)).toMatchObject({ AGENT_GITHUB_ACCESS: "read" })
+    expect(githubSandboxEnv(true, githubEnv)).not.toHaveProperty("AGENT_GITHUB_ACCESS")
+    expect(githubAccessFromEnvValue(undefined)).toBe("write")
+    expect(githubAccessFromEnvValue("admin")).toBe("write")
+    expect(githubAccessFromEnvValue("code-read")).toBe("code-read")
+  })
+
   it("githubShellPrompt names every repo and nothing about credentials values", () => {
     expect(githubShellPrompt(["a/b"])).toContain("`a/b`")
+    expect(githubShellPrompt(["a/b"], false, "read")).toContain("READ-ONLY")
+    expect(githubShellPrompt(["a/b"], false, "read")).not.toContain("gh pr create")
+    expect(githubShellPrompt(["a/b"], false, "code-read")).toContain("code only")
+    expect(githubShellPrompt(["a/b"], false, "code-read")).not.toContain("gh pr create")
+    expect(githubShellPrompt(["a/b"])).toContain("gh pr create")
+    expect(githubShellPrompt(["a/b"])).toBe(githubShellPrompt(["a/b"], false, "write"))
   })
 })
 

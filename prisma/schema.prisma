@@ -2923,6 +2923,7 @@ model AgentRuntimeSnapshot {
 /// (not via MCP). See docs/decisions/0001-in-app-agent-architecture.md Phase 3.
 /// DSQL: no FKs, no @updatedAt (set explicitly), no JSON columns.
 model AgentConversation {
+  sandboxCoordinationToken String? @map("sandbox_coordination_token") @db.Uuid
   id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   workspaceId String   @map("workspace_id") @db.Uuid
   userId      String   @map("user_id") @db.Uuid
@@ -3121,6 +3122,28 @@ model AgentWebFetch {
 
   @@id([credentialId, seq])
   @@map("agent_web_fetches")
+}
+
+/// Durable ownership across launch, pause and receipt bookkeeping.
+model AgentSandboxOperation {
+  conversationId String    @id @map("conversation_id") @db.Uuid
+  runId          String    @map("run_id") @db.Uuid
+  sandboxName    String    @map("sandbox_name")
+  token          String    @db.Uuid
+  phase          String
+  providerSessionId String? @map("provider_session_id")
+  retryAt        DateTime? @map("retry_at") @db.Timestamptz
+
+  @@map("agent_sandbox_operations")
+}
+
+/// Latest generation to use a named persistent sandbox.
+model AgentSandboxGeneration {
+  sandboxName    String @id @map("sandbox_name")
+  conversationId String @map("conversation_id") @db.Uuid
+  runId          String @map("run_id") @db.Uuid
+
+  @@map("agent_sandbox_generations")
 }
 
 /// One durable, detachable agent turn. The sandbox owns execution and
