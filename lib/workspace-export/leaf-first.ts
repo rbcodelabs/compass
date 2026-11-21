@@ -23,22 +23,24 @@ export class StuckDeleteError extends Error {}
  * passes, one row at a time, so each pass removes the rows whose children are already gone.
  */
 export async function deleteIdsLeafFirst(delegate: Pick<Delegate, "deleteMany">, ids: string[]): Promise<void> {
-  if (ids.length === 0) return
-  try {
-    await withRetry(() => delegate.deleteMany({ where: { id: { in: ids } } }))
-    return
-  } catch (error) {
-    if (!isRestrictViolation(error)) throw error
-  }
   let pending = ids
   while (pending.length) {
     const next: string[] = []
-    for (const id of pending) {
+    for (let offset = 0; offset < pending.length; offset += 100) {
+      const batch = pending.slice(offset, offset + 100)
       try {
-        await withRetry(() => delegate.deleteMany({ where: { id } }))
+        await withRetry(() => delegate.deleteMany({ where: { id: { in: batch } } }))
+        continue
       } catch (error) {
         if (!isRestrictViolation(error)) throw error
-        next.push(id)
+      }
+      for (const id of batch) {
+        try {
+          await withRetry(() => delegate.deleteMany({ where: { id } }))
+        } catch (error) {
+          if (!isRestrictViolation(error)) throw error
+          next.push(id)
+        }
       }
     }
     if (next.length === pending.length) throw new StuckDeleteError(`Could not delete ${next.length} row(s): something still references them`)

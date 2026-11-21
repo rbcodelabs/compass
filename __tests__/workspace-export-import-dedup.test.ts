@@ -863,3 +863,34 @@ it("bounds member batches and rolls back staged memberships when final publicati
   expect(Math.max(...sizes)).toBeLessThanOrEqual(100)
   expect(db.tables.WorkspaceMember).toHaveLength(0)
 })
+
+it("retries the first Doc after deleting its child in the last rollback batch", async () => {
+  const organizationId = randomUUID(), workspaceId = randomUUID(), importerUserId = randomUUID()
+  const ids = Array.from({ length: 101 }, () => randomUUID()).sort()
+  const db = createInMemoryPrisma({
+    Organization: [{ id: organizationId, name: "Org", slug: "org" }],
+    Workspace: [{ id: workspaceId, organizationId, name: "Source", slug: "src" }],
+    OrganizationMember: [{ id: randomUUID(), organizationId, userId: importerUserId, role: "ADMIN" }],
+    User: [{ id: importerUserId, name: "User", email: "user@example.com" }],
+    Doc: ids.map((id, i) => ({ id, workspaceId, title: String(i), content: "", parentId: i === 100 ? ids[0] : null })),
+  })
+  const bytes = await exportWorkspaceToBuffer(db.client, workspaceId, noopBlobs)
+  const original = db.client.doc as {deleteMany(args: {where: Row}): Promise<{count: number}>}
+  let blocked = 0
+  db.client.doc = { ...original, async deleteMany(args: {where: Row}) {
+    const predicate = args.where.id as string | {in: string[]}
+    const batch = typeof predicate === "string" ? [predicate] : predicate.in
+    expect(batch.length).toBeLessThanOrEqual(100)
+    if (db.tables.Doc.some(row => batch.includes(String(row.parentId)))) {
+      blocked++
+      throw Object.assign(new Error("Doc has a child"), {code: "P2014"})
+    }
+    return original.deleteMany(args)
+  } }
+  db.client.workspace = { ...(db.client.workspace as object), async createMany() { throw new Error("publication failed") } }
+  await expect(importWorkspaceBundle(db.client, bytes, {
+    organizationId, importerUserId, nonce: "doc-rollback", blobs: noopBlobs,
+  })).rejects.toThrow("publication failed")
+  expect(blocked).toBeGreaterThan(0)
+  expect(db.tables.Doc.map(row => row.id)).toEqual(ids)
+})

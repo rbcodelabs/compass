@@ -101,3 +101,26 @@ it("keeps a fresh receipt unbound when its bytes differ from the committed opera
   expect(bindImportReceipt).not.toHaveBeenCalled()
   expect(discard).not.toHaveBeenCalled()
 })
+
+it("returns the committed counters and warnings on both fresh and already-bound receipt replay", async () => {
+  const workspaceId = "fe1e28d3-2ecb-4638-88ff-b4c393ad701e"
+  const committed = { workspaceId, counts: { Doc: 0 }, usersMatched: 4, blobsCopied: 1, warnings: ["Skipped a row"], alreadyImported: false }
+  const synthetic = { workspaceId, counts: { Doc: 1 }, usersMatched: 0, blobsCopied: 0, warnings: [], alreadyImported: true }
+  const tx = {
+    workspace: { findFirst: vi.fn().mockResolvedValue({ id: workspaceId }) },
+    $queryRawUnsafe: vi.fn().mockResolvedValue([{ phase: "committed", bundle_digest: "same", result_text: JSON.stringify(committed) }]),
+  }
+  Object.assign(state.db, { $transaction: (fn: (db: typeof tx) => unknown) => fn(tx) })
+  state.result.mockResolvedValueOnce(null).mockResolvedValue(committed)
+  const discard = vi.fn()
+  state.load.mockResolvedValue({ bytes: new Uint8Array([1]), discard })
+  state.apply.mockImplementation(async (_db, _bytes, callbacks) => (await callbacks.recordExisting(synthetic, "same")) ?? synthetic)
+  const { POST } = await import("@/app/api/workspace-import/[orgSlug]/route")
+  const replay = async () => (await POST(new Request("http://localhost/import", {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ receipt: "fresh" }),
+  }), { params: Promise.resolve({ orgSlug: "org" }) })).json()
+  const expected = { ok: true, ...committed, alreadyImported: true }
+  expect(await replay()).toEqual(expected)
+  expect(await replay()).toEqual(expected)
+  expect(discard).toHaveBeenCalledTimes(1)
+})

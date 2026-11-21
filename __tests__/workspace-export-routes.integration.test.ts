@@ -115,6 +115,10 @@ describe.skipIf(!databaseUrl)("workspace export/import routes", () => {
     const again = await (await post(adminId)).json()
     expect(again.alreadyImported).toBe(true)
     expect(again.workspaceId).toBe(body.workspaceId)
+    const persisted = { ...body, counts: { Opportunity: 0 }, blobsCopied: 1, usersMatched: 4, warnings: ["Skipped a row whose reference was missing"] }
+    delete persisted.ok
+    await pool.query(`UPDATE "${schema}".workspace_import_operations SET result_text=$1 WHERE workspace_id=$2`, [JSON.stringify(persisted), body.workspaceId])
+    expect(await (await post(adminId)).json()).toEqual({ ok: true, ...persisted, alreadyImported: true })
     const entries = unzipSync(bundle)
     entries["manifest.json"] = new TextEncoder().encode(new TextDecoder().decode(entries["manifest.json"]) + " ")
     expect((await post(adminId, "r1", new Uint8Array(zipSync(entries)))).status).toBe(422)

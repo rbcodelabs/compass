@@ -10,7 +10,7 @@ import { BundleReader, blobEntry, type BundleManifest } from "@/lib/workspace-ex
 import { DOC_IMAGE_URL, docImagePathname, type BlobAdapters } from "@/lib/workspace-export/blobs"
 import { decodeRow, fieldInfo } from "@/lib/workspace-export/codec"
 import { OPTIONAL_FIELDS, OPTIONAL_STRING_FIELDS, UNIQUE_KEYS } from "@/lib/workspace-export/schema-meta.generated"
-import { deleteIdsLeafFirst, deleteScopedImportRows, withRetry } from "@/lib/workspace-export/leaf-first"
+import { deleteIdsLeafFirst, deleteScopedImportRows, StuckDeleteError, withRetry } from "@/lib/workspace-export/leaf-first"
 import { IMPORT_OVERRIDES, SECRET_COLUMNS } from "@/lib/workspace-export/model-registry"
 import {
   capabilityPackArtifactPath,
@@ -86,7 +86,7 @@ export type ImportOptions = {
   }
   startOperation?(workspaceId: string, bundleDigest: string): Promise<void | "applying" | "recovering">
   resumeRecovered?(): Promise<void>
-  recordExisting?(report: ImportReport, digest: string): Promise<void>
+  recordExisting?(report: ImportReport, digest: string): Promise<ImportReport | void>
   bindWorkspace?(workspaceId: string): Promise<void>
   publishResult?(tx: unknown, report: ImportReport): Promise<void>
   blobs: BlobAdapters
@@ -224,8 +224,7 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
   const existing = await delegateFor(client, "Workspace").findMany({ where: { id: newWorkspaceId }, take: 1 })
   if (existing[0]) {
     const report = alreadyImportedReport(existing[0], manifest)
-    await opts.recordExisting?.(report, bundleDigest)
-    return report
+    return (await opts.recordExisting?.(report, bundleDigest)) ?? report
   }
 
   // ---- users: match by email, fall back to the importer ---------------------------------------------------------------
@@ -665,8 +664,7 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
     if (committed[0]) {
       if ((error as { code?: string }).code === "P2002") {
         const report = alreadyImportedReport(committed[0], manifest)
-        await opts.recordExisting?.(report, bundleDigest)
-        return report
+        return (await opts.recordExisting?.(report, bundleDigest)) ?? report
       }
       throw error
     }
@@ -727,7 +725,7 @@ async function rollbackImport(
     if (modelHasId(model)) {
       const ids: string[] = []
       for (const row of reader.rows(model)) if (typeof row.id === "string") ids.push(deriveId(importKey, row.id))
-      for (const group of chunks(ids, 100)) await deleteIdsLeafFirst(delegate, group)
+      await deleteIdsLeafFirst(delegate, ids)
     } else if (modelHasWorkspaceId(model)) {
       await deleteScopedImportRows({ workspaceId: newWorkspaceId }, delegate.deleteMany)
     } else {
@@ -749,7 +747,7 @@ async function rollbackImport(
       try {
         await deleteModel(model)
       } catch (error) {
-        if ((error as { code?: string }).code !== "P2014") throw error
+        if (!(error instanceof StuckDeleteError) && (error as { code?: string }).code !== "P2014") throw error
         lastError = error
         next.push(model)
       }

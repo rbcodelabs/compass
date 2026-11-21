@@ -8,7 +8,7 @@ import { auth } from "@/auth"
 import { getArtifactStorage, privateProviderIdentity } from "@/lib/artifact-storage"
 import { isPermissionError, resolveOrgAdmin } from "@/lib/permissions"
 import { defaultBlobAdapters } from "@/lib/workspace-export/blobs"
-import { WorkspaceImportError, WorkspaceImportRecoveryRequired, importWorkspaceBundle } from "@/lib/workspace-export/import"
+import { WorkspaceImportError, WorkspaceImportRecoveryRequired, importWorkspaceBundle, type ImportReport } from "@/lib/workspace-export/import"
 import { MAX_BUNDLE_BYTES, loadStagedBundle, verifyBundleReceipt } from "@/lib/workspace-export/upload"
 import { bindImportReceipt, readImportReceiptResult } from "@/lib/workspace-export/receipt-binding"
 
@@ -53,7 +53,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ orgSlug
       const nonce = body.nonce ?? verified.uploadId
       const digest = createHash("sha256").update(JSON.stringify(["workspace-import", organizationId, userId, verified.uploadId])).digest("hex")
       const result = await readImportReceiptResult(prisma, { organizationId, userId, nonce, digest })
-      if (result) return NextResponse.json({ ok: true, ...result })
+      if (result) return NextResponse.json({ ok: true, ...result, alreadyImported: true })
       const staged = await loadStagedBundle(body.receipt, organizationId, userId, getArtifactStorage())
       bytes = staged.bytes
       discard = staged.discard
@@ -101,21 +101,26 @@ export async function POST(req: Request, { params }: { params: Promise<{ orgSlug
       },
       async recordExisting(report, digest) {
         const binding = receiptBinding
-        await withRetry(() => prisma.$transaction(async tx => {
+        return withRetry(() => prisma.$transaction(async tx => {
           const workspace = await tx.workspace.findFirst({ where: { id: report.workspaceId, organizationId }, select: { id: true } })
           if (!workspace || (owner && owner.workspaceId !== workspace.id)) {
             throw new WorkspaceImportRecoveryRequired("Imported workspace is unavailable")
           }
-          const [operation] = await tx.$queryRawUnsafe<{ phase: string; bundle_digest: string | null }[]>(
-            `SELECT phase, bundle_digest FROM ${importSchema()}.workspace_import_operations
+          const [operation] = await tx.$queryRawUnsafe<{ phase: string; bundle_digest: string | null; result_text: string | null }[]>(
+            `SELECT phase, bundle_digest, result_text FROM ${importSchema()}.workspace_import_operations
              WHERE workspace_id=$1::uuid AND organization_id=$2::uuid`, workspace.id, organizationId,
           )
           if (operation && operation.bundle_digest !== digest) throw new WorkspaceImportError("Bundle differs from the original import")
-          if (operation?.phase !== "committed") {
+          let replay = report
+          if (operation?.phase === "committed") {
+            if (!operation.result_text) throw new WorkspaceImportRecoveryRequired("Committed import report is unavailable")
+            replay = { ...JSON.parse(operation.result_text) as ImportReport, alreadyImported: true }
+          } else {
             const active = owner ?? await claimBundleImport(tx, workspace.id, organizationId, digest)
             await commitImportReport(tx, active, report)
           }
           if (binding) await bindImportReceipt(tx, { ...binding, workspaceId: workspace.id })
+          return replay
         }))
       },
       async startOperation(workspaceId, digest) {
