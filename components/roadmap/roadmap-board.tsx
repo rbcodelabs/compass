@@ -242,9 +242,27 @@ const droppedOnId = (over: { id: string | number }): string => {
   return id.startsWith(DOCK_TAB_PREFIX) ? `column-${id.slice(DOCK_TAB_PREFIX.length)}` : id;
 };
 
-const collisionDetection: CollisionDetection = (args) => {
+export const roadmapCollisionDetection: CollisionDetection = (args) => {
   const onTab = pointerWithin(args).find((hit) => args.droppableContainers.find((c) => c.id === hit.id)?.data.current?.dockTab);
-  return onTab ? [onTab] : closestCenter(args);
+  if (onTab) return [onTab];
+
+  // A scheduled card moves optimistically on drag-over. Scoring cards from
+  // adjacent columns after that reflow can send it straight back across the
+  // boundary and repeatedly unmount its menu. Use the pointer to pick the
+  // column; within it, keep the usual card ordering.
+  if (args.pointerCoordinates && args.active.data.current?.horizon) {
+    const { x, y } = args.pointerCoordinates;
+    const column = document.elementsFromPoint(x, y)
+      .map(element => element.closest('[id^="roadmap-column-"]'))
+      .find(Boolean);
+    if (column) {
+      const candidates = args.droppableContainers.filter(container =>
+        column.contains(container.node.current)
+      );
+      if (candidates.length) return closestCenter({ ...args, droppableContainers: candidates });
+    }
+  }
+  return closestCenter(args);
 };
 
 /**
@@ -720,7 +738,7 @@ export function RoadmapBoard({
     <DndContext
       id={dndId}
       sensors={sensors}
-      collisionDetection={collisionDetection}
+      collisionDetection={roadmapCollisionDetection}
       onDragStart={handleDragStart}
       onDragOver={handleDragOver}
       onDragEnd={handleDragEnd}
