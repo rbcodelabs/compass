@@ -3402,12 +3402,17 @@ model AgentMessage {
   /// "MESSAGE" | "PLAN_PROPOSAL" | "SYSTEM_RESOLUTION" (migration 124).
   messageKind    String?   @map("message_kind") @db.VarChar(30)
   editedAt       DateTime? @map("edited_at")
+  /// The AgentRun that produced this assistant message (migration 129). NULL for inline turns, which have no run,
+  /// and for every message that predates the column. Lets spend be counted once: run cost, plus message cost
+  /// only where run_id IS NULL (lib/agent-spend.ts). No foreign key (DSQL).
+  runId          String?   @map("run_id") @db.Uuid
   createdAt      DateTime  @default(now()) @map("created_at")
 
   conversation AgentConversation @relation(fields: [conversationId], references: [id])
 
   @@index([conversationId, createdAt])
   @@index([createdAt], map: "idx_agent_messages_created_at")
+  @@index([runId], map: "idx_agent_messages_run")
   @@map("agent_messages")
 }
 
