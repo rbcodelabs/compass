@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import path from "path";
 import fs from "fs";
 import { randomUUID } from "node:crypto";
@@ -84,13 +84,27 @@ const GUIDED_PAGES = buildScreenshotCases({
   workspaceBase: WORKSPACE_BASE,
   includeGuidedUx: FUNCTIONAL || process.env.DOCS_GUIDED_UX_SCREENSHOTS === "1",
   includeSharedDiscussion: FUNCTIONAL,
+  includeSettingsShell: FUNCTIONAL || process.env.DOCS_SETTINGS_SHELL_SCREENSHOTS === "1",
   researchToken: process.env.DOCS_RESEARCH_TOKEN || (FUNCTIONAL ? GUIDED_UX_SCREENSHOT_TOKEN : null),
 });
 
 const PAGES: Array<StandardScreenshotCase | ScreenshotCase> = [...STANDARD_PAGES, ...GUIDED_PAGES];
 
+async function assertSettingsPage(page: Page, entry: ScreenshotCase) {
+  if (!entry.settingsPage) return;
+  const { heading, navLink } = entry.settingsPage;
+  await expect(page).toHaveURL((url) => url.pathname === entry.url);
+  await expect(page.getByRole("heading", { name: heading, exact: true, level: 1 })).toBeVisible();
+  if (entry.viewport && entry.viewport.width < 768) {
+    await expect(page.getByRole("button", { name: `Settings menu, current page ${navLink}`, exact: true })).toBeVisible();
+  } else {
+    const nav = page.getByRole("navigation", { name: "Settings", exact: true });
+    await expect(nav.getByRole("link", { name: navLink, exact: true })).toHaveAttribute("aria-current", "page");
+  }
+}
+
 async function prepareScreenshot(
-  page: import("@playwright/test").Page,
+  page: Page,
   entry: StandardScreenshotCase | ScreenshotCase,
 ) {
   if (!entry.prepare) return;
@@ -110,6 +124,12 @@ async function prepareScreenshot(
     await expect(disclosure).toHaveAttribute("aria-expanded", "false");
     await disclosure.click();
     await expect(disclosure).toHaveAttribute("aria-expanded", "true");
+    return;
+  }
+  if (entry.prepare === "settings-nav-sheet") {
+    await page.getByRole("button", { name: /^Settings menu, current page/ }).click();
+    const nav = page.getByRole("navigation", { name: "Settings sections", exact: true });
+    await expect(nav.getByRole("link", { name: "Profile", exact: true })).toHaveAttribute("aria-current", "page");
     return;
   }
   if (entry.prepare === "workspace-search") {
@@ -193,6 +213,7 @@ test.describe("docs screenshots", () => {
         }));
       }
       await page.goto(url);
+      if ("settingsPage" in entry) await assertSettingsPage(page, entry);
       await page.waitForLoadState("networkidle");
       if (FUNCTIONAL) {
         // Local screenshots run against Next's dev server; omit its floating

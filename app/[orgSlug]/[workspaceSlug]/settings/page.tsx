@@ -7,7 +7,7 @@ import { ManageFieldsPanel } from "@/components/custom-fields/manage-fields-pane
 import { SharedOptionSetsPanel } from "@/components/custom-fields/shared-option-sets-panel";
 import { toCustomFieldDefinitionData } from "@/lib/custom-field-definitions";
 import { listInheritanceRules } from "@/lib/custom-field-inheritance-admin";
-import { customFieldInheritanceTableExists } from "@/lib/feature-tables";
+import { readIfInheritanceTableExists } from "@/lib/feature-tables";
 import { InheritanceRulesPanel } from "@/components/custom-fields/inheritance-rules-panel";
 import { parseSelectOptions } from "@/lib/shared-field-options";
 import { ManageSquadsPanel } from "@/components/squads/manage-squads-panel";
@@ -16,7 +16,7 @@ import { OrgReadOnlyAccessPanel } from "@/components/settings/org-readonly-acces
 import { ManageApiKeysPanel } from "@/components/settings/manage-api-keys-panel";
 import { PortalSettingsPanel } from "@/components/settings/portal-settings-panel";
 import { DeliveryLimitsPanel } from "@/components/settings/delivery-limits-panel";
-import { parseStoredRepos } from "@/lib/agent-github-repos";
+import { parseStoredConfig } from "@/lib/agent-github-repos";
 import { AgentGithubReposPanel } from "@/components/settings/agent-github-repos-panel";
 import { AnthropicKeyPanel } from "@/components/settings/anthropic-key-panel";
 import { readAnthropicKeyLast4 } from "@/lib/workspace-anthropic-key";
@@ -161,9 +161,10 @@ export default async function SettingsPage({ params }: Props) {
   const fields: CustomFieldDefinitionData[] = rawFields.map(toCustomFieldDefinitionData);
 
   // A missing table (migration 113 not applied yet) reads as "no rules", never a broken page.
-  const inheritanceAvailable = await customFieldInheritanceTableExists(prisma);
-  const inheritanceRules = inheritanceAvailable
-    ? (await listInheritanceRules(prisma, workspace.id)).map((rule) => ({
+  const loadedInheritanceRules = await readIfInheritanceTableExists(prisma, () => listInheritanceRules(prisma, workspace.id));
+  const inheritanceAvailable = loadedInheritanceRules !== undefined;
+  const inheritanceRules = loadedInheritanceRules
+    ? loadedInheritanceRules.map((rule) => ({
         id: rule.id,
         priority: rule.priority,
         enabled: rule.enabled,
@@ -495,11 +496,11 @@ export default async function SettingsPage({ params }: Props) {
         <AgentDeveloperSandboxPanel orgSlug={orgSlug} workspaceSlug={workspaceSlug} initialEnabled={developerSandboxEnabled} canEdit={canManageCapabilityPacks} />
       </SettingsSection>
 
-      <SettingsSection title="Agent GitHub access" description="Repositories agents in this workspace may push branches and open pull requests to. Agents get a short-lived token limited to exactly these repos.">
+      <SettingsSection title="Agent GitHub access" description="Repositories agents in this workspace may work with, read-only or with push and pull request access. Agents get a short-lived token limited to exactly these repos.">
         <AgentGithubReposPanel
           orgSlug={orgSlug}
           workspaceSlug={workspaceSlug}
-          initialRepos={parseStoredRepos(workspace.agentGithubRepos)}
+          initialConfig={parseStoredConfig(workspace.agentGithubRepos)}
           canEdit={canManageCapabilityPacks}
         />
       </SettingsSection>

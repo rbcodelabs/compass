@@ -21,6 +21,14 @@ export function isPublicPath(pathname: string): boolean {
     // Liveness probe: no session, no database, no secrets (app/api/health/route.ts). Exact path so nothing under it is public.
     pathname === "/api/health" ||
     pathname.startsWith("/_vercel/insights/") ||
+    // PWA install metadata: the browser fetches the manifest and icons without
+    // credentials, so a 302 to /login would make the app uninstallable. Static
+    // brand assets only; nothing user-specific. Exact paths (or a slash-terminated
+    // prefix) so look-alikes stay behind login.
+    pathname === "/manifest.webmanifest" ||
+    pathname.startsWith("/icons/") ||
+    pathname === "/apple-icon.png" ||
+    pathname === "/icon.svg" ||
     ["/api/preview-automation/bootstrap", "/api/preview-automation/session", "/api/preview-automation/teardown"].includes(pathname) ||
     // ADR-0009 preview-login page + its start route. Both fail closed
     // internally (404 before any DB access) unless VERCEL_ENV=preview and

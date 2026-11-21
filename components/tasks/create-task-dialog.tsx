@@ -81,6 +81,7 @@ export function CreateTaskDialog({ workspaceId, orgSlug, workspaceSlug, members 
           assignee: task.assignee,
           ownerName: task.ownerName ?? null,
           storyPoints: task.storyPoints ?? null,
+          startDate: task.startDate ? task.startDate.toISOString() : null,
           dueDate: task.dueDate ? task.dueDate.toISOString() : null,
           iteration: task.iteration ?? null,
           parentTaskId: task.parentTaskId ?? null,

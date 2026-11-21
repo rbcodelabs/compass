@@ -20,12 +20,20 @@ export function FollowButton({
   subjectType,
   subjectId,
   className,
+  iconOnly = false,
 }: {
   orgSlug: string
   workspaceSlug: string
   subjectType: string
   subjectId: string
   className?: string
+  /**
+   * An icon-only ghost button (for a panel header). The accessible name is a constant "Follow" and the state is carried by
+   * aria-pressed, so a screen reader announces "Follow, toggle button, pressed" rather than a name that flips with the state.
+   * A failed save never adds inline text here (it would push Pin and Close off a narrow header): the error is announced
+   * through a visually hidden alert and shown on the button itself (destructive icon and its title).
+   */
+  iconOnly?: boolean
 }) {
   const [state, setState] = useState<State>(null)
   const [error, setError] = useState("")
@@ -78,19 +86,26 @@ export function FollowButton({
     <span className={`inline-flex items-center gap-2 ${className ?? ""}`}>
       <Button
         type="button"
-        variant="outline"
-        size="sm"
+        variant={iconOnly ? "ghost" : "outline"}
+        size={iconOnly ? "icon-sm" : "sm"}
         aria-pressed={state.following}
+        aria-label={iconOnly ? "Follow" : undefined}
         disabled={pending}
         onClick={toggle}
         data-slot="follow-button"
-        title={state.following ? "You get notified about status changes and comments. Click to unfollow." : "Get notified about status changes and comments"}
+        title={
+          iconOnly && error
+            ? error
+            : state.following
+              ? "You get notified about status changes and comments. Click to unfollow."
+              : "Get notified about status changes and comments"
+        }
       >
-        <Icon className={state.following ? "text-primary" : undefined} aria-hidden="true" />
-        {state.following ? "Following" : "Follow"}
+        <Icon className={iconOnly && error ? "text-destructive" : state.following ? "text-primary" : undefined} aria-hidden="true" />
+        {iconOnly ? null : state.following ? "Following" : "Follow"}
       </Button>
       {error && (
-        <span role="alert" className="text-xs text-destructive">
+        <span role="alert" className={iconOnly ? "sr-only" : "text-xs text-destructive"}>
           {error}
         </span>
       )}

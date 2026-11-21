@@ -1,6 +1,6 @@
 import getPrisma from "@/lib/db"
 import { captureWorkspaceMutation } from "@/lib/workspace-update-mutations"
-import { assignmentUpdate, validateTaskLink, validateTaskReferences, type TaskAssignee } from "@/lib/task-assignment"
+import { assignmentUpdate, validateTaskDates, validateTaskLink, validateTaskReferences, type TaskAssignee } from "@/lib/task-assignment"
 import { allocateOneSeq } from "@/lib/work-item-sequence"
 import { createTaskLinks } from "@/lib/task-link-writes"
 import type { TaskLinkRecordType, TaskPriority, TaskStatus } from "@/lib/types"
@@ -16,6 +16,7 @@ export type NewTaskInput = {
   assignee?: TaskAssignee
   ownerName?: string | null
   storyPoints?: number | null
+  startDate?: Date | null
   dueDate?: Date | null
   iteration?: string | null
   /** TaskLinks written in the same insert as the task, validated against this workspace first. */
@@ -32,6 +33,7 @@ export type NewTaskInput = {
 export async function createWorkspaceTask(workspaceId: string, data: NewTaskInput) {
   const prisma = getPrisma()
   await validateTaskReferences(workspaceId, data)
+  validateTaskDates(data.startDate, data.dueDate)
   const assignment = await assignmentUpdate(workspaceId, data)
   for (const link of data.links ?? []) await validateTaskLink(workspaceId, link.linkedType, link.linkedId)
   const status = data.status ?? "TODO"
@@ -59,6 +61,7 @@ export async function createWorkspaceTask(workspaceId: string, data: NewTaskInpu
         ...assignment,
         ownerName: data.ownerName,
         storyPoints: data.storyPoints,
+        startDate: data.startDate,
         dueDate: data.dueDate,
         iteration: data.iteration,
         sortOrder,

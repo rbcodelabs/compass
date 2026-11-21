@@ -6,7 +6,6 @@ import {
   PanelSkeleton,
   PanelError,
   PanelContainer,
-  FullPageLink,
   PanelTitle,
   EditableText,
   Section,
@@ -22,6 +21,7 @@ import { useLabels, useThinkingModel } from "@/components/thinking-model/thinkin
 import { LinkedOpportunitiesSection } from "./linked-opportunities-section";
 import type { LinkedOpportunities } from "@/lib/objective-linked-opportunities";
 import { cycleRouteSegment, noCycleLabel } from "@/lib/okr-cycle-scope";
+import { usePanelHeaderActions } from "./panel-header-actions";
 
 type ObjectiveData = {
   id: string;
@@ -78,6 +78,7 @@ export function ObjectivePanel({
     orgSlug,
     workspaceSlug
   );
+  usePanelHeaderActions(data ? { fullPageHref: `/${orgSlug}/${workspaceSlug}/okrs/${cycleRouteSegment(data.cycle?.id)}` } : {});
 
   const labels = useLabels();
   // Cycles are subdued under Torres: shown where the Outcome has one, never as a "no cycle" placeholder.
@@ -117,8 +118,6 @@ export function ObjectivePanel({
 
   return (
     <PanelContainer entity={{ type: edit.type, id: edit.id, title: data.title }}>
-      <FullPageLink href={`/${orgSlug}/${workspaceSlug}/okrs/${cycleRouteSegment(data.cycle?.id)}`} />
-
       <PanelTitle displayId={displayId}
         title={data.title}
         status={{ value: data.status, ...(STATUS[data.status] ?? { label: data.status }) }}

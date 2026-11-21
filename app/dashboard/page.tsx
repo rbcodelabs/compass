@@ -52,7 +52,7 @@ export default async function DashboardPage() {
 
   if (memberships.length === 1) {
     const { workspace } = memberships[0]
-    redirect(`/${workspace.organization.slug}/${workspace.slug}/okrs`)
+    redirect(`/${workspace.organization.slug}/${workspace.slug}/home`)
   }
 
   if (memberships.length > 1) {
@@ -91,7 +91,7 @@ export default async function DashboardPage() {
 
   if (readOnlyWorkspaces.length === 1) {
     const workspace = readOnlyWorkspaces[0]
-    redirect(`/${workspace.orgSlug}/${workspace.slug}/okrs`)
+    redirect(`/${workspace.orgSlug}/${workspace.slug}/home`)
   }
 
   return (

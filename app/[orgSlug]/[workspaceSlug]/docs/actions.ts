@@ -25,6 +25,7 @@ import { postDocCommentWithOptionalTask, type CommentTaskRequest, type PostComme
 import { getArtifactStorage } from "@/lib/artifact-storage";
 import { parseArtifactKind } from "@/lib/artifact-kind";
 import { resolveCanvasCards, resolveDocEmbeds, searchCanvasCardTargets, type DocEmbedResolution } from "@/lib/canvas-card-data";
+import { castDecisionVote, retractDecisionVote, DecisionVoteError } from "@/lib/decision-votes";
 import { getCanvasOverview } from "@/lib/canvas/data";
 import { buildTreeFragment, TREE_SCOPE_KINDS, type TreeFragment, type TreeScope } from "@/lib/canvas-tree";
 import { isUuid } from "@/lib/canvas-cards";
@@ -402,6 +403,31 @@ export async function resolveDocEmbedRefs(docId: string, refs: unknown): Promise
   const result = await resolveDocEmbeds({ docId, userId: access.userId, refs: refs.slice(0, MAX_EMBED_REFS_PER_CALL), expectedWorkspaceId: access.workspaceId });
   if (!result) throw new Error("Document not found");
   return { ...result, canEdit: access.canEdit };
+}
+
+/**
+ * Cast, change or retract the vote of the caller on an embedded Decision (ADR-0030). Advisory only: this never touches the approval path.
+ * Gate: a direct member of the DOC workspace (org-wide read-only access cannot vote), and the Decision must belong to that same workspace.
+ * Refusals the person can act on (voting closed, option no longer offered) are returned as values, because production replaces the message
+ * of a thrown server-action error with an opaque digest.
+ */
+export async function setDecisionVote(
+  docId: string,
+  requestId: string,
+  questionIndex: number,
+  option: string | null,
+  revisionId: string,
+): Promise<{ ok: true } | { error: string }> {
+  const { user, workspaceId } = await requireDocumentMember(docId);
+  try {
+    if (option === null) await retractDecisionVote({ workspaceId, requestId, voterUserId: user.id as string, questionIndex, revisionId });
+    else await castDecisionVote({ workspaceId, requestId, voterUserId: user.id as string, questionIndex, option, revisionId });
+    return { ok: true };
+  } catch (error) {
+    if (error instanceof DecisionVoteError) return { error: error.message };
+    console.error("[decision-vote] unexpected failure", error);
+    return { error: "Could not save your vote." };
+  }
 }
 
 /** Picker search. Requires workspace membership (it is an editing action). */

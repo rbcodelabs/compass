@@ -152,6 +152,7 @@ describe.skipIf(!databaseUrl)("workspace export: wide model coverage", () => {
     await db().squad.create({ data: { workspaceId: wsId, name: "Core", createdById: adminId } })
     await db().opportunityScore.create({ data: { opportunityId: opp.id, scoringModelId: sm.id, scoredByUserId: adminId, modelVersion: 1, formulaSnapshot: {}, rawValues: {}, rawScore: 1, normalizedScore: 1 } })
     await db().entityLink.create({ data: { workspaceId: wsId, linkType: "RELATES_TO", fromType: "TASK", fromId: task.id, toType: "OPPORTUNITY", toId: opp.id } })
+    await db().decisionVote.create({ data: { workspaceId: wsId, requestId: req.id, revisionId: rev.id, questionIndex: 0, chosenOption: "A", voterUserId: adminId } })
     await db().docVersion.create({ data: { docId: docX.id, title: "Dx", content: "v1", createdById: adminId } })
     await db().artifactRevision.create({ data: { artifactId: art.id, revisionNumber: 1, blobPathname: `artifacts/${wsId}/${art.id}/r1-page.html`, createdById: adminId } })
     await db().feedbackAttachment.create({ data: { feedbackItemId: fb.id, url: "https://public.example/feedback/old/shot.png", filename: "shot.png", fileType: "image/png", fileSize: 2 } })

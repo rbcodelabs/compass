@@ -58,6 +58,7 @@ import type {
   CustomFieldDefinitionData,
   CustomFieldValue,
 } from "@/lib/types";
+import { usePanelHeaderActions } from "@/components/panels/panel-header-actions";
 
 type TaskLink = TaskLinkData;
 
@@ -74,6 +75,7 @@ type SubtaskData = {
   assignee?: ResolvedTaskAssignee | null;
   ownerName: string | null;
   storyPoints: number | null;
+  startDate: string | null;
   dueDate: string | null;
   iteration: string | null;
   parentTaskId: string | null;
@@ -95,6 +97,7 @@ type TaskDetailData = {
   assignee?: ResolvedTaskAssignee | null;
   ownerName: string | null;
   storyPoints: number | null;
+  startDate: string | null;
   dueDate: string | null;
   iteration: string | null;
   sortOrder: number;
@@ -152,6 +155,7 @@ function toCardData(d: TaskDetailData): TaskCardData {
     assignee: d.assignee,
     ownerName: d.ownerName,
     storyPoints: d.storyPoints,
+    startDate: d.startDate,
     dueDate: d.dueDate,
     iteration: d.iteration,
     parentTaskId: d.parentTaskId,
@@ -224,6 +228,8 @@ export function TaskDetail({ taskId, orgSlug, workspaceSlug, variant }: Props) {
     orgSlug,
     workspaceSlug
   );
+  // In the panel the shell shows Follow as a header icon; on the full page it stays inline.
+  const inShell = usePanelHeaderActions(data ? { follow: { subjectType: "TASK", subjectId: taskId } } : {});
 
   if (error) return <PanelError label="task" />;
   if (!data) return <PanelSkeleton />;
@@ -268,8 +274,9 @@ export function TaskDetail({ taskId, orgSlug, workspaceSlug, variant }: Props) {
             compact
           />
         </div>
+        <InlineDateField value={data.startDate} field="startDate" edit={edit} placeholder="Set start date" compact />
         <InlineDateField value={data.dueDate} field="dueDate" edit={edit} placeholder="Set due date" compact />
-        <FollowButton orgSlug={orgSlug} workspaceSlug={workspaceSlug} subjectType="TASK" subjectId={taskId} />
+        {!inShell && <FollowButton orgSlug={orgSlug} workspaceSlug={workspaceSlug} subjectType="TASK" subjectId={taskId} />}
       </div>
       <EditableText
         value={data.description}

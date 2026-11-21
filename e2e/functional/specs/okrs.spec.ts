@@ -101,6 +101,15 @@ test.describe("OKRs", () => {
     await page.getByLabel("Title").fill(krTitle);
     await page.getByLabel("Target").fill("100");
     await page.getByLabel("Unit (optional)").fill("%");
+
+    const filter = page.getByRole("searchbox", { name: "Filter objectives by name" });
+    await filter.fill("unmatched objective");
+    await expect(page.getByText("0 of 1")).toBeVisible();
+    await expect(page.getByLabel("Target")).toBeHidden();
+    await filter.press("Escape");
+    await expect(page.getByLabel("Title")).toHaveValue(krTitle);
+    await expect(page.getByLabel("Target")).toHaveValue("100");
+
     await page.getByRole("button", { name: "Add key result" }).click();
 
     // The form closes once the server action completes (setOpen(false) is called
@@ -118,6 +127,15 @@ test.describe("OKRs", () => {
     // KR title appears in the row
     await expect(page.getByText(krTitle)).toBeVisible({ timeout: 10_000 });
 
+    await page.getByRole("button", { name: `Collapse ${objectiveTitle}` }).click();
+    await filter.fill(krTitle);
+    await expect(page.getByRole("button", { name: krTitle }).locator("mark")).toBeVisible();
+    await expect(page.getByText("1 of 1")).toBeVisible();
+    await expect(page.getByRole("button", { name: `Collapse ${objectiveTitle}` })).toHaveCount(0);
+    await page.getByRole("button", { name: "Clear filter" }).click();
+    await expect(filter).toBeFocused();
+    await page.getByRole("button", { name: `Expand ${objectiveTitle}` }).click();
+
     // ── 6. Log a check-in ───────────────────────────────────────────────────
     // KR bar shows initial progress "0 / 100 %"
     await expect(page.getByText("0 / 100 %")).toBeVisible();
@@ -125,6 +143,30 @@ test.describe("OKRs", () => {
     await page.getByRole("button", { name: "Check in" }).click();
     // Clear current value (pre-filled with 0) and enter 50
     await page.getByLabel("Current value").fill("50");
+
+    // Another session can rename a matching metric while this check-in is a draft.
+    await filter.fill(krTitle);
+    await expect(page.getByText("1 of 1")).toBeVisible();
+    const pool = new pg.Pool({ connectionString: isolatedE2EConnectionString() });
+    const renameMetric = (name: string, previousName: string) => pool.query(
+      `UPDATE "${S}".key_results SET title = $1 WHERE title = $2 AND objective_id IN (SELECT id FROM "${S}".objectives WHERE title = $3)`,
+      [name, previousName, objectiveTitle],
+    );
+    const temporaryTitle = `Renamed metric ${ts}`;
+    try {
+      expect((await renameMetric(temporaryTitle, krTitle)).rowCount).toBe(1);
+      await expect(page.getByText("0 of 1")).toBeVisible({ timeout: 20_000 });
+      await expect(page.getByLabel("Current value")).toBeHidden();
+    } finally {
+      try {
+        await renameMetric(krTitle, temporaryTitle);
+      } finally {
+        await pool.end();
+      }
+    }
+    await expect(page.getByText("1 of 1")).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByLabel("Current value")).toHaveValue("50");
+    await filter.press("Escape");
     await page.getByRole("button", { name: "Save check-in" }).click();
 
     // Wait for the check-in form to close (server action done → setOpen(false)).

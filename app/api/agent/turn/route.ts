@@ -41,7 +41,7 @@ import { resolveWorkspaceAgentModel } from "@/lib/workspace-anthropic-key"
 import { agentRunCredentialSource, logAgentRunCredentialSource } from "@/lib/agent-credential-source"
 import { resolveAgentHandoffContext } from "@/lib/agent-context"
 import { resolveAgentPageContext } from "@/lib/agent-page-context"
-import { resolveConversationAccess } from "@/lib/agent-conversation-access"
+import { isClosedToNewTurns, resolveConversationAccess } from "@/lib/agent-conversation-access"
 import { clearConversationPendingQuestions } from "@/lib/agent-inbox-questions"
 import { cancelAllPendingConversationWakeups } from "@/lib/agent-scheduled-wakeups"
 import { getOrchestratorSkillAppendixForConversation } from "@/lib/orchestrator/skill"
@@ -68,7 +68,7 @@ import { effectiveTurnModel, parseRequestedTurnModel } from "@/lib/agent-turn-mo
 import { BUILT_IN_AGENT_SELECTION } from "@/lib/agent-defaults"
 import { agentMayUseOwnerConnectors, type AgentRecord } from "@/lib/agent-ownership"
 import { mintAgentMcpKey, revokeAgentMcpKey } from "@/lib/agent-mcp-key"
-import { readWorkspaceAgentRepos } from "@/lib/agent-github-repos"
+import { readWorkspaceAgentGithub } from "@/lib/agent-github-repos"
 import { mintAgentGithubEnv } from "@/lib/github-app-token"
 import { gitAuthorEnv, readAgentGitAuthor } from "@/lib/agent-git-author"
 import { turnEgressPolicy, developerNpmToken, githubShellEnabled } from "@/lib/agent-github-access"
@@ -175,6 +175,11 @@ function assemblePrompt(
   return [framing, seedSection, transcript, pageContextBlock, userTurn(userMessage, currentUserId), "Assistant:"]
     .filter(Boolean)
     .join("\n\n")
+}
+
+/** 404 like a lost-access conversation (existence is not newly revealed: the caller can already read it), but marked so the client can show "archived" instead of an error. */
+function archivedConversationResponse() {
+  return new Response("Conversation archived.", { status: 404, headers: { "x-conversation-state": "archived" } })
 }
 
 export async function POST(request: NextRequest) {
@@ -297,6 +302,7 @@ export async function POST(request: NextRequest) {
     let passiveConvo: { id: string } | null = null
     if (typeof conversationId === "string") {
       const access = await resolveConversationAccess(prisma, { conversationId, workspaceId, userId })
+      if (access && isClosedToNewTurns(access)) return archivedConversationResponse()
       if (!access) {
         return new Response("Conversation not found or access denied.", { status: 404 })
       }
@@ -398,6 +404,7 @@ export async function POST(request: NextRequest) {
   let convo: { id: string } | null = null
   if (typeof conversationId === "string") {
     const access = await resolveConversationAccess(prisma, { conversationId, workspaceId, userId })
+    if (access && isClosedToNewTurns(access)) return archivedConversationResponse()
     if (!access) {
       return new Response("Conversation not found or access denied.", { status: 404 })
     }
@@ -802,7 +809,8 @@ export async function POST(request: NextRequest) {
       // An agent-scoped key is honoured only while a live run names it, so the run must name it before the sandbox exists.
       if (runAgent && !(await attachAgentRunKey({ prisma, runId: run.id, apiKeyId }))) throw new Error("agent run ended before its key could be attached")
       // A named agent may commit as a configured identity (migration 111); otherwise the sandbox keeps the bot author.
-      const githubEnv = { ...(await mintAgentGithubEnv(await readWorkspaceAgentRepos(prisma, workspaceId))), ...(runAgent ? gitAuthorEnv(await readAgentGitAuthor(prisma, runAgent.id)) : {}) }
+      const githubConfig = await readWorkspaceAgentGithub(prisma, workspaceId)
+      const githubEnv = { ...(await mintAgentGithubEnv(githubConfig.repos, githubConfig.access)), ...(runAgent ? gitAuthorEnv(await readAgentGitAuthor(prisma, runAgent.id)) : {}) }
       // Bash + GitHub only when the docs tree will be materialized (same condition as docMaterial below). Every sandbox, shell or not, is created with a deny-by-default
       // egress allowlist, so there is never a moment where the agent can run with open egress.
       const githubShell = githubShellEnabled({ githubEnv, harness, docs: !scope && harness !== "opencode" })
@@ -948,7 +956,8 @@ export async function POST(request: NextRequest) {
         const minted = await analysisStep(() => mintAgentMcpKey(userId, workspaceId, scope), deadline, abort, late => revokeAgentMcpKey(late.apiKeyId))
         apiKeyId = minted.apiKeyId
         const token = minted.token
-        const githubEnv = await mintAgentGithubEnv(await readWorkspaceAgentRepos(prisma, workspaceId))
+        const githubConfig = await readWorkspaceAgentGithub(prisma, workspaceId)
+        const githubEnv = await mintAgentGithubEnv(githubConfig.repos, githubConfig.access)
         const preparedPacks = await step(() => prepareCapabilityPacksForTurn(activePacks, { get: (pathname) => getCapabilityPackArtifactStorage().get(pathname) }))
         packProvenance = preparedPacks.provenanceJson
         sse("status", { phase: "booting", conversationId: conversationIdResolved })

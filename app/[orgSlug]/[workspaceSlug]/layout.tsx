@@ -21,6 +21,7 @@ import { initialsOf } from "@/lib/user-initials"
 import { WorkspaceThemeStyle } from "@/components/branding/workspace-theme-style"
 import { resolveWorkspaceBranding } from "@/lib/branding"
 import { cookies } from "next/headers"
+import { RememberWorkspace } from "@/components/remember-workspace"
 import { panelPinCookieName, parsePanelPin } from "@/lib/panel-pin"
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
 import { TooltipProvider } from "@/components/ui/tooltip"
@@ -112,6 +113,7 @@ export default async function WorkspaceLayout({
   return (
     <>
       <script dangerouslySetInnerHTML={{ __html: workspaceThemeInitScript }} />
+      <RememberWorkspace orgSlug={orgSlug} workspaceSlug={workspaceSlug} />
       <WorkspaceThemeStyle branding={resolveWorkspaceBranding(workspace)} />
       <ThemeProvider>
         <div className="workspace-theme-scope contents">

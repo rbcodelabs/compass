@@ -24,7 +24,7 @@
  */
 import { CANVAS_CARD_KINDS, MAX_CARD_TITLE_LENGTH, isUuid } from "@/lib/canvas-cards"
 
-export const DOC_EMBED_KINDS = [...CANVAS_CARD_KINDS, "artifact"] as const
+export const DOC_EMBED_KINDS = [...CANVAS_CARD_KINDS, "artifact", "decision"] as const
 export type DocEmbedKind = (typeof DOC_EMBED_KINDS)[number]
 
 export const RESERVED_EMBED_FENCE_INFO = "compass-embed"

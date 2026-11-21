@@ -2,9 +2,10 @@ import type { TaskCardData } from "@/components/tasks/task-card";
 import { isTaskOriginLink } from "@/lib/task-links-read";
 import type { TaskLinkRecordType, TaskPriority, TaskStatus } from "@/lib/types";
 
-type TaskCardRow = Omit<TaskCardData, "status" | "priority" | "squad" | "dueDate" | "subtaskCount" | "links"> & {
+type TaskCardRow = Omit<TaskCardData, "status" | "priority" | "squad" | "startDate" | "dueDate" | "subtaskCount" | "links"> & {
   status: string;
   priority: string;
+  startDate: Date | null;
   dueDate: Date | null;
 };
 type SquadRow = { id: string; name: string; color: string };
@@ -35,6 +36,7 @@ export function buildTaskCards(input: {
     status: task.status as TaskStatus,
     priority: task.priority as TaskPriority,
     squad: task.squadId ? squadById.get(task.squadId) ?? null : null,
+    startDate: task.startDate?.toISOString() ?? null,
     dueDate: task.dueDate?.toISOString() ?? null,
     subtaskCount: subtaskCountByParentId.get(task.id) ?? 0,
     links: (linksByTaskId.get(task.id) ?? []).map((link) => {
