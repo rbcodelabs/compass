@@ -242,7 +242,7 @@ const droppedOnId = (over: { id: string | number }): string => {
   return id.startsWith(DOCK_TAB_PREFIX) ? `column-${id.slice(DOCK_TAB_PREFIX.length)}` : id;
 };
 
-const collisionDetection: CollisionDetection = (args) => {
+export const roadmapCollisionDetection: CollisionDetection = (args) => {
   const onTab = pointerWithin(args).find((hit) => args.droppableContainers.find((c) => c.id === hit.id)?.data.current?.dockTab);
   if (onTab) return [onTab];
 
@@ -738,7 +738,7 @@ export function RoadmapBoard({
     <DndContext
       id={dndId}
       sensors={sensors}
-      collisionDetection={collisionDetection}
+      collisionDetection={roadmapCollisionDetection}
       onDragStart={handleDragStart}
       onDragOver={handleDragOver}
       onDragEnd={handleDragEnd}
