@@ -53,7 +53,12 @@ const prisma = spawnSync(
   ["node_modules/prisma/build/index.js", "db", "push", "--accept-data-loss"],
   {
     cwd: process.cwd(),
-    env: { ...process.env, DATABASE_URL: prismaUrl.toString() },
+    env: {
+      ...process.env,
+      DATABASE_URL: prismaUrl.href,
+      DATABASE_MIGRATION_URL: prismaUrl.href,
+      POSTGRES_URL_NON_POOLING: prismaUrl.href,
+    },
     stdio: "inherit",
   },
 );
