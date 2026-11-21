@@ -178,7 +178,12 @@ export async function* exportWorkspaceChunks(
   yield* writeModel("Workspace", [[ws]])
   // Everything else, parents first.
   for (const model of exportOrder()) {
-    yield* writeModel(model, selectRows(client, model, workspaceId, (m) => idsByModel.get(m) ?? []))
+    try {
+      yield* writeModel(model, selectRows(client, model, workspaceId, (m) => idsByModel.get(m) ?? []))
+    } catch (error) {
+      if (model !== "DecisionVote" || typeof error !== "object" || error === null || !("code" in error) || error.code !== "P2021") throw error
+      counts[model] = 0
+    }
   }
 
   // Blobs, after data so the lists are complete.

@@ -80,8 +80,11 @@ describe("Show archived", () => {
 
 describe("a conversation archived from the panel", () => {
   it("drops the row at once, announces it, and moves focus to the section heading", async () => {
-    render(<ObjectConversationsSection targetType="TASK" targetId="task" />)
-    await screen.findByText("Live thread")
+    // Flush the initial list commit and its archive membership effect before dispatching.
+    await act(async () => {
+      render(<ObjectConversationsSection targetType="TASK" targetId="task" />)
+    })
+    expect(screen.getByText("Live thread")).toBeInTheDocument()
     archivedNow = true
     act(() => { window.dispatchEvent(new CustomEvent(CONVERSATION_ARCHIVE_CHANGED_EVENT, { detail: { conversationId: "live", archived: true } })) })
     expect(screen.queryByText("Live thread")).toBeNull()

@@ -99,10 +99,12 @@ test.describe("Chain graph", () => {
 
     // ── 4. Cluster collapse and expand from the keyboard ─────────────────────
     await page.getByRole("button", { name: "Collapse all" }).click();
-    const cluster = page.getByRole("button", { name: /collapsed group of \d+/ }).first();
+    const cluster = page.getByRole("button", { name: /^No objective: collapsed group of /, expanded: false });
     await expect(cluster).toBeVisible();
-    await cluster.focus();
-    await page.keyboard.press("Enter");
+    await cluster.press("Enter");
+    await expect(page.getByRole("button", { name: /^No objective \(\d+\)$/, expanded: true })).toBeVisible();
+    // Expansion can lay members outside the viewport, where React Flow virtualizes them.
+    await page.getByRole("button", { name: "Expand all", exact: true }).press("0");
     await expect(page.getByRole("button", { name: new RegExp(`Opportunity: ${oppTitle}`) })).toBeVisible();
 
     // ── 5. Open details from the outline, and the deep link survives a reload ─

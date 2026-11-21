@@ -216,13 +216,24 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
   })) as { id: string; email: string | null }[]
   const byEmail = new Map(memberUsers.filter((u) => u.email).map((u) => [u.email!.toLowerCase(), u.id]))
   const userMap = new Map<string, string>()
+  const matchedUsers = new Set<string>()
   let usersMatched = 0
   let usersFallback = 0
   for (const u of manifest.users) {
+    if (userMap.has(u.id.toLowerCase())) throw new WorkspaceImportError("A voter or user identity in this bundle could not be matched uniquely. Resolve duplicate identities before importing.")
     const target = byEmail.get(u.email.toLowerCase())
-    if (target) usersMatched++
+    if (target) { usersMatched++; matchedUsers.add(u.id.toLowerCase()) }
     else usersFallback++
     userMap.set(u.id.toLowerCase(), target ?? opts.importerUserId)
+  }
+  const voteIdentities = new Map<string, string>()
+  for (const vote of reader.rows("DecisionVote")) {
+    const source = typeof vote.voterUserId === "string" ? vote.voterUserId.toLowerCase() : ""
+    const target = userMap.get(source)
+    if (!matchedUsers.has(source) || !target || idSet.has(source) || (voteIdentities.has(target) && voteIdentities.get(target) !== source)) {
+      throw new WorkspaceImportError("A voter in this bundle could not be matched to a member of the target organization. Match all voters before importing.")
+    }
+    voteIdentities.set(target, source)
   }
   // The manifest is attacker-written, so a scoring model is only kept when it really belongs to the target organization.
   const claimedModels = manifest.scoringModels.filter((s) => s.organizationId === opts.organizationId).map((s) => s.id)

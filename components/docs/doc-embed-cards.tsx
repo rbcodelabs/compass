@@ -140,7 +140,9 @@ export type PatchRecordField = (type: CardEntityType, id: string, field: "title"
  * What the cards in this editor may do. `editable` is the PAGE's answer (false for an org-wide read-only member); the server's per-batch
  * `canEdit` must also be true before any control shows. `patch` is how a record write is made.
  */
-export type EmbedEditing = { editable: boolean; patch: PatchRecordField };
+/** Cast (option) or retract (null) the vote of the caller on one question of an embedded Decision. Resolves to an error message, or null on success. */
+export type CastDecisionVote = (requestId: string, questionIndex: number, option: string | null, revisionId: string) => Promise<string | null>;
+export type EmbedEditing = { editable: boolean; patch: PatchRecordField; vote?: CastDecisionVote };
 const EditingContext = createContext<EmbedEditing | null>(null);
 
 /** Wrap the editor. `resolve` is read once, so pass a stable function (the doc id never changes for a mounted editor). */
@@ -158,7 +160,7 @@ export function DocEmbedCardsProvider({ resolve, editing, children }: { resolve:
 }
 
 /** The store, and whether edit controls may show at all (page editable AND the server said the viewer can write). Fails closed. */
-export function useEmbedEditing(): { store: EmbedCardStore | null; canEdit: boolean; patch: PatchRecordField | null } {
+export function useEmbedEditing(): { store: EmbedCardStore | null; canEdit: boolean; patch: PatchRecordField | null; vote: CastDecisionVote | null } {
   const store = useContext(StoreContext);
   const editing = useContext(EditingContext);
   const serverCanEdit = useSyncExternalStore(
@@ -166,7 +168,7 @@ export function useEmbedEditing(): { store: EmbedCardStore | null; canEdit: bool
     () => store?.canEdit() ?? false,
     () => false
   );
-  return { store, canEdit: Boolean(editing?.editable && serverCanEdit), patch: editing?.patch ?? null };
+  return { store, canEdit: Boolean(editing?.editable && serverCanEdit), patch: editing?.patch ?? null, vote: editing?.vote ?? null };
 }
 
 /** The cached answer for one reference and a function that asks for it. Without a provider nothing is ever loaded. */

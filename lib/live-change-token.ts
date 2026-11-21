@@ -188,7 +188,7 @@ export async function computeChangeToken(
         where: { workspaceId },
         select: {
           id: true, status: true, sortOrder: true, title: true, priority: true, squadId: true,
-          assigneeUserId: true, assigneeAgentId: true, storyPoints: true, dueDate: true,
+          assigneeUserId: true, assigneeAgentId: true, storyPoints: true, startDate: true, dueDate: true,
           parentTaskId: true, updatedAt: true,
         },
       });

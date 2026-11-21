@@ -107,18 +107,27 @@ test.describe("Tasks assignee filter", () => {
       // Reorder only the two visible cards. The assigned task is filtered out,
       // but the server must keep its full-column position while renumbering all
       // siblings so this visible order survives a fresh read.
-      const reorderResponse = page.waitForResponse((response) =>
-        response.request().method() === "POST" &&
-        Boolean(response.request().headers()["next-action"]) &&
-        new URL(response.url()).pathname === `${base}/tasks`
-      );
+      const reorderResponse = page.waitForResponse((response) => {
+        const request = response.request();
+        if (request.method() !== "POST" || !request.headers()["next-action"] ||
+            new URL(response.url()).pathname !== `${base}/tasks`) return false;
+        try {
+          const args = request.postDataJSON();
+          // updateSortOrder(taskId, orderedTaskIds, revalidatePathStr)
+          return Array.isArray(args) && args.length === 3 &&
+            typeof args[0] === "string" && Array.isArray(args[1]) &&
+            args[1].includes(args[0]) && typeof args[2] === "string";
+        } catch {
+          return false;
+        }
+      });
       await dragCardBefore(
         page,
         cardIn(secondUnassignedTitle).getByLabel("Drag to reorder"),
         cardIn(unassignedTitle)
       );
       const response = await reorderResponse;
-      expect(await response.finished()).toBeNull();
+      // The Next.js response can stream after the mutation. The reload below checks persisted order.
       expect(response.ok()).toBe(true);
       await expect.poll(() => appearsBefore(todoColumn, secondUnassignedTitle, unassignedTitle)).toBe(true);
 

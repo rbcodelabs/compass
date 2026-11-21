@@ -460,37 +460,51 @@ test.describe("Re-QA a022c39e", () => {
     const editor = await startComment(page);
     const confirm = page.getByTestId("agent-scope-confirm");
     const submit = page.getByRole("button", { name: /^Comment/ });
-    async function openConfirm(agent: string) {
-      await editor.click();
-      await page.keyboard.type(`do it @${agent}`);
+    async function selectAgent(name: string) {
+      const picker = page.getByTestId("mention-picker");
+      const option = picker.locator(`[role="option"][data-mention-name=${JSON.stringify(name)}]`);
+      await expect(option).toHaveAttribute("aria-selected", "true");
       await page.keyboard.press("Enter");
-      await page.getByRole("button", { name: "Comment & create task" }).click();
+      await expect(page.getByTestId("mention-chip")).toContainText(name);
+      await expect(picker).toBeHidden();
+    }
+    async function openConfirm() {
+      await editor.click();
+      await page.keyboard.type("do it @Adv Agent");
+      await selectAgent(agentName);
+      // A submit click schedules picker dismissal on blur, which can close the next mention.
+      await editor.press("Control+Enter");
       await expect(confirm).toBeVisible();
+      await expect(editor).toBeFocused();
     }
     // (a) Backspace the chip behind the confirm.
-    await openConfirm("Adv Agent");
-    await editor.click(); await page.keyboard.press("End");
+    await openConfirm();
+    await editor.press("End");
     await page.keyboard.press("Backspace"); await page.keyboard.press("Backspace");
     await expect(page.getByTestId("mention-chip")).toHaveCount(0);
     await expect(confirm).toBeHidden();
     await expect(submit.first()).toBeVisible();
     await expect(submit.first()).toBeEnabled();
     // (b) Re-mention, open the confirm, then just type more text: the confirm must go away (body changed after the preview).
-    await page.keyboard.type("@Adv Agent"); await page.keyboard.press("Enter");
+    await page.keyboard.type("@Adv Agent");
+    await selectAgent(agentName);
     await page.getByRole("button", { name: "Comment & create task" }).click();
     await expect(confirm).toBeVisible();
     await editor.click(); await page.keyboard.press("End");
     await page.keyboard.type(" extra words");
     await expect.soft(confirm, "typing while the confirm is up dismisses it").toBeHidden();
     await expect(page.getByRole("button", { name: "Comment & create task" })).toBeVisible();
-    // (c) Swap the assignee behind an open confirm: read-only agent instead of the write agent. The confirm must reflect the new one, not the old.
-    await page.getByRole("button", { name: "Comment & create task" }).click();
+    // (c) Open confirmation with the editor shortcut and keep focus while swapping the assignee.
+    // Clicking submit would blur the editor and schedule dismissal of the next mention picker.
+    await editor.press("Control+Enter");
     await expect(confirm).toBeVisible();
-    await editor.click(); await page.keyboard.press("End");
+    await expect(editor).toBeFocused();
+    await editor.press("End");
     for (let i = 0; i < 12; i++) await page.keyboard.press("Backspace"); // " extra words" removed
     await page.keyboard.press("Backspace"); await page.keyboard.press("Backspace");
     await expect(page.getByTestId("mention-chip")).toHaveCount(0);
-    await page.keyboard.type("@Adv ReadOnly"); await page.keyboard.press("Enter");
+    await page.keyboard.type("@Adv ReadOnly");
+    await selectAgent(readAgentName);
     await expect(confirm).toBeHidden();
     await page.getByRole("button", { name: "Comment & create task" }).click();
     await expect(confirm).toContainText(readAgentName);
@@ -512,7 +526,8 @@ test.describe("Re-QA a022c39e", () => {
     await page.locator(".ProseMirror").click();
     await selectLeadingWord(page, "QUEBEC");
     const editor2 = await startComment(page);
-    await editor2.click(); await page.keyboard.type("again @Adv Agent"); await page.keyboard.press("Enter");
+    await editor2.click(); await page.keyboard.type("again @Adv Agent");
+    await selectAgent(agentName);
     await page.getByRole("button", { name: "Comment & create task" }).click();
     await expect(confirm).toBeVisible();
     await editor2.click(); await page.keyboard.press("Escape");
