@@ -162,7 +162,7 @@ reconnecting a Connected App invalidates its outstanding codes as well as its
 live tokens. A later reconnect replays the remembered binding only while that
 binding remains valid.
 
-Manage these connections in **Settings → Agents → Connected apps**. Each entry
+Manage these connections in **Settings → My agents → Connected apps**. Each entry
 shows the client and redirect host, its USER or agent binding, approved scopes,
 current workspace reach, and last-used time. **Revoke** disconnects the client
 and removes its remembered approval. **Reconnect** does the same invalidation,
