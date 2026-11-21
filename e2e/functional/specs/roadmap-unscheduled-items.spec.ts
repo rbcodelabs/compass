@@ -78,7 +78,21 @@ async function dragTo(page: Page, source: Locator, target: Locator, scrollContai
   const endY = targetBox.y + targetBox.height / 2;
 
   await page.mouse.move(endX, endY, { steps: 40 });
-  await beforeRelease?.();
+  if (beforeRelease) {
+    // Edge auto-scroll can continue during the approach. The scheduled hold
+    // starts only once the pointer is actually over the destination body.
+    let pointer = { x: endX, y: endY };
+    const overTarget = () => target.evaluate((body, point) =>
+      document.elementsFromPoint(point.x, point.y).some(el => body.contains(el)), pointer);
+    for (let correction = 0; correction < 3 && !(await overTarget()); correction++) {
+      const box = await target.boundingBox();
+      if (!box) throw new Error("scheduled drag target disappeared");
+      pointer = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+      await page.mouse.move(pointer.x, pointer.y, { steps: 8 });
+    }
+    expect(await overTarget(), "scheduled drag pointer must reach the destination body").toBe(true);
+    await beforeRelease();
+  }
   await page.mouse.up();
 }
 
