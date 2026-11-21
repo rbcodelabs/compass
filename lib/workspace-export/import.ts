@@ -1,13 +1,16 @@
+import { configuredBlobStoreHostname } from "@/lib/feedback-attachments"
+import { copyPublicImportAsset } from "./public-import-asset"
+import { ImportOwnershipChanged } from "./lease"
 import { externalLinkKeyHash } from "@/lib/external-link-key"
 import { createHash, randomUUID } from "node:crypto"
 import { normalizeWorkspaceRole } from "@/lib/roles"
 import { SLUG_PATTERN, isReservedWorkspaceSlug } from "@/lib/slug"
 import { WORK_ITEM_REGISTRY, WORK_ITEM_TYPES } from "@/lib/work-item-ids"
 import { BundleReader, blobEntry, type BundleManifest } from "@/lib/workspace-export/bundle"
-import { type BlobAdapters } from "@/lib/workspace-export/blobs"
+import { DOC_IMAGE_URL, docImagePathname, type BlobAdapters } from "@/lib/workspace-export/blobs"
 import { decodeRow, fieldInfo } from "@/lib/workspace-export/codec"
 import { OPTIONAL_FIELDS, OPTIONAL_STRING_FIELDS, UNIQUE_KEYS } from "@/lib/workspace-export/schema-meta.generated"
-import { deleteIdsLeafFirst, withRetry } from "@/lib/workspace-export/leaf-first"
+import { deleteIdsLeafFirst, deleteScopedImportRows, StuckDeleteError, withRetry } from "@/lib/workspace-export/leaf-first"
 import { IMPORT_OVERRIDES, SECRET_COLUMNS } from "@/lib/workspace-export/model-registry"
 import {
   capabilityPackArtifactPath,
@@ -65,6 +68,7 @@ const REKEY_COLUMNS = new Set(["DecisionRecord.idempotencyKey", "DecisionApplica
 const MAX_ROWS_PER_MODEL = 2_000_000
 
 export class WorkspaceImportError extends Error {}
+export class WorkspaceImportRecoveryRequired extends Error {}
 
 export type ImportOptions = {
   organizationId: string
@@ -73,6 +77,18 @@ export type ImportOptions = {
   slug?: string
   /** Retrying with the same nonce resumes the same import; a new nonce makes a fresh copy. */
   nonce?: string
+  rollbackComplete?(): Promise<void>
+  fenceWrite?(tx: unknown, phase: "applying" | "rolling_back" | "recovering"): Promise<void>
+  providerIO?<T>(io: () => Promise<T>): Promise<T>
+  journal?: {
+    reserve(store: PrivateBlobStore | "feedback", logical: string, bytes: Uint8Array): Promise<string>
+    verify(store: PrivateBlobStore | "feedback", logical: string, physical: string): Promise<void>
+  }
+  startOperation?(workspaceId: string, bundleDigest: string): Promise<void | "applying" | "recovering">
+  resumeRecovered?(): Promise<void>
+  recordExisting?(report: ImportReport, digest: string): Promise<ImportReport | void>
+  bindWorkspace?(workspaceId: string): Promise<void>
+  publishResult?(tx: unknown, report: ImportReport): Promise<void>
   blobs: BlobAdapters
 }
 
@@ -203,8 +219,13 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
   }
   const newWorkspaceId = deriveId(importKey, manifest.source.workspaceId)
 
+  const bundleDigest = createHash("sha256").update(bytes).digest("hex")
+  await opts.bindWorkspace?.(newWorkspaceId)
   const existing = await delegateFor(client, "Workspace").findMany({ where: { id: newWorkspaceId }, take: 1 })
-  if (existing[0]) return alreadyImportedReport(existing[0], manifest)
+  if (existing[0]) {
+    const report = alreadyImportedReport(existing[0], manifest)
+    return (await opts.recordExisting?.(report, bundleDigest)) ?? report
+  }
 
   // ---- users: match by email, fall back to the importer ---------------------------------------------------------------
   const members = (await delegateFor(client, "OrganizationMember").findMany({
@@ -290,6 +311,7 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
   const uploaded: { store: "artifact" | "research" | "feedback"; key: string }[] = []
   const sourceWorkspaceId = manifest.source.workspaceId
 
+  const verifiedAssets = new Set<string>()
   const dropped: Record<string, number> = {}
   const deduped: Record<string, number> = {}
   const droppedIds = new Set<string>()
@@ -317,6 +339,9 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
           pathRule.store === "pack"
             ? capabilityPackArtifactPath(value, row.artifactSha256)
             : confineStoragePath(pathRule.store, value, sourceWorkspaceId, newWorkspaceId, rewriteText)
+        if (opts.journal && confined && pathRule.store !== "pack" && !verifiedAssets.has(pathRule.store + "/" + confined)) {
+          throw new WorkspaceImportError("Missing verified private asset for " + model + "." + name)
+        }
         if (confined) row[name] = confined
         else if (pathRule.invalid === "null") {
           row[name] = null
@@ -365,6 +390,13 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
       if (typeof row.id === "string") droppedIds.add(row.id.toLowerCase())
       return null
     }
+    if (opts.journal && (model === "Doc" || model === "DocVersion") && typeof row.content === "string") {
+      for (const [, workspace, filename] of row.content.matchAll(DOC_IMAGE_URL)) {
+        if (workspace.toLowerCase() === newWorkspaceId && !verifiedAssets.has("artifact/" + docImagePathname(workspace, filename))) {
+          throw new WorkspaceImportError("Missing verified private asset for document image")
+        }
+      }
+    }
     for (const col of SECRET_COLUMNS[model] ?? []) if (col in row) row[col] = null
     Object.assign(row, IMPORT_OVERRIDES[model] ?? {})
     // Org-scoped columns (Workspace, SavedView) always belong to the target organization, never the source.
@@ -381,6 +413,23 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
     return row
   }
 
+  const phase = await opts.startOperation?.(newWorkspaceId, bundleDigest)
+  async function write<T>(phase: "applying" | "rolling_back" | "recovering", mutation: (tx: Client) => Promise<T>) {
+    const fence = opts.fenceWrite
+    if (!fence) return withRetry(() => mutation(client))
+    return withRetry(() => (client as { $transaction(fn: (tx: Client) => Promise<T>): Promise<T> }).$transaction(async tx => {
+      await fence(tx, phase)
+      return mutation(tx)
+    }))
+  }
+  if (phase === "recovering") {
+    const published = await delegateFor(client, "Workspace").findMany({ where: { id: newWorkspaceId }, take: 1 })
+    if (published.length) throw new WorkspaceImportRecoveryRequired("Workspace was published during import recovery")
+    await rollbackImport(client, reader, importKey, newWorkspaceId, [], opts.blobs, mutation => write("recovering", mutation))
+    if (!opts.resumeRecovered) throw new WorkspaceImportRecoveryRequired("Import recovery could not be finalized")
+    await opts.resumeRecovered()
+  }
+  const providerIO = opts.providerIO ?? (<T>(io: () => Promise<T>) => io())
   const rewritePath = rewriteText
 
   try {
@@ -404,8 +453,18 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
       }
       const storage = b.store === "research" ? opts.blobs.research : opts.blobs.artifact
       // Never overwrite: the target prefix is brand new, so an existing object is not ours to replace (or to delete later).
-      const put = await storage.put(target, data, b.contentType, { overwrite: false })
-      if (put.created !== false) uploaded.push({ store: b.store, key: target })
+      const physical = opts.journal ? await opts.journal.reserve(b.store, target, data) : target
+      const put = await providerIO(() => storage.put(physical, data, b.contentType, { overwrite: false }))
+      if (opts.journal) {
+        const bytes = await providerIO(() => storage.get(physical))
+        if (put.pathname !== physical || !bytes || !Buffer.from(data).equals(bytes)) {
+          throw new WorkspaceImportRecoveryRequired("Import asset verification failed")
+        }
+        await opts.journal.verify(b.store, target, physical)
+        verifiedAssets.add(b.store + "/" + target)
+      } else if (put.created !== false) {
+        uploaded.push({ store: b.store, key: physical })
+      }
       blobsCopied++
     }
 
@@ -425,7 +484,7 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
         if (!buffer.length) return
         const data = buffer
         buffer = []
-        await withRetry(() => delegate.createMany({ data, skipDuplicates: true }))
+        await write("applying", tx => delegateFor(tx, model).createMany({ data, skipDuplicates: true }))
       }
       for (const raw of reader.rows(model)) {
         const row = transform(model, raw)
@@ -468,8 +527,14 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
           if (data && typeof raw.id === "string") {
             const filename = String(raw.filename ?? "attachment").replace(/[^A-Za-z0-9._-]/g, "_")
             const key = `feedback/${newWorkspaceId}/${deriveId(importKey, `fb:${raw.id}`)}-${filename}`
-            row.url = await opts.blobs.putPublic(key, data, String(raw.fileType ?? "application/octet-stream"))
-            uploaded.push({ store: "feedback", key: row.url as string })
+            const contentType = String(raw.fileType ?? "application/octet-stream")
+            const journal = opts.journal
+            if (journal) {
+              row.url = await copyPublicImportAsset(opts.blobs, journal, key, data, contentType, configuredBlobStoreHostname(), providerIO)
+            } else {
+              row.url = await providerIO(() => opts.blobs.putPublic(key, data, contentType))
+              uploaded.push({ store: "feedback", key: row.url as string })
+            }
             blobsCopied++
           } else if (isOwnFeedbackAttachmentUrl(raw.url, sourceWorkspaceId)) {
             // Only this deployment's own public-store URLs survive, and verbatim (not run through the id rewrite).
@@ -517,17 +582,19 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
         aggregate(a: Row): Promise<{ _max: { seqNumber: number | null } }>
       }).aggregate({ where: { workspaceId: newWorkspaceId }, _max: { seqNumber: true } }))._max.seqNumber
       if (agg == null) continue
-      const seq = delegateFor(client, "WorkspaceSequence") as unknown as {
-        updateMany(a: Row): Promise<{ count: number }>
-        createMany(a: Row): Promise<{ count: number }>
-      }
-      const bumped = await seq.updateMany({
-        where: { workspaceId: newWorkspaceId, entityType: type, nextValue: { lt: agg + 1 } },
-        data: { nextValue: agg + 1 },
+      await write("applying", async tx => {
+        const seq = delegateFor(tx, "WorkspaceSequence") as unknown as {
+          updateMany(a: Row): Promise<{ count: number }>
+          createMany(a: Row): Promise<{ count: number }>
+        }
+        const bumped = await seq.updateMany({
+          where: { workspaceId: newWorkspaceId, entityType: type, nextValue: { lt: agg + 1 } },
+          data: { nextValue: agg + 1 },
+        })
+        if (bumped.count === 0) {
+          await seq.createMany({ data: [{ workspaceId: newWorkspaceId, entityType: type, nextValue: agg + 1 }], skipDuplicates: true })
+        }
       })
-      if (bumped.count === 0) {
-        await seq.createMany({ data: [{ workspaceId: newWorkspaceId, entityType: type, nextValue: agg + 1 }], skipDuplicates: true })
-      }
     }
 
     // ---- validate before the workspace becomes visible ---------------------------------------------------------------------
@@ -554,20 +621,18 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
     } else {
       memberRows.find((m) => m.userId === opts.importerUserId)!.role = "ADMIN"
     }
-    await withRetry(() =>
-      (client as { $transaction<T>(fn: (tx: unknown) => Promise<T>): Promise<T> }).$transaction(async (tx) => {
-        await delegateFor(tx, "Workspace").createMany({ data: [wsRow] })
-        await delegateFor(tx, "WorkspaceMember").createMany({ data: memberRows, skipDuplicates: true })
-      }),
-    )
-
     for (const [m, n] of Object.entries(dropped)) {
       warnings.push(`Skipped ${n} ${m} row(s) whose required reference or storage path does not resolve inside the bundle`)
     }
     for (const [m, n] of Object.entries(deduped)) {
       warnings.push(`Skipped ${n} ${m} row(s) that would duplicate another row once people without an account in this organization were attributed to you`)
     }
-    return {
+    const batches = chunks(memberRows, 100)
+    const finalMembers = batches.pop() ?? []
+    for (const data of batches) {
+      await write("applying", tx => delegateFor(tx, "WorkspaceMember").createMany({ data, skipDuplicates: true }))
+    }
+    const report: ImportReport = {
       workspaceId: newWorkspaceId,
       slug,
       name: baseName,
@@ -579,18 +644,34 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
       blobsCopied,
       warnings,
     }
+    await withRetry(() =>
+      (client as { $transaction<T>(fn: (tx: unknown) => Promise<T>): Promise<T> }).$transaction(async (tx) => {
+        await opts.fenceWrite?.(tx, "applying")
+        await delegateFor(tx, "Workspace").createMany({ data: [wsRow] })
+        await delegateFor(tx, "WorkspaceMember").createMany({ data: finalMembers, skipDuplicates: true })
+        await opts.publishResult?.(tx, report)
+      }),
+    )
+    return report
   } catch (error) {
+    if (error instanceof ImportOwnershipChanged) throw error
     // The Workspace row is the commit point. If it exists, a request with the same nonce finished first (two concurrent
     // submissions derive identical ids, and the loser fails at the Workspace insert). Rolling back would delete the
     // winner's rows, so treat it as "already imported" and leave everything alone.
-    const committed = await delegateFor(client, "Workspace").findMany({ where: { id: newWorkspaceId }, take: 1 }).catch(() => [])
+    const committed = await delegateFor(client, "Workspace").findMany({ where: { id: newWorkspaceId }, take: 1 }).catch((cause: unknown) => {
+      throw new WorkspaceImportRecoveryRequired("Workspace import outcome is unknown and needs reconciliation", { cause })
+    })
     if (committed[0]) {
-      if ((error as { code?: string }).code === "P2002") return alreadyImportedReport(committed[0], manifest)
+      if ((error as { code?: string }).code === "P2002") {
+        const report = alreadyImportedReport(committed[0], manifest)
+        return (await opts.recordExisting?.(report, bundleDigest)) ?? report
+      }
       throw error
     }
-    await rollbackImport(client, reader, importKey, newWorkspaceId, uploaded, opts.blobs).catch((rollbackError) => {
-      console.error("[workspace-import] rollback failed; partial rows may remain for workspace", newWorkspaceId, rollbackError)
+    await rollbackImport(client, reader, importKey, newWorkspaceId, uploaded, opts.blobs, mutation => write("rolling_back", mutation)).catch((rollbackError) => {
+      throw new WorkspaceImportRecoveryRequired("Workspace import rollback needs reconciliation", { cause: rollbackError })
     })
+    await opts.rollbackComplete?.()
     throw error
   }
 }
@@ -603,22 +684,57 @@ async function rollbackImport(
   newWorkspaceId: string,
   uploaded: { store: "artifact" | "research" | "feedback"; key: string }[],
   blobs: BlobAdapters,
+  write: <T>(mutation: (tx: Client) => Promise<T>) => Promise<T>,
 ) {
+  const directScope = (model: string): Row | undefined => {
+    if (model === "Agent") return { ownerType: "WORKSPACE", ownerWorkspaceId: newWorkspaceId }
+    if (modelHasWorkspaceId(model)) return { workspaceId: newWorkspaceId }
+  }
+
+  // Verify each link back to the destination inside the fenced deletion transaction.
+  async function ownedIds(tx: Client, model: string, candidates: string[]): Promise<string[]> {
+    if (!candidates.length) return []
+    const scope = directScope(model)
+    const parent = PARENT[model]
+    if (!scope && !parent) throw new Error("Unknown import ownership for " + model)
+    const rows = await delegateFor(tx, model).findMany({
+      where: { id: { in: candidates }, ...scope },
+      select: scope ? { id: true } : { id: true, [parent.fk]: true },
+    })
+    if (scope) return rows.map(row => String(row.id))
+    const parents = new Set(await ownedIds(tx, parent.model, rows.map(row => String(row[parent.fk]))))
+    return rows.filter(row => parents.has(String(row[parent.fk]))).map(row => String(row.id))
+  }
+
   const deleteModel = async (model: string) => {
-    const delegate = delegateFor(client, model)
+    const delegate = { deleteMany: (args: { where: Row; limit?: number }) => write(async tx => {
+      const scope = directScope(model)
+      if (scope) return delegateFor(tx, model).deleteMany({ ...args, where: { ...args.where, ...scope } })
+      const parent = PARENT[model]
+      if (!parent) throw new Error("Unknown import ownership for " + model)
+      const idPredicate = args.where.id
+      if (idPredicate) {
+        const candidates = typeof idPredicate === "string" ? [idPredicate] : (idPredicate as { in: string[] }).in
+        const ids = await ownedIds(tx, model, candidates)
+        return delegateFor(tx, model).deleteMany({ where: { id: { in: ids } } })
+      }
+      const candidates = (args.where[parent.fk] as { in: string[] }).in
+      const ids = await ownedIds(tx, parent.model, candidates)
+      return delegateFor(tx, model).deleteMany({ ...args, where: { [parent.fk]: { in: ids } } })
+    }) }
     if (modelHasId(model)) {
       const ids: string[] = []
       for (const row of reader.rows(model)) if (typeof row.id === "string") ids.push(deriveId(importKey, row.id))
-      for (const group of chunks(ids, 500)) await deleteIdsLeafFirst(delegate, group)
+      await deleteIdsLeafFirst(delegate, ids)
     } else if (modelHasWorkspaceId(model)) {
-      await withRetry(() => delegate.deleteMany({ where: { workspaceId: newWorkspaceId } }))
+      await deleteScopedImportRows({ workspaceId: newWorkspaceId }, delegate.deleteMany)
     } else {
       // Keyed by its parent (e.g. SolutionPlanProposal.commentId): delete by the derived parent ids.
       const parent = PARENT[model]
       if (!parent) return
       const parentIds: string[] = []
       for (const row of reader.rows(parent.model)) if (typeof row.id === "string") parentIds.push(deriveId(importKey, row.id))
-      for (const group of chunks(parentIds, 500)) await withRetry(() => delegate.deleteMany({ where: { [parent.fk]: { in: group } } }))
+      for (const group of chunks(parentIds, 500)) await deleteScopedImportRows({ [parent.fk]: { in: group } }, delegate.deleteMany)
     }
   }
   // Prisma emulates required relations (relationMode "prisma"), so a delete can be refused while another model
@@ -631,7 +747,7 @@ async function rollbackImport(
       try {
         await deleteModel(model)
       } catch (error) {
-        if ((error as { code?: string }).code !== "P2014") throw error
+        if (!(error instanceof StuckDeleteError) && (error as { code?: string }).code !== "P2014") throw error
         lastError = error
         next.push(model)
       }
@@ -639,6 +755,9 @@ async function rollbackImport(
     if (next.length === pending.length) throw lastError
     pending = next
   }
+  await deleteScopedImportRows({ workspaceId: newWorkspaceId }, args =>
+    write(tx => delegateFor(tx, "WorkspaceMember").deleteMany(args)),
+  )
   for (const u of uploaded) {
     if (u.store === "feedback") await blobs.delPublic(u.key)
     else await (u.store === "research" ? blobs.research : blobs.artifact).del(u.key).catch(() => undefined)
