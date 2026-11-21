@@ -585,3 +585,19 @@ it("preserves the import when the outcome of workspace publication cannot be rea
   expect(db.tables.Workspace).toHaveLength(2)
   expect(db.tables.WorkspaceMember).toHaveLength(1)
 })
+
+it("persists a replay result when retry finds a previously imported workspace", async () => {
+  const org = randomUUID(), ws = randomUUID(), user = randomUUID()
+  const db = createInMemoryPrisma({
+    Organization: [{ id: org, name: "Org", slug: "org" }],
+    Workspace: [{ id: ws, organizationId: org, name: "Source", slug: "src", ssoEnabled: false }],
+    User: [{ id: user, name: "User", email: "user@example.com" }],
+    OrganizationMember: [{ id: randomUUID(), organizationId: org, userId: user, role: "ADMIN" }],
+  })
+  const bytes = await exportWorkspaceToBuffer(db.client, ws, noopBlobs)
+  const options = { organizationId: org, importerUserId: user, nonce: "legacy", blobs: noopBlobs }
+  const first = await importWorkspaceBundle(db.client, bytes, options)
+  let recorded = ""
+  await importWorkspaceBundle(db.client, bytes, { ...options, async recordExisting(report) { recorded = report.workspaceId } })
+  expect(recorded).toBe(first.workspaceId)
+})

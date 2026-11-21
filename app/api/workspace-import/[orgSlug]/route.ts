@@ -78,6 +78,17 @@ export async function POST(req: Request, { params }: { params: Promise<{ orgSlug
       async bindWorkspace(workspaceId) {
         if (receiptBinding) await bindImportReceipt(prisma, { ...receiptBinding, workspaceId })
       },
+      async recordExisting(report) {
+        if (!receiptBinding) return
+        const binding = receiptBinding
+        await prisma.$transaction(async (tx) => {
+          if (await readImportReceiptResult(tx, binding)) return
+          const workspace = await tx.workspace.findFirst({ where: { id: report.workspaceId, organizationId }, select: { id: true } })
+          if (!workspace) throw new WorkspaceImportRecoveryRequired("Imported workspace is unavailable")
+          const existingOwner = await startImportOperation(tx, workspace.id, organizationId)
+          await commitImportReport(tx, existingOwner, report)
+        })
+      },
       async startOperation(workspaceId) {
         owner = await startImportOperation(prisma, workspaceId, organizationId)
       },

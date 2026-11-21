@@ -74,6 +74,7 @@ export type ImportOptions = {
   /** Retrying with the same nonce resumes the same import; a new nonce makes a fresh copy. */
   nonce?: string
   startOperation?(workspaceId: string): Promise<void>
+  recordExisting?(report: ImportReport): Promise<void>
   bindWorkspace?(workspaceId: string): Promise<void>
   publishResult?(tx: unknown, report: ImportReport): Promise<void>
   blobs: BlobAdapters
@@ -208,7 +209,11 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
 
   await opts.bindWorkspace?.(newWorkspaceId)
   const existing = await delegateFor(client, "Workspace").findMany({ where: { id: newWorkspaceId }, take: 1 })
-  if (existing[0]) return alreadyImportedReport(existing[0], manifest)
+  if (existing[0]) {
+    const report = alreadyImportedReport(existing[0], manifest)
+    await opts.recordExisting?.(report)
+    return report
+  }
 
   // ---- users: match by email, fall back to the importer ---------------------------------------------------------------
   const members = (await delegateFor(client, "OrganizationMember").findMany({
