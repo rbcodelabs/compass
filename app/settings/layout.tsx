@@ -12,6 +12,10 @@ import { cookies } from "next/headers";
 import { panelPinCookieName, parsePanelPin } from "@/lib/panel-pin";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { LAST_WORKSPACE_COOKIE, pickAnchorWorkspace } from "@/lib/last-workspace";
+import { SettingsShell } from "@/components/settings/settings-shell";
+import getPrisma from "@/lib/db";
+import { isOrgAdminRole } from "@/lib/roles";
 
 interface SettingsLayoutProps {
   children: React.ReactNode;
@@ -46,15 +50,27 @@ export default async function SettingsLayout({ children }: SettingsLayoutProps) 
   }
 
   const workspaces = await getUserWorkspaces(session.user.id);
-  const anchorWorkspace = workspaces[0];
+  const cookieStore = await cookies();
+  // The workspace they last used, so the Workspace group names the one they came from. Falls back to the first.
+  const anchorWorkspace = pickAnchorWorkspace(workspaces, cookieStore.get(LAST_WORKSPACE_COOKIE)?.value);
   const isPlatformAdmin = isPlatformAdminSession(session);
 
   if (!anchorWorkspace) {
-    return <>{children}</>;
+    return (
+      <SettingsShell backHref="/dashboard" context={{ orgSlug: null, workspaceSlug: null, isOrgAdmin: false, isPlatformAdmin }}>
+        {children}
+      </SettingsShell>
+    );
   }
 
+  // Org settings links are only offered to admins of the anchor workspace's org.
+  const orgMembership = await getPrisma().organizationMember.findFirst({
+    where: { organization: { slug: anchorWorkspace.orgSlug }, userId: session.user.id },
+    select: { role: true },
+  });
+  const isOrgAdmin = isOrgAdminRole(orgMembership?.role);
+
   const researchCaptureEnabled = await researchNavEnabled(anchorWorkspace.id);
-  const cookieStore = await cookies();
   const sidebarDefaultOpen = cookieStore.get("sidebar_state")?.value !== "false";
   // Same server-seeded read as the workspace and org-settings layouts.
   const initialPanelPin = parsePanelPin(
@@ -100,7 +116,18 @@ export default async function SettingsLayout({ children }: SettingsLayoutProps) 
           />
 
           <SidebarInset className="min-w-0 overflow-y-auto bg-surface-app pb-16 md:pb-0">
-            {children}
+            <SettingsShell
+              backHref="/dashboard"
+              context={{
+                orgSlug: anchorWorkspace.orgSlug,
+                workspaceSlug: anchorWorkspace.slug,
+                workspaceName: anchorWorkspace.name,
+                isOrgAdmin,
+                isPlatformAdmin,
+              }}
+            >
+              {children}
+            </SettingsShell>
           </SidebarInset>
 
           {/* Inside SidebarProvider, after SidebarInset — see the note in

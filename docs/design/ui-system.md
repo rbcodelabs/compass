@@ -45,6 +45,18 @@ The authenticated desktop shell uses the shadcn `Sidebar` primitive in icon-coll
 - Collapsed navigation items retain accessible names and expose visible tooltips.
 - Compass's mobile header and bottom navigation remain the mobile information architecture; the desktop sidebar does not replace them.
 
+### Settings navigation
+
+Every settings screen (account, workspace, organization) is wrapped in `SettingsShell` (`components/settings/settings-shell.tsx`). The shell adds one navigation, grouped by scope: Account (applies to you everywhere), Workspace, Organization (organization admins), and Platform (platform admins).
+
+- The group and link list comes from `buildSettingsNav` in `lib/settings-nav.ts`, a pure function covered by unit tests. Add or move a settings page there, not in a layout.
+- Hiding an admin-only link is a convenience, not access control. Every settings route must still authorize on the server.
+- From `md` up the nav is a left rail (`SettingsNavRail`) beside the page. Below `md` it is a bar (`SettingsMobileBar`) that shows the current page and opens the full list in a sheet, so no group is clipped on a phone. Both render the same link list.
+- The current page is marked with `aria-current="page"`. The longest matching link wins, so `/settings/modules` selects Modules, not Workspace settings.
+- The shell provides the only "Back to Compass" link. Individual settings pages should not add their own.
+- The states are on `/ui` under Product patterns ("Settings navigation").
+- The functional screenshot fixture captures settings automatically. When capturing against a deployment with the shared shell, set `DOCS_SETTINGS_SHELL_SCREENSHOTS=1` and supply an authenticated `DOCS_SESSION_FILE` for an organization admin.
+
 ## Semantic token vocabulary
 
 ### Surfaces
