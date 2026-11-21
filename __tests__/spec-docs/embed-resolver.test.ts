@@ -61,7 +61,7 @@ const uuid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0
 const ID: Record<DocEmbedKind, string> = Object.fromEntries(DOC_EMBED_KINDS.map((kind, i) => [kind, uuid(i + 1)])) as Record<DocEmbedKind, string>
 const TABLE: Record<DocEmbedKind, string> = {
   opportunity: "opportunity", solution: "solution", experiment: "experiment", task: "task", doc: "doc", objective: "objective",
-  keyResult: "keyResult", assumption: "assumption", roadmapItem: "roadmapItem", metric: "metric", artifact: "artifact",
+  keyResult: "keyResult", assumption: "assumption", roadmapItem: "roadmapItem", metric: "metric", artifact: "artifact", decision: "reviewRequest",
 }
 
 /** A row for `kind` living in `workspaceId`. */
@@ -73,6 +73,15 @@ function rowFor(kind: DocEmbedKind, workspaceId: string, extra: Row = {}): Row {
     case "objective": return { ...base, workspaceId, owner: "Pat", keyResults: [{ current: 5, target: 10 }], ...extra }
     case "doc": return { ...base, workspaceId, docType: "STANDARD", ...extra }
     case "artifact": return { ...base, workspaceId, kind: null, ...extra }
+    case "decision": {
+      // A review request: the card title comes from the current revision and the status is the request state.
+      const { status, ...rest } = extra
+      return {
+        id: base.id, workspaceId, state: status ?? "PENDING", updatedAt: base.updatedAt,
+        currentRevision: { title: "Live decision", options: [{ label: "Advisory only", actionKey: "CHOICE_1" }, { label: "Reject", actionKey: "REJECT" }] },
+        decisions: [], ...rest,
+      }
+    }
     default: return { ...base, workspaceId, ...extra }
   }
 }
@@ -210,5 +219,21 @@ describe("resolveDocEmbeds: MAX_CARD_REFS", () => {
     const refs = [{ kind: "task", id }, { kind: "task", id: id.toUpperCase() }, { kind: "task", id }]
     const result = await resolveDocEmbeds({ docId: DOC_A, userId: USER, refs })
     expect(Object.keys(result!.cards)).toEqual([`task:${id}`])
+  })
+})
+
+describe("resolveDocEmbeds: decision facts", () => {
+  it("lists the offered choices and the chosen option once decided", async () => {
+    seed("decision", WS_A, {
+      status: "DECIDED",
+      decisions: [{ decidedAt: new Date("2026-02-04T00:00:00Z"), option: { label: "Advisory only" } }],
+    })
+    const card = (await run(["decision"]))!.cards[key("decision")]
+    expect(card.state).toBe("ok")
+    if (card.state === "ok") {
+      expect(card.status).toBe("DECIDED")
+      expect(card.facts).toEqual([{ label: "Options", value: "Advisory only" }, { label: "Decided", value: "Advisory only" }])
+      expect(card.href).toMatch(/^\/acme\/alpha\/reviews\//)
+    }
   })
 })

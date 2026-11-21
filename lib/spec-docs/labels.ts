@@ -31,6 +31,7 @@ export const DOC_EMBED_KIND_LABEL: Record<DocEmbedKind, string> = {
   assumption: "Assumption",
   roadmapItem: "Roadmap item",
   artifact: "Artifact",
+  decision: "Decision",
 }
 
 /** `IN_PROGRESS` becomes `In progress`. */

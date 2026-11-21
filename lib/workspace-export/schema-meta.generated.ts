@@ -273,6 +273,7 @@ export const UNIQUE_KEYS: Readonly<Record<string, readonly (readonly string[])[]
   DecisionApplication: [["receiptKey"],["decisionId","continuationKey"]],
   DecisionEvidenceRef: [["reviewRevisionId","evidenceType","authorityRecordId"]],
   DecisionRecord: [["revisionId"],["idempotencyKey"]],
+  DecisionVote: [["requestId","revisionId","questionIndex","voterUserId"]],
   Doc: [["roadmapItemId"],["workspaceId","seqPrefix","seqNumber"]],
   DocOperation: [["workspaceId","operationId"]],
   EmbedAuthHandoff: [["nonceHash"]],

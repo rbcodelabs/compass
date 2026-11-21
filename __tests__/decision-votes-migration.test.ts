@@ -7,6 +7,7 @@ import { assertDecisionVotesMigration } from "@/lib/migrations/decision-votes"
 const ROOT = process.cwd()
 const NAME = "127_decision_votes"
 const runner = readFileSync(path.join(ROOT, "lib/migrations/runner.ts"), "utf-8")
+const schema = readFileSync(path.join(ROOT, "prisma/schema.prisma"), "utf-8")
 const sqlPath = path.join(ROOT, "prisma/migrations", NAME, "migration.sql")
 const sql = existsSync(sqlPath) ? readFileSync(sqlPath, "utf-8").split("\n").map((line) => line.replace(/--.*$/, "")).join("\n") : ""
 const statements = sql.split(";").map((s) => s.trim()).filter(Boolean)
@@ -25,6 +26,15 @@ describe(NAME, () => {
     expect(sql).not.toMatch(/REFERENCES|CREATE TYPE|CREATE TRIGGER|ALTER TABLE|\bWHERE\b|DROP|\bASC\b|\bDESC\b|SERIAL/i)
   })
 
+  it("is mirrored in schema.prisma: the same table, columns and index name, and no @updatedAt", () => {
+    const model = schema.slice(schema.indexOf("model DecisionVote {"))
+    const body = model.slice(0, model.indexOf("\n}\n"))
+    expect(body).toContain('@@map("decision_votes")')
+    expect(body).toContain('@@unique([requestId, revisionId, questionIndex, voterUserId], map: "idx_decision_votes_voter")')
+    expect(body).not.toContain("@updatedAt")
+    expect(body).not.toContain("@relation")
+    expect(body).toContain('@map("voter_user_id")')
+  })
 
   it("waits for the async index build like the other index migrations, so the postcondition cannot fail on the first DSQL run", () => {
     expect(runner).toMatch(/const ASYNC_WAIT_MIGRATIONS = \[[^\]]*"127_decision_votes"/)
