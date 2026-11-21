@@ -37,7 +37,7 @@ import { buildResumePrompt, planAgentSession } from "@/lib/agent-session"
 import { launchQueuedAgentRun, type LaunchContext } from "@/lib/agent-run-launch"
 import { workspaceFraming } from "@/lib/agent-run-sandbox"
 import { trustedCompassBaseUrl } from "@/lib/compass-url"
-import { readWorkspaceAgentRepos } from "@/lib/agent-github-repos"
+import { readWorkspaceAgentGithub } from "@/lib/agent-github-repos"
 import { mintAgentGithubEnv } from "@/lib/github-app-token"
 import { gitAuthorEnv, readAgentGitAuthor } from "@/lib/agent-git-author"
 import { developerNpmToken } from "@/lib/agent-github-access"
@@ -323,7 +323,8 @@ export async function startConversationContinuationRun(
     throw error
   }
 
-  const mintedGithubEnv = await mintAgentGithubEnv(await readWorkspaceAgentRepos(prisma, input.workspaceId)).catch(() => null)
+  const githubConfig = await readWorkspaceAgentGithub(prisma, input.workspaceId)
+  const mintedGithubEnv = await mintAgentGithubEnv(githubConfig.repos, githubConfig.access).catch(() => null)
   const githubEnv = mintedGithubEnv ? { ...mintedGithubEnv, ...(runAgent ? gitAuthorEnv(await readAgentGitAuthor(prisma, runAgent.id)) : {}) } : null
   const developer = { enabled: sandboxClass === "DEVELOPER", npmToken: developerNpmToken() }
 

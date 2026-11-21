@@ -1,4 +1,4 @@
-import { mintRepoInstallationToken, githubConnectorUid } from "@/lib/github-app-token"
+import { mintRepoInstallationToken, githubAppConfigured } from "@/lib/github-app-token"
 import { pullRequestUrl, type PullRequestRef } from "@/lib/github-pull-request-links"
 
 export type PullRequestState = "open" | "draft" | "merged" | "closed"
@@ -89,7 +89,7 @@ export type PullRequestFetchResult = { ok: true; summary: PullRequestSummary } |
  * is one of the workspace's approved agent repos. Check data is best effort: a missing permission yields "unknown", not an error.
  */
 export async function fetchPullRequestSummary(ref: PullRequestRef, fetcher: typeof fetch = fetch): Promise<PullRequestFetchResult> {
-  if (!githubConnectorUid()) return { ok: false, reason: "not_configured" }
+  if (!githubAppConfigured()) return { ok: false, reason: "not_configured" }
   try {
     const target = { owner: ref.owner, names: [ref.repo] }
     let token: string
