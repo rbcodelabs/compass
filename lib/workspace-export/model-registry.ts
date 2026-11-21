@@ -37,7 +37,7 @@ export const MODEL_BUCKETS: Readonly<Record<string, ExportBucket>> = Object.from
      CommentExternalAuthor Doc DocComment DocVersion Artifact ArtifactRevision FeedbackItem
      FeedbackSource FeedbackElementAnchor FeedbackAttachment FeedbackVote ResearchStudy
      ResearchSession ResearchTurn ResearchAttachment ResearchSynthesis PMInterview ReviewRequest
-     ReviewRevision ReviewOption DecisionRecord DecisionApplication DecisionEvidenceRef
+     ReviewRevision ReviewOption DecisionVote DecisionRecord DecisionApplication DecisionEvidenceRef
      CardSortRound CardSortProposal CardSortNewEntry MetricDefinition MetricRevision MetricBinding
      MetricObservation Agent WorkspaceDefaultAgent CapabilityPack CapabilityPackVersion
      WorkspaceCapabilityPack Follow`

@@ -6,11 +6,13 @@ coordination column. Provider work stays outside database transactions.
 
 ## Cutover and rollback
 
-1. Use the staged deployment procedure for [migration 129](agent-message-run-id-rollout.md).
-   Verify the exact staged revision, backend, schema and receipts. With separate
-   approval, apply and verify `129_agent_message_run_id` and then
-   `130_agent_sandbox_operations` before enabling the staged runtime.
-2. Quiesce persistent starts, continuations and cron on the prior deployment.
+1. Complete the staged release checks for [migration 129](agent-message-run-id-rollout.md).
+   Verify the exact staged revision, production backend and schema, and the
+   completed receipts for `129_agent_message_run_id` followed by
+   `130_agent_sandbox_operations`. Confirm the writable coordination column
+   and operation and generation tables. This runtime rollout submits no
+   migration POST.
+2. Quiesce persistent starts, continuations, callbacks and cron on the prior deployment.
    Drain old in-flight launch and stop requests, including requests using
    deployment-specific URLs. Old code ignores operation records. Require
    evidence that it can neither launch into nor stop a persistent sandbox after

@@ -2687,6 +2687,9 @@ model Task {
   /// or both of assigneeUserId / ownerName may be set.
   ownerName      String?   @map("owner_name") @db.VarChar(255)
   storyPoints    Float?    @map("story_points")
+  /// Optional start of the work. Null means the task has only a due date (a milestone on a timeline). When both are set,
+  /// startDate <= dueDate (checked in code via validateTaskDates, not in the database).
+  startDate      DateTime? @map("start_date")
   dueDate        DateTime? @map("due_date")
   /// Freeform sprint/iteration label (e.g. "Sprint 24", "2026-W31"). Reserved
   /// extension point for a future first-class Sprint entity.
@@ -3006,6 +3009,24 @@ model AgentConversationReview {
   @@unique([conversationId, userId], map: "idx_agent_conversation_reviews_conversation_user")
   @@index([userId, workspaceId], map: "idx_agent_conversation_reviews_user_workspace")
   @@map("agent_conversation_reviews")
+}
+
+/// Advisory vote on a tracked Decision (ADR-0030). One row per (request, revision, question, voter).
+/// Bare UUIDs, no relations (Aurora DSQL has no foreign keys); lib/decision-votes.ts validates every id.
+/// Never read by the approval path: a vote cannot change a review request or create a decision record.
+model DecisionVote {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId   String   @map("workspace_id") @db.Uuid
+  requestId     String   @map("request_id") @db.Uuid
+  revisionId    String   @map("revision_id") @db.Uuid
+  questionIndex Int      @map("question_index")
+  chosenOption  String   @map("chosen_option") @db.VarChar(120)
+  voterUserId   String   @map("voter_user_id") @db.Uuid
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @default(now()) @map("updated_at")
+
+  @@unique([requestId, revisionId, questionIndex, voterUserId], map: "idx_decision_votes_voter")
+  @@map("decision_votes")
 }
 
 /// Generic typed association link between two entities of one workspace (ADR "One generic

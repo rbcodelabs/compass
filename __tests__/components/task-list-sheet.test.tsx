@@ -25,7 +25,7 @@ function task(overrides: Partial<TaskCardData> & Pick<TaskCardData, "id" | "titl
     assigneeUserId: null,
     ownerName: null,
     storyPoints: null,
-    dueDate: "2026-10-20T00:00:00.000Z",
+    startDate: null, dueDate: "2026-10-20T00:00:00.000Z",
     iteration: null,
     parentTaskId: null,
     subtaskCount: 0,
