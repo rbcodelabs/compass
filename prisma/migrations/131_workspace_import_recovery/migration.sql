@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS "workspace_import_operations" (
   "epoch" INTEGER NOT NULL DEFAULT 1,
   "phase" VARCHAR(24) NOT NULL,
   "lease_expires_at" TIMESTAMP(3) NOT NULL,
+  "bundle_digest" VARCHAR(64),
   "result_text" TEXT,
   "updated_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY ("workspace_id")

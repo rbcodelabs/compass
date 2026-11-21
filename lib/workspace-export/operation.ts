@@ -55,3 +55,33 @@ export async function finishImportRollback(db: ImportDatabase, owner: ImportLeas
   )
   if (rows.length !== 1) throw new ImportOwnershipChanged()
 }
+
+export async function claimBundleImport(db: ImportDatabase, workspaceId: string, organizationId: string, digest: string) {
+  const attemptId = randomUUID()
+  const rows = await db.$queryRawUnsafe<{ epoch: number; phase: "recovering" | "applying" }[]>(
+    `INSERT INTO ${importSchema()}.workspace_import_operations AS old
+       (workspace_id, organization_id, attempt_id, bundle_digest, phase, lease_expires_at, updated_at)
+     VALUES ($1::uuid,$2::uuid,$3::uuid,$4,'applying',CURRENT_TIMESTAMP+interval '5 minutes',CURRENT_TIMESTAMP)
+     ON CONFLICT (workspace_id) DO UPDATE
+       SET attempt_id=EXCLUDED.attempt_id, epoch=old.epoch+1, updated_at=CURRENT_TIMESTAMP,
+           lease_expires_at=EXCLUDED.lease_expires_at,
+           phase=CASE WHEN old.phase='rolled_back' THEN 'applying' ELSE 'recovering' END
+       WHERE old.organization_id=EXCLUDED.organization_id AND old.bundle_digest=EXCLUDED.bundle_digest
+         AND (old.phase='rolled_back' OR (old.phase IN ('applying','recovering','rolling_back')
+              AND old.lease_expires_at<=CURRENT_TIMESTAMP))
+     RETURNING epoch, phase`, workspaceId, organizationId, attemptId, digest,
+  )
+  if (!rows.length) throw new Error("Workspace import is in progress or requires the original bundle")
+  return { workspaceId, attemptId, ...rows[0] }
+}
+
+export async function resumeRecoveredImport(db: ImportDatabase, owner: ImportLeaseOwner) {
+  const rows = await db.$queryRawUnsafe<{ epoch: number }[]>(
+    `UPDATE ${importSchema()}.workspace_import_operations SET phase='applying', updated_at=CURRENT_TIMESTAMP,
+       lease_expires_at=CURRENT_TIMESTAMP+interval '5 minutes'
+     WHERE workspace_id=$1::uuid AND attempt_id=$2::uuid AND epoch=$3
+       AND phase='recovering' AND lease_expires_at>CURRENT_TIMESTAMP RETURNING epoch`,
+    owner.workspaceId, owner.attemptId, owner.epoch,
+  )
+  if (rows.length !== 1) throw new ImportOwnershipChanged()
+}

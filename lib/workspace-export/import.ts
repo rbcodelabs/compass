@@ -77,13 +77,14 @@ export type ImportOptions = {
   /** Retrying with the same nonce resumes the same import; a new nonce makes a fresh copy. */
   nonce?: string
   rollbackComplete?(): Promise<void>
-  fenceWrite?(tx: unknown, phase: "applying" | "rolling_back"): Promise<void>
+  fenceWrite?(tx: unknown, phase: "applying" | "rolling_back" | "recovering"): Promise<void>
   providerIO?<T>(io: () => Promise<T>): Promise<T>
   journal?: {
     reserve(store: PrivateBlobStore | "feedback", logical: string, bytes: Uint8Array): Promise<string>
     verify(store: PrivateBlobStore | "feedback", logical: string, physical: string): Promise<void>
   }
-  startOperation?(workspaceId: string): Promise<void>
+  startOperation?(workspaceId: string, bundleDigest: string): Promise<void | "applying" | "recovering">
+  resumeRecovered?(): Promise<void>
   recordExisting?(report: ImportReport): Promise<void>
   bindWorkspace?(workspaceId: string): Promise<void>
   publishResult?(tx: unknown, report: ImportReport): Promise<void>
@@ -382,14 +383,21 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
     return row
   }
 
-  await opts.startOperation?.(newWorkspaceId)
-  async function write<T>(phase: "applying" | "rolling_back", mutation: (tx: Client) => Promise<T>) {
+  const phase = await opts.startOperation?.(newWorkspaceId, createHash("sha256").update(bytes).digest("hex"))
+  async function write<T>(phase: "applying" | "rolling_back" | "recovering", mutation: (tx: Client) => Promise<T>) {
     const fence = opts.fenceWrite
     if (!fence) return withRetry(() => mutation(client))
     return withRetry(() => (client as { $transaction(fn: (tx: Client) => Promise<T>): Promise<T> }).$transaction(async tx => {
       await fence(tx, phase)
       return mutation(tx)
     }))
+  }
+  if (phase === "recovering") {
+    const published = await delegateFor(client, "Workspace").findMany({ where: { id: newWorkspaceId }, take: 1 })
+    if (published.length) throw new WorkspaceImportRecoveryRequired("Workspace was published during import recovery")
+    await rollbackImport(client, reader, importKey, newWorkspaceId, [], opts.blobs, mutation => write("recovering", mutation))
+    if (!opts.resumeRecovered) throw new WorkspaceImportRecoveryRequired("Import recovery could not be finalized")
+    await opts.resumeRecovered()
   }
   const providerIO = opts.providerIO ?? (<T>(io: () => Promise<T>) => io())
   const rewritePath = rewriteText

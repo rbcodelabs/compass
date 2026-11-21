@@ -123,3 +123,29 @@ it.skipIf(!integrationDatabaseUrl)("releases a completed rollback for a fresh at
     await pool.end()
   }
 })
+
+it.skipIf(!integrationDatabaseUrl)("takes over an expired matching bundle only in recovery phase", async () => {
+  const pool = new Pool({ connectionString: integrationDatabaseUrl })
+  const db = await pool.connect()
+  try {
+    await db.query(`CREATE TEMP TABLE workspace_import_operations (
+      workspace_id uuid PRIMARY KEY, organization_id uuid, attempt_id uuid, epoch integer DEFAULT 1,
+      phase text, bundle_digest text, lease_expires_at timestamp, updated_at timestamp)`)
+    const tx = { async $queryRawUnsafe<T>(sql: string, ...params: unknown[]) { return (await db.query(sql, params)).rows as T } }
+    const { claimBundleImport, resumeRecoveredImport, renewImportOperation } = await import("@/lib/workspace-export/operation")
+    const ws = randomUUID(), org = randomUUID(), digest = "a".repeat(64)
+    const first = await claimBundleImport(tx, ws, org, digest)
+    await db.query("UPDATE workspace_import_operations SET lease_expires_at=now()-interval '1 second'")
+    await expect(claimBundleImport(tx, ws, org, "b".repeat(64))).rejects.toThrow(/in progress|bundle/i)
+    const next = await claimBundleImport(tx, ws, org, digest)
+    expect(next.phase).toBe("recovering")
+    expect(next.epoch).toBe(first.epoch + 1)
+    await expect(renewImportOperation(tx, next, "applying")).rejects.toThrow(/ownership changed/i)
+    await resumeRecoveredImport(tx, next)
+    await expect(renewImportOperation(tx, next, "applying")).resolves.toBeUndefined()
+    await expect(renewImportOperation(tx, first, "applying")).rejects.toThrow(/ownership changed/i)
+  } finally {
+    db.release()
+    await pool.end()
+  }
+})

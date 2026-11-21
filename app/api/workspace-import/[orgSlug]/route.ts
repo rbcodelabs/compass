@@ -12,7 +12,7 @@ import { WorkspaceImportError, WorkspaceImportRecoveryRequired, importWorkspaceB
 import { MAX_BUNDLE_BYTES, loadStagedBundle, verifyBundleReceipt } from "@/lib/workspace-export/upload"
 import { bindImportReceipt, readImportReceiptResult } from "@/lib/workspace-export/receipt-binding"
 
-import { commitImportReport, finishImportRollback, renewImportOperation, startImportOperation, type ImportDatabase } from "@/lib/workspace-export/operation"
+import { claimBundleImport, resumeRecoveredImport, commitImportReport, finishImportRollback, renewImportOperation, startImportOperation, type ImportDatabase } from "@/lib/workspace-export/operation"
 import type { ImportLeaseOwner } from "@/lib/workspace-export/lease"
 
 export const maxDuration = 300
@@ -115,8 +115,15 @@ export async function POST(req: Request, { params }: { params: Promise<{ orgSlug
           await commitImportReport(tx, existingOwner, report)
         })
       },
-      async startOperation(workspaceId) {
-        owner = await startImportOperation(prisma, workspaceId, organizationId)
+      async startOperation(workspaceId, digest) {
+        const claimed = await withRetry(() => claimBundleImport(prisma, workspaceId, organizationId, digest))
+        owner = claimed
+        return claimed.phase
+      },
+      async resumeRecovered() {
+        const active = owner
+        if (!active) throw new Error("Missing workspace import owner")
+        await withRetry(() => resumeRecoveredImport(prisma, active))
       },
       async rollbackComplete() {
         const active = owner
