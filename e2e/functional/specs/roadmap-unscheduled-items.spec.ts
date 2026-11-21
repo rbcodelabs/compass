@@ -25,7 +25,9 @@ import { openFullPage } from "../fixtures/full-page";
 import type { Locator, Page } from "@playwright/test";
 
 async function dragTo(page: Page, source: Locator, target: Locator, scrollContainer?: Locator, beforeRelease?: () => Promise<void>) {
-  await source.scrollIntoViewIfNeeded();
+  // A cancelled drag can still have its drop animation over the handle.
+  // Wait until the source can actually receive the next pointer gesture.
+  await source.hover({ trial: true });
   const sourceBox = await source.boundingBox();
   if (!sourceBox) throw new Error("drag source has no bounding box");
 
@@ -255,13 +257,74 @@ test.describe("Roadmap — not yet on the roadmap", () => {
       const dragHandle = solutionUnscheduledCard.getByLabel("Drag to schedule");
       const laterColumn = page.locator("#roadmap-column-LATER");
       const roadmapBoard = page.getByRole("region", { name: "Roadmap board" });
+      const snap = () => roadmapBoard.evaluate(element => getComputedStyle(element).scrollSnapType);
+      await expect.poll(snap).toMatch(/^x(?: |$)/);
+      const startDrag = async (handle: Locator) => {
+        await handle.scrollIntoViewIfNeeded();
+        const box = (await handle.boundingBox())!;
+        await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+        await page.mouse.down();
+        await page.mouse.move(box.x + box.width / 2 + 15, box.y + box.height / 2 + 15, { steps: 10 });
+        await expect.poll(snap).toMatch(/^x(?: |$)/);
+      };
+      const titles = page.locator('[data-slot="card-title"]').filter({ hasText: solTitle });
+      const idleTitles = await titles.count();
+      await startDrag(dragHandle);
+      await expect(titles).toHaveCount(idleTitles + 1);
+      await page.keyboard.press("Escape");
+      await page.mouse.up();
+      await expect(titles).toHaveCount(idleTitles);
+      await expect(solutionUnscheduledCard).toBeVisible();
+      await expect.poll(snap).toMatch(/^x(?: |$)/);
+      await roadmapBoard.evaluate(element => { element.scrollLeft = 0; });
+      await expect.poll(() => roadmapBoard.evaluate(element => element.scrollLeft)).toBe(0);
+      const view = (await roadmapBoard.boundingBox())!;
+      const target = (await laterColumn.boundingBox())!;
+      expect(target.x + target.width).toBeGreaterThan(view.x + view.width);
       await dragTo(page, dragHandle, laterColumn, roadmapBoard);
-
+      await expect.poll(() => roadmapBoard.evaluate(element => element.scrollLeft)).toBeGreaterThan(0);
+      await expect.poll(snap).toMatch(/^x(?: |$)/);
       await expect(solutionUnscheduledCard).not.toBeVisible({ timeout: 10_000 });
       // .first() — the promoted item's own title AND its "Solution" link
       // chip both show the same solution title, so this text appears twice
       // on the card; either occurrence confirms it landed here.
       await expect(laterColumn.getByText(solTitle).first()).toBeVisible({ timeout: 10_000 });
+
+      const laterCard = laterColumn.locator('[data-slot="card"]').filter({ hasText: solTitle });
+      const cancelTarget = page.locator("#roadmap-column-NEXT");
+      await dragTo(page, laterCard.getByRole("button", { name: "Drag to reorder" }), cancelTarget, roadmapBoard, async () => {
+        await expect.poll(snap).toMatch(/^x(?: |$)/);
+        await expect(cancelTarget.getByText(solTitle).first()).toBeVisible();
+        await page.keyboard.press("Escape");
+      });
+      await expect(laterCard).toBeVisible();
+      await expect.poll(snap).toMatch(/^x(?: |$)/);
+
+      // Use the real board, including its columns, dock, and production CSS.
+      const boardBox = (await roadmapBoard.boundingBox())!;
+      await page.mouse.move(boardBox.x + 60, boardBox.y + 27);
+      await roadmapBoard.evaluate(element => { element.scrollLeft = 0; });
+      await expect.poll(() => roadmapBoard.evaluate(element => element.scrollLeft)).toBe(0);
+      for (let input = 1; input <= 4; input++) {
+        await page.mouse.wheel(0, 40);
+        await expect.poll(() => roadmapBoard.evaluate(element => element.scrollLeft)).toBe(input * 40);
+      }
+      await expect.poll(snap).toMatch(/^x(?: |$)/);
+      // Restoring proximity snap may settle on a nearby column, but the
+      // completed four-tick gesture must not jump back to the starting column.
+      const settledOffset = await roadmapBoard.evaluate(async element => {
+        let last = element.scrollLeft;
+        let stable = 0;
+        for (let frame = 0; frame < 90; frame++) {
+          await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+          const current = element.scrollLeft;
+          stable = current === last ? stable + 1 : 0;
+          if (stable >= 12) return current;
+          last = current;
+        }
+        throw new Error("Roadmap scroll did not settle");
+      });
+      expect(settledOffset).toBeGreaterThan(0);
 
       // Crossing a horizon remounts the linked card and its popup triggers.
       // The optimistic move must settle in the pointed column before release.
