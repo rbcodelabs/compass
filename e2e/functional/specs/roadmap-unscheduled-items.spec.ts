@@ -232,12 +232,44 @@ test.describe("Roadmap — not yet on the roadmap", () => {
       const dragHandle = solutionUnscheduledCard.getByLabel("Drag to schedule");
       const laterColumn = page.locator("#roadmap-column-LATER");
       const roadmapBoard = page.getByRole("region", { name: "Roadmap board" });
+      const snap = () => roadmapBoard.evaluate(element => getComputedStyle(element).scrollSnapType);
+      await expect.poll(snap).toMatch(/^x(?: |$)/);
+      const startDrag = async (handle: Locator) => {
+        await handle.scrollIntoViewIfNeeded();
+        const box = (await handle.boundingBox())!;
+        await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+        await page.mouse.down();
+        await page.mouse.move(box.x + box.width / 2 + 15, box.y + box.height / 2 + 15, { steps: 10 });
+        await expect.poll(snap).toBe("none");
+      };
+      await startDrag(dragHandle);
+      await page.keyboard.press("Escape");
+      await page.mouse.up();
+      await expect(solutionUnscheduledCard).toBeVisible();
+      await expect.poll(snap).toMatch(/^x(?: |$)/);
+      await roadmapBoard.evaluate(element => { element.scrollLeft = 0; });
+      await expect.poll(() => roadmapBoard.evaluate(element => element.scrollLeft)).toBe(0);
+      const view = (await roadmapBoard.boundingBox())!;
+      const target = (await laterColumn.boundingBox())!;
+      expect(target.x + target.width).toBeGreaterThan(view.x + view.width);
       await dragTo(page, dragHandle, laterColumn, roadmapBoard);
+      await expect.poll(() => roadmapBoard.evaluate(element => element.scrollLeft)).toBeGreaterThan(0);
+      await expect.poll(snap).toMatch(/^x(?: |$)/);
       await expect(solutionUnscheduledCard).not.toBeVisible({ timeout: 10_000 });
       // .first() — the promoted item's own title AND its "Solution" link
       // chip both show the same solution title, so this text appears twice
       // on the card; either occurrence confirms it landed here.
       await expect(laterColumn.getByText(solTitle).first()).toBeVisible({ timeout: 10_000 });
+
+      const laterCard = laterColumn.locator('[data-slot="card"]').filter({ hasText: solTitle });
+      await startDrag(laterCard.getByRole("button", { name: "Drag to reorder" }));
+      const next = (await page.locator("#roadmap-column-NEXT").boundingBox())!;
+      await page.mouse.move(next.x + next.width / 2, next.y + next.height / 2, { steps: 20 });
+      await expect(page.locator("#roadmap-column-NEXT").getByText(solTitle).first()).toBeVisible();
+      await page.keyboard.press("Escape");
+      await page.mouse.up();
+      await expect(laterCard).toBeVisible();
+      await expect.poll(snap).toMatch(/^x(?: |$)/);
 
       // Use the real board, including its columns, dock, and production CSS.
       const boardBox = (await roadmapBoard.boundingBox())!;
@@ -248,7 +280,7 @@ test.describe("Roadmap — not yet on the roadmap", () => {
         await page.mouse.wheel(0, 40);
         await expect.poll(() => roadmapBoard.evaluate(element => element.scrollLeft)).toBe(input * 40);
       }
-
+      await expect.poll(snap).toMatch(/^x(?: |$)/);
 
       // ── 4. Quick-add the bug to NEXT via its card menu (no drag) ────────────
       await bugUnscheduledCard.hover();
