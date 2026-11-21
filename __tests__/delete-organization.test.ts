@@ -70,6 +70,7 @@ const mockPortfolioCapacityReservation = { deleteMany: vi.fn() };
 const mockPortfolioCapacityPlan = { deleteMany: vi.fn() };
 const mockResearchDelete = { deleteMany: vi.fn(), updateMany: vi.fn() };
 const mockEntityLink = { findMany: vi.fn(), deleteMany: vi.fn() };
+const mockExternalLink = { findMany: vi.fn(), deleteMany: vi.fn() };
 const mockResearchStudy = { findMany: vi.fn(), deleteMany: vi.fn(), updateMany: vi.fn() };
 
 const mockPrisma = {
@@ -181,6 +182,7 @@ const mockPrisma = {
   researchSynthesis: mockResearchDelete,
   researchStudy: mockResearchStudy,
   entityLink: mockEntityLink,
+  externalLink: mockExternalLink,
 };
 
 vi.mock("@/lib/db", () => ({
@@ -263,6 +265,7 @@ beforeEach(() => {
     mockCapabilityPack,
     mockCapabilityPackVersion,
     mockEntityLink,
+    mockExternalLink,
     mockResearchStudy,
   ]) {
     m.findMany.mockResolvedValue([]);
@@ -299,6 +302,7 @@ beforeEach(() => {
     mockOpportunity.deleteMany,
     mockOpportunityScore.deleteMany,
     mockEntityLink.deleteMany,
+    mockExternalLink.deleteMany,
     mockResearchStudy.deleteMany,
     mockSolutionScore.deleteMany,
     mockSolution.deleteMany,
@@ -460,6 +464,11 @@ describe("deleteOrganization", () => {
     expect(sweepOrder("OPPORTUNITY")).toBeLessThan(mockOpportunity.deleteMany.mock.invocationCallOrder[0]);
     expect(sweepOrder("SOLUTION")).toBeLessThan(mockSolution.deleteMany.mock.invocationCallOrder[0]);
     expect(sweepOrder("OBJECTIVE")).toBeLessThan(mockObjective.deleteMany.mock.invocationCallOrder[0]);
+
+    // ── External links (ADR-0028): swept by workspace before the Solutions and Tasks they hang off are deleted ──
+    expect(mockExternalLink.findMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" }, select: { id: true }, take: 500 });
+    expect(mockExternalLink.findMany.mock.invocationCallOrder[0]).toBeLessThan(mockTask.deleteMany.mock.invocationCallOrder[0]);
+    expect(mockExternalLink.findMany.mock.invocationCallOrder[0]).toBeLessThan(mockSolution.deleteMany.mock.invocationCallOrder[0]);
 
     // ── Experiment / study endpoints are swept too, before those rows go ──
     expect(mockEntityLink.findMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" }, select: { id: true }, take: 500 });

@@ -32,7 +32,7 @@ export const MODEL_BUCKETS: Readonly<Record<string, ExportBucket>> = Object.from
      CanvasNodePosition ChecklistTemplate ChecklistTemplateItem OKRCycle Objective KeyResult CheckIn
      Opportunity OpportunityScore Solution SolutionScore SolutionComment Assumption Experiment
      ExperimentResult Evidence EvidenceResearchSource RoadmapItem RoadmapVote LaunchChecklist
-     LaunchChecklistItem Task EntityLink
+     LaunchChecklistItem Task EntityLink ExternalLink
      Comment DocCommentAnchor SolutionPlanProposal CommentElementAnchor
      CommentExternalAuthor Doc DocComment DocVersion Artifact ArtifactRevision FeedbackItem
      FeedbackSource FeedbackElementAnchor FeedbackAttachment FeedbackVote ResearchStudy

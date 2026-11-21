@@ -1,3 +1,4 @@
+import { externalLinkKeyHash } from "@/lib/external-link-key"
 /**
  * Wide-coverage round trip: seeds a row in most exported models (research, decisions, metrics, OKRs, roadmap,
  * launch checklists, card sort, capability packs, ...) and proves that, after import,
@@ -157,6 +158,7 @@ describe.skipIf(!databaseUrl)("workspace export: wide model coverage", () => {
     await db().feedbackAttachment.create({ data: { feedbackItemId: fb.id, url: "https://public.example/feedback/old/shot.png", filename: "shot.png", fileType: "image/png", fileSize: 2 } })
     await db().customFieldValue.create({ data: { fieldId: field.id, objectId: opp.id, value: "now" } })
     await db().analyticsConnection.create({ data: { workspaceId: wsId, provider: "POSTHOG", projectId: "p1", secretEncrypted: "x", enabled: true } })
+    await db().externalLink.create({ data: { workspaceId: wsId, subjectType: "TASK", subjectId: task.id, provider: "GITHUB_PR", url: "https://github.com/acme/app/pull/1", externalKey: "acme/app#1", externalKeyHash: externalLinkKeyHash("acme/app#1"), title: "PR 1", relation: "IMPLEMENTS" } })
     await db().workspaceSequence.create({ data: { workspaceId: wsId, entityType: "opportunity", nextValue: 5 } })
     await db().solutionScore.create({ data: { solutionId: sol.id, scoringModelId: sm.id, modelVersion: 1, formulaSnapshot: {}, rawValues: {}, rawScore: 1, normalizedScore: 1 } })
     await db().decisionEvidenceRef.create({

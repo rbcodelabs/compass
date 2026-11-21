@@ -8,6 +8,8 @@ section: "Configuration"
 
 # Export and import
 
+External links attached to Tasks and Solutions are included with their full URLs and provider identities.
+
 A workspace can be exported to a single file and imported again as a new workspace. Use it to keep a backup, to make a working copy, or to move a workspace into a different organization.
 
 ## Exporting a workspace
