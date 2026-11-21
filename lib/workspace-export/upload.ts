@@ -13,8 +13,9 @@ export const MAX_BUNDLE_BYTES = 512 * 1024 * 1024
 /** Largest bundle accepted through the multipart route (a serverless request body is capped near 4.5 MB). */
 export const MAX_MULTIPART_BYTES = 4 * 1024 * 1024
 const TTL_MS = 30 * 60 * 1000
+const REPLAY_TTL_MS = 24 * 60 * 60 * 1000
 
-type Payload = { v: 1; uploadId: string; organizationId: string; userId: string; pathname: string; fileSize: number; expiresAt: number }
+type Payload = { v: 1; uploadId: string; organizationId: string; userId: string; pathname: string; fileSize: number; expiresAt: number; replayExpiresAt?: number }
 
 function secret(): string {
   const s = process.env.ARTIFACT_UPLOAD_RECEIPT_SECRET?.trim() || process.env.ARTIFACT_BLOB_READ_WRITE_TOKEN?.trim()
@@ -38,12 +39,12 @@ export async function prepareBundleUpload(input: { organizationId: string; userI
     store: "private", pathname, allowedContentTypes: ["application/zip", "application/octet-stream"], maxBytes: input.fileSize,
     validUntil: expiresAt, ttlSeconds: TTL_MS / 1000, allowOverwrite: false, notConfiguredMessage: "Direct upload is not configured",
   })
-  const payload: Payload = { v: 1, uploadId, organizationId: input.organizationId, userId: input.userId, pathname, fileSize: input.fileSize, expiresAt }
+  const payload: Payload = { v: 1, uploadId, organizationId: input.organizationId, userId: input.userId, pathname, fileSize: input.fileSize, expiresAt, replayExpiresAt: now + REPLAY_TTL_MS }
   const encoded = Buffer.from(JSON.stringify(payload)).toString("base64url")
   return { uploadId, pathname, ...credential, receipt: `${encoded}.${sign(encoded)}`, expiresAt, access: "private" as const }
 }
 
-export function verifyBundleReceipt(receipt: string, organizationId: string, userId: string, now = Date.now()): Payload {
+export function verifyBundleReceipt(receipt: string, organizationId: string, userId: string, now = Date.now(), purpose: "upload" | "replay" = "upload"): Payload {
   const [encoded, signature, extra] = receipt.split(".")
   if (!encoded || !signature || extra) throw new Error("Invalid upload receipt")
   const expected = Buffer.from(sign(encoded))
@@ -57,7 +58,8 @@ export function verifyBundleReceipt(receipt: string, organizationId: string, use
   }
   if (p.v !== 1 || p.organizationId !== organizationId || p.userId !== userId) throw new Error("Upload receipt does not belong to this organization")
   if (p.pathname !== stagingPath(p.organizationId, p.uploadId)) throw new Error("Invalid upload receipt")
-  if (p.expiresAt < now) throw new Error("Upload receipt has expired; upload the file again")
+  const expiry = purpose === "replay" ? p.replayExpiresAt ?? p.expiresAt : p.expiresAt
+  if (expiry < now) throw new Error("Upload receipt has expired; upload the file again")
   return p
 }
 
