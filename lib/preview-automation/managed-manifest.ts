@@ -292,7 +292,9 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   // Unified Conversations model (OPP-67 / SOL-117): twelve nullable ADD COLUMN IF NOT EXISTS statements across agent_conversations and agent_messages; no default, backfill, index or FK.
   // Postcondition pinned in REVIEWED_MIGRATION_CODE_SHA256. Digest recorded from the shipped SQL after reading it.
   "125_unified_conversations": "dc6968e7f3573b5bc5aa9982f59c2f147643c807764c7c2ad768b21182333faf",
-  // Links an assistant message to the run that produced it (ADR-0032): one nullable `ADD COLUMN IF NOT EXISTS run_id UUID` on agent_messages plus one ASYNC index; no default, backfill or FK. No code postcondition. Digest recorded from the shipped SQL after reading it.
+  "126_doc_version_numbers": "e1082457e986ef1968b13f7460aec087f595fc3e7dfd35f38610d1902f1da58b",
+  "127_decision_votes": "acb304bf3fcb4288c2fa0d3298cc04e51bef8958108176b7f3930649d83f0691",
+  "128_task_start_date": "e357da11f90dbf6030030ee0ba16df9153e2ef2e85bbb5c53ef7db666e5ce66e",
   "129_agent_message_run_id": "f82b208a7648bac31ef3917a3080efeb350730cd485bb347b64f615007a4c9bd",
   "130_agent_sandbox_operations": "a19322f4022bfe3e0595788943adb4bb04320b3ea568a6dea5b09180d33c97d4",
 };
@@ -442,14 +444,6 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
   "109_agent_conversation_reviews": {
     "lib/migrations/agent-conversation-reviews.ts": "970ff2d900951977feefd21dc9592b49b5d59dc0819c9b2e66e0e911718503ed",
   },
-  // The fence depends on one operation per conversation.
-  "130_agent_sandbox_operations": {
-    "lib/migrations/agent-sandbox-operations.ts": "16ccb4d7e2855ca5fd593f812139354124319e05555a07bf3280567f08daf1f8",
-  },
-  // The 129 postcondition (agent_messages.run_id is a bare nullable uuid; idx_agent_messages_run is valid, ready, non-unique, on run_id only); editing it re-reviews the migration.
-  "129_agent_message_run_id": {
-    "lib/migrations/agent-message-run-id.ts": "d9b3a9ae84b5a61f52e919c29d51d83bf9268dbbb15ad79f87e6d6727de7921d",
-  },
   // The 110 postcondition (columns, plus every index valid and ready); editing it re-reviews the migration.
   "110_artifact_external_share": {
     "lib/migrations/artifact-external-share.ts": "b8b882fe110ef9d7b3e633d4910df18a577642fd8d5bf81cf95c5199facb36f8",
@@ -525,6 +519,21 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
   // The 125 postcondition (twelve nullable columns across agent_conversations and agent_messages exist and carry expected types); editing it re-reviews the migration.
   "125_unified_conversations": {
     "lib/migrations/unified-conversations.ts": "5160ebc0955373c955f3c781c2d08089b9b2cd42730ad9a5d7a6e0e6f0ea85ef",
+  },
+  "126_doc_version_numbers": {
+    "lib/migrations/schema-first-columns.ts": "8cb404f5e3005487345e2aa4b4f521a37db1f54e972a89ef0d7803f7275765dd",
+  },
+  "127_decision_votes": {
+    "lib/migrations/decision-votes.ts": "322fecc3f8d99029f8670ff96c6e52d12b1fcf131b616d9e07f8ca7890bcd2ce",
+  },
+  "128_task_start_date": {
+    "lib/migrations/schema-first-columns.ts": "8cb404f5e3005487345e2aa4b4f521a37db1f54e972a89ef0d7803f7275765dd",
+  },
+  "129_agent_message_run_id": {
+    "lib/migrations/agent-message-run-id.ts": "d9b3a9ae84b5a61f52e919c29d51d83bf9268dbbb15ad79f87e6d6727de7921d",
+  },
+  "130_agent_sandbox_operations": {
+    "lib/migrations/agent-sandbox-operations.ts": "116056a42465597b0d83003ba39be4b6cfb6d2c5115e09c2dfe66435bc76d233",
   },
 };
 

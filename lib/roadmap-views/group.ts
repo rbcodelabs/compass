@@ -6,6 +6,7 @@
 import { HORIZON_META } from "@/lib/roadmap"
 import { ROADMAP_HORIZONS, type RoadmapViewDisplay, type RoadmapViewFilters } from "@/lib/roadmap-views/schema"
 import type { CrossWorkspaceRoadmapItem } from "@/lib/roadmap-views/query"
+import type { RoadmapFieldFacet } from "@/lib/roadmap-views/fields"
 
 export type RoadmapGroup = {
   key: string
@@ -23,7 +24,11 @@ export function groupRoadmapItems(
   groupBy: RoadmapViewDisplay["groupBy"],
   filters: Pick<RoadmapViewFilters, "horizons">,
   workspaceOrder: ReadonlyArray<{ id: string; name: string }> = [],
+  /** When set, groups by this picklist field instead of `groupBy`. */
+  fieldGroup?: Pick<RoadmapFieldFacet, "key" | "name" | "options"> | null,
 ): RoadmapGroup[] {
+  if (fieldGroup) return groupByField(items, fieldGroup)
+
   if (groupBy === "none") return [{ key: "all", label: "All items", items: [...items] }]
 
   if (groupBy === "horizon") {
@@ -62,6 +67,37 @@ export function groupRoadmapItems(
   }
   const groups = [...bySquad.values()].sort((a, b) => a.label.localeCompare(b.label))
   return unassigned.items.length ? [...groups, unassigned] : groups
+}
+
+/**
+ * One group per option label, in the field's option order (options from different
+ * workspaces are merged by label), then any stored label no workspace offers any more,
+ * then "No <field>". A multi-select item appears in every group it carries.
+ */
+function groupByField(items: readonly CrossWorkspaceRoadmapItem[], field: Pick<RoadmapFieldFacet, "key" | "name" | "options">): RoadmapGroup[] {
+  const groups = new Map<string, RoadmapGroup>()
+  for (const option of field.options) {
+    groups.set(option.label.toLowerCase(), { key: "f:" + option.label.toLowerCase(), label: option.label, color: option.color, items: [] })
+  }
+  const unset: RoadmapGroup = { key: "__none__", label: "No " + field.name, items: [] }
+  const extras: RoadmapGroup[] = []
+  for (const item of items) {
+    const cells = item.fieldValues[field.key] ?? []
+    if (cells.length === 0) { unset.items.push(item); continue }
+    for (const cell of cells) {
+      const id = cell.label.toLowerCase()
+      let group = groups.get(id)
+      if (!group) {
+        group = { key: "f:" + id, label: cell.label, color: cell.color, items: [] }
+        groups.set(id, group)
+        extras.push(group)
+      }
+      if (!group.items.includes(item)) group.items.push(item)
+    }
+  }
+  const ordered = [...groups.values()].filter((g) => !extras.includes(g))
+  extras.sort((a, b) => a.label.localeCompare(b.label))
+  return [...ordered, ...extras, ...(unset.items.length ? [unset] : [])]
 }
 
 /* ------------------------------------------------------------------ timeline */

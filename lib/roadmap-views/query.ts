@@ -10,7 +10,12 @@ import { getTasksLinkedTo } from "@/lib/task-links-read"
 import { ROADMAP_CARD_INCLUDE, toRoadmapCardData } from "@/lib/roadmap/card-data"
 import type { RoadmapCardData } from "@/components/roadmap/roadmap-card"
 import type { TaskStatus } from "@/lib/types"
-import type { RoadmapViewDisplay, RoadmapViewFilters } from "@/lib/roadmap-views/schema"
+import { resolveEffectiveOptions } from "@/lib/shared-field-options"
+import { makeRoadmapFieldKey, type RoadmapViewDisplay, type RoadmapViewFilters } from "@/lib/roadmap-views/schema"
+import {
+  buildFieldFacets, cellsMatchLabels, toCellValues,
+  type FieldCellValue, type FieldDefinitionInput, type RoadmapFieldFacet,
+} from "@/lib/roadmap-views/fields"
 
 type Db = ReturnType<typeof getPrisma>
 
@@ -19,11 +24,15 @@ export const MAX_ROADMAP_ITEMS = 1000
 
 export type CrossWorkspaceRoadmapItem = RoadmapCardData & {
   workspace: { id: string; name: string; slug: string }
+  /** Cells for the custom fields the view uses (shown fields + the grouping field), by field key. A missing key means not set, or not defined in this item's workspace. */
+  fieldValues: Record<string, FieldCellValue[]>
 }
 
 export type RoadmapFacets = {
   workspaces: Array<{ id: string; name: string; slug: string }>
   squads: Array<{ id: string; name: string; color: string | null; workspaceId: string }>
+  /** Every ROADMAP_ITEM custom field the viewer can read, merged across workspaces by type + name. */
+  fields: RoadmapFieldFacet[]
 }
 
 /** Intersection of the filter's workspaces with what the viewer can read. Empty filter = everything readable. */
@@ -73,12 +82,128 @@ export function buildRoadmapOrderBy(sort: RoadmapViewDisplay["sort"]): Prisma.Ro
   }
 }
 
+/** Roadmap-item custom field definitions in the given workspaces, with shared option sets resolved. */
+export async function loadFieldDefinitions(workspaceIds: readonly string[], db: Db = getPrisma()): Promise<FieldDefinitionInput[]> {
+  if (workspaceIds.length === 0) return []
+  const rows = await db.customFieldDefinition.findMany({
+    where: { workspaceId: { in: [...workspaceIds] }, objectType: "ROADMAP_ITEM" },
+    select: { id: true, workspaceId: true, name: true, fieldType: true, order: true, options: true, sharedOptionSet: { select: { options: true } } },
+  })
+  return rows.map((r) => ({
+    id: r.id, workspaceId: r.workspaceId, name: r.name, fieldType: r.fieldType, order: r.order,
+    options: resolveEffectiveOptions({ fieldType: r.fieldType, options: r.options, sharedOptionSet: r.sharedOptionSet }),
+  }))
+}
+
 export async function loadRoadmapFacets(readableIds: readonly string[], db: Db = getPrisma()): Promise<RoadmapFacets> {
-  const [workspaces, squads] = await Promise.all([
+  const [workspaces, squads, definitions] = await Promise.all([
     db.workspace.findMany({ where: { id: { in: [...readableIds] } }, select: { id: true, name: true, slug: true }, orderBy: { name: "asc" } }),
     db.squad.findMany({ where: { workspaceId: { in: [...readableIds] } }, select: { id: true, name: true, color: true, workspaceId: true }, orderBy: { name: "asc" } }),
+    loadFieldDefinitions(readableIds, db),
   ])
-  return { workspaces, squads }
+  return { workspaces, squads, fields: buildFieldFacets(definitions) }
+}
+
+const FIELD_SEARCH_BATCH_SIZE = 250
+const MAX_FIELD_SEARCH_CANDIDATES = 5_000
+const MAX_FIELD_SEARCH_VALUES = 20_000
+
+/**
+ * Scan ordered, already scoped candidates so custom-field filters run before the
+ * display cap. Keep both the per-query candidate list and the total search bounded.
+ * Report an incomplete search when either budget prevents a complete scan.
+ */
+async function matchingItemIds(
+  where: Prisma.RoadmapItemWhereInput,
+  orderBy: Prisma.RoadmapItemOrderByWithRelationInput[],
+  definitions: readonly FieldDefinitionInput[],
+  filters: RoadmapViewFilters["fields"],
+  db: Db,
+): Promise<{ ids: Set<string>; incomplete: boolean }> {
+  const ids = new Set<string>()
+  const definitionsById = new Map<string, { field: FieldDefinitionInput; filterIndexes: number[] }>()
+  const supportedFilters = new Set<number>()
+  for (const field of definitions) {
+    const key = makeRoadmapFieldKey(field.fieldType, field.name)
+    const filterIndexes = filters.flatMap((filter, index) => filter.key === key ? [index] : [])
+    if (filterIndexes.length === 0) continue
+    definitionsById.set(field.id, { field, filterIndexes })
+    for (const index of filterIndexes) supportedFilters.add(index)
+  }
+  if (supportedFilters.size < filters.length) return { ids, incomplete: false }
+
+  let remainingValues = MAX_FIELD_SEARCH_VALUES
+  for (let offset = 0; offset < MAX_FIELD_SEARCH_CANDIDATES; offset += FIELD_SEARCH_BATCH_SIZE) {
+    const batchSize = Math.min(FIELD_SEARCH_BATCH_SIZE, MAX_FIELD_SEARCH_CANDIDATES - offset)
+    const lastBatch = offset + batchSize === MAX_FIELD_SEARCH_CANDIDATES
+    const candidates = await db.roadmapItem.findMany({
+      where, orderBy, skip: offset, take: batchSize + (lastBatch ? 1 : 0), select: { id: true, workspaceId: true },
+    })
+    const batch = candidates.slice(0, batchSize)
+    if (batch.length === 0) return { ids, incomplete: false }
+    const workspaceOf = new Map(batch.map((item) => [item.id, item.workspaceId]))
+
+    const rows = await db.customFieldValue.findMany({
+      where: { fieldId: { in: [...definitionsById.keys()] }, objectId: { in: [...workspaceOf.keys()] } },
+      select: { fieldId: true, objectId: true, value: true },
+      take: remainingValues + 1,
+    })
+    // A partial batch can omit matching rows earlier in the sort order, so only
+    // return the matches from completed batches.
+    if (rows.length > remainingValues) return { ids, incomplete: true }
+    remainingValues -= rows.length
+
+    const matches = new Map<string, Set<number>>()
+    for (const row of rows) {
+      const definition = definitionsById.get(row.fieldId)
+      if (!definition || workspaceOf.get(row.objectId) !== definition.field.workspaceId) continue
+      const matchedFilters = matches.get(row.objectId) ?? new Set<number>()
+      const cells = toCellValues(definition.field, row.value)
+      for (const index of definition.filterIndexes) {
+        if (cellsMatchLabels(cells, filters[index].values)) matchedFilters.add(index)
+      }
+      matches.set(row.objectId, matchedFilters)
+    }
+
+    for (const item of batch) {
+      if (matches.get(item.id)?.size !== filters.length) continue
+      ids.add(item.id)
+      if (ids.size > MAX_ROADMAP_ITEMS) return { ids, incomplete: false }
+    }
+    if (candidates.length < batchSize || (lastBatch && candidates.length === batchSize)) return { ids, incomplete: false }
+  }
+  return { ids, incomplete: true }
+}
+
+/** Cells for the shown fields, per item. One query for all shown fields' values across the page. */
+async function loadItemFieldValues(
+  page: ReadonlyArray<{ id: string; workspaceId: string }>,
+  definitions: readonly FieldDefinitionInput[],
+  keys: readonly string[],
+  db: Db,
+): Promise<Map<string, Record<string, FieldCellValue[]>>> {
+  const out = new Map<string, Record<string, FieldCellValue[]>>()
+  if (keys.length === 0 || page.length === 0) return out
+  const wanted = new Set(keys)
+  const defs = definitions.filter((d) => wanted.has(makeRoadmapFieldKey(d.fieldType, d.name)))
+  if (defs.length === 0) return out
+  const byId = new Map(defs.map((d) => [d.id, d]))
+  const workspaceOf = new Map(page.map((r) => [r.id, r.workspaceId]))
+  const rows = await db.customFieldValue.findMany({
+    where: { fieldId: { in: defs.map((d) => d.id) }, objectId: { in: page.map((r) => r.id) } },
+    select: { fieldId: true, objectId: true, value: true },
+  })
+  for (const row of rows) {
+    const def = byId.get(row.fieldId)
+    // A definition from another workspace cannot apply to this item; ignore a stray row.
+    if (!def || workspaceOf.get(row.objectId) !== def.workspaceId) continue
+    const cells = toCellValues(def, row.value)
+    if (cells.length === 0) continue
+    const record = out.get(row.objectId) ?? {}
+    record[makeRoadmapFieldKey(def.fieldType, def.name)] = cells
+    out.set(row.objectId, record)
+  }
+  return out
 }
 
 export async function loadCrossWorkspaceRoadmap(
@@ -86,13 +211,24 @@ export async function loadCrossWorkspaceRoadmap(
   filters: RoadmapViewFilters,
   display: RoadmapViewDisplay,
   db: Db = getPrisma(),
-): Promise<{ items: CrossWorkspaceRoadmapItem[]; truncated: boolean }> {
+): Promise<{ items: CrossWorkspaceRoadmapItem[]; truncated: boolean; fieldSearchIncomplete?: true }> {
   const workspaceIds = effectiveWorkspaceIds(readableIds, filters.workspaceIds)
   if (workspaceIds.length === 0) return { items: [], truncated: false }
 
+  const shownKeys = [...new Set([...display.fields, ...(display.groupByField ? [display.groupByField] : [])])]
+  const definitions = shownKeys.length > 0 || filters.fields.length > 0 ? await loadFieldDefinitions(workspaceIds, db) : []
+
+  const where = buildRoadmapWhere(workspaceIds, filters)
+  const orderBy = buildRoadmapOrderBy(display.sort)
+  // The same order is used to scan candidates and hydrate the final page.
+  if (filters.fields.length > 0) orderBy.push({ id: "asc" })
+  const match = filters.fields.length > 0 ? await matchingItemIds(where, orderBy, definitions, filters.fields, db) : null
+  const fieldSearchState = match?.incomplete ? { fieldSearchIncomplete: true as const } : {}
+  if (match?.ids.size === 0) return { items: [], truncated: false, ...fieldSearchState }
+
   const rows = await db.roadmapItem.findMany({
-    where: buildRoadmapWhere(workspaceIds, filters),
-    orderBy: buildRoadmapOrderBy(display.sort),
+    where: match ? { ...where, id: { in: [...match.ids] } } : where,
+    orderBy,
     include: { ...ROADMAP_CARD_INCLUDE, workspace: { select: { id: true, name: true, slug: true } } },
     take: MAX_ROADMAP_ITEMS + 1,
   })
@@ -107,13 +243,16 @@ export async function loadCrossWorkspaceRoadmap(
     statusesByItem.set(link.linkedId, list)
   }
 
+  const fieldValuesByItem = await loadItemFieldValues(page, definitions, shownKeys, db)
+
   let items = page.map((row): CrossWorkspaceRoadmapItem => ({
     ...toRoadmapCardData(row, statusesByItem.get(row.id) ?? []),
     workspace: row.workspace,
+    fieldValues: fieldValuesByItem.get(row.id) ?? {},
   }))
   if (filters.deliveryStatuses.length) {
     const wanted = new Set<string>(filters.deliveryStatuses)
     items = items.filter((item) => wanted.has(item.deliveryStatus))
   }
-  return { items, truncated }
+  return { items, truncated, ...fieldSearchState }
 }

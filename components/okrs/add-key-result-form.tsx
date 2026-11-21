@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useTransition } from "react";
+import { useId, useRef, useState, useTransition } from "react";
 import { PlusIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -40,6 +40,7 @@ export function AddKeyResultForm({
   };
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const formId = useId();
   const formRef = useRef<HTMLFormElement>(null);
 
   function handleSubmit(formData: FormData) {
@@ -79,9 +80,9 @@ export function AddKeyResultForm({
       </p>
 
       <div className="flex flex-col gap-1.5">
-        <Label htmlFor="kr-title">Title</Label>
+        <Label htmlFor={`${formId}-kr-title`}>Title</Label>
         <Input
-          id="kr-title"
+          id={`${formId}-kr-title`}
           name="title"
           placeholder="Weekly active users"
           autoFocus
@@ -92,9 +93,9 @@ export function AddKeyResultForm({
 
       <div className="grid grid-cols-2 gap-3">
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor="kr-target">Target</Label>
+          <Label htmlFor={`${formId}-kr-target`}>Target</Label>
           <Input
-            id="kr-target"
+            id={`${formId}-kr-target`}
             name="target"
             type="number"
             step="any"
@@ -106,9 +107,9 @@ export function AddKeyResultForm({
         </div>
 
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor="kr-unit">Unit (optional)</Label>
+          <Label htmlFor={`${formId}-kr-unit`}>Unit (optional)</Label>
           <Input
-            id="kr-unit"
+            id={`${formId}-kr-unit`}
             name="unit"
             placeholder="users, %, NPS…"
             disabled={isPending}

@@ -876,7 +876,7 @@ async function main(): Promise<void> {
 
   type AttemptOutcome =
     | { kind: "ok"; finalText: string; usage: unknown }
-    | { kind: "parked"; message: string }
+    | { kind: "parked"; message: string; usage: unknown }
     | { kind: "canceled" }
 
   /** One pass of the SDK loop. `state.sawAssistant` lets the caller tell a failed resume from a failed turn. */
@@ -886,7 +886,7 @@ async function main(): Promise<void> {
     state: { sawAssistant: boolean },
   ): Promise<AttemptOutcome> {
     let finalText: string | undefined
-    let usage: unknown
+    let usage: Record<string, unknown> | undefined
     const abortController = new AbortController()
     activeParkAbort = abortController
     parkedReason = undefined
@@ -910,34 +910,28 @@ async function main(): Promise<void> {
         }
 
         if (message.type === "result") {
+          usage = {
+            durationMs: message.duration_ms,
+            durationApiMs: message.duration_api_ms,
+            numTurns: message.num_turns,
+            totalCostUsd: message.total_cost_usd,
+            usage: message.usage,
+          }
           if (message.subtype === "success") {
             finalText = message.result
-            usage = {
-              durationMs: message.duration_ms,
-              durationApiMs: message.duration_api_ms,
-              numTurns: message.num_turns,
-              totalCostUsd: message.total_cost_usd,
-              usage: message.usage,
-            }
           } else if (parkedReason) {
-            return { kind: "parked", message: parkedReason }
+            return { kind: "parked", message: parkedReason, usage }
           } else {
-            failureUsage = {
-              durationMs: message.duration_ms,
-              durationApiMs: message.duration_api_ms,
-              numTurns: message.num_turns,
-              totalCostUsd: message.total_cost_usd,
-              usage: message.usage,
-            }
+            failureUsage = usage
             throw new Error(`query() ended with subtype: ${message.subtype}`)
           }
         }
       }
     } catch (error) {
-      if (parkedReason) return { kind: "parked", message: parkedReason }
+      if (parkedReason) return { kind: "parked", message: parkedReason, usage }
       throw error
     }
-    if (parkedReason) return { kind: "parked", message: parkedReason }
+    if (parkedReason) return { kind: "parked", message: parkedReason, usage }
     if (finalText === undefined) throw new Error("query() ended without a success result")
     return { kind: "ok", finalText, usage }
   }
@@ -1005,8 +999,9 @@ async function main(): Promise<void> {
   if (activeStore && activeSessionId) await publishSession(activeStore, activeSessionId, baseUrl)
 
   if (outcome.kind === "parked") {
-    emit("AGENT_ERROR", { message: finalText })
-    await reporter?.finish("error", { message: finalText, code: "AWAITING_USER" })
+    const payload = { message: finalText, code: "AWAITING_USER", usage: outcome.usage }
+    emit("AGENT_ERROR", payload)
+    await reporter?.finish("error", payload)
     return
   }
 
