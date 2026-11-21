@@ -812,3 +812,20 @@ it("keeps the first destination's task when another destination collides with it
   await expect(importWorkspaceBundle(db.client, zipSync(entries), options)).rejects.toThrow()
   expect(db.tables.Task).toContainEqual(task)
 })
+
+it("refuses to publish a document that would read unverified private bytes from its destination", async () => {
+  const organizationId = randomUUID(), workspaceId = randomUUID(), importerUserId = randomUUID()
+  const db = createInMemoryPrisma({
+    Organization: [{ id: organizationId, name: "Org", slug: "org" }],
+    Workspace: [{ id: workspaceId, organizationId, name: "Source", slug: "src", ssoEnabled: false }],
+    User: [{ id: importerUserId, name: "User", email: "user@example.com" }],
+    OrganizationMember: [{ id: randomUUID(), organizationId, userId: importerUserId, role: "ADMIN" }],
+    Doc: [{ id: randomUUID(), workspaceId, title: "Diagram", content: `![diagram](/api/docs/images/${workspaceId}/${randomUUID()}.png)` }],
+  })
+  const bytes = await exportWorkspaceToBuffer(db.client, workspaceId, noopBlobs)
+  await expect(importWorkspaceBundle(db.client, bytes, {
+    organizationId, importerUserId, blobs: noopBlobs, nonce: "missing-bytes",
+    journal: { reserve: vi.fn(), verify: vi.fn() },
+  })).rejects.toThrow(/private asset/i)
+  expect(db.tables.Workspace).toHaveLength(1)
+})

@@ -7,7 +7,7 @@ import { normalizeWorkspaceRole } from "@/lib/roles"
 import { SLUG_PATTERN, isReservedWorkspaceSlug } from "@/lib/slug"
 import { WORK_ITEM_REGISTRY, WORK_ITEM_TYPES } from "@/lib/work-item-ids"
 import { BundleReader, blobEntry, type BundleManifest } from "@/lib/workspace-export/bundle"
-import { type BlobAdapters } from "@/lib/workspace-export/blobs"
+import { DOC_IMAGE_URL, docImagePathname, type BlobAdapters } from "@/lib/workspace-export/blobs"
 import { decodeRow, fieldInfo } from "@/lib/workspace-export/codec"
 import { OPTIONAL_FIELDS, OPTIONAL_STRING_FIELDS, UNIQUE_KEYS } from "@/lib/workspace-export/schema-meta.generated"
 import { deleteIdsLeafFirst, deleteScopedImportRows, withRetry } from "@/lib/workspace-export/leaf-first"
@@ -311,6 +311,7 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
   const uploaded: { store: "artifact" | "research" | "feedback"; key: string }[] = []
   const sourceWorkspaceId = manifest.source.workspaceId
 
+  const verifiedAssets = new Set<string>()
   const dropped: Record<string, number> = {}
   const deduped: Record<string, number> = {}
   const droppedIds = new Set<string>()
@@ -338,6 +339,9 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
           pathRule.store === "pack"
             ? capabilityPackArtifactPath(value, row.artifactSha256)
             : confineStoragePath(pathRule.store, value, sourceWorkspaceId, newWorkspaceId, rewriteText)
+        if (opts.journal && confined && pathRule.store !== "pack" && !verifiedAssets.has(pathRule.store + "/" + confined)) {
+          throw new WorkspaceImportError("Missing verified private asset for " + model + "." + name)
+        }
         if (confined) row[name] = confined
         else if (pathRule.invalid === "null") {
           row[name] = null
@@ -385,6 +389,13 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
       dropped[model] = (dropped[model] ?? 0) + 1
       if (typeof row.id === "string") droppedIds.add(row.id.toLowerCase())
       return null
+    }
+    if (opts.journal && (model === "Doc" || model === "DocVersion") && typeof row.content === "string") {
+      for (const [, workspace, filename] of row.content.matchAll(DOC_IMAGE_URL)) {
+        if (workspace.toLowerCase() === newWorkspaceId && !verifiedAssets.has("artifact/" + docImagePathname(workspace, filename))) {
+          throw new WorkspaceImportError("Missing verified private asset for document image")
+        }
+      }
     }
     for (const col of SECRET_COLUMNS[model] ?? []) if (col in row) row[col] = null
     Object.assign(row, IMPORT_OVERRIDES[model] ?? {})
@@ -450,6 +461,7 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
           throw new WorkspaceImportRecoveryRequired("Import asset verification failed")
         }
         await opts.journal.verify(b.store, target, physical)
+        verifiedAssets.add(b.store + "/" + target)
       } else if (put.created !== false) {
         uploaded.push({ store: b.store, key: physical })
       }
