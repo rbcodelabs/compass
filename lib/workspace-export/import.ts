@@ -1,3 +1,4 @@
+import { externalLinkKeyHash } from "@/lib/external-link-key"
 import { createHash, randomUUID } from "node:crypto"
 import { normalizeWorkspaceRole } from "@/lib/roles"
 import { SLUG_PATTERN, isReservedWorkspaceSlug } from "@/lib/slug"
@@ -302,6 +303,8 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
       const info = fieldInfo(model, name)
       if (!info) continue
       if (FORCED_COLUMNS.has(name)) continue
+      // These identities belong to external providers, even when a URL happens to contain one of our UUIDs.
+      if (model === "ExternalLink" && ["url", "externalKey", "provider"].includes(name)) continue
       // Real databases hold legacy NULLs in columns the schema now declares required (they have a default).
       // Prisma rejects an explicit null there, so leave the key out and let the column default apply.
       if (value === null && !OPTIONAL_FIELDS[model]?.includes(name)) {
@@ -370,6 +373,11 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
     if (modelHasWorkspaceId(model)) row.workspaceId = newWorkspaceId
     if (model === "Agent" && row.ownerWorkspaceId) row.ownerWorkspaceId = newWorkspaceId
     for (const col of CLEARED_COLUMNS[model] ?? []) if (col in row) row[col] = null
+    if (model === "ExternalLink") {
+      if (typeof row.externalKey !== "string") throw new WorkspaceImportError("ExternalLink is missing its external key")
+      // Old bundles have no digest, and supplied digests are untrusted. Derive it after all identity rewrites.
+      row.externalKeyHash = externalLinkKeyHash(row.externalKey)
+    }
     return row
   }
 
@@ -410,6 +418,8 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
       const parent = PARENT[model]
       let buffer: Row[] = []
       const insertedIds: string[] = []
+      const externalKeysByDigest = new Map<string, string>()
+      const expectedExternalKeys = new Map<string, { externalKey: string; externalKeyHash: string }>()
       let total = 0
       const flush = async () => {
         if (!buffer.length) return
@@ -432,6 +442,15 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
             if (typeof row.id === "string") dedupedIds.add(row.id.toLowerCase())
             continue
           }
+        }
+        if (model === "ExternalLink") {
+          const digestTuple = uniqueTupleKey(row, ["subjectType", "subjectId", "provider", "externalKeyHash"])
+          if (digestTuple === null || typeof row.externalKey !== "string" || typeof row.externalKeyHash !== "string") {
+            throw new WorkspaceImportError("ExternalLink has an incomplete external identity")
+          }
+          const previous = externalKeysByDigest.get(digestTuple)
+          if (previous !== undefined && previous !== row.externalKey) throw new WorkspaceImportError("ExternalLink digest collision; import was not applied")
+          externalKeysByDigest.set(digestTuple, row.externalKey)
         }
         if (uniqueConstraints.length > 0) {
           const tupleKeys = uniqueConstraints.map((cols) => uniqueTupleKey(row, cols))
@@ -462,6 +481,9 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
             continue
           }
         }
+        if (model === "ExternalLink" && typeof row.id === "string") {
+          expectedExternalKeys.set(row.id, {externalKey: row.externalKey as string, externalKeyHash: row.externalKeyHash as string})
+        }
         buffer.push(row)
         if (typeof row.id === "string") insertedIds.push(row.id)
         total++
@@ -470,6 +492,14 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
       await flush()
       // createMany(skipDuplicates) swallows unique-constraint conflicts. Prove every row actually landed.
       for (const group of chunks(insertedIds, 500)) {
+        if (model === "ExternalLink") {
+          // skipDuplicates must never turn a digest collision or rejected write into a successful import.
+          const rows = await delegate.findMany({where: {id: {in: group}}, select: {id: true, externalKey: true, externalKeyHash: true}})
+          if (rows.length !== group.length || rows.some(row => {
+            const expected = expectedExternalKeys.get(String(row.id))
+            return !expected || row.externalKey !== expected.externalKey || row.externalKeyHash !== expected.externalKeyHash
+          })) throw new WorkspaceImportError("ExternalLink identity readback failed; import was not applied")
+        }
         const present = await delegate.count({ where: { id: { in: group } } })
         if (present !== group.length) {
           throw new WorkspaceImportError(`Import of ${model} was incomplete: ${group.length - present} row(s) were rejected by a uniqueness constraint`)

@@ -17,3 +17,6 @@ Apply and verify the registered migration before code paths that read external l
 For plain PostgreSQL, wait for the production alias to serve the registration. Read migration status and inventory the target catalog before applying. Require compass_prod, only 126_external_links pending, no unresolved attempts and no pre-existing external_links table or receipt. Apply only the named script. Verify one finished receipt, writable digest, primary key and both indexes with their expected columns, uniqueness, validity and readiness. Preserve receipt history on failure. The application rollout follows successful readback.
 
 Aurora DSQL deployments separately require live index admission and ASYNC wait/resume evidence.
+## Required verification
+
+The isolated PostgreSQL diagnostic `__tests__/external-links-key.integration.test.ts` measures the actual catalog key columns for 1000-byte ASCII and normalized multibyte URL inputs, checks the key-byte bound, retains full keys, resolves reverse lookups and deduplicates concurrent creates. PostgreSQL cannot prove Aurora DSQL index-key admission or async wait behavior. Use separately authorized isolated DSQL verification for those properties and catalog/default rendering, before approving integration. Keep existing runner job-failure/retry/no-job-resume tests and catalog-shape tests required.

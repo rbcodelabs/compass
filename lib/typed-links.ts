@@ -119,7 +119,7 @@ async function loadKeyResultIn(tx: Tx, id: string, workspaceId: string) {
 
 // ── Transactions ────────────────────────────────────────────────────────────
 
-const LINK_NAMES = /idx_entity_links_pair|entity_links|EntityLink\b/
+const LINK_NAMES = /idx_entity_links_pair|\bentity_links\b|\bEntityLink\b|idx_external_links_subject_key|\bexternal_links\b|\bExternalLink\b|\bexternalLink\.create\b/
 
 /**
  * A lost race on the unique pair index. Prisma reports it as P2002, but a driver adapter does not necessarily fill `meta.modelName`,

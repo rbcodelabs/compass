@@ -1,15 +1,18 @@
 import { describe, expect, it } from "vitest"
-import { existsSync, readFileSync } from "node:fs"
+import { existsSync, readFileSync, readdirSync } from "node:fs"
 import path from "node:path"
 
 // Static guards for 126_external_links: the SQL file is what reaches Aurora DSQL.
 const ROOT = process.cwd()
 const NAME = "126_external_links"
 const runner = readFileSync(path.join(ROOT, "lib/migrations/runner.ts"), "utf-8")
+const schema = readFileSync(path.join(ROOT, "prisma/schema.prisma"), "utf-8")
 const sqlPath = path.join(ROOT, "prisma/migrations", NAME, "migration.sql")
 const raw = existsSync(sqlPath) ? readFileSync(sqlPath, "utf-8") : ""
 const sql = raw.split("\n").map(function (line) { return line.split("--")[0] }).join("\n")
 const statements = sql.split(";").map(function (s) { return s.trim() }).filter(Boolean)
+const start = schema.indexOf("model ExternalLink ")
+const model = schema.slice(start, start + 2500)
 
 describe(NAME, function () {
   it("is registered exactly once, after 125_unified_conversations", function () {
@@ -40,4 +43,30 @@ describe(NAME, function () {
     expect(4 * (40 + 30 + 64) + 16).toBeLessThan(1024)
   })
 
+  it("maps the same table, columns and indexes in schema.prisma, with no relation", function () {
+    expect(model).toContain('@@map("external_links")')
+    expect(model).toContain('map: "idx_external_links_subject_key"')
+    expect(model).toContain('map: "idx_external_links_workspace_key"')
+    expect(model).not.toContain("@relation")
+    for (const column of ["workspace_id", "subject_type", "subject_id", "provider", "url", "external_key", "title", "relation", "status_snapshot", "source", "created_by_id", "created_at", "updated_at"]) {
+      expect(statements[0]).toContain(column)
+    }
+  })
+
+  it("is named only by the external links service", function () {
+    const offenders: string[] = []
+    const stack = [path.join(ROOT, "lib"), path.join(ROOT, "app"), path.join(ROOT, "components")]
+    while (stack.length !== 0) {
+      const dir = stack.pop() as string
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name)
+        if (entry.isDirectory()) {
+          stack.push(full)
+        } else if (entry.name.endsWith(".ts") || entry.name.endsWith(".tsx")) {
+          if (readFileSync(full, "utf-8").includes(".externalLink.")) offenders.push(path.relative(ROOT, full))
+        }
+      }
+    }
+    expect(offenders).toEqual(["lib/external-links-service.ts"])
+  })
 })
