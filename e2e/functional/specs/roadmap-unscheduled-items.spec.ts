@@ -242,10 +242,11 @@ test.describe("Roadmap — not yet on the roadmap", () => {
       // Use the real board, including its columns, dock, and production CSS.
       const boardBox = (await roadmapBoard.boundingBox())!;
       await page.mouse.move(boardBox.x + 60, boardBox.y + 27);
-      const startingOffset = await roadmapBoard.evaluate(element => element.scrollLeft);
+      await roadmapBoard.evaluate(element => { element.scrollLeft = 0; });
+      await expect.poll(() => roadmapBoard.evaluate(element => element.scrollLeft)).toBe(0);
       for (let input = 1; input <= 4; input++) {
         await page.mouse.wheel(0, 40);
-        await expect.poll(() => roadmapBoard.evaluate(element => element.scrollLeft)).toBe(startingOffset + input * 40);
+        await expect.poll(() => roadmapBoard.evaluate(element => element.scrollLeft)).toBe(input * 40);
       }
 
 

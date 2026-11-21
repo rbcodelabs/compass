@@ -281,6 +281,7 @@ export function RoadmapBoard({
   // optimistic move. `isPending` covers every save below because they all run
   // inside an awaited startTransition(async ...).
   const [activeItem, setActiveItem] = useState<RoadmapCardData | null>(null);
+  const [dragging, setDragging] = useState(false);
   const [activeUnscheduledItem, setActiveUnscheduledItem] = useState<UnscheduledItem | null>(null);
   // Track the horizon the drag started from so handleDragEnd can detect cross-column moves.
   const [dragSourceHorizon, setDragSourceHorizon] = useState<Horizon | null>(null);
@@ -506,6 +507,7 @@ export function RoadmapBoard({
   }
 
   function handleDragStart(event: DragStartEvent) {
+    setDragging(true);
     const id = event.active.id as string;
 
     const parsed = parseUnscheduledDragId(id);
@@ -584,7 +586,13 @@ export function RoadmapBoard({
     });
   }
 
+  function endDragScroll() {
+    setDragging(false);
+    containerRef.current?.querySelector("[data-wheel-snap-control]")?.removeAttribute("data-wheel-panning");
+  }
+
   function handleDragEnd(event: DragEndEvent) {
+    endDragScroll();
     const { active, over } = event;
     setActiveItem(null);
 
@@ -724,8 +732,9 @@ export function RoadmapBoard({
       onDragStart={handleDragStart}
       onDragOver={handleDragOver}
       onDragEnd={handleDragEnd}
+      onDragCancel={endDragScroll}
     >
-      <div ref={containerRef} className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto md:overflow-hidden">
+      <div ref={containerRef} data-dragging={dragging} className="group/roadmap-drag flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto md:overflow-hidden">
         {laneError ? (
           <p
             role="alert"
@@ -737,13 +746,14 @@ export function RoadmapBoard({
         <div className="flex min-h-0 min-w-0 flex-1 flex-col md:flex-row">
         <Board
           label="Roadmap board"
+          wheelSnapControl={!spec}
           fadeEnd={dockedColumnIds.length > 0}
           className={cn(
             "block min-h-[24rem] flex-1 scroll-px-3 overflow-x-auto p-0 sm:scroll-px-4",
             // Lanes stack vertically, so the board scrolls both ways in lane mode. Snapping is off there:
             // the only snap target would be the "Not scheduled" column, which yanks a freshly loaded
             // board to its far right and leaves the first lane column under the sidebar.
-            spec ? "snap-none overflow-y-auto" : "md:overflow-y-hidden",
+            spec ? "snap-none overflow-y-auto" : "md:overflow-y-hidden md:snap-x md:group-data-[dragging=true]/roadmap-drag:snap-none md:data-[wheel-panning=true]:snap-none",
           )}
         >
           <div

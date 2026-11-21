@@ -22,7 +22,7 @@ function overflowingVerticalScroller(start: EventTarget | null, stop: HTMLElemen
  * scrollport under the cursor (including the Board) owns vertical scrolling. Nested horizontal scrollports
  * also keep their wheel input. Narrow screens retain native vertical navigation through tall columns.
  */
-export function BoardScroller({ children, className, label }: { children: ReactNode; className?: string; label: string }) {
+export function BoardScroller({ children, className, label, wheelSnapControl }: { children: ReactNode; className?: string; label: string; wheelSnapControl?: boolean }) {
   const ref = useRef(null as HTMLDivElement | null);
 
   useEffect(() => {
@@ -44,6 +44,9 @@ export function BoardScroller({ children, className, label }: { children: ReactN
       }
       // deltaMode 1 = lines, 2 = pages; normalise to pixels.
       const unit = event.deltaMode === 1 ? 40 : event.deltaMode === 2 ? board.clientWidth : 1;
+      // Keep the wheel's pixel offsets between events on boards that opt
+      // into resting snap points. Re-enabling snap between inputs can undo them.
+      if (board.hasAttribute("data-wheel-snap-control")) board.dataset.wheelPanning = "true";
       const before = board.scrollLeft;
       board.scrollLeft += event.deltaY * unit;
       if (board.scrollLeft !== before) event.preventDefault();
@@ -53,7 +56,7 @@ export function BoardScroller({ children, className, label }: { children: ReactN
   }, []);
 
   return (
-    <div ref={ref} role="region" aria-label={label} className={className}>
+    <div ref={ref} role="region" data-wheel-snap-control={wheelSnapControl || undefined} aria-label={label} className={className}>
       {children}
     </div>
   );
