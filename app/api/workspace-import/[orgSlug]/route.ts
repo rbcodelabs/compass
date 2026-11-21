@@ -1,10 +1,15 @@
+import { createHash } from "node:crypto"
 import { NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { getArtifactStorage } from "@/lib/artifact-storage"
 import { isPermissionError, resolveOrgAdmin } from "@/lib/permissions"
 import { defaultBlobAdapters } from "@/lib/workspace-export/blobs"
 import { WorkspaceImportError, importWorkspaceBundle } from "@/lib/workspace-export/import"
-import { MAX_BUNDLE_BYTES, loadStagedBundle } from "@/lib/workspace-export/upload"
+import { MAX_BUNDLE_BYTES, loadStagedBundle, verifyBundleReceipt } from "@/lib/workspace-export/upload"
+import { bindImportReceipt, readImportReceiptResult } from "@/lib/workspace-export/receipt-binding"
+
+import { commitImportReport, startImportOperation, type ImportDatabase } from "@/lib/workspace-export/operation"
+import type { ImportLeaseOwner } from "@/lib/workspace-export/lease"
 
 export const maxDuration = 300
 
@@ -30,6 +35,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ orgSlug
   const session = await auth()
   const userId = session!.user!.id!
 
+  let receiptBinding: Omit<Parameters<typeof bindImportReceipt>[1], "workspaceId"> | undefined
+  let owner: ImportLeaseOwner | undefined
   let bytes: Uint8Array
   let discard: (() => Promise<void>) | undefined
   let fields: { name?: string; slug?: string; nonce?: string } = {}
@@ -37,10 +44,16 @@ export async function POST(req: Request, { params }: { params: Promise<{ orgSlug
     if ((req.headers.get("content-type") ?? "").includes("application/json")) {
       const body = (await req.json()) as { receipt?: string; name?: string; slug?: string; nonce?: string }
       if (!body.receipt) return NextResponse.json({ error: "receipt is required" }, { status: 400 })
+      const verified = verifyBundleReceipt(body.receipt, organizationId, userId, Date.now(), "replay")
+      const nonce = body.nonce ?? verified.uploadId
+      const digest = createHash("sha256").update(body.receipt).digest("hex")
+      const result = await readImportReceiptResult(prisma, { organizationId, userId, nonce, digest })
+      if (result) return NextResponse.json({ ok: true, ...result })
       const staged = await loadStagedBundle(body.receipt, organizationId, userId, getArtifactStorage())
       bytes = staged.bytes
       discard = staged.discard
-      fields = body
+      fields = { ...body, nonce }
+      receiptBinding = { organizationId, userId, nonce, digest, expiresAt: new Date(verified.replayExpiresAt ?? verified.expiresAt) }
     } else {
       const form = await req.formData()
       const file = form.get("file")
@@ -62,6 +75,16 @@ export async function POST(req: Request, { params }: { params: Promise<{ orgSlug
       slug: fields.slug,
       nonce: fields.nonce,
       blobs: defaultBlobAdapters(),
+      async bindWorkspace(workspaceId) {
+        if (receiptBinding) await bindImportReceipt(prisma, { ...receiptBinding, workspaceId })
+      },
+      async startOperation(workspaceId) {
+        owner = await startImportOperation(prisma, workspaceId, organizationId)
+      },
+      async publishResult(tx, report) {
+        if (!owner) throw new Error("Missing workspace import owner")
+        await commitImportReport(tx as ImportDatabase, owner, report)
+      },
     })
     await discard?.()
     const { revalidatePath } = await import("next/cache")

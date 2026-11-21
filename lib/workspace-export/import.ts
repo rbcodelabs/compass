@@ -72,6 +72,9 @@ export type ImportOptions = {
   slug?: string
   /** Retrying with the same nonce resumes the same import; a new nonce makes a fresh copy. */
   nonce?: string
+  startOperation?(workspaceId: string): Promise<void>
+  bindWorkspace?(workspaceId: string): Promise<void>
+  publishResult?(tx: unknown, report: ImportReport): Promise<void>
   blobs: BlobAdapters
 }
 
@@ -202,6 +205,7 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
   }
   const newWorkspaceId = deriveId(importKey, manifest.source.workspaceId)
 
+  await opts.bindWorkspace?.(newWorkspaceId)
   const existing = await delegateFor(client, "Workspace").findMany({ where: { id: newWorkspaceId }, take: 1 })
   if (existing[0]) return alreadyImportedReport(existing[0], manifest)
 
@@ -362,6 +366,7 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
     return row
   }
 
+  await opts.startOperation?.(newWorkspaceId)
   const rewritePath = rewriteText
 
   try {
@@ -513,20 +518,13 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
     } else {
       memberRows.find((m) => m.userId === opts.importerUserId)!.role = "ADMIN"
     }
-    await withRetry(() =>
-      (client as { $transaction<T>(fn: (tx: unknown) => Promise<T>): Promise<T> }).$transaction(async (tx) => {
-        await delegateFor(tx, "Workspace").createMany({ data: [wsRow] })
-        await delegateFor(tx, "WorkspaceMember").createMany({ data: memberRows, skipDuplicates: true })
-      }),
-    )
-
     for (const [m, n] of Object.entries(dropped)) {
       warnings.push(`Skipped ${n} ${m} row(s) whose required reference or storage path does not resolve inside the bundle`)
     }
     for (const [m, n] of Object.entries(deduped)) {
       warnings.push(`Skipped ${n} ${m} row(s) that would duplicate another row once people without an account in this organization were attributed to you`)
     }
-    return {
+    const report: ImportReport = {
       workspaceId: newWorkspaceId,
       slug,
       name: baseName,
@@ -538,6 +536,14 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
       blobsCopied,
       warnings,
     }
+    await withRetry(() =>
+      (client as { $transaction<T>(fn: (tx: unknown) => Promise<T>): Promise<T> }).$transaction(async (tx) => {
+        await delegateFor(tx, "Workspace").createMany({ data: [wsRow] })
+        await delegateFor(tx, "WorkspaceMember").createMany({ data: memberRows, skipDuplicates: true })
+        await opts.publishResult?.(tx, report)
+      }),
+    )
+    return report
   } catch (error) {
     // The Workspace row is the commit point. If it exists, a request with the same nonce finished first (two concurrent
     // submissions derive identical ids, and the loser fails at the Workspace insert). Rolling back would delete the

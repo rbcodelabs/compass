@@ -1,7 +1,7 @@
-import type { Prisma } from "@prisma/client"
+import type { ImportDatabase } from "./operation"
 import type { ImportReport } from "@/lib/workspace-export/import"
 
-type ReceiptDatabase = Pick<Prisma.TransactionClient, "$queryRawUnsafe">
+type ReceiptDatabase = ImportDatabase
 
 type ReceiptScope = {
   digest: string

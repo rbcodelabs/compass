@@ -27,3 +27,30 @@ it.skipIf(!integrationDatabaseUrl)("rejects a stale import mutation after databa
     await pool.end()
   }
 })
+
+it.skipIf(!integrationDatabaseUrl)("publishes a recorded report only for the live applying attempt", async () => {
+  const pool = new Pool({ connectionString: integrationDatabaseUrl })
+  const db = await pool.connect()
+  try {
+    await db.query(`CREATE TEMP TABLE workspace_import_operations (
+      workspace_id uuid PRIMARY KEY, organization_id uuid, attempt_id uuid, epoch integer DEFAULT 1,
+      phase text, lease_expires_at timestamptz, result_text text, updated_at timestamptz
+    )`)
+    const tx = { async $queryRawUnsafe<T>(sql: string, ...args: unknown[]) { return (await db.query(sql, args)).rows as T } }
+    const { startImportOperation, commitImportReport } = await import("@/lib/workspace-export/operation")
+    const workspaceId = randomUUID()
+    const organizationId = randomUUID()
+    const owner = await startImportOperation(tx, workspaceId, organizationId)
+    await expect(startImportOperation(tx, workspaceId, organizationId)).rejects.toThrow(/in progress/i)
+    const report = { workspaceId, slug: "copy", name: "Copy", alreadyImported: false, counts: {}, warnings: [],
+      usersMatched: 0, usersFallbackToImporter: 0, referencesCleared: 0, blobsCopied: 0 }
+    await expect(commitImportReport(tx, { ...owner, epoch: owner.epoch + 1 }, report)).rejects.toThrow(/ownership changed/i)
+    await commitImportReport(tx, owner, report)
+    const { rows } = await db.query("SELECT phase, result_text FROM workspace_import_operations")
+    expect(rows[0].phase).toBe("committed")
+    expect(JSON.parse(rows[0].result_text)).toEqual(report)
+  } finally {
+    db.release()
+    await pool.end()
+  }
+})
