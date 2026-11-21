@@ -6,25 +6,23 @@ coordination column. Provider work stays outside database transactions.
 
 ## Cutover and rollback
 
-1. Complete the staged release checks for [migration 129](agent-message-run-id-rollout.md).
-   Verify the exact staged revision, production backend and schema, and the
-   completed receipts for `129_agent_message_run_id` followed by
-   `130_agent_sandbox_operations`. Confirm the writable coordination column
-   and operation and generation tables. This runtime rollout submits no
-   migration POST.
-2. Quiesce persistent starts, continuations, callbacks and cron on the prior deployment.
-   Drain old in-flight launch and stop requests, including requests using
-   deployment-specific URLs. Old code ignores operation records. Require
-   evidence that it can neither launch into nor stop a persistent sandbox after
-   cutover. Route the application, callbacks and cron to the reviewed build when
-   this barrier is established.
-3. Verify a single persistent conversation can launch, become idle, pause,
-   resume from its snapshot and run again. Check that a scheduled wake-up remains
-   pending during a temporary fence and starts after the operation settles.
-   Verify both sandbox classes with isolated fixtures before enabling traffic.
+1. Verify completed production receipts for `129_agent_message_run_id` and
+   `130_agent_sandbox_operations` and the expected catalog shape. Confirm the
+   valid 129 index, writable 130 coordination column, and operation and
+   generation tables. Record the staged revision, backend, and schema. Both
+   migrations are already applied. Use read-only status and catalog checks.
+2. Keep public traffic off the fenced staged runtime. Quiesce old persistent
+   starts, continuations, worker callbacks and cron, including traffic using
+   deployment-specific URLs. Drain in-flight provider launches and stops.
+   Confirm that old callers can no longer act on the named sandboxes.
+3. After the drain, route only isolated fixture traffic and its callbacks to the
+   staged revision. Verify the linked transcript readback, then persistent
+   launch, idle pause, snapshot resume, and scheduled wake-up retry. Confirm
+   the callback receiver is the staged revision and verify both sandbox
+   classes. Promote public traffic, callbacks and cron only after smoke passes.
 4. To roll back, quiesce the new launch and stop paths. Wait for active calls and
-   resolve outstanding operations before allowing any old caller to access the
-   named sandboxes. Keep the additive schema and receipts during code rollback.
+   reconcile outstanding operations before allowing old callers to access the
+   named sandboxes. Retain the additive schema and receipts.
 
 ## Recovery
 
