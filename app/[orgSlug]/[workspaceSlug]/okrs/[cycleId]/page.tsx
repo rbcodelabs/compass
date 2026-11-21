@@ -1,3 +1,4 @@
+import { OkrLiveRefresh } from "@/components/okrs/okr-live-refresh";
 import { Suspense } from "react";
 import { notFound } from "next/navigation";
 import { auth } from "@/auth";
@@ -23,6 +24,8 @@ import type {
   SquadData,
 } from "@/lib/types";
 import { PageHeader, StatusBadge } from "@/components/patterns";
+import { OkrFilterProvider } from "@/components/okrs/okr-filter-context";
+import { OkrNameFilter } from "@/components/okrs/okr-name-filter";
 import { toCustomFieldDefinitionData } from "@/lib/custom-field-definitions";
 import { getThinkingModelForSlugs } from "@/lib/thinking-model/server";
 import { resolveThinkingModel } from "@/lib/thinking-model/resolve";
@@ -105,7 +108,7 @@ export default async function CyclePage({ params, searchParams }: CyclePageProps
         workspaceId: workspace.id,
         ...(squadFilter ? { squadId: squadFilter } : {}),
       },
-      orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+      orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }, { id: "asc" }],
     }),
     getEligibleParentKeyResults(workspace.id, cycle?.id ?? null),
     getEligibleSupportingObjectives(workspace.id, cycle?.id ?? null),
@@ -139,7 +142,7 @@ export default async function CyclePage({ params, searchParams }: CyclePageProps
               orderBy: [{ cycle: { startDate: "asc" } }, { sortOrder: "asc" }],
             },
           },
-          orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+          orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }, { id: "asc" }],
         })
       : [];
 
@@ -258,6 +261,8 @@ export default async function CyclePage({ params, searchParams }: CyclePageProps
   const requestedGroupBy = (await searchParams).groupBy;
   const groupBy = groupableFields.some((f) => `field:${f.id}` === requestedGroupBy) ? requestedGroupBy! : "none";
   const headerActions = (
+    <>
+    <OkrNameFilter />
     <Suspense>
       {groupableFields.length > 0 && (
         <OkrGroupByToggle
@@ -267,10 +272,13 @@ export default async function CyclePage({ params, searchParams }: CyclePageProps
       )}
       <SquadFilterBar squads={squads} />
     </Suspense>
+    </>
   );
 
   return (
+    <OkrFilterProvider>
     <main className="okx flex flex-col flex-1 p-4 sm:p-6 md:p-8 gap-6">
+      <OkrLiveRefresh orgSlug={orgSlug} workspaceSlug={workspaceSlug} />
       {cycle && cycleStatus ? (
         <PageHeader actions={headerActions} title={<span className="flex items-center gap-2">{cycle.title}<StatusBadge status={CYCLE_STATUS_TONE[cycleStatus]}>{CYCLE_STATUS_LABELS[cycleStatus]}</StatusBadge></span>} description={`${formatDate(cycle.startDate)} – ${formatDate(cycle.endDate)}`} />
       ) : (
@@ -282,9 +290,8 @@ export default async function CyclePage({ params, searchParams }: CyclePageProps
       {/* Objectives list + inline add */}
       <div className="flex flex-col gap-4">
         <ObjectivesList
-          key={objectivesWithData
-            .map((o) => `${o.id}:${o.parentKeyResultId ?? ""}`)
-            .join(",")}
+          // Reset list-local state (collapsed rows, drafts) when switching cycle; never key on objective ids.
+          key={cycleId}
           objectives={objectivesWithData.map((obj) => ({
             ...obj,
             parentKeyResultId: obj.parentKeyResultId ?? null,
@@ -311,5 +318,6 @@ export default async function CyclePage({ params, searchParams }: CyclePageProps
         />
       </div>
     </main>
+    </OkrFilterProvider>
   );
 }

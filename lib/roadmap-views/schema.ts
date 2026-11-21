@@ -16,7 +16,7 @@ export const ROADMAP_HORIZONS = ["NOW", "NEXT", "LATER", "LAUNCHING", "LAUNCHED"
 export const ROADMAP_DELIVERY_STATUSES = ["NOT_STARTED", "IN_DEVELOPMENT", "IN_REVIEW", "BLOCKED", "COMPLETE"] as const satisfies readonly RoadmapDeliveryStatus[]
 export const ROADMAP_LINK_FILTERS = ["linked", "unlinked"] as const
 export const ROADMAP_VIEW_VISIBILITIES = ["PERSONAL", "SHARED"] as const
-export const ROADMAP_VIEW_MODES = ["board", "timeline", "gallery"] as const
+export const ROADMAP_VIEW_MODES = ["board", "timeline", "gallery", "table"] as const
 export const ROADMAP_VIEW_GROUPINGS = ["horizon", "workspace", "squad", "none", "status"] as const
 export const ROADMAP_VIEW_SORTS = ["manual", "startDate", "endDate", "title", "updated"] as const
 
@@ -25,6 +25,44 @@ export const MAX_VIEW_NAME_LENGTH = 120
 export const MAX_FILTER_IDS = 100
 
 const uuid = z.string().uuid()
+
+/* ------------------------------------------------------------------ cross-workspace field keys */
+
+/**
+ * Custom fields are defined per workspace, so the same "Status" field has a different
+ * id in every workspace. The cross-workspace roadmap therefore refers to a field by a
+ * key made of its type and its case-insensitive name, and resolves that key to every
+ * matching ROADMAP_ITEM definition the viewer can read. Same name with a different
+ * type is deliberately a separate field.
+ */
+export const ROADMAP_FIELD_TYPES = ["TEXT", "NUMBER", "DATE", "SELECT", "MULTI_SELECT", "URL", "BOOLEAN"] as const
+export type RoadmapFieldType = (typeof ROADMAP_FIELD_TYPES)[number]
+/** Only picklists can be filtered or grouped on (they have a closed set of labels). */
+export const ROADMAP_PICKLIST_FIELD_TYPES = ["SELECT", "MULTI_SELECT"] as const
+export const MAX_VIEW_FIELDS = 12
+export const MAX_FIELD_FILTER_VALUES = 50
+
+export function makeRoadmapFieldKey(fieldType: string, name: string): string {
+  return fieldType + ":" + name.trim().toLowerCase()
+}
+
+export function parseRoadmapFieldKey(key: string): { fieldType: RoadmapFieldType; name: string } | null {
+  const i = key.indexOf(":")
+  if (i <= 0) return null
+  const fieldType = key.slice(0, i)
+  const name = key.slice(i + 1)
+  if (!(ROADMAP_FIELD_TYPES as readonly string[]).includes(fieldType) || name.length === 0 || name.length > 255) return null
+  return { fieldType: fieldType as RoadmapFieldType, name }
+}
+
+export function isPicklistFieldKey(key: string): boolean {
+  const parsed = parseRoadmapFieldKey(key)
+  return parsed !== null && (ROADMAP_PICKLIST_FIELD_TYPES as readonly string[]).includes(parsed.fieldType)
+}
+
+const fieldKey = z.string().max(270).refine((k) => parseRoadmapFieldKey(k) !== null, "Invalid field key")
+const picklistFieldKey = fieldKey.refine(isPicklistFieldKey, "Only picklist fields can be filtered or grouped on")
+
 const idList = z.array(uuid).max(MAX_FILTER_IDS)
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected YYYY-MM-DD").refine((value) => !Number.isNaN(Date.parse(`${value}T00:00:00.000Z`)), "Invalid date")
 
@@ -43,6 +81,11 @@ export const roadmapViewFiltersSchema = z
     solution: z.enum(ROADMAP_LINK_FILTERS).optional(),
     /** Workspace roadmaps only: one picklist custom-field value (the per-workspace `?field=&fieldValue=` filter). Ignored by the cross-workspace roadmap, which has no shared field definitions. */
     customField: z.object({ fieldId: uuid, value: z.string().min(1).max(200) }).optional(),
+    /** Cross-workspace roadmap only: picklist filters by field key. Values are option LABELS; ANDed across fields, ORed within one. */
+    fields: z
+      .array(z.object({ key: picklistFieldKey, values: z.array(z.string().min(1).max(200)).min(1).max(MAX_FIELD_FILTER_VALUES) }))
+      .max(MAX_VIEW_FIELDS)
+      .default([]),
   })
   .refine((f) => !f.dateFrom || !f.dateTo || f.dateFrom <= f.dateTo, { message: "dateFrom must not be after dateTo", path: ["dateTo"] })
 
@@ -62,6 +105,10 @@ export const roadmapViewDisplaySchema = z.object({
    * Not a URL param: it is client state that the saved-views menu reads (components/roadmap/column-layout-context.tsx).
    */
   columnLayout: boardLayoutSchema.optional().catch(undefined),
+  /** Cross-workspace roadmap only: custom fields to show on cards / as table columns, in this order. */
+  fields: z.array(fieldKey).max(MAX_VIEW_FIELDS).default([]),
+  /** Cross-workspace roadmap only: group by this picklist field key instead of `groupBy`. */
+  groupByField: picklistFieldKey.optional(),
 })
 
 export type RoadmapViewDisplay = z.infer<typeof roadmapViewDisplaySchema>
@@ -111,6 +158,9 @@ export const ROADMAP_URL_PARAMS = {
   dateTo: "to",
   keyResult: "kr",
   solution: "solution",
+  fieldFilters: "ff",
+  fields: "fields",
+  groupByField: "groupByField",
   mode: "view",
   groupBy: "groupBy",
   sort: "sort",
@@ -126,6 +176,25 @@ function first(raw: string | string[] | undefined): string | undefined {
 function list(raw: string | string[] | undefined): string[] {
   const value = first(raw)
   return value ? value.split(",").map((s) => s.trim()).filter(Boolean) : []
+}
+
+function decodeOne(raw: string): string {
+  try { return decodeURIComponent(raw) } catch { return raw }
+}
+/** encodeURIComponent leaves "~" alone; the filter encoding uses it as a separator. */
+function enc(value: string): string { return encodeURIComponent(value).replace(/~/g, "%7E") }
+
+/** `<key>~<value>~<value>` per filter, comma-joined; every part percent-encoded. */
+function parseFieldFilters(items: string[]): RoadmapViewFilters["fields"] {
+  const out: RoadmapViewFilters["fields"] = []
+  for (const item of items) {
+    const [rawKey, ...rawValues] = item.split("~")
+    const key = decodeOne(rawKey ?? "")
+    const values = rawValues.map(decodeOne).filter((v) => v.length > 0 && v.length <= 200).slice(0, MAX_FIELD_FILTER_VALUES)
+    if (!picklistFieldKey.safeParse(key).success || values.length === 0) continue
+    out.push({ key, values })
+  }
+  return out.slice(0, MAX_VIEW_FIELDS)
 }
 
 function keepValid<T extends string>(values: string[], allowed: readonly T[]): T[] {
@@ -169,6 +238,13 @@ export function parseRoadmapParams(
   if (has(p.keyResult)) filters.keyResult = keepValid([first(params[p.keyResult])!], ROADMAP_LINK_FILTERS)[0]
   if (has(p.solution)) filters.solution = keepValid([first(params[p.solution])!], ROADMAP_LINK_FILTERS)[0]
 
+  if (has(p.fieldFilters)) filters.fields = parseFieldFilters(list(params[p.fieldFilters]))
+  if (has(p.fields)) display.fields = list(params[p.fields]).map(decodeOne).filter((k) => fieldKey.safeParse(k).success).slice(0, MAX_VIEW_FIELDS)
+  if (has(p.groupByField)) {
+    const parsed = picklistFieldKey.safeParse(decodeOne(first(params[p.groupByField]) ?? ""))
+    display.groupByField = parsed.success ? parsed.data : undefined
+  }
+
   if (has(p.mode)) display.view = keepValid([first(params[p.mode])!], ROADMAP_VIEW_MODES)[0] ?? base.display.view
   if (has(p.groupBy)) display.groupBy = keepValid([first(params[p.groupBy])!], ROADMAP_VIEW_GROUPINGS)[0] ?? base.display.groupBy
   if (has(p.sort)) display.sort = keepValid([first(params[p.sort])!], ROADMAP_VIEW_SORTS)[0] ?? base.display.sort
@@ -192,6 +268,9 @@ export function roadmapStateToParams(state: { filters: RoadmapViewFilters; displ
   if (f.dateTo) out.set(p.dateTo, f.dateTo)
   if (f.keyResult) out.set(p.keyResult, f.keyResult)
   if (f.solution) out.set(p.solution, f.solution)
+  if (f.fields.length) out.set(p.fieldFilters, f.fields.map((x) => [enc(x.key), ...x.values.map(enc)].join("~")).join(","))
+  if (d.fields.length) out.set(p.fields, d.fields.map(enc).join(","))
+  if (d.groupByField) out.set(p.groupByField, enc(d.groupByField))
   if (d.view !== DEFAULT_ROADMAP_DISPLAY.view) out.set(p.mode, d.view)
   if (d.groupBy !== DEFAULT_ROADMAP_DISPLAY.groupBy) out.set(p.groupBy, d.groupBy)
   if (d.sort !== DEFAULT_ROADMAP_DISPLAY.sort) out.set(p.sort, d.sort)
@@ -206,8 +285,11 @@ export function roadmapStateKey(state: { filters: RoadmapViewFilters; display: R
     sorted(f.workspaceIds), sorted(f.horizons), sorted(f.squadIds), sorted(f.deliveryStatuses),
     f.dateFrom ?? null, f.dateTo ?? null, f.keyResult ?? null, f.solution ?? null,
     f.customField ? [f.customField.fieldId, f.customField.value] : null,
+    f.fields.map((x) => [x.key, sorted(x.values)] as const).sort((a, b) => a[0].localeCompare(b[0])),
     state.display.view, state.display.groupBy, state.display.sort, state.display.groupField ?? null,
     state.display.columnLayout ? boardLayoutKey(state.display.columnLayout) : null,
+    // Field order is meaningful (it is the column order), so it is NOT sorted.
+    state.display.fields, state.display.groupByField ?? null,
   ])
 }
 
@@ -215,7 +297,7 @@ export function roadmapStateKey(state: { filters: RoadmapViewFilters; display: R
 export function countActiveFilters(f: RoadmapViewFilters): number {
   return (
     (f.workspaceIds.length ? 1 : 0) + (f.horizons.length ? 1 : 0) + (f.squadIds.length ? 1 : 0) +
-    (f.deliveryStatuses.length ? 1 : 0) + (f.dateFrom || f.dateTo ? 1 : 0) + (f.keyResult ? 1 : 0) + (f.solution ? 1 : 0) + (f.customField ? 1 : 0)
+    (f.deliveryStatuses.length ? 1 : 0) + (f.dateFrom || f.dateTo ? 1 : 0) + (f.keyResult ? 1 : 0) + (f.solution ? 1 : 0) + (f.customField ? 1 : 0) + f.fields.length
   )
 }
 
@@ -255,7 +337,7 @@ export function roadmapHref(basePath: string, state: RoadmapState, options: { sa
   return query ? `${basePath}?${query}` : basePath
 }
 
-/** The cross-workspace roadmap renders only Board and Timeline and has no Solution status to group by; Gallery-only values fall back to the defaults. */
+/** The cross-workspace roadmap renders Board, Timeline and Table (not Gallery) and has no Solution status to group by; Gallery-only values fall back to the defaults. */
 export function withoutGalleryOnlyDisplay<T extends { display: RoadmapViewDisplay }>(state: T): T {
   const { view, groupBy } = state.display
   if (view !== "gallery" && groupBy !== "status") return state

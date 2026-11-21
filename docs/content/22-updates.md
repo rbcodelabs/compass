@@ -10,7 +10,7 @@ section: "Getting Started"
 
 Updates helps returning workspace members understand what progressed, what was
 learned, and where a decision was recorded. When enabled for your environment,
-it is the workspace landing page and is available from workspace navigation.
+you can open Updates from workspace navigation. Workspaces open on Home.
 
 ![Updates on desktop with grouped workspace stories](/screenshots/docs/updates-desktop-light.png)
 

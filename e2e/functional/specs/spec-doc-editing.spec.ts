@@ -245,7 +245,7 @@ test.describe("Spec docs: editing", () => {
     expect(await editorMarkdown(page)).toBe(before);
 
     // Closing the panel removes ?detail= and leaves the reader on the doc.
-    await panel.getByRole("button", { name: "Close", exact: true }).click();
+    await panel.getByRole("button", { name: "Close panel", exact: true }).click();
     await expect(panel).toBeHidden();
     await expect(page).not.toHaveURL(/detail=/);
     expect(new URL(page.url()).pathname).toBe(docPath);

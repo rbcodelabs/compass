@@ -7,7 +7,6 @@ import {
   PanelSkeleton,
   PanelError,
   PanelContainer,
-  FullPageLink,
   PanelTitle,
   EditableText,
   StatusSelect,
@@ -23,9 +22,9 @@ import {
   FEEDBACK_TYPE_OPTIONS,
 } from "@/lib/feedback-meta";
 import { FeedbackAttachments } from "@/components/feedback/feedback-attachments";
-import { RequestDecisionLink } from "@/components/decisions/request-decision-link";
 import { LinkedTasksSection, type LinkedTaskData } from "@/components/tasks/linked-tasks-section";
 import type { MemberData } from "@/lib/types";
+import { usePanelHeaderActions } from "./panel-header-actions";
 
 type FeedbackData = {
   id: string;
@@ -75,6 +74,15 @@ export function FeedbackPanel({
     workspaceSlug
   );
 
+  usePanelHeaderActions(
+    data
+      ? {
+          fullPageHref: `/${orgSlug}/${workspaceSlug}/feedback`,
+          decision: { subjectType: "FEEDBACK", subjectId: data.id, subjectTitle: data.title },
+        }
+      : {},
+  );
+
   if (error) return <PanelError label="feedback" />;
   if (!data) return <PanelSkeleton />;
 
@@ -92,14 +100,11 @@ export function FeedbackPanel({
 
   return (
     <PanelContainer entity={{ type: edit.type, id: edit.id, title: data.title }}>
-      <FullPageLink href={`/${orgSlug}/${workspaceSlug}/feedback`} />
-
       <PanelTitle displayId={displayId}
         title={data.title}
         status={TYPE[data.type] ?? { label: data.type }}
         edit={edit}
       />
-      <RequestDecisionLink orgSlug={orgSlug} workspaceSlug={workspaceSlug} subjectType="FEEDBACK" subjectId={data.id} subjectTitle={data.title} />
 
       <EditableText
         value={data.description}

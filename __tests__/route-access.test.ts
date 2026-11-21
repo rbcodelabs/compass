@@ -30,6 +30,22 @@ describe("isPublicPath", () => {
     expect(isPublicPath("/api/healthcheck")).toBe(false);
   });
 
+  it("allows the PWA manifest and icons so install checks are not sent to /login", () => {
+    for (const path of [
+      "/manifest.webmanifest",
+      "/icons/icon-512.png",
+      "/icons/icon-maskable-512.png",
+      "/apple-icon.png",
+      "/icon.svg",
+    ]) {
+      expect(isPublicPath(path)).toBe(true);
+    }
+    // Exact or prefix-with-slash only: look-alikes stay behind login.
+    expect(isPublicPath("/manifest.webmanifest.bak")).toBe(false);
+    expect(isPublicPath("/iconsx/secret")).toBe(false);
+    expect(isPublicPath("/apple-icon.png/x")).toBe(false);
+  });
+
   it("allows auth-related routes", () => {
     expect(isPublicPath("/login")).toBe(true);
     expect(isPublicPath("/api/auth/callback/google")).toBe(true);
