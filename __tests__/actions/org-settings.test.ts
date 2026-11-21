@@ -106,7 +106,7 @@ describe("createWorkspace", () => {
       ok: true,
       workspace: { id: "ws-1", name: "Product Team", slug: "product-team", description: null },
       // Matches the workspace links rendered on /dashboard.
-      redirectTo: "/acme/product-team/okrs",
+      redirectTo: "/acme/product-team/home",
     });
     expect(mockWorkspace.create).toHaveBeenCalledWith({
       data: {

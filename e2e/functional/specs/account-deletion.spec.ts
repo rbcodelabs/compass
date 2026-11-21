@@ -1,8 +1,10 @@
 import { test, expect } from "../fixtures/index";
 import { isolatedE2EConnectionString } from "../fixtures/isolated-database";
+import { cleanupAccountDeletionMember } from "../fixtures/account-deletion-cleanup";
 import type { APIRequestContext, BrowserContext } from "@playwright/test";
 import pg from "pg";
 import { randomUUID } from "node:crypto";
+import { writeFile } from "node:fs/promises";
 
 /**
  * Self-service account deletion (Settings, Profile).
@@ -90,7 +92,27 @@ test("a user deletes their account: personal data and session go, teammates and 
     const confirm = xPage.getByLabel(/Type .* to confirm/);
     const submit = xPage.getByRole("button", { name: "Delete my account" });
     await expect(submit, "disabled until the email is typed").toBeDisabled();
-    await expect(xPage.getByRole("alert"), "no blockers for an ordinary member").toHaveCount(0);
+    const deletionPanel = xPage.locator("section").filter({ has: xPage.getByRole("heading", { level: 2, name: "Delete account", exact: true }) });
+    const alerts = deletionPanel.getByRole("alert");
+    try {
+      await expect(alerts, "no blockers for an ordinary member").toHaveCount(0);
+    } catch (error) {
+      const alertDiagnosticsPath = testInfo.outputPath("account-deletion-alerts.json");
+      await writeFile(alertDiagnosticsPath, JSON.stringify(await alerts.evaluateAll((elements) => elements.map((element) => {
+          const root = element.getRootNode();
+          return {
+            tag: element.tagName,
+            id: element.id,
+            text: element.textContent,
+            shadowHost: root instanceof ShadowRoot ? root.host.tagName : null,
+          };
+        })), null, 2));
+      await testInfo.attach("account-deletion-alerts", {
+        path: alertDiagnosticsPath,
+        contentType: "application/json",
+      });
+      throw error;
+    }
     await confirm.fill("someone-else@example.com");
     await expect(submit, "a wrong email keeps it disabled").toBeDisabled();
     await xPage.screenshot({ path: testInfo.outputPath("account-deletion-settings.png"), fullPage: true });
@@ -138,10 +160,13 @@ test("a user deletes their account: personal data and session go, teammates and 
     await pool.query(`DELETE FROM "${S}".comments WHERE id = $1`, [own.comment]).catch(() => undefined);
     await pool.query(`DELETE FROM "${S}".agent_messages WHERE conversation_id = ANY($1::uuid[])`, [[own.conv, own.theirConv]]).catch(() => undefined);
     await pool.query(`DELETE FROM "${S}".agent_conversations WHERE id = ANY($1::uuid[])`, [[own.conv, own.theirConv]]).catch(() => undefined);
-    await pool.query(`DELETE FROM "${S}".users WHERE email = $1`, [email]).catch(() => undefined);
-    for (const context of contexts) await context.close().catch(() => undefined);
-    for (const api of disposables) await api.dispose().catch(() => undefined);
-    await pool.end();
+    try {
+      await cleanupAccountDeletionMember(pool, email);
+    } finally {
+      for (const context of contexts) await context.close().catch(() => undefined);
+      for (const api of disposables) await api.dispose().catch(() => undefined);
+      await pool.end();
+    }
   }
 });
 
@@ -194,7 +219,8 @@ test("deletion is blocked for the sole administrator of a shared workspace, and 
     const zPage = await zContext.newPage();
     await zPage.setViewportSize({ width: 1280, height: 1000 });
     await zPage.goto("/settings/profile");
-    const blockers = zPage.getByRole("alert").filter({ hasText: "Before you can delete your account" });
+    const deletionPanel = zPage.locator("section").filter({ has: zPage.getByRole("heading", { level: 2, name: "Delete account", exact: true }) });
+    const blockers = deletionPanel.getByRole("alert").filter({ hasText: "Before you can delete your account" });
     await expect(blockers).toBeVisible({ timeout: 45_000 });
     await expect(blockers).toContainText("Shared Team");
     await expect(zPage.getByRole("button", { name: "Delete my account" })).toBeDisabled();
@@ -273,7 +299,8 @@ test("in an organization with two OWNERs, deleting one OWNER's account keeps the
     await page.setViewportSize({ width: 1280, height: 1000 });
     await page.goto("/settings/profile");
     await expect(page.getByRole("heading", { name: "Delete account" })).toBeVisible({ timeout: 45_000 });
-    await expect(page.getByRole("alert"), "the other OWNER keeps the workspace administrable: no blocker").toHaveCount(0);
+    const deletionPanel = page.locator("section").filter({ has: page.getByRole("heading", { level: 2, name: "Delete account", exact: true }) });
+    await expect(deletionPanel.getByRole("alert"), "the other OWNER keeps the workspace administrable: no blocker").toHaveCount(0);
     await expect(page.getByText("would be deleted too"), "and it is not offered for deletion").toHaveCount(0);
     await page.getByLabel(/Type .* to confirm/).fill(vEmail);
     await Promise.all([page.waitForURL((url) => url.pathname === "/", { timeout: 90_000 }), page.getByRole("button", { name: "Delete my account" }).click()]);

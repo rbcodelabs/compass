@@ -25,7 +25,7 @@ export function workspaceKey(ws: Pick<SelectorWorkspace, "orgSlug" | "slug">): s
 }
 
 export function workspaceHref(ws: Pick<SelectorWorkspace, "orgSlug" | "slug">): string {
-  return `/${ws.orgSlug}/${ws.slug}/okrs`
+  return `/${ws.orgSlug}/${ws.slug}/home`
 }
 
 /** Deterministic string hash so a workspace always gets the same cover. */
