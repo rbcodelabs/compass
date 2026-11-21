@@ -245,11 +245,57 @@ test.describe("Roadmap — not yet on the roadmap", () => {
       // The optimistic move must settle in the pointed column before release.
       const nextColumn = page.locator("#roadmap-column-NEXT");
       const scheduled = laterColumn.locator('[data-slot="card"]').filter({ hasText: solTitle });
+      // The newly promoted card and its immediate neighbor exercise both an
+      // activated drag released over its source and an intentional reorder.
+      const order = () => laterColumn.locator("[data-flip-id]").evaluateAll(nodes => nodes.map(node => node.getAttribute("data-flip-id")!));
+      const initialOrder = await order();
+      const sourceId = await scheduled.locator("..").getAttribute("data-flip-id");
+      const index = initialOrder.indexOf(sourceId!);
+      expect(index).toBeGreaterThanOrEqual(0);
+      expect(initialOrder.length).toBeGreaterThan(1);
+      const neighborIndex = index === 0 ? 1 : index - 1;
+      const neighbor = laterColumn.locator(`[data-flip-id="${initialOrder[neighborIndex]}"]`);
+
+      async function releaseWithinColumn(ontoNeighbor: boolean) {
+        const handle = scheduled.getByRole("button", { name: "Drag to reorder" });
+        await handle.hover();
+        const grip = (await handle.boundingBox())!;
+        const card = (await scheduled.boundingBox())!;
+        const other = (await neighbor.boundingBox())!;
+        const x = grip.x + grip.width / 2;
+        const y = grip.y + grip.height / 2;
+        await page.mouse.move(x, y);
+        await page.mouse.down();
+        await page.mouse.move(x + 10, y, { steps: 5 });
+        if (ontoNeighbor) {
+          await page.mouse.move(x, y + other.y + other.height / 2 - card.y - card.height / 2, { steps: 20 });
+        }
+        await page.mouse.up();
+      }
+
+      await releaseWithinColumn(false);
+      await expect.poll(order).toEqual(initialOrder);
+      await releaseWithinColumn(true);
+      const reordered = [...initialOrder];
+      [reordered[index], reordered[neighborIndex]] = [reordered[neighborIndex], reordered[index]];
+      await expect.poll(order).toEqual(reordered);
+
       const browserErrors: string[] = [];
       page.on("pageerror", error => browserErrors.push(error.message));
       try {
         await dragTo(page, scheduled.getByRole("button", { name: "Drag to reorder" }), nextColumn, roadmapBoard, async () => {
           await expect(nextColumn.getByText(solTitle).first()).toBeVisible();
+          const horizons = await page.evaluate(async id => {
+            const observed = [];
+            for (let frame = 0; frame < 12; frame++) {
+              await new Promise(requestAnimationFrame);
+              const card = document.querySelector(`[id^="roadmap-column-"] [data-flip-id="${id}"]`);
+              observed.push(card?.closest('[id^="roadmap-column-"]')?.id);
+            }
+            return observed;
+          }, sourceId);
+          expect(horizons).toEqual(Array(12).fill("roadmap-column-NEXT"));
+          expect(browserErrors).toEqual([]);
         });
         await expect(nextColumn.getByText(solTitle).first()).toBeVisible();
       } finally {
