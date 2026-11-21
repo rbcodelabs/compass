@@ -1,4 +1,5 @@
 import { reserveImportAsset, verifyImportAsset } from "@/lib/workspace-export/asset-journal"
+import { withImportHeartbeat } from "@/lib/workspace-export/heartbeat"
 import { withRetry } from "@/lib/workspace-export/leaf-first"
 import { createHash } from "node:crypto"
 import { NextResponse } from "next/server"
@@ -77,6 +78,11 @@ export async function POST(req: Request, { params }: { params: Promise<{ orgSlug
       slug: fields.slug,
       nonce: fields.nonce,
       blobs: defaultBlobAdapters(),
+      providerIO(io) {
+        const active = owner
+        if (!active) throw new Error("Missing workspace import owner")
+        return withImportHeartbeat(() => withRetry(() => renewImportOperation(prisma, active, "applying")), io)
+      },
       journal: {
         reserve(store, logical, bytes) {
           const active = owner

@@ -75,6 +75,7 @@ export type ImportOptions = {
   /** Retrying with the same nonce resumes the same import; a new nonce makes a fresh copy. */
   nonce?: string
   fenceWrite?(tx: unknown, phase: "applying" | "rolling_back"): Promise<void>
+  providerIO?<T>(io: () => Promise<T>): Promise<T>
   journal?: {
     reserve(store: PrivateBlobStore, logical: string, bytes: Uint8Array): Promise<string>
     verify(store: PrivateBlobStore, logical: string, physical: string): Promise<void>
@@ -387,6 +388,7 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
       return mutation(tx)
     }))
   }
+  const providerIO = opts.providerIO ?? (<T>(io: () => Promise<T>) => io())
   const rewritePath = rewriteText
 
   try {
@@ -411,9 +413,9 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
       const storage = b.store === "research" ? opts.blobs.research : opts.blobs.artifact
       // Never overwrite: the target prefix is brand new, so an existing object is not ours to replace (or to delete later).
       const physical = opts.journal ? await opts.journal.reserve(b.store, target, data) : target
-      const put = await storage.put(physical, data, b.contentType, { overwrite: false })
+      const put = await providerIO(() => storage.put(physical, data, b.contentType, { overwrite: false }))
       if (opts.journal) {
-        const bytes = await storage.get(physical)
+        const bytes = await providerIO(() => storage.get(physical))
         if (put.pathname !== physical || !bytes || !Buffer.from(data).equals(bytes)) {
           throw new WorkspaceImportRecoveryRequired("Import asset verification failed")
         }
@@ -472,7 +474,7 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
           if (data && typeof raw.id === "string") {
             const filename = String(raw.filename ?? "attachment").replace(/[^A-Za-z0-9._-]/g, "_")
             const key = `feedback/${newWorkspaceId}/${deriveId(importKey, `fb:${raw.id}`)}-${filename}`
-            row.url = await opts.blobs.putPublic(key, data, String(raw.fileType ?? "application/octet-stream"))
+            row.url = await providerIO(() => opts.blobs.putPublic(key, data, String(raw.fileType ?? "application/octet-stream")))
             uploaded.push({ store: "feedback", key: row.url as string })
             blobsCopied++
           } else if (isOwnFeedbackAttachmentUrl(raw.url, sourceWorkspaceId)) {
