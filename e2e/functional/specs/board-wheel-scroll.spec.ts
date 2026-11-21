@@ -54,6 +54,25 @@ async function wheel(page: Page, target: Locator, x: number, y: number) {
 const left = (locator: Locator) => locator.evaluate(element => element.scrollLeft);
 const top = (locator: Locator) => locator.evaluate(element => element.scrollTop);
 
+test("small desktop wheel inputs accumulate on the production Opportunities board", async ({ page, base }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto(`${base}/discovery?view=board`);
+  await page.waitForLoadState("networkidle");
+  const board = page.getByRole("region", { name: /opportunit.*board/i });
+  await expect(board).toBeVisible();
+  await expect(board.locator("section").first()).toBeVisible();
+  const box = (await board.boundingBox())!;
+  await page.mouse.move(box.x + 60, box.y + 27);
+  for (let i = 0; i < 4; i++) {
+    const before = await left(board);
+    await page.mouse.wheel(0, 40);
+    await expect.poll(() => left(board)).toBeGreaterThan(before);
+  }
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect.poll(() => board.evaluate(element => getComputedStyle(element).scrollSnapType)).toMatch(/^x(?: |$)/);
+});
+
 test("desktop vertical wheel pans the real board and horizontal wheel input stays native", async ({ page, base }, testInfo) => {
   const { board, target } = await scrollFixture(page, base);
   await wheel(page, target, 0, 100);
