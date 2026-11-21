@@ -247,6 +247,10 @@ test.describe("Roadmap — not yet on the roadmap", () => {
       const scheduled = laterColumn.locator('[data-slot="card"]').filter({ hasText: solTitle });
       // The newly promoted card and its immediate neighbor exercise both an
       // activated drag released over its source and an intentional reorder.
+      const viewport = page.viewportSize()!;
+      const priorOffset = await roadmapBoard.evaluate(node => node.scrollLeft);
+      // Isolate reordering from horizontal edge scrolling and the dock.
+      await page.setViewportSize({ width: 2400, height: viewport.height });
       const order = () => laterColumn.locator("[data-flip-id]").evaluateAll(nodes => nodes.map(node => node.getAttribute("data-flip-id")!));
       const initialOrder = await order();
       const sourceId = await scheduled.locator("..").getAttribute("data-flip-id");
@@ -280,6 +284,8 @@ test.describe("Roadmap — not yet on the roadmap", () => {
       [reordered[index], reordered[neighborIndex]] = [reordered[neighborIndex], reordered[index]];
       await expect.poll(order).toEqual(reordered);
 
+      await page.setViewportSize(viewport);
+      await roadmapBoard.evaluate((node, offset) => { node.scrollLeft = offset; }, priorOffset);
       const browserErrors: string[] = [];
       page.on("pageerror", error => browserErrors.push(error.message));
       try {
