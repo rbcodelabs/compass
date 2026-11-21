@@ -34,8 +34,8 @@ export async function renewImportOperation(
 ): Promise<void> {
   const rows = await db.$queryRawUnsafe<{ epoch: number }[]>(
     `UPDATE ${importSchema(schema)}.workspace_import_operations
-     SET lease_expires_at = CURRENT_TIMESTAMP + interval '5 minutes', updated_at = CURRENT_TIMESTAMP
-     WHERE workspace_id = $1::uuid AND attempt_id = $2::uuid AND epoch = $3 AND phase = $4
+     SET phase = $4, lease_expires_at = CURRENT_TIMESTAMP + interval '5 minutes', updated_at = CURRENT_TIMESTAMP
+     WHERE workspace_id = $1::uuid AND attempt_id = $2::uuid AND epoch = $3 AND (phase = $4 OR ($4 = 'rolling_back' AND phase = 'applying'))
        AND lease_expires_at > CURRENT_TIMESTAMP RETURNING epoch`,
     owner.workspaceId, owner.attemptId, owner.epoch, phase,
   )

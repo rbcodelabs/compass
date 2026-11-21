@@ -22,7 +22,7 @@ export class StuckDeleteError extends Error {}
  * parent and its children go in one statement (P2014), even though every row is being deleted. On P2014 fall back to repeated
  * passes, one row at a time, so each pass removes the rows whose children are already gone.
  */
-export async function deleteIdsLeafFirst(delegate: Delegate, ids: string[]): Promise<void> {
+export async function deleteIdsLeafFirst(delegate: Pick<Delegate, "deleteMany">, ids: string[]): Promise<void> {
   if (ids.length === 0) return
   try {
     await withRetry(() => delegate.deleteMany({ where: { id: { in: ids } } }))

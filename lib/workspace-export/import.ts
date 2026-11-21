@@ -1,3 +1,4 @@
+import { ImportOwnershipChanged } from "./lease"
 import { createHash, randomUUID } from "node:crypto"
 import { normalizeWorkspaceRole } from "@/lib/roles"
 import { SLUG_PATTERN, isReservedWorkspaceSlug } from "@/lib/slug"
@@ -73,6 +74,7 @@ export type ImportOptions = {
   slug?: string
   /** Retrying with the same nonce resumes the same import; a new nonce makes a fresh copy. */
   nonce?: string
+  fenceWrite?(tx: unknown, phase: "applying" | "rolling_back"): Promise<void>
   startOperation?(workspaceId: string): Promise<void>
   recordExisting?(report: ImportReport): Promise<void>
   bindWorkspace?(workspaceId: string): Promise<void>
@@ -373,6 +375,14 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
   }
 
   await opts.startOperation?.(newWorkspaceId)
+  async function write<T>(phase: "applying" | "rolling_back", mutation: (tx: Client) => Promise<T>) {
+    const fence = opts.fenceWrite
+    if (!fence) return withRetry(() => mutation(client))
+    return withRetry(() => (client as { $transaction(fn: (tx: Client) => Promise<T>): Promise<T> }).$transaction(async tx => {
+      await fence(tx, phase)
+      return mutation(tx)
+    }))
+  }
   const rewritePath = rewriteText
 
   try {
@@ -415,7 +425,7 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
         if (!buffer.length) return
         const data = buffer
         buffer = []
-        await withRetry(() => delegate.createMany({ data, skipDuplicates: true }))
+        await write("applying", tx => delegateFor(tx, model).createMany({ data, skipDuplicates: true }))
       }
       for (const raw of reader.rows(model)) {
         const row = transform(model, raw)
@@ -487,17 +497,19 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
         aggregate(a: Row): Promise<{ _max: { seqNumber: number | null } }>
       }).aggregate({ where: { workspaceId: newWorkspaceId }, _max: { seqNumber: true } }))._max.seqNumber
       if (agg == null) continue
-      const seq = delegateFor(client, "WorkspaceSequence") as unknown as {
-        updateMany(a: Row): Promise<{ count: number }>
-        createMany(a: Row): Promise<{ count: number }>
-      }
-      const bumped = await seq.updateMany({
-        where: { workspaceId: newWorkspaceId, entityType: type, nextValue: { lt: agg + 1 } },
-        data: { nextValue: agg + 1 },
+      await write("applying", async tx => {
+        const seq = delegateFor(tx, "WorkspaceSequence") as unknown as {
+          updateMany(a: Row): Promise<{ count: number }>
+          createMany(a: Row): Promise<{ count: number }>
+        }
+        const bumped = await seq.updateMany({
+          where: { workspaceId: newWorkspaceId, entityType: type, nextValue: { lt: agg + 1 } },
+          data: { nextValue: agg + 1 },
+        })
+        if (bumped.count === 0) {
+          await seq.createMany({ data: [{ workspaceId: newWorkspaceId, entityType: type, nextValue: agg + 1 }], skipDuplicates: true })
+        }
       })
-      if (bumped.count === 0) {
-        await seq.createMany({ data: [{ workspaceId: newWorkspaceId, entityType: type, nextValue: agg + 1 }], skipDuplicates: true })
-      }
     }
 
     // ---- validate before the workspace becomes visible ---------------------------------------------------------------------
@@ -544,6 +556,7 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
     }
     await withRetry(() =>
       (client as { $transaction<T>(fn: (tx: unknown) => Promise<T>): Promise<T> }).$transaction(async (tx) => {
+        await opts.fenceWrite?.(tx, "applying")
         await delegateFor(tx, "Workspace").createMany({ data: [wsRow] })
         await delegateFor(tx, "WorkspaceMember").createMany({ data: memberRows, skipDuplicates: true })
         await opts.publishResult?.(tx, report)
@@ -551,6 +564,7 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
     )
     return report
   } catch (error) {
+    if (error instanceof ImportOwnershipChanged) throw error
     // The Workspace row is the commit point. If it exists, a request with the same nonce finished first (two concurrent
     // submissions derive identical ids, and the loser fails at the Workspace insert). Rolling back would delete the
     // winner's rows, so treat it as "already imported" and leave everything alone.
@@ -565,7 +579,7 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
       }
       throw error
     }
-    await rollbackImport(client, reader, importKey, newWorkspaceId, uploaded, opts.blobs).catch((rollbackError) => {
+    await rollbackImport(client, reader, importKey, newWorkspaceId, uploaded, opts.blobs, mutation => write("rolling_back", mutation)).catch((rollbackError) => {
       throw new WorkspaceImportRecoveryRequired("Workspace import rollback needs reconciliation", { cause: rollbackError })
     })
     throw error
@@ -580,9 +594,10 @@ async function rollbackImport(
   newWorkspaceId: string,
   uploaded: { store: "artifact" | "research" | "feedback"; key: string }[],
   blobs: BlobAdapters,
+  write: <T>(mutation: (tx: Client) => Promise<T>) => Promise<T>,
 ) {
   const deleteModel = async (model: string) => {
-    const delegate = delegateFor(client, model)
+    const delegate = { deleteMany: (args: { where: Row }) => write(tx => delegateFor(tx, model).deleteMany(args)) }
     if (modelHasId(model)) {
       const ids: string[] = []
       for (const row of reader.rows(model)) if (typeof row.id === "string") ids.push(deriveId(importKey, row.id))

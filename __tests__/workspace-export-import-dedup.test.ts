@@ -625,3 +625,27 @@ it("records the winner first seen after a duplicate publication before returning
   expect(result.alreadyImported).toBe(true)
   expect(recorded).toBe(result.workspaceId)
 })
+
+it("stops before writing imported rows if the applying transaction loses ownership", async () => {
+  const org = randomUUID(), ws = randomUUID(), user = randomUUID()
+  const db = createInMemoryPrisma({
+    Organization: [{ id: org, name: "Org", slug: "org" }],
+    Workspace: [{ id: ws, organizationId: org, name: "Source", slug: "src", ssoEnabled: false }],
+    User: [{ id: user, name: "User", email: "user@example.com" }],
+    OrganizationMember: [{ id: randomUUID(), organizationId: org, userId: user, role: "ADMIN" }],
+    Doc: [{ id: randomUUID(), workspaceId: ws, title: "Owned", content: "body" }],
+  })
+  const bytes = await exportWorkspaceToBuffer(db.client, ws, noopBlobs)
+  const { ImportOwnershipChanged } = await import("@/lib/workspace-export/lease")
+  const phases: string[] = []
+  await expect(importWorkspaceBundle(db.client, bytes, {
+    organizationId: org, importerUserId: user, nonce: "fence", blobs: noopBlobs,
+    async fenceWrite(tx, phase) {
+      expect(tx).toBe(db.client)
+      phases.push(phase)
+      throw new ImportOwnershipChanged()
+    },
+  })).rejects.toThrow(/ownership changed/i)
+  expect(phases).toEqual(["applying"])
+  expect(db.tables.Doc).toHaveLength(1)
+})
