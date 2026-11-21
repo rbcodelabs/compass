@@ -171,6 +171,7 @@ export async function handleAgentRunCallback(
                   payload.message ??
                   "Paused waiting for your answer — submit your answer to resume where the agent left off.",
                 errorCode: "AWAITING_USER",
+                usage: payload.usage ?? null,
               }
             }
             return {
