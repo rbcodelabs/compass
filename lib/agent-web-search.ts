@@ -26,6 +26,7 @@ export const MAX_SEARCH_ATTEMPTS_PER_TURN = MAX_SEARCHES_PER_TURN * 3
 export const DEFAULT_MAX_RESULTS = 5
 export const MAX_RESULTS_CEILING = 8
 export const MAX_QUERY_LENGTH = 400
+const AGENTCORE_MAX_QUERY_LENGTH = 200
 export const MAX_SNIPPET_CHARS = 1_200
 export const SEARCH_TIMEOUT_MS = 25_000
 
@@ -392,6 +393,7 @@ export function shapeAgentCoreResults(toolText: string, maxResults: number): Web
 }
 
 export const agentCoreWebSearch: SearchBackend = async (query, maxResults, signal) => {
+  if (query.length > AGENTCORE_MAX_QUERY_LENGTH) return { ok: false, reason: "invalid_input" }
   const config = agentCoreSearchConfig()
   if (!config) {
     console.error("agent web search: AGENT_WEB_SEARCH_GATEWAY_URL is not set")
@@ -400,7 +402,7 @@ export const agentCoreWebSearch: SearchBackend = async (query, maxResults, signa
   try {
     const { AwsClient } = await import("aws4fetch")
     const credentials = await resolveAwsCredentials(config.region)
-    const client = new AwsClient({ ...credentials, service: "bedrock-agentcore", region: config.region })
+    const client = new AwsClient({ ...credentials, service: "bedrock-agentcore", region: config.region, retries: 0 })
     const response = await client.fetch(config.url, {
       method: "POST",
       signal,
@@ -412,28 +414,27 @@ export const agentCoreWebSearch: SearchBackend = async (query, maxResults, signa
         params: { name: config.tool, arguments: { query, maxResults } },
       }),
     })
-    const raw = await response.text()
     if (response.status === 429) return { ok: false, reason: "rate_limit" }
     if (!response.ok) {
-      console.error("agent web search agentcore error", response.status, raw.slice(0, 500))
+      console.error("agent web search agentcore HTTP error", response.status)
       return { ok: false, reason: "upstream" }
     }
-    const reply = mcpReplyJson(raw)
+    const reply = mcpReplyJson(await response.text())
     const text = reply?.result?.content?.find(part => part.type === "text")?.text
     if (!reply?.result || reply.result.isError || typeof text !== "string") {
-      console.error("agent web search agentcore tool error", raw.slice(0, 500))
+      console.error("agent web search agentcore tool error", response.status)
       return { ok: false, reason: "upstream" }
     }
     const results = shapeAgentCoreResults(text, maxResults)
     if (!results) {
-      console.error("agent web search agentcore unexpected payload", text.slice(0, 300))
+      console.error("agent web search agentcore unexpected payload", response.status)
       return { ok: false, reason: "upstream" }
     }
     return { ok: true, results }
   } catch (error) {
     if (error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError"))
       return { ok: false, reason: "timeout" }
-    console.error("agent web search agentcore failed", error instanceof Error ? error.message : error)
+    console.error("agent web search agentcore request failed")
     return { ok: false, reason: "upstream" }
   }
 }
@@ -447,6 +448,10 @@ export function selectSearchBackend(env: Env = process.env): SearchBackend {
   if (forced === "bedrock") return bedrockWebSearch
   if (forced === "agentcore") return agentCoreWebSearch
   return gatewayPerplexitySearch
+}
+
+export function webSearchQueryLimit(): number {
+  return selectSearchBackend() === agentCoreWebSearch ? AGENTCORE_MAX_QUERY_LENGTH : MAX_QUERY_LENGTH
 }
 
 export type WebSearchOutcome =
@@ -522,7 +527,7 @@ export function formatSearchOutcome(outcome: WebSearchOutcome): { text: string; 
             : outcome.reason === "timeout"
               ? "The web search timed out. Try a narrower query."
               : outcome.reason === "invalid_input"
-                ? "The search query was not accepted. Rephrase it and try again."
+                ? "The search query was not accepted. Shorten or rephrase it and try again."
                 : "Web search failed. Do not retry repeatedly; use web_fetch on a known URL instead.",
         isError: true,
       }

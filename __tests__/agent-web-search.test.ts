@@ -3,11 +3,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 vi.mock("ai", () => ({ gateway: { tools: { perplexitySearch: vi.fn() } }, generateText: vi.fn(), stepCountIs: vi.fn() }))
 
 const { mockAgentCoreFetch } = vi.hoisted(() => ({ mockAgentCoreFetch: vi.fn() }))
-vi.mock("aws4fetch", () => ({
-  AwsClient: class {
-    fetch = mockAgentCoreFetch
-  },
-}))
 vi.mock("@aws-sdk/credential-providers", () => ({
   fromNodeProviderChain: () => async () => ({
     accessKeyId: "test-access-key",
@@ -275,7 +270,14 @@ describe("Bedrock Web Search backend", () => {
 describe("AgentCore Gateway web search backend", () => {
   const url = "https://gw-abc123.gateway.bedrock-agentcore.us-east-1.amazonaws.com/mcp"
 
+  beforeEach(() => {
+    vi.stubEnv("VERCEL", undefined)
+    vi.stubEnv("AGENT_WEB_SEARCH_GATEWAY_URL", url)
+    vi.stubGlobal("fetch", mockAgentCoreFetch)
+  })
+
   afterEach(() => {
+    vi.unstubAllGlobals()
     vi.restoreAllMocks()
     vi.unstubAllEnvs()
     mockAgentCoreFetch.mockReset()
@@ -322,8 +324,6 @@ describe("AgentCore Gateway web search backend", () => {
   })
 
   it("preserves valid gateway results when the connector returns a null entry", async () => {
-    vi.stubEnv("VERCEL", undefined)
-    vi.stubEnv("AGENT_WEB_SEARCH_GATEWAY_URL", url)
     vi.spyOn(console, "error").mockImplementation(() => {})
     const resultUrl = "https://example.test/report"
     mockAgentCoreFetch.mockResolvedValueOnce(Response.json({
@@ -343,5 +343,47 @@ describe("AgentCore Gateway web search backend", () => {
       ok: true,
       results: [{ title: "Report", url: resultUrl, snippet: "One two" }],
     })
+  })
+
+  it("accepts 200 characters and rejects 201 before sending", async () => {
+    mockAgentCoreFetch.mockImplementation(async () =>
+      Response.json({ result: { content: [{ type: "text", text: '{"results":[]}' }] } }),
+    )
+    const signal = new AbortController().signal
+    expect(await agentCoreWebSearch("a".repeat(200), 1, signal)).toEqual({ ok: true, results: [] })
+    expect(await agentCoreWebSearch("a".repeat(201), 1, signal)).toEqual({ ok: false, reason: "invalid_input" })
+    expect(mockAgentCoreFetch).toHaveBeenCalledTimes(1)
+  })
+
+  it("finalizes one audited attempt after the first 429", async () => {
+    const { prisma, table } = fakePrisma()
+    mockAgentCoreFetch.mockResolvedValueOnce(new Response(null, { status: 429 }))
+    mockAgentCoreFetch.mockImplementation(async () => { throw new Error("unexpected retry") })
+
+    expect(await runWebSearch(prisma, scope, { query: "query" }, agentCoreWebSearch))
+      .toEqual({ status: "failed", reason: "rate_limit" })
+    expect(mockAgentCoreFetch).toHaveBeenCalledTimes(1)
+    expect(table.create).toHaveBeenCalledTimes(1)
+    expect(table.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: "FAILED" }),
+    }))
+  })
+
+  it.each(["http", "tool", "payload", "exception"])("keeps query and result text out of %s error logs", async kind => {
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => {})
+    const query = "private query marker"
+    const result = "private result marker"
+    const body = query + " " + result
+    if (kind === "http") mockAgentCoreFetch.mockResolvedValueOnce(new Response(body, { status: 403 }))
+    else if (kind === "exception") mockAgentCoreFetch.mockRejectedValueOnce(new Error(body))
+    else mockAgentCoreFetch.mockResolvedValueOnce(Response.json({
+      result: { isError: kind === "tool", content: [{ type: "text", text: body }] },
+    }))
+
+    expect(await agentCoreWebSearch(query, 1, new AbortController().signal))
+      .toEqual({ ok: false, reason: "upstream" })
+    expect(errorLog).toHaveBeenCalled()
+    expect(JSON.stringify(errorLog.mock.calls)).not.toContain(query)
+    expect(JSON.stringify(errorLog.mock.calls)).not.toContain(result)
   })
 })
