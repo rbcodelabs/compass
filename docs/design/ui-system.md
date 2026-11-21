@@ -55,6 +55,7 @@ Every settings screen (account, workspace, organization) is wrapped in `Settings
 - The current page is marked with `aria-current="page"`. The longest matching link wins, so `/settings/modules` selects Modules, not Workspace settings.
 - The shell provides the only "Back to Compass" link. Individual settings pages should not add their own.
 - The states are on `/ui` under Product patterns ("Settings navigation").
+- The functional screenshot fixture captures settings automatically. When capturing against a deployment with the shared shell, set `DOCS_SETTINGS_SHELL_SCREENSHOTS=1` and supply an authenticated `DOCS_SESSION_FILE` for an organization admin.
 
 ## Semantic token vocabulary
 

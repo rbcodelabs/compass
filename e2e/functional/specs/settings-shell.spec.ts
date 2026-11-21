@@ -1,3 +1,4 @@
+import { LAST_WORKSPACE_COOKIE } from "../../../lib/last-workspace"
 import { test, expect } from "../fixtures/index"
 
 // The dev server compiles a route the first time it is visited; allow for that after a click.
@@ -56,15 +57,17 @@ test.describe("settings shell", () => {
     await page.setViewportSize({ width: 1280, height: 800 })
     const nav = page.getByRole("navigation", { name: "Settings", exact: true })
     const remembered = base.replace(/^\//, "")
+    await page.context().clearCookies({ name: LAST_WORKSPACE_COOKIE })
 
     // The seeded organization has two workspaces and "E2E Planning" sorts first, so naming
     // "E2E Workspace" proves the remembered one is used rather than the first in the list.
     await page.goto(`${base}/settings`)
     await expect
-      .poll(async () => (await page.context().cookies()).some((c) => c.name === "compass_last_workspace" && c.value === remembered), { timeout: NAVIGATE_MS })
+      .poll(async () => (await page.context().cookies()).some((c) => c.name === LAST_WORKSPACE_COOKIE && c.value === remembered), { timeout: NAVIGATE_MS })
       .toBe(true)
 
-    await page.goto("/settings/profile")
+    await nav.getByRole("link", { name: "Profile", exact: true }).click()
+    await expect(page).toHaveURL(/\/settings\/profile$/, { timeout: NAVIGATE_MS })
     await expect(nav.getByText("E2E Workspace", { exact: true })).toBeVisible({ timeout: NAVIGATE_MS })
     await expect(nav.getByText("E2E Planning", { exact: true })).toHaveCount(0)
 

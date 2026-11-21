@@ -9,6 +9,7 @@ export type ScreenshotCase = {
   prepare?: ScreenshotPreparation
   viewport?: { width: number; height: number }
   fullPage?: boolean
+  settingsPage?: { heading: string; navLink: string }
 }
 
 export function buildScreenshotCases({
@@ -32,11 +33,13 @@ export function buildScreenshotCases({
   if (includeSettingsShell) {
     // The organization page lives at /{org}/settings, one segment up from the workspace base.
     const orgBase = `/${workspaceBase.split("/").filter(Boolean)[0]}`
+    const profile = { heading: "Profile", navLink: "Profile" }
+    const organization = { heading: "Organization Settings", navLink: "Organization settings" }
     cases.push(
-      { file: "settings-account-desktop.png", url: "/settings/profile", viewport: { width: 1280, height: 800 } },
-      { file: "settings-organization-desktop.png", url: `${orgBase}/settings`, viewport: { width: 1280, height: 800 } },
-      { file: "settings-nav-mobile.png", url: "/settings/profile", viewport: { width: 390, height: 844 } },
-      { file: "settings-nav-mobile-open.png", url: "/settings/profile", prepare: "settings-nav-sheet", viewport: { width: 390, height: 844 } },
+      { file: "settings-account-desktop.png", url: "/settings/profile", settingsPage: profile, viewport: { width: 1280, height: 800 } },
+      { file: "settings-organization-desktop.png", url: `${orgBase}/settings`, settingsPage: organization, viewport: { width: 1280, height: 800 } },
+      { file: "settings-nav-mobile.png", url: "/settings/profile", settingsPage: profile, viewport: { width: 390, height: 844 } },
+      { file: "settings-nav-mobile-open.png", url: "/settings/profile", settingsPage: profile, prepare: "settings-nav-sheet", viewport: { width: 390, height: 844 } },
     )
   }
   if (!includeGuidedUx) return cases

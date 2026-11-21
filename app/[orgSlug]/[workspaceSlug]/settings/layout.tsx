@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { SettingsShell } from "@/components/settings/settings-shell";
+import { isPlatformAdminEmail } from "@/lib/platform-admin";
 import { requireWorkspaceContext } from "@/lib/workspace-context";
 
 /**
@@ -15,12 +16,18 @@ export default async function WorkspaceSettingsLayout({
   params: Promise<{ orgSlug: string; workspaceSlug: string }>;
 }) {
   const { orgSlug, workspaceSlug } = await params;
-  const { workspace, isOrgAdmin } = await requireWorkspaceContext(orgSlug, workspaceSlug);
+  const { user, workspace, isOrgAdmin } = await requireWorkspaceContext(orgSlug, workspaceSlug);
 
   return (
     <SettingsShell
       backHref={"/" + orgSlug + "/" + workspaceSlug}
-      context={{ orgSlug, workspaceSlug, workspaceName: workspace.name, isOrgAdmin }}
+      context={{
+        orgSlug,
+        workspaceSlug,
+        workspaceName: workspace.name,
+        isOrgAdmin,
+        isPlatformAdmin: isPlatformAdminEmail(user.email),
+      }}
     >
       {children}
     </SettingsShell>

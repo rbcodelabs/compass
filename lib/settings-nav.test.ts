@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { activeSettingsHref, buildSettingsNav } from "@/lib/settings-nav";
 
-const ctx = { orgSlug: "bankrate", workspaceSlug: "compass-internal", workspaceName: "Compass Internal", isOrgAdmin: false };
+const ctx = { orgSlug: "acme", workspaceSlug: "growth", workspaceName: "Growth", isOrgAdmin: false };
 
 describe("buildSettingsNav", () => {
   it("always offers the account group", () => {
@@ -21,38 +21,38 @@ describe("buildSettingsNav", () => {
     );
     expect(hrefs).toEqual({
       account: ["/settings/profile", "/settings/passkeys", "/settings/agents"],
-      workspace: ["/bankrate/compass-internal/settings", "/bankrate/compass-internal/settings/modules"],
-      organization: ["/bankrate/settings"],
+      workspace: ["/acme/growth/settings", "/acme/growth/settings/modules"],
+      organization: ["/acme/settings"],
       platform: ["/settings/admin/agent-snapshot"],
     });
   });
   it("marks admin-only items so they can be hidden or gated", () => {
     const groups = buildSettingsNav({ ...ctx, isOrgAdmin: true, isPlatformAdmin: true });
     const adminOnly = groups.flatMap((g) => g.items).filter((i) => i.adminOnly).map((i) => i.href);
-    expect(adminOnly).toEqual(["/bankrate/settings", "/settings/admin/agent-snapshot"]);
+    expect(adminOnly).toEqual(["/acme/settings", "/settings/admin/agent-snapshot"]);
   });
   it("offers account and organization, but no workspace, to an org admin who has no workspace", () => {
-    const groups = buildSettingsNav({ orgSlug: "bankrate", workspaceSlug: null, isOrgAdmin: true });
+    const groups = buildSettingsNav({ orgSlug: "acme", workspaceSlug: null, isOrgAdmin: true });
     expect(groups.map((g) => g.id)).toEqual(["account", "organization"]);
   });
   it("never offers organization without an org slug, even if flagged admin", () => {
     expect(buildSettingsNav({ orgSlug: null, workspaceSlug: null, isOrgAdmin: true }).map((g) => g.id)).toEqual(["account"]);
   });
   it("shows the workspace and organization names as sublabels", () => {
-    const groups = buildSettingsNav({ ...ctx, orgName: "Bankrate", isOrgAdmin: true });
-    expect(groups.find((g) => g.id === "workspace")?.sublabel).toBe("Compass Internal");
-    expect(groups.find((g) => g.id === "organization")?.sublabel).toBe("Bankrate");
+    const groups = buildSettingsNav({ ...ctx, orgName: "Acme", isOrgAdmin: true });
+    expect(groups.find((g) => g.id === "workspace")?.sublabel).toBe("Growth");
+    expect(groups.find((g) => g.id === "organization")?.sublabel).toBe("Acme");
   });
 });
 
 describe("activeSettingsHref", () => {
   const groups = buildSettingsNav({ ...ctx, isOrgAdmin: true });
   it("prefers the longest matching href", () => {
-    expect(activeSettingsHref(groups, "/bankrate/compass-internal/settings/modules")).toBe("/bankrate/compass-internal/settings/modules");
-    expect(activeSettingsHref(groups, "/bankrate/compass-internal/settings")).toBe("/bankrate/compass-internal/settings");
+    expect(activeSettingsHref(groups, "/acme/growth/settings/modules")).toBe("/acme/growth/settings/modules");
+    expect(activeSettingsHref(groups, "/acme/growth/settings")).toBe("/acme/growth/settings");
   });
   it("does not confuse org and workspace settings", () => {
-    expect(activeSettingsHref(groups, "/bankrate/settings")).toBe("/bankrate/settings");
+    expect(activeSettingsHref(groups, "/acme/settings")).toBe("/acme/settings");
   });
   it("returns null off the nav", () => {
     expect(activeSettingsHref(groups, "/dashboard")).toBeNull();
@@ -70,6 +70,6 @@ describe("activeSettingsHref", () => {
   });
   it("selects nothing for a member who cannot see an item (no highlight for hidden pages)", () => {
     const memberGroups = buildSettingsNav(ctx);
-    expect(activeSettingsHref(memberGroups, "/bankrate/settings")).toBeNull();
+    expect(activeSettingsHref(memberGroups, "/acme/settings")).toBeNull();
   });
 });

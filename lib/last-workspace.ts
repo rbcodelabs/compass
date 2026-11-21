@@ -1,6 +1,6 @@
 /**
- * The workspace a person last used, remembered in a cookie so account and
- * organization settings can name it.
+ * One last-used workspace, remembered across organizations in a browser cookie
+ * so account and organization settings can name it.
  *
  * Account settings (/settings/*) and organization settings (/{org}/settings)
  * have no workspace in their URL, but their navigation still has a Workspace
@@ -50,8 +50,8 @@ export function lastWorkspaceCookieString(orgSlug: string, workspaceSlug: string
 /**
  * The workspace to anchor settings navigation on: the remembered one when the
  * person still belongs to it, otherwise the first candidate. With `orgSlug`
- * only that organization's workspaces are considered, so organization settings
- * never name a workspace from another organization.
+ * only that organization's workspaces are considered. If the cookie remembers
+ * a different organization, use the first workspace in the requested one.
  */
 export function pickAnchorWorkspace<T extends { orgSlug: string; slug: string }>(
   workspaces: readonly T[],
