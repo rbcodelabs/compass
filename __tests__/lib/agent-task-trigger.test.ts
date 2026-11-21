@@ -1,3 +1,4 @@
+import { TRANSACTION_CONFLICT_ATTEMPTS } from "@/lib/transaction-conflict"
 /**
  * Assigning a task to a cloud agent starts an attributed run (phase 4).
  *
@@ -56,6 +57,7 @@ const prisma: Row = {
   agentConversation: table("agentConversation"),
   agentMessage: { ...table("agentMessage"), aggregate: vi.fn(async () => ({ _count: { _all: db.state.userTurns?.length ?? 0 }, _sum: { costUsd: 0 } })) },
   agentRun: table("agentRun"),
+  agentSandboxOperation: { findUnique: table("agentSandboxOperation").findFirst },
   agentRunEvent: table("agentRunEvent"),
   workspaceMember: table("workspaceMember"),
   task: {
@@ -83,17 +85,14 @@ const prisma: Row = {
     const releases: Array<() => void> = []
     const tx: Row = {
       ...prisma,
-      agentConversation: {
-        ...prisma.agentConversation,
-        updateMany: async ({ where }: Row) => {
-          const previous = rowLocks.get(where.id) ?? Promise.resolve()
-          let release!: () => void
-          const mine = new Promise<void>((resolve) => { release = resolve })
-          rowLocks.set(where.id, previous.then(() => mine))
-          await previous
-          releases.push(release)
-          return { count: 1 }
-        },
+      $executeRaw: async (_sql: TemplateStringsArray, _table: unknown, _token: string, conversationId: string) => {
+        const previous = rowLocks.get(conversationId) ?? Promise.resolve()
+        let release!: () => void
+        const mine = new Promise<void>((resolve) => { release = resolve })
+        rowLocks.set(conversationId, previous.then(() => mine))
+        await previous
+        releases.push(release)
+        return 1
       },
     }
     try { return await fn(tx) } finally { releases.forEach((release) => release()) }
@@ -378,7 +377,9 @@ describe("concurrent triggers", () => {
   })
 
   it.each(conflicts)("asks the person to retry on a write conflict (%s) when NO run exists, instead of claiming one is running", async (_label, conflict) => {
-    prisma.$transaction.mockRejectedValueOnce(conflict)
+    for (let attempt = 0; attempt < TRANSACTION_CONFLICT_ATTEMPTS; attempt++) {
+      prisma.$transaction.mockRejectedValueOnce(conflict)
+    }
     const outcome = await trigger()
     expect(outcome).toMatchObject({ status: "refused", code: "AGENT_RUN_RETRY" })
     expect(outcome.status === "refused" && outcome.message).toMatch(/Assign it again/)
