@@ -14,12 +14,28 @@ export async function reclaimAbandonedAsset(asset: Asset, adapter: CleanupAdapte
 }
 
 export async function sweepAbandonedAssets(db: ImportDatabase, adapterFor: (store: CleanupRecord["store"]) => CleanupAdapter) {
+  // The worker can retire attempt-owned bytes without the ZIP. Keep the digest and
+  // leave row reconciliation to a subsequent claimant presenting the original bundle.
+  const operations = importSchema() + ".workspace_import_operations"
+  const expired = await db.$queryRawUnsafe<{ workspace_id: string; attempt_id: string; epoch: number }[]>(
+    `SELECT workspace_id, attempt_id, epoch FROM ${operations}
+     WHERE phase IN ('applying','rolling_back','recovering') AND lease_expires_at<=CURRENT_TIMESTAMP
+     ORDER BY lease_expires_at, workspace_id LIMIT 25`,
+  )
+  for (const owner of expired) {
+    await db.$queryRawUnsafe(
+      `UPDATE ${operations} SET phase='cleanup_pending', epoch=epoch+1, updated_at=CURRENT_TIMESTAMP
+       WHERE workspace_id=$1::uuid AND attempt_id=$2::uuid AND epoch=$3
+         AND phase IN ('applying','rolling_back','recovering') AND lease_expires_at<=CURRENT_TIMESTAMP
+       RETURNING epoch`, owner.workspace_id, owner.attempt_id, owner.epoch,
+    )
+  }
   const rows = await db.$queryRawUnsafe<CleanupRecord[]>(
     `SELECT a.attempt_id AS "attemptId", a.workspace_id AS "workspaceId", a.logical_key AS "logicalKey",
             a.physical_key AS "physicalKey", a.backend AS store, a.state, a.provider_id AS provider, a.namespace_id AS namespace
      FROM ${importSchema()}.workspace_import_assets a
      JOIN ${importSchema()}.workspace_import_operations o ON o.workspace_id=a.workspace_id
-     WHERE (a.attempt_id<>o.attempt_id OR o.phase='rolled_back') AND a.state IN ('reserved','verified')
+     WHERE (a.attempt_id<>o.attempt_id OR o.phase IN ('rolled_back','cleanup_pending')) AND a.state IN ('reserved','verified')
      ORDER BY a.updated_at, a.attempt_id, a.logical_key LIMIT 25`,
   )
   let cleaned = 0

@@ -44,3 +44,29 @@ it.skipIf(!integrationDatabaseUrl)("keeps uncertain writes journaled and exposes
     await pool.end()
   }
 })
+
+it.skipIf(!integrationDatabaseUrl)("fences an expired owner and retires its public object without a client retry", async () => {
+  const pool = new Pool({ connectionString: integrationDatabaseUrl })
+  const db = await pool.connect()
+  try {
+    await db.query("CREATE TEMP TABLE workspace_import_operations (workspace_id uuid PRIMARY KEY, attempt_id uuid, epoch integer, phase text, lease_expires_at timestamp, updated_at timestamp, bundle_digest text)")
+    await db.query("CREATE TEMP TABLE workspace_import_assets (attempt_id uuid, workspace_id uuid, logical_key text, physical_key text, backend text, state text, provider_id text, namespace_id text, updated_at timestamp)")
+    const ws = randomUUID(), attempt = randomUUID()
+    const key = "feedback/" + ws + "/" + attempt + "-" + "a".repeat(64)
+    await db.query("INSERT INTO workspace_import_operations VALUES ($1,$2,3,'applying',now()-interval '1 minute',now(),'original')", [ws, attempt])
+    await db.query("INSERT INTO workspace_import_assets VALUES ($1,$2,'attachment',$3,'feedback','reserved','blob','fixture',now())", [attempt, ws, key])
+    const tx = { async $queryRawUnsafe<T>(sql: string, ...args: unknown[]) { return (await db.query(sql,args)).rows as T } }
+    const remove = vi.fn(async () => {})
+    const { sweepAbandonedAssets } = await import("@/lib/workspace-export/abandoned-assets")
+    await sweepAbandonedAssets(tx, () => ({ provider: "blob", namespace: "fixture", remove }))
+    expect(remove).toHaveBeenCalledWith(key)
+    const op = (await db.query("SELECT * FROM workspace_import_operations")).rows[0]
+    expect(op.epoch).toBeGreaterThan(3)
+    expect(op.bundle_digest).toBe("original")
+    expect(op.phase).not.toBe("rolled_back")
+    expect((await db.query("SELECT state FROM workspace_import_assets")).rows[0].state).toBe("reserved")
+  } finally {
+    db.release()
+    await pool.end()
+  }
+})

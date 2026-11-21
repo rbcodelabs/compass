@@ -67,7 +67,7 @@ export async function claimBundleImport(db: ImportDatabase, workspaceId: string,
            lease_expires_at=EXCLUDED.lease_expires_at,
            phase=CASE WHEN old.phase='rolled_back' THEN 'applying' ELSE 'recovering' END
        WHERE old.organization_id=EXCLUDED.organization_id AND old.bundle_digest=EXCLUDED.bundle_digest
-         AND (old.phase='rolled_back' OR (old.phase IN ('applying','recovering','rolling_back')
+         AND (old.phase='rolled_back' OR (old.phase IN ('applying','recovering','rolling_back','cleanup_pending')
               AND old.lease_expires_at<=CURRENT_TIMESTAMP))
      RETURNING epoch, phase`, workspaceId, organizationId, attemptId, digest,
   )
