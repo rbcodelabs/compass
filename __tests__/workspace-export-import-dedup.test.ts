@@ -601,3 +601,27 @@ it("persists a replay result when retry finds a previously imported workspace", 
   await importWorkspaceBundle(db.client, bytes, { ...options, async recordExisting(report) { recorded = report.workspaceId } })
   expect(recorded).toBe(first.workspaceId)
 })
+
+it("records the winner first seen after a duplicate publication before returning success", async () => {
+  const org = randomUUID(), ws = randomUUID(), user = randomUUID()
+  const db = createInMemoryPrisma({
+    Organization: [{ id: org, name: "Org", slug: "org" }],
+    Workspace: [{ id: ws, organizationId: org, name: "Source", slug: "src", ssoEnabled: false }],
+    User: [{ id: user, name: "User", email: "user@example.com" }],
+    OrganizationMember: [{ id: randomUUID(), organizationId: org, userId: user, role: "ADMIN" }],
+  })
+  const bytes = await exportWorkspaceToBuffer(db.client, ws, noopBlobs)
+  let destination = ""
+  let recorded = ""
+  db.client.$transaction = async () => {
+    db.tables.Workspace.push({ id: destination, organizationId: org, slug: "winner", name: "Winner" })
+    throw Object.assign(new Error("workspace already exists"), { code: "P2002" })
+  }
+  const result = await importWorkspaceBundle(db.client, bytes, {
+    organizationId: org, importerUserId: user, nonce: "concurrent", blobs: noopBlobs,
+    async bindWorkspace(id) { destination = id },
+    async recordExisting(report) { recorded = report.workspaceId },
+  })
+  expect(result.alreadyImported).toBe(true)
+  expect(recorded).toBe(result.workspaceId)
+})

@@ -97,6 +97,12 @@ export async function POST(req: Request, { params }: { params: Promise<{ orgSlug
         await commitImportReport(tx as ImportDatabase, owner, report)
       },
     })
+    if (receiptBinding) {
+      const durable = await readImportReceiptResult(prisma, receiptBinding)
+      if (durable?.workspaceId !== report.workspaceId) {
+        throw new WorkspaceImportRecoveryRequired("Import result is awaiting reconciliation")
+      }
+    }
     await discard?.()
     const { revalidatePath } = await import("next/cache")
     revalidatePath("/dashboard")

@@ -558,7 +558,11 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
       throw new WorkspaceImportRecoveryRequired("Workspace import outcome is unknown and needs reconciliation", { cause })
     })
     if (committed[0]) {
-      if ((error as { code?: string }).code === "P2002") return alreadyImportedReport(committed[0], manifest)
+      if ((error as { code?: string }).code === "P2002") {
+        const report = alreadyImportedReport(committed[0], manifest)
+        await opts.recordExisting?.(report)
+        return report
+      }
       throw error
     }
     await rollbackImport(client, reader, importKey, newWorkspaceId, uploaded, opts.blobs).catch((rollbackError) => {
