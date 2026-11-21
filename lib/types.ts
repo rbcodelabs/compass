@@ -305,6 +305,7 @@ export interface TaskData {
   assigneeUserId: string | null
   ownerName: string | null
   storyPoints: number | null
+  startDate: string | null
   dueDate: string | null
   iteration: string | null
   sortOrder: number

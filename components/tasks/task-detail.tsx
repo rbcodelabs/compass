@@ -75,6 +75,7 @@ type SubtaskData = {
   assignee?: ResolvedTaskAssignee | null;
   ownerName: string | null;
   storyPoints: number | null;
+  startDate: string | null;
   dueDate: string | null;
   iteration: string | null;
   parentTaskId: string | null;
@@ -96,6 +97,7 @@ type TaskDetailData = {
   assignee?: ResolvedTaskAssignee | null;
   ownerName: string | null;
   storyPoints: number | null;
+  startDate: string | null;
   dueDate: string | null;
   iteration: string | null;
   sortOrder: number;
@@ -153,6 +155,7 @@ function toCardData(d: TaskDetailData): TaskCardData {
     assignee: d.assignee,
     ownerName: d.ownerName,
     storyPoints: d.storyPoints,
+    startDate: d.startDate,
     dueDate: d.dueDate,
     iteration: d.iteration,
     parentTaskId: d.parentTaskId,
@@ -271,6 +274,7 @@ export function TaskDetail({ taskId, orgSlug, workspaceSlug, variant }: Props) {
             compact
           />
         </div>
+        <InlineDateField value={data.startDate} field="startDate" edit={edit} placeholder="Set start date" compact />
         <InlineDateField value={data.dueDate} field="dueDate" edit={edit} placeholder="Set due date" compact />
         {!inShell && <FollowButton orgSlug={orgSlug} workspaceSlug={workspaceSlug} subjectType="TASK" subjectId={taskId} />}
       </div>
