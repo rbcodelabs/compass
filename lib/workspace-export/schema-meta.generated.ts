@@ -165,7 +165,7 @@ export const OPTIONAL_FIELDS: Readonly<Record<string, readonly string[]>> = {
   Doc: ["content","contentRef","createdById","docType","icon","kind","metadata","parentId","publishedAt","publishedById","revision","roadmapItemId","seqNumber","seqPrefix","storageProvider","updatedById"],
   DocComment: ["anchorEnd","anchorPrefix","anchorStart","anchorSuffix","anchorText","authorId","parentId"],
   DocCommentAnchor: ["anchorEnd","anchorPrefix","anchorStart","anchorSuffix"],
-  DocVersion: ["content","contentRef","createdById","createdByName","icon","label","metadata","storageProvider"],
+  DocVersion: ["content","contentRef","createdById","createdByName","icon","label","metadata","storageProvider","versionNumber"],
   EmbedAuthHandoff: ["portalAccountId","userId"],
   EmbedVisitorSession: ["lastUsedAt","portalAccountId","revokedAt","userId"],
   EntityLink: ["attrs","createdById"],

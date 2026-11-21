@@ -2415,6 +2415,9 @@ model DocVersion {
   /// Set only on manual "named" snapshots (bypasses coalescing). Null for
   /// ordinary auto-snapshots taken before an overwriting save.
   label         String?  @db.VarChar(100)
+  /// v1, v2, v3. Set only on versions pinned for a decision request (see
+  /// pinDocVersion). Null for ordinary auto and named snapshots.
+  versionNumber Int?     @map("version_number")
   createdById   String?  @map("created_by_id") @db.Uuid
   createdByName String?  @map("created_by_name") @db.VarChar(255)
   createdAt     DateTime @default(now()) @map("created_at")
