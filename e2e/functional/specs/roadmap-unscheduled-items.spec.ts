@@ -25,7 +25,9 @@ import { openFullPage } from "../fixtures/full-page";
 import type { Locator, Page } from "@playwright/test";
 
 async function dragTo(page: Page, source: Locator, target: Locator, scrollContainer?: Locator, beforeRelease?: () => Promise<void>) {
-  await source.scrollIntoViewIfNeeded();
+  // A cancelled drag can still have its drop animation over the handle.
+  // Wait until the source can actually receive the next pointer gesture.
+  await source.hover({ trial: true });
   const sourceBox = await source.boundingBox();
   if (!sourceBox) throw new Error("drag source has no bounding box");
 
