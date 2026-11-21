@@ -67,6 +67,23 @@ export async function customFieldInheritanceTableExists(prisma: AppPrismaClient 
   }
 }
 
+/**
+ * Runs a read that needs the inheritance rules table, answering undefined when the table is not there. The positive answer above is
+ * cached for the life of the server, so a table that disappears afterwards (a rolled-back migration, a restored database) would
+ * otherwise surface as a P2021 on every read until a restart. A missing table here reads as "not there" exactly as it does at probe
+ * time, and the stale positive is forgotten so the next probe asks the database again. Any other error propagates.
+ */
+export async function readIfInheritanceTableExists<T>(prisma: AppPrismaClient, read: () => Promise<T>): Promise<T | undefined> {
+  if (!(await customFieldInheritanceTableExists(prisma))) return undefined
+  try {
+    return await read()
+  } catch (error) {
+    if (!isMissingTable(error)) throw error
+    inheritanceKnownToExist = false
+    return undefined
+  }
+}
+
 /** Test seam: forget the cached positive answers. */
 export function resetFeatureTablesCache(): void {
   followingKnownToExist = false

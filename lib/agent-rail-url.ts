@@ -8,8 +8,11 @@
  * on a fresh chat leaves the URL untouched):
  *
  *   rail=help|library   which view; absent means "agent"
- *   rc=<conversationId> the active agent thread; absent means "new chat"
  *   ra=<slug>[#anchor]  the open Help article (and heading); Help view only
+ *
+ * `rc=<conversationId>` is a legacy param from the removed rail agent view; it is
+ * no longer read or written here (components/panels/legacy-rail-link-redirect.tsx
+ * rewrites it to `detail=conversation:<id>`).
  *
  * Open/closed is deliberately not a param of its own: it is the
  * `compass_panel_agent` cookie. The URL can only ever *open* the rail (any valid
@@ -25,7 +28,9 @@ export const RAIL_VIEW_PARAM = "rail";
 export const RAIL_CONVERSATION_PARAM = "rc";
 export const RAIL_ARTICLE_PARAM = "ra";
 
-export const RAIL_PARAMS = [RAIL_VIEW_PARAM, RAIL_CONVERSATION_PARAM, RAIL_ARTICLE_PARAM] as const;
+// `rc` is deliberately absent: the rail no longer owns it, so it is neither
+// decoded nor re-added (that would fight the legacy redirect).
+export const RAIL_PARAMS = [RAIL_VIEW_PARAM, RAIL_ARTICLE_PARAM] as const;
 
 export type HelpArticleRef = { slug: string; anchor?: string };
 
@@ -69,17 +74,16 @@ export function decodeConversationId(raw: string | null): string | null {
 export function decodeRailParams(params: ParamSource): RailUrlState | null {
   const rawView = params.get(RAIL_VIEW_PARAM);
   const explicitView = RAIL_VIEWS.find((v) => v === rawView) ?? null;
-  const conversationId = decodeConversationId(params.get(RAIL_CONVERSATION_PARAM));
   const helpArticle = decodeHelpArticle(params.get(RAIL_ARTICLE_PARAM));
 
-  if (!explicitView && !conversationId && !helpArticle) return null;
+  if (!explicitView && !helpArticle) return null;
 
   // An article with no explicit view can only mean the Help view.
   const view: RailView = explicitView ?? (helpArticle ? "help" : "agent");
   return {
     open: true,
     view,
-    conversationId,
+    conversationId: null,
     helpArticle: view === "help" ? helpArticle : null,
   };
 }
@@ -95,7 +99,6 @@ export function applyRailParams(current: URLSearchParams, state: RailUrlState): 
   if (!state.open) return next;
 
   if (state.view !== "agent") next.set(RAIL_VIEW_PARAM, state.view);
-  if (state.conversationId) next.set(RAIL_CONVERSATION_PARAM, state.conversationId);
   if (state.view === "help" && state.helpArticle) {
     next.set(RAIL_ARTICLE_PARAM, encodeHelpArticle(state.helpArticle));
   }

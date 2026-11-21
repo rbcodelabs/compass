@@ -217,7 +217,13 @@ describe("Opportunity header picker", () => {
     fireEvent.click(cutCosts)
     await waitFor(() => expect(link).toHaveBeenCalledWith("opp-1", "o2"))
     await waitFor(() => expect(onChanged).toHaveBeenCalled())
-    const retention = await screen.findByRole("menuitemcheckbox", { name: /Grow retention/ })
+    // The callback can run before React commits the selection and re-enables the menu items.
+    await screen.findByRole("menuitemcheckbox", { name: /Cut costs/, checked: true })
+    const retention = await waitFor(() => {
+      const item = screen.getByRole("menuitemcheckbox", { name: /Grow retention/ })
+      expect(item).not.toHaveAttribute("aria-disabled", "true")
+      return item
+    })
     fireEvent.click(retention)
     await waitFor(() => expect(unlink).toHaveBeenCalledWith("opp-1", "o1"))
   })

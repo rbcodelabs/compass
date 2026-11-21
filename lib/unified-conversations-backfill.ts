@@ -10,8 +10,9 @@
  */
 
 import type { AppPrismaClient } from "@/lib/db"
-import { deriveConversationSummary } from "@/lib/agent-card-derive"
-import { isConversationLinkTarget, recordConversationLink } from "@/lib/links/conversation-links"
+import { deriveConversationTitleFromComment, mirrorCommentThread } from "@/lib/conversation-mirror"
+
+export { deriveConversationTitleFromComment }
 
 export const PROTOTYPE_MOCK_CONVERSATION_IDS = [
   "00000000-0000-4000-8000-000000000101",
@@ -35,15 +36,6 @@ function isMissingColumnOrTable(error: unknown): boolean {
   )
 }
 
-export function deriveConversationTitleFromComment(body: string): string {
-  const firstLine =
-    body
-      .split("\n")
-      .map((line) => line.replace(/^[#*>\-\s]+/, "").trim())
-      .find(Boolean) ?? "Discussion thread"
-  return firstLine.length > 80 ? `${firstLine.slice(0, 79)}…` : firstLine
-}
-
 export type BackfillUnifiedConversationsResult = {
   conversationsPromoted: number
   messagesPromoted: number
@@ -65,6 +57,7 @@ export async function backfillUnifiedConversations(
   try {
     const comments = await prisma.comment.findMany({
       where: { workspaceId },
+      include: { solutionPlanProposal: { select: { commentId: true } } },
       orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     })
     if (comments.length === 0) {
@@ -94,82 +87,10 @@ export async function backfillUnifiedConversations(
       if (!ownerUserId) continue
 
       const replies = repliesByParent.get(root.id) ?? []
-      const allMessages = [root, ...replies]
-      const lastMessage = allMessages[allMessages.length - 1]!
-      const updatedAt = lastMessage.updatedAt > root.updatedAt ? lastMessage.updatedAt : root.updatedAt
-      const title = deriveConversationTitleFromComment(root.body)
-      const summary = deriveConversationSummary(lastMessage.body) ?? title.slice(0, 140)
-      const status = root.status === "RESOLVED" ? "RESOLVED" : "OPEN"
-      const resolvedAt = status === "RESOLVED" ? root.updatedAt : null
-
-      await prisma.agentConversation.upsert({
-        where: { id: root.id },
-        create: {
-          id: root.id,
-          workspaceId,
-          userId: ownerUserId,
-          title,
-          summary,
-          targetType: root.targetType,
-          targetId: root.targetId,
-          visibility: "WORKSPACE",
-          status,
-          agentMode: "MENTION_ONLY",
-          source: root.source ?? "BROWSER",
-          resolvedAt,
-          resolvedById: null,
-          createdAt: root.createdAt,
-          updatedAt,
-        },
-        update: {
-          status,
-          resolvedAt,
-          summary,
-          updatedAt,
-        },
-      })
+      const { messagesPromoted: promoted, linkCreated } = await mirrorCommentThread(prisma, { root, replies, ownerUserId })
       conversationsPromoted++
-
-      for (const item of allMessages) {
-        const isAssistant = item.authorType === "AGENT" || item.authorType === "AI"
-        const role = isAssistant ? "assistant" : "user"
-        const editedAt = item.updatedAt > item.createdAt ? item.updatedAt : null
-        await prisma.agentMessage.upsert({
-          where: { id: item.id },
-          create: {
-            id: item.id,
-            conversationId: root.id,
-            role,
-            content: item.body,
-            authorUserId: item.authorId,
-            authorName: item.authorName,
-            authorType: item.authorType ?? (isAssistant ? "AGENT" : "HUMAN"),
-            messageKind: "COMMENT",
-            editedAt,
-            createdAt: item.createdAt,
-          },
-          update: {
-            content: item.body,
-            editedAt,
-          },
-        })
-        messagesPromoted++
-      }
-
-      if (isConversationLinkTarget(root.targetType)) {
-        try {
-          const outcome = await recordConversationLink(prisma, {
-            conversationId: root.id,
-            workspaceId,
-            entityType: root.targetType,
-            entityId: root.targetId,
-            kind: "MENTIONS",
-          })
-          if (outcome === "created") linksCreated++
-        } catch {
-          // Best-effort if the target entity was deleted.
-        }
-      }
+      messagesPromoted += promoted
+      if (linkCreated) linksCreated++
     }
   } catch (error) {
     if (!isMissingColumnOrTable(error)) throw error

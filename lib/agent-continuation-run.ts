@@ -129,6 +129,15 @@ export async function startConversationContinuationRun(
     return { status: "refused", code: "WORKSPACE_ACCESS_DENIED", message: "Workspace not found or user is no longer a member." }
   }
 
+  // An archived shared thread takes no replies (TASK-195 S2): wake-ups and supervision actions must not revive it.
+  const archivedShared = await prisma.agentConversation.findFirst({
+    where: { id: input.conversationId, workspaceId: input.workspaceId, visibility: "WORKSPACE", archivedAt: { not: null } },
+    select: { id: true },
+  })
+  if (archivedShared) {
+    return { status: "refused", code: "CONVERSATION_ARCHIVED", message: "This conversation is archived. Restore it to continue." }
+  }
+
   if (!(await agentRunsAvailable(prisma))) {
     return { status: "refused", code: "AGENT_RUN_UNAVAILABLE", message: "Background agent runs are not available yet." }
   }

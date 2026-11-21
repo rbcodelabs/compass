@@ -46,7 +46,7 @@ describe("WorkspaceGallery", () => {
 
   it("links each tile to the workspace's default landing page", () => {
     renderGallery()
-    expect(screen.getByRole("link", { name: /^Epsilon/ })).toHaveAttribute("href", "/globex/eps/okrs")
+    expect(screen.getByRole("link", { name: /^Epsilon/ })).toHaveAttribute("href", "/globex/eps/home")
   })
 
   it("filters on workspace and organization name, with counts and a no-results panel", () => {

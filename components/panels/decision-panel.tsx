@@ -12,7 +12,8 @@ import { subjectPanelType } from "@/components/decisions/decision-sources";
 import { DECISION_UPDATED_EVENT, decisionStatusBadgeProps } from "@/lib/decision-review-ui";
 import type { TrackedDecisionAnswer, TrackedDecisionPacketQuestion } from "@/lib/tracked-decision-types";
 import { useOptionalPanelContext, type EntityPanelType } from "./panel-context";
-import { FullPageLink, PanelContainer, PanelError, PanelSkeleton } from "./panel-parts";
+import { PanelContainer, PanelError, PanelSkeleton } from "./panel-parts";
+import { usePanelHeaderActions } from "./panel-header-actions";
 
 export type DecisionPanelData = {
   id: string;
@@ -90,6 +91,10 @@ export function DecisionPanel({ id, orgSlug, workspaceSlug }: { id: string; orgS
     window.addEventListener(DECISION_UPDATED_EVENT, onUpdated);
     return () => window.removeEventListener(DECISION_UPDATED_EVENT, onUpdated);
   }, [load]);
+
+  usePanelHeaderActions(
+    data ? { fullPageHref: "/" + orgSlug + "/" + workspaceSlug + "/reviews/" + (data.displayId ?? data.id) } : {},
+  );
 
   if (error) return <PanelError label="decision" />;
   if (!data) return <PanelSkeleton />;
@@ -225,14 +230,11 @@ export function DecisionPanel({ id, orgSlug, workspaceSlug }: { id: string; orgS
         </div>
       )}
 
-      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border-subtle pt-3">
-        <FullPageLink href={"/" + orgSlug + "/" + workspaceSlug + "/reviews/" + (data.displayId ?? data.id)} />
-        {typeof data.sourcesCount === "number" && data.sourcesCount > 0 && (
-          <span className="text-xs text-muted-foreground">
-            {data.sourcesCount} {data.sourcesCount === 1 ? "source" : "sources"} on full page
-          </span>
-        )}
-      </div>
+      {typeof data.sourcesCount === "number" && data.sourcesCount > 0 && (
+        <p className="border-t border-border-subtle pt-3 text-xs text-muted-foreground">
+          {data.sourcesCount} {data.sourcesCount === 1 ? "source" : "sources"} on full page
+        </p>
+      )}
     </PanelContainer>
   );
 }

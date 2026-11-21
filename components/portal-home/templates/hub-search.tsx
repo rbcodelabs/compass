@@ -7,7 +7,8 @@ import { Search } from "lucide-react"
  * The docs hub's search-first box. It filters the published docs already on this page (the docs widget's list
  * items) as you type, so it needs no search backend and can never surface anything the customer cannot see.
  */
-export function HubSearch({ suggestions = [] }: { suggestions?: string[] }) {
+export function HubSearch({ suggestions = [], tone = "onDark" }: { suggestions?: string[]; tone?: "onDark" | "light" }) {
+  const light = tone === "light"
   const inputId = useId()
   const [status, setStatus] = useState("")
   const [query, setQuery] = useState("")
@@ -39,8 +40,8 @@ export function HubSearch({ suggestions = [] }: { suggestions?: string[] }) {
       }}
     >
       <label htmlFor={inputId} className="sr-only">Search the docs</label>
-      <div className="relative flex items-center rounded-xl bg-white p-1.5 pl-12 shadow-[0_18px_40px_rgba(0,0,0,0.45)] focus-within:ring-4 focus-within:ring-[#A294FF]">
-        <Search className="absolute left-4 size-5 text-[#5B564F]" aria-hidden />
+      <div className={light ? "relative flex items-center rounded-xl border border-border-default bg-surface-panel p-1.5 pl-12 shadow-sm focus-within:ring-4 focus-within:ring-ring/40" : "relative flex items-center rounded-xl bg-white p-1.5 pl-12 shadow-[0_18px_40px_rgba(0,0,0,0.45)] focus-within:ring-4 focus-within:ring-[#A294FF]"}>
+        <Search className={light ? "absolute left-4 size-5 text-text-subtle" : "absolute left-4 size-5 text-[#5B564F]"} aria-hidden />
         <input
           id={inputId}
           type="search"
@@ -48,21 +49,21 @@ export function HubSearch({ suggestions = [] }: { suggestions?: string[] }) {
           placeholder="Search the docs"
           value={query}
           onChange={(event) => filter(event.target.value)}
-          className="min-h-12 min-w-0 flex-1 bg-transparent text-[17px] text-[#14110F] outline-none placeholder:text-[#6F6A61]"
+          className={light ? "min-h-12 min-w-0 flex-1 bg-transparent text-[17px] text-text-primary outline-none placeholder:text-text-subtle" : "min-h-12 min-w-0 flex-1 bg-transparent text-[17px] text-[#14110F] outline-none placeholder:text-[#6F6A61]"}
         />
         <button type="submit" className="min-h-11 rounded-lg bg-primary px-5 text-sm font-semibold text-primary-foreground hover:opacity-90">Search</button>
       </div>
-      <p role="status" aria-live="polite" className="mt-3 min-h-5 text-sm text-[#B9B3A9]">{status}</p>
+      <p role="status" aria-live="polite" className={light ? "mt-3 min-h-5 text-sm text-text-subtle" : "mt-3 min-h-5 text-sm text-[#B9B3A9]"}>{status}</p>
     </form>
     {suggestions.length > 0 ? (
       <div className="mt-1 flex flex-wrap items-center justify-center gap-2" data-testid="hub-popular">
-        <span className="mr-1 text-[13px] font-semibold tracking-[0.08em] text-[#B9B3A9] uppercase">Popular</span>
+        <span className={light ? "mr-1 text-[13px] font-semibold tracking-[0.08em] text-text-subtle uppercase" : "mr-1 text-[13px] font-semibold tracking-[0.08em] text-[#B9B3A9] uppercase"}>Popular</span>
         {suggestions.map((term) => (
           <button
             key={term}
             type="button"
             onClick={() => filter(term)}
-            className="max-w-full truncate rounded-full border border-[#4D473E] px-3.5 py-1 text-sm text-[#FAF9F6] hover:border-[#A294FF] hover:bg-[#26221E] focus-visible:ring-2 focus-visible:ring-[#A294FF] focus-visible:outline-none"
+            className={light ? "max-w-full truncate rounded-full border border-border-default px-3.5 py-1 text-sm text-text-primary hover:border-border-focus hover:bg-surface-inset focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none" : "max-w-full truncate rounded-full border border-[#4D473E] px-3.5 py-1 text-sm text-[#FAF9F6] hover:border-[#A294FF] hover:bg-[#26221E] focus-visible:ring-2 focus-visible:ring-[#A294FF] focus-visible:outline-none"}
           >
             {term}
           </button>

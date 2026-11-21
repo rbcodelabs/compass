@@ -9,7 +9,6 @@ import {
   PanelSkeleton,
   PanelError,
   PanelContainer,
-  FullPageLink,
   PanelTitle,
   Section,
   Field,
@@ -18,6 +17,7 @@ import {
   type RelationItem,
   type EditContext,
 } from "./panel-parts";
+import { usePanelHeaderActions } from "./panel-header-actions";
 
 type AssumptionData = {
   id: string;
@@ -73,6 +73,9 @@ export function AssumptionPanel({
     orgSlug,
     workspaceSlug
   );
+  usePanelHeaderActions(
+    data?.solution?.opportunity ? { fullPageHref: `/${orgSlug}/${workspaceSlug}/discovery/${data.solution.opportunity.id}` } : {},
+  );
 
   if (error) return <PanelError label="assumption" />;
   if (!data) return <PanelSkeleton />;
@@ -97,12 +100,6 @@ export function AssumptionPanel({
 
   return (
     <PanelContainer entity={{ type: edit.type, id: edit.id, title: data.title }}>
-      {data.solution?.opportunity && (
-        <FullPageLink
-          href={`/${orgSlug}/${workspaceSlug}/discovery/${data.solution.opportunity.id}`}
-        />
-      )}
-
       <PanelTitle displayId={displayId}
         title={data.title}
         status={{ value: data.status, ...(STATUS[data.status] ?? { label: data.status }) }}

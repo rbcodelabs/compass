@@ -136,9 +136,11 @@ test.describe("Workspace Updates", () => {
         await fixture.event(second, { kind: "COMMENT_ADDED" });
         await page.setViewportSize(viewport);
         await page.goto(base);
-        await expect(page).toHaveURL(new RegExp(`${base}/updates$`));
+        await expect(page).toHaveURL(new RegExp(`${base}/home$`));
         const nav = page.getByRole("navigation", { name: size === "mobile" ? "Primary navigation" : "Main navigation" });
         await expect(nav.getByRole("link", { name: "Updates", exact: true })).toBeVisible();
+        await nav.getByRole("link", { name: "Updates", exact: true }).click();
+        await expect(page).toHaveURL(new RegExp(`${base}/updates$`));
         if (size === "mobile") {
           const decisions = nav.getByRole("link", { name: "Decisions", exact: true });
           // BottomNav re-centres the active link (Updates) in an effect that runs on hydration, which
