@@ -233,12 +233,21 @@ test.describe("Roadmap — not yet on the roadmap", () => {
       const laterColumn = page.locator("#roadmap-column-LATER");
       const roadmapBoard = page.getByRole("region", { name: "Roadmap board" });
       await dragTo(page, dragHandle, laterColumn, roadmapBoard);
-
       await expect(solutionUnscheduledCard).not.toBeVisible({ timeout: 10_000 });
       // .first() — the promoted item's own title AND its "Solution" link
       // chip both show the same solution title, so this text appears twice
       // on the card; either occurrence confirms it landed here.
       await expect(laterColumn.getByText(solTitle).first()).toBeVisible({ timeout: 10_000 });
+
+      // Use the real board, including its columns, dock, and production CSS.
+      const boardBox = (await roadmapBoard.boundingBox())!;
+      await page.mouse.move(boardBox.x + 60, boardBox.y + 27);
+      const startingOffset = await roadmapBoard.evaluate(element => element.scrollLeft);
+      for (let input = 1; input <= 4; input++) {
+        await page.mouse.wheel(0, 40);
+        await expect.poll(() => roadmapBoard.evaluate(element => element.scrollLeft)).toBe(startingOffset + input * 40);
+      }
+
 
       // ── 4. Quick-add the bug to NEXT via its card menu (no drag) ────────────
       await bugUnscheduledCard.hover();
