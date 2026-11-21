@@ -1,3 +1,4 @@
+import { OkrLiveRefresh } from "@/components/okrs/okr-live-refresh";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { auth } from "@/auth";
@@ -93,6 +94,7 @@ export default async function OKRsPage({ params }: OKRsPageProps) {
 
   return (
     <main className="flex flex-col flex-1 p-4 sm:p-6 md:p-8 gap-8">
+      <OkrLiveRefresh orgSlug={orgSlug} workspaceSlug={workspaceSlug} />
       <PageHeader title={labels.sections.okrs} description={`Track ${labels.objective.lowerPlural} and ${labels.keyResult.lowerPlural} across ${labels.cycle.lowerPlural}.`} actions={<CreateCycleForm
           workspaceId={workspace.id}
           orgSlug={orgSlug}

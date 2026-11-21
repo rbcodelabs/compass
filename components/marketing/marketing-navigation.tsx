@@ -113,7 +113,7 @@ export function MarketingNavigation({ viewer }: { viewer: MarketingViewer }) {
             {viewer.workspaces.map((workspace) => (
               <DropdownMenuItem key={workspace.id} className="cursor-pointer p-0">
                 <Link
-                  href={`/${workspace.orgSlug}/${workspace.slug}/okrs`}
+                  href={`/${workspace.orgSlug}/${workspace.slug}/home`}
                   aria-label={`${workspace.name} ${workspace.orgName}`}
                   className="flex w-full items-center gap-2 px-2 py-1.5"
                 >

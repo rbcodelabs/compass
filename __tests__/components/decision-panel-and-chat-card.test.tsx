@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => ({
   decide: vi.fn(),
+  headerActions: vi.fn(),
   refresh: vi.fn(),
   push: vi.fn(),
   replace: vi.fn(),
@@ -14,6 +15,11 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: mocks.refresh, push: mocks.push, replace: mocks.replace }),
   usePathname: () => "/acme/product/agent",
   useSearchParams: () => new URLSearchParams(),
+}))
+// The full-page link is a PanelShell header action (usePanelHeaderActions), not part of the panel body.
+vi.mock("@/components/panels/panel-header-actions", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/components/panels/panel-header-actions")>()),
+  usePanelHeaderActions: mocks.headerActions,
 }))
 vi.mock("@/app/[orgSlug]/[workspaceSlug]/reviews/actions", () => ({
   decideReviewAction: mocks.decide,
@@ -93,7 +99,7 @@ describe("DecisionPanel slide-over drawer", () => {
     const banner = screen.getByTestId("decision-outcome-banner")
     expect(banner).toHaveAttribute("data-outcome", "REJECT")
     expect(banner).toHaveTextContent("Decision recorded: Reject by Rick Bowman")
-    expect(screen.getByRole("link", { name: /Open full page/i })).toHaveAttribute("href", "/acme/product/reviews/DEC-19")
+    expect(mocks.headerActions).toHaveBeenCalledWith({ fullPageHref: "/acme/product/reviews/DEC-19" })
   })
 })
 

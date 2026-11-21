@@ -123,7 +123,7 @@ export function DocsForm({ config, onChange, options }: ConfigFormProps<DocsConf
         <div className="flex flex-col gap-2">
           <span className="text-sm font-medium">Choose docs</span>
           {options === null ? <p className="text-xs text-text-subtle">Loading docs…</p> : null}
-          {options && docs.length === 0 ? <p className="text-xs leading-5 text-text-subtle">No publishable docs yet. Create a doc, then publish it from the doc header.</p> : null}
+          {options && !options.unavailable && docs.length === 0 ? <p className="text-xs leading-5 text-text-subtle">No publishable docs yet. Create a doc, then publish it from the doc header.</p> : null}
           {config.docIds.length > 0 ? (
             <ol className="flex flex-col gap-1" aria-label="Selected docs, in display order">
               {config.docIds.map((id, index) => {
