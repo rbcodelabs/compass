@@ -2687,6 +2687,9 @@ model Task {
   /// or both of assigneeUserId / ownerName may be set.
   ownerName      String?   @map("owner_name") @db.VarChar(255)
   storyPoints    Float?    @map("story_points")
+  /// Optional start of the work. Null means the task has only a due date (a milestone on a timeline). When both are set,
+  /// startDate <= dueDate (checked in code via validateTaskDates, not in the database).
+  startDate      DateTime? @map("start_date")
   dueDate        DateTime? @map("due_date")
   /// Freeform sprint/iteration label (e.g. "Sprint 24", "2026-W31"). Reserved
   /// extension point for a future first-class Sprint entity.
