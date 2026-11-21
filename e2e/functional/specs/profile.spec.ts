@@ -48,13 +48,23 @@ test("Profile updates past and future conversation author names and account navi
     await itemConversations.getByTestId("object-conversation-composer").fill("A comment before the rename")
     await itemConversations.getByRole("button", { name: "Send", exact: true }).click()
     // Send opens the new conversation in the Conversation panel, where the follow-up is the old "reply".
-    await expect(conversationPanel().getByText("A comment before the rename", { exact: true })).toBeVisible()
+    await expect(conversationPanel().getByTestId("conversation-message").getByText("A comment before the rename", { exact: true })).toBeVisible()
     await expect.poll(openedConversationId).not.toBe("")
     const conversationId = openedConversationId()
-    await conversationPanel().getByPlaceholder(/message the agent/i).fill("A reply before the rename")
+    const reply = "A reply before the rename"
+    await conversationPanel().getByPlaceholder(/message the agent/i).fill(reply)
+    const replyAccepted = page.waitForResponse((response) => {
+      const request = response.request()
+      if (request.method() !== "POST" || new URL(response.url()).pathname !== "/api/agent/turn") return false
+      const payload = request.postDataJSON()
+      return payload?.conversationId === conversationId && payload?.message === reply
+    })
     await conversationPanel().getByRole("button", { name: "Send message" }).click()
-    await expect(conversationPanel().getByText("A reply before the rename", { exact: true })).toBeVisible()
+    expect((await replyAccepted).status()).toBe(200)
     await expect.poll(async () => (await messages(workspaceId, conversationId)).length).toBe(2)
+    // Shared conversations poll every four seconds and skip ticks while sending. Wait for the stored row.
+    await expect(conversationPanel().getByTestId("conversation-message").getByText(reply, { exact: true }))
+      .toBeVisible({ timeout: 15_000 })
 
     await page.goto("/settings/profile")
     await page.getByLabel("Display name").fill("   ")
@@ -66,31 +76,33 @@ test("Profile updates past and future conversation author names and account navi
     await expect(page.getByRole("button", { name: "Account menu", exact: true })).toContainText(desiredName)
     await page.screenshot({ path: testInfo.outputPath("profile-desktop.png"), fullPage: true })
     await page.getByRole("button", { name: "Account menu", exact: true }).click()
-    await expect(page.getByRole("link", { name: "Profile", exact: true })).toBeVisible()
+    // Scoped to the menu: the settings nav on this page also has a "Profile" link.
+    await expect(page.locator('[data-slot="dropdown-menu-content"]').getByRole("link", { name: "Profile", exact: true })).toBeVisible()
     await page.keyboard.press("Escape")
     await page.setViewportSize({ width: 390, height: 844 })
     await expect(page.getByLabel("Display name")).toBeVisible()
     await page.screenshot({ path: testInfo.outputPath("profile-mobile.png"), fullPage: true })
     await page.getByRole("button", { name: "Account", exact: true }).click()
-    await expect(page.getByRole("link", { name: "Profile", exact: true })).toBeVisible()
-    await page.getByRole("link", { name: "Profile", exact: true }).click()
+    const accountMenuProfile = page.locator('[data-slot="dropdown-menu-content"]').getByRole("link", { name: "Profile", exact: true })
+    await expect(accountMenuProfile).toBeVisible()
+    await accountMenuProfile.click()
     await page.setViewportSize({ width: 1280, height: 800 })
 
     await page.goto(`${base}/roadmap`)
     await card.getByRole("button", { name: title }).click()
     await page.locator('[data-slot="sheet-content"]').getByTestId("object-conversations-section").getByRole("button", { name: /^A comment before the rename/ }).click()
-    await expect(conversationPanel().getByText("A reply before the rename", { exact: true })).toBeVisible()
+    await expect(conversationPanel().getByTestId("conversation-message").getByText("A reply before the rename", { exact: true })).toBeVisible()
     // Past messages now carry the new name; renaming is not an edit.
     const past = await messages(workspaceId, conversationId)
     expect(past.map((message) => message.authorName)).toEqual([desiredName, desiredName])
     for (const message of past) expect(message.editedAt ?? null).toBeNull()
     await conversationPanel().getByPlaceholder(/message the agent/i).fill("A comment after the rename")
     await conversationPanel().getByRole("button", { name: "Send message" }).click()
-    await expect(conversationPanel().getByText("A comment after the rename", { exact: true })).toBeVisible()
+    await expect(conversationPanel().getByTestId("conversation-message").getByText("A comment after the rename", { exact: true })).toBeVisible()
     await expect.poll(async () => (await messages(workspaceId, conversationId)).map((message) => message.authorName)).toEqual([desiredName, desiredName, desiredName])
     await page.reload()
     await expect(conversationPanel()).toBeVisible()
-    await expect(conversationPanel().getByText("A comment after the rename", { exact: true })).toBeVisible()
+    await expect(conversationPanel().getByTestId("conversation-message").getByText("A comment after the rename", { exact: true })).toBeVisible()
     expect((await messages(workspaceId, conversationId)).map((message) => message.authorName)).toEqual([desiredName, desiredName, desiredName])
   } catch (error) {
     failed = true

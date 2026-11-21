@@ -8,7 +8,7 @@ describe("buildTaskCards", () => {
       tasks: [{
         id: "task-1", title: "Ship", description: null, status: "TODO", priority: "HIGH",
         sortOrder: 2, squadId: "squad-1", assigneeUserId: null, ownerName: "Rick",
-        storyPoints: 3, dueDate: new Date("2026-09-04T00:00:00.000Z"), iteration: null,
+        storyPoints: 3, startDate: new Date("2026-09-01T00:00:00.000Z"), dueDate: new Date("2026-09-04T00:00:00.000Z"), iteration: null,
         parentTaskId: null,
       }],
       squads: [{ id: "squad-1", name: "Core", color: "blue" }],
@@ -23,6 +23,7 @@ describe("buildTaskCards", () => {
     expect(cards).toEqual([expect.objectContaining({
       id: "task-1",
       squad: { id: "squad-1", name: "Core", color: "blue" },
+      startDate: "2026-09-01T00:00:00.000Z",
       dueDate: "2026-09-04T00:00:00.000Z",
       subtaskCount: 2,
       links: [
@@ -37,11 +38,11 @@ describe("buildTaskCards", () => {
       tasks: [{
         id: "task-2", title: "Empty", description: null, status: "BACKLOG", priority: "LOW",
         sortOrder: 0, squadId: null, assigneeUserId: null, ownerName: null,
-        storyPoints: null, dueDate: null, iteration: null, parentTaskId: null,
+        storyPoints: null, startDate: null, dueDate: null, iteration: null, parentTaskId: null,
       }],
       squads: [], links: [], subtaskCounts: [], linkedTitles: new Map(),
     });
 
-    expect(card).toEqual(expect.objectContaining({ squad: null, links: [], subtaskCount: 0 }));
+    expect(card).toEqual(expect.objectContaining({ squad: null, startDate: null, links: [], subtaskCount: 0 }));
   });
 });

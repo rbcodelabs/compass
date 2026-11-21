@@ -1,4 +1,5 @@
 import { APIError, Sandbox, Snapshot, type Command } from "@vercel/sandbox"
+import type { PreparedPersistentSandboxStop } from "@/lib/agent-sandbox-fence"
 import type {
   BootSandboxOptions,
   CommandHandle,
@@ -98,6 +99,82 @@ class VercelSandboxHandle implements SandboxHandle {
   async snapshot(): Promise<{ imageId: string; sizeBytes: number }> {
     const snap = await this.sandbox.currentSession().snapshot()
     return { imageId: snap.snapshotId, sizeBytes: snap.sizeBytes }
+  }
+}
+
+/**
+ * Resolve the named sandbox without resuming it, then keep the specific session
+ * for dispatch. A prepared stop can only refer to that session.
+ */
+async function readVercelSandboxSession(name: string) {
+  let sandbox: Sandbox
+  try {
+    sandbox = await Sandbox.get({ name, resume: false })
+  } catch (error) {
+    if (error instanceof APIError && error.response.status === 404) return { exists: false as const }
+    throw error
+  }
+  try {
+    return { exists: true as const, sandbox, session: sandbox.currentSession() }
+  } catch (error) {
+    // currentSession() throws when the fresh lookup returned no session.
+    if (error instanceof Error && error.message.startsWith("No active session.")) {
+      return { exists: true as const, sandbox, session: null }
+    }
+    throw error
+  }
+}
+
+export async function isVercelSandboxQuiescent(name: string, sessionId: string): Promise<boolean> {
+  const found = await readVercelSandboxSession(name)
+  if (!found.exists) return false
+  if (found.session) {
+    if (found.session.sessionId !== sessionId || found.session.status !== "stopped") return false
+  } else {
+    const { sessions: [latest] } = await found.sandbox.listSessions({ limit: 1, sortOrder: "desc" })
+    if (latest?.id !== sessionId || latest.status !== "stopped") return false
+  }
+  return hasSettledSessionSnapshot(found.sandbox, sessionId)
+}
+
+async function hasSettledSessionSnapshot(sandbox: Sandbox, sessionId: string): Promise<boolean> {
+  if (!sandbox.currentSnapshotId) return false
+  try {
+    const snapshot = await Snapshot.get({ snapshotId: sandbox.currentSnapshotId })
+    return snapshot.sourceSessionId === sessionId && (snapshot.status === "created" || snapshot.status === "deleted")
+  } catch (error) {
+    // This lookup targets the advertised snapshot of a verified stopped sandbox.
+    // An explicitly absent snapshot leaves the existing launch fallback to replace it.
+    if (error instanceof APIError && [404, 410].includes(error.response.status)) return true
+    throw error
+  }
+}
+
+export async function prepareVercelSandboxStop(name: string): Promise<PreparedPersistentSandboxStop | null> {
+  const found = await readVercelSandboxSession(name)
+  if (!found.exists) return null
+  if (!found.session || found.session.status === "stopped") {
+    const last = found.session
+      ? { id: found.session.sessionId, status: found.session.status }
+      : (await found.sandbox.listSessions({ limit: 1, sortOrder: "desc" })).sessions[0]
+    // No stop has been sent. A verified terminal session with no advertised
+    // snapshot can be handed back to the launch path's missing-snapshot fallback.
+    if (last?.status === "stopped" && !found.sandbox.currentSnapshotId) return null
+    if (last?.status !== "stopped" || !(await hasSettledSessionSnapshot(found.sandbox, last.id))) {
+      throw new Error("Sandbox paused without a confirmed saved snapshot")
+    }
+    return null
+  }
+  const session = found.session
+  if (session.status !== "running") throw new Error("Sandbox session has not settled")
+  return {
+    sessionId: session.sessionId,
+    stop: async () => {
+      const result = await session.stop()
+      if (result.session.status !== "stopped" || result.snapshot?.sourceSessionId !== session.sessionId || result.snapshot.status !== "created") {
+        throw new Error("Sandbox pause or saved snapshot has not been confirmed")
+      }
+    },
   }
 }
 

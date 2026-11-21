@@ -143,6 +143,30 @@ test.describe("OKRs", () => {
     await page.getByRole("button", { name: "Check in" }).click();
     // Clear current value (pre-filled with 0) and enter 50
     await page.getByLabel("Current value").fill("50");
+
+    // Another session can rename a matching metric while this check-in is a draft.
+    await filter.fill(krTitle);
+    await expect(page.getByText("1 of 1")).toBeVisible();
+    const pool = new pg.Pool({ connectionString: isolatedE2EConnectionString() });
+    const renameMetric = (name: string, previousName: string) => pool.query(
+      `UPDATE "${S}".key_results SET title = $1 WHERE title = $2 AND objective_id IN (SELECT id FROM "${S}".objectives WHERE title = $3)`,
+      [name, previousName, objectiveTitle],
+    );
+    const temporaryTitle = `Renamed metric ${ts}`;
+    try {
+      expect((await renameMetric(temporaryTitle, krTitle)).rowCount).toBe(1);
+      await expect(page.getByText("0 of 1")).toBeVisible({ timeout: 20_000 });
+      await expect(page.getByLabel("Current value")).toBeHidden();
+    } finally {
+      try {
+        await renameMetric(krTitle, temporaryTitle);
+      } finally {
+        await pool.end();
+      }
+    }
+    await expect(page.getByText("1 of 1")).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByLabel("Current value")).toHaveValue("50");
+    await filter.press("Escape");
     await page.getByRole("button", { name: "Save check-in" }).click();
 
     // Wait for the check-in form to close (server action done → setOpen(false)).

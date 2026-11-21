@@ -18,6 +18,8 @@ const AGENT = "11111111-1111-4111-8111-111111111111"
 
 function fakePrisma(options: { attribution: boolean | Error }) {
   const prisma: Any = {
+    $executeRaw: vi.fn().mockResolvedValue(1),
+    agentSandboxOperation: { findUnique: vi.fn().mockResolvedValue(null) },
     agentRun: {
       // The attribution probe selects the new columns; with migration 100 missing Prisma raises P2022.
       findMany: vi.fn(async () => {

@@ -26,10 +26,20 @@ const redirect = vi.hoisted(() =>
     throw new Error("NEXT_REDIRECT");
   })
 );
-const cookiesGet = vi.hoisted(() => vi.fn(() => undefined));
+const cookiesGet = vi.hoisted(() => vi.fn());
+const orgMembership = vi.hoisted(() => vi.fn());
+const requireWorkspaceContext = vi.hoisted(() => vi.fn());
+const getSessionUser = vi.hoisted(() => vi.fn());
 
 vi.mock("@/auth", () => ({ auth }));
 vi.mock("@/lib/workspace", () => ({ getUserWorkspaces }));
+vi.mock("@/lib/workspace-context", () => ({ requireWorkspaceContext }));
+vi.mock("@/lib/session", () => ({ getSessionUser }));
+vi.mock("@/lib/db", () => ({
+  default: () => ({
+    organizationMember: { findFirst: orgMembership },
+  }),
+}));
 vi.mock("next/headers", () => ({ cookies: async () => ({ get: cookiesGet }) }));
 vi.mock("next/navigation", () => ({
   redirect,
@@ -41,15 +51,19 @@ vi.mock("@/lib/actions/auth-actions", () => ({ signOutAction: vi.fn() }));
 vi.mock("@/lib/meta-feedback-actions", () => ({ sendCompassFeedback: vi.fn() }));
 
 import SettingsLayout from "@/app/settings/layout";
+import WorkspaceSettingsLayout from "@/app/[orgSlug]/[workspaceSlug]/settings/layout";
+import OrgSettingsLayout from "@/app/[orgSlug]/settings/layout";
+import { LAST_WORKSPACE_COOKIE } from "@/lib/last-workspace";
 
 const session = {
-  user: { id: "user-1", name: "Rick Bowman", email: "rick@rbcodelabs.com" },
+  user: { id: "user-1", name: "Casey Example", email: "casey@example.test" },
 };
 
 describe("SettingsLayout (account-wide /settings chrome)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     auth.mockResolvedValue(session);
+    orgMembership.mockResolvedValue({ role: "MEMBER" });
   });
 
   afterEach(cleanup);
@@ -107,5 +121,72 @@ describe("SettingsLayout (account-wide /settings chrome)", () => {
     // workspace) — and nothing throws or redirects for lack of an anchor.
     expect(screen.getByTestId("page-content")).toBeInTheDocument();
     expect(redirect).not.toHaveBeenCalled();
+  });
+});
+
+describe("scoped settings navigation", () => {
+  const workspace = { id: "ws-growth", name: "Growth", slug: "growth", orgSlug: "acme", orgName: "Acme" };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    cookiesGet.mockReset();
+    getUserWorkspaces.mockResolvedValue([workspace]);
+    orgMembership.mockResolvedValue({ role: "OWNER" });
+    vi.stubEnv("PLATFORM_ADMIN_EMAILS", "platform-admin@example.test");
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllEnvs();
+  });
+
+  it.each([
+    { email: "platform-admin@example.test", showPlatform: true },
+    { email: "casey@example.test", showPlatform: false },
+  ])("workspace settings show platform navigation for $email: $showPlatform", async ({ email, showPlatform }) => {
+    requireWorkspaceContext.mockResolvedValue({ workspace, isOrgAdmin: true, user: { ...session.user, email } });
+    render(await WorkspaceSettingsLayout({
+      children: <div />,
+      params: Promise.resolve({ orgSlug: "acme", workspaceSlug: "growth" }),
+    }));
+
+    const nav = within(screen.getByRole("navigation", { name: "Settings" }));
+    const link = nav.queryByRole("link", { name: "Agent snapshot" });
+    if (showPlatform) expect(link).toHaveAttribute("href", "/settings/admin/agent-snapshot");
+    else expect(link).not.toBeInTheDocument();
+  });
+
+  it.each([
+    { email: "platform-admin@example.test", showPlatform: true },
+    { email: "casey@example.test", showPlatform: false },
+  ])("organization settings show platform navigation for $email: $showPlatform", async ({ email, showPlatform }) => {
+    getSessionUser.mockResolvedValue({ ...session.user, email });
+    render(await OrgSettingsLayout({ children: <div />, params: Promise.resolve({ orgSlug: "acme" }) }));
+
+    const nav = within(screen.getByRole("navigation", { name: "Settings" }));
+    const link = nav.queryByRole("link", { name: "Agent snapshot" });
+    if (showPlatform) expect(link).toHaveAttribute("href", "/settings/admin/agent-snapshot");
+    else expect(link).not.toBeInTheDocument();
+  });
+
+  it("falls back within an organization after visiting a workspace in another organization", async () => {
+    getSessionUser.mockResolvedValue(session.user);
+    getUserWorkspaces.mockResolvedValue([
+      workspace,
+      { id: "ws-platform", name: "Platform", slug: "platform", orgSlug: "acme", orgName: "Acme" },
+      { id: "ws-ops", name: "Operations", slug: "ops", orgSlug: "globex", orgName: "Globex" },
+    ]);
+    const params = Promise.resolve({ orgSlug: "acme" });
+
+    cookiesGet.mockImplementation((name: string) => name === LAST_WORKSPACE_COOKIE ? { value: "acme/platform" } : undefined);
+    render(await OrgSettingsLayout({ children: <div />, params }));
+    expect(within(screen.getByRole("navigation", { name: "Settings" })).getByRole("link", { name: "Workspace settings" }))
+      .toHaveAttribute("href", "/acme/platform/settings");
+    cleanup();
+
+    cookiesGet.mockImplementation((name: string) => name === LAST_WORKSPACE_COOKIE ? { value: "globex/ops" } : undefined);
+    render(await OrgSettingsLayout({ children: <div />, params }));
+    expect(within(screen.getByRole("navigation", { name: "Settings" })).getByRole("link", { name: "Workspace settings" }))
+      .toHaveAttribute("href", "/acme/growth/settings");
   });
 });

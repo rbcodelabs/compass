@@ -2,6 +2,7 @@ import { redirect, notFound } from "next/navigation";
 import { researchNavEnabled } from "@/lib/modules/server";
 import { getUserWorkspaces } from "@/lib/workspace";
 import { getSessionUser } from "@/lib/session";
+import { isPlatformAdminEmail } from "@/lib/platform-admin";
 import { isOrgAdminRole } from "@/lib/roles";
 import getPrisma from "@/lib/db";
 import { Sidebar } from "@/components/sidebar";
@@ -13,6 +14,8 @@ import { cookies } from "next/headers";
 import { panelPinCookieName, parsePanelPin } from "@/lib/panel-pin";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { LAST_WORKSPACE_COOKIE, pickAnchorWorkspace } from "@/lib/last-workspace";
+import { SettingsShell } from "@/components/settings/settings-shell";
 
 interface OrgSettingsLayoutProps {
   children: React.ReactNode;
@@ -23,9 +26,9 @@ interface OrgSettingsLayoutProps {
  * Layout for the org-level settings route (/{orgSlug}/settings) — the first
  * org-scoped (not workspace-scoped) route in the app. Reuses the same
  * Sidebar/BottomNav/MobileHeader chrome as workspace pages, anchored to the
- * caller's first workspace membership in this org purely for nav-link
- * targets (Discovery, OKRs, etc.) — this page itself renders org-wide data,
- * not workspace data.
+ * caller's remembered workspace in this org or their first membership here.
+ * The workspace anchors nav links (Discovery, OKRs, etc.). This page renders
+ * organization-wide data.
  *
  * Access is gated to org admins/owners here (not per-action in the page),
  * matching the getWorkspace() -> notFound() convention used by the
@@ -63,7 +66,9 @@ export default async function OrgSettingsLayout({
     notFound();
   }
 
-  const anchorWorkspace = workspaces.find((ws) => ws.orgSlug === orgSlug);
+  const cookieStore = await cookies();
+  // Use the globally remembered workspace if it belongs to this organization.
+  const anchorWorkspace = pickAnchorWorkspace(workspaces, cookieStore.get(LAST_WORKSPACE_COOKIE)?.value, { orgSlug });
   if (!anchorWorkspace) {
     // Org admin with no workspace membership in this org — no workspace to
     // anchor nav on. Extremely unlikely (org admins are typically also
@@ -71,7 +76,6 @@ export default async function OrgSettingsLayout({
     notFound();
   }
   const researchCaptureEnabled = await researchNavEnabled(anchorWorkspace.id);
-  const cookieStore = await cookies();
   const sidebarDefaultOpen = cookieStore.get("sidebar_state")?.value !== "false";
   // Same server-seeded read as the workspace layout — see the note there.
   const initialPanelPin = parsePanelPin(
@@ -118,7 +122,18 @@ export default async function OrgSettingsLayout({
           />
 
           <SidebarInset className="min-w-0 overflow-y-auto bg-surface-app pb-16 md:pb-0">
-            {children}
+            <SettingsShell
+              backHref={"/" + orgSlug + "/" + anchorWorkspace.slug}
+              context={{
+                orgSlug,
+                workspaceSlug: anchorWorkspace.slug,
+                workspaceName: anchorWorkspace.name,
+                isOrgAdmin: true,
+                isPlatformAdmin: isPlatformAdminEmail(user.email),
+              }}
+            >
+              {children}
+            </SettingsShell>
           </SidebarInset>
 
           {/* Inside SidebarProvider, after SidebarInset — see the note in the

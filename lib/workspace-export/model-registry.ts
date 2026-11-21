@@ -37,7 +37,7 @@ export const MODEL_BUCKETS: Readonly<Record<string, ExportBucket>> = Object.from
      CommentExternalAuthor Doc DocComment DocVersion Artifact ArtifactRevision FeedbackItem
      FeedbackSource FeedbackElementAnchor FeedbackAttachment FeedbackVote ResearchStudy
      ResearchSession ResearchTurn ResearchAttachment ResearchSynthesis PMInterview ReviewRequest
-     ReviewRevision ReviewOption DecisionRecord DecisionApplication DecisionEvidenceRef
+     ReviewRevision ReviewOption DecisionVote DecisionRecord DecisionApplication DecisionEvidenceRef
      CardSortRound CardSortProposal CardSortNewEntry MetricDefinition MetricRevision MetricBinding
      MetricObservation Agent WorkspaceDefaultAgent CapabilityPack CapabilityPackVersion
      WorkspaceCapabilityPack Follow`
@@ -66,7 +66,7 @@ export const MODEL_BUCKETS: Readonly<Record<string, ExportBucket>> = Object.from
     `WorkspaceUpdateEvent WorkspaceUpdatesState WorkspaceUpdatesReadState UiSession UiCommand
      Notification PreviewAutomationRun ResearchRequest ResearchBlobCleanup ArtifactBlobCleanup
      DocOperation DocStorageObject ResearchParticipantVoiceEvent ResearchVoiceEvent
-     ResearchVoiceCommand AgentRuntimeConfig AgentRuntimeSnapshot AgentRun AgentRunEvent AgentChildRun
+     ResearchVoiceCommand AgentRuntimeConfig AgentRuntimeSnapshot AgentSandboxOperation AgentSandboxGeneration AgentRun AgentRunEvent AgentChildRun
      AgentInboxItem AgentScheduledWakeup AgentOrchestrator AgentConversationSupervision AgentOrchestratorWakeup AgentSession
      AgentWebSearch AgentWebFetch AgentToolCall AgentAuditLog AgentConversationReview NowGateEvaluation
      NowPolicyApplicationEvidence PortfolioCapacityOperation ReleaseDispatch WorkspaceActivationState
@@ -79,6 +79,7 @@ export const MODEL_BUCKETS: Readonly<Record<string, ExportBucket>> = Object.from
  * these; the importer additionally applies IMPORT_OVERRIDES.
  */
 export const SECRET_COLUMNS: Readonly<Record<string, readonly string[]>> = {
+  AgentConversation: ["sandboxCoordinationToken"],
   Workspace: [
     "ssoSecretEncrypted",
     "ssoSecretUpdatedAt",

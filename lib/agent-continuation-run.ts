@@ -37,7 +37,7 @@ import { buildResumePrompt, planAgentSession } from "@/lib/agent-session"
 import { launchQueuedAgentRun, type LaunchContext } from "@/lib/agent-run-launch"
 import { workspaceFraming } from "@/lib/agent-run-sandbox"
 import { trustedCompassBaseUrl } from "@/lib/compass-url"
-import { readWorkspaceAgentRepos } from "@/lib/agent-github-repos"
+import { readWorkspaceAgentGithub } from "@/lib/agent-github-repos"
 import { mintAgentGithubEnv } from "@/lib/github-app-token"
 import { gitAuthorEnv, readAgentGitAuthor } from "@/lib/agent-git-author"
 import { developerNpmToken } from "@/lib/agent-github-access"
@@ -314,16 +314,16 @@ export async function startConversationContinuationRun(
       model: turnModel,
       budgetMs,
       now,
-      fenceConversation: true,
     })
   } catch (error) {
-    if (error instanceof AgentRunError && error.code === "RUN_IN_FLIGHT") {
+    if (error instanceof AgentRunError && ["RUN_IN_FLIGHT", "SANDBOX_OPERATION_IN_FLIGHT"].includes(error.code)) {
       return { status: "already_running", conversationId: input.conversationId }
     }
     throw error
   }
 
-  const mintedGithubEnv = await mintAgentGithubEnv(await readWorkspaceAgentRepos(prisma, input.workspaceId)).catch(() => null)
+  const githubConfig = await readWorkspaceAgentGithub(prisma, input.workspaceId)
+  const mintedGithubEnv = await mintAgentGithubEnv(githubConfig.repos, githubConfig.access).catch(() => null)
   const githubEnv = mintedGithubEnv ? { ...mintedGithubEnv, ...(runAgent ? gitAuthorEnv(await readAgentGitAuthor(prisma, runAgent.id)) : {}) } : null
   const developer = { enabled: sandboxClass === "DEVELOPER", npmToken: developerNpmToken() }
 

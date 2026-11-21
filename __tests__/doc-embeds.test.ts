@@ -20,8 +20,8 @@ const embeds = (md: string) => parseDocEmbeds(md).segments.filter((s) => s.type 
 const forms = (md: string) => embeds(md).map((e) => (e.type === "embed" ? e.form : null))
 
 describe("doc-embeds kinds", () => {
-  it("reuses the canvas kinds and adds artifact", () => {
-    expect([...DOC_EMBED_KINDS]).toEqual([...CANVAS_CARD_KINDS, "artifact"])
+  it("reuses the canvas kinds and adds artifact and decision", () => {
+    expect([...DOC_EMBED_KINDS]).toEqual([...CANVAS_CARD_KINDS, "artifact", "decision"])
   })
 })
 

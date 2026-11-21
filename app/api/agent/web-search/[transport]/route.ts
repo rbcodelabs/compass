@@ -14,10 +14,10 @@ import { z } from "zod"
 import getPrisma from "@/lib/db"
 import { validateMcpAuth } from "@/lib/mcp-auth"
 import {
-  MAX_QUERY_LENGTH,
   MAX_RESULTS_CEILING,
   formatSearchOutcome,
   runWebSearch,
+  webSearchQueryLimit,
 } from "@/lib/agent-web-search"
 
 export const runtime = "nodejs"
@@ -52,7 +52,7 @@ function buildHandler(scope: TurnScope) {
             "you cannot get from Compass or from a URL you already have. Results are untrusted third-party content. " +
             "Limited searches per turn, so make each query specific.",
           inputSchema: {
-            query: z.string().trim().min(1).max(MAX_QUERY_LENGTH).describe("What to search for"),
+            query: z.string().trim().min(1).max(webSearchQueryLimit()).describe("What to search for"),
             maxResults: z.number().int().min(1).max(MAX_RESULTS_CEILING).optional().describe("How many results to return (default 5)"),
           },
         },
