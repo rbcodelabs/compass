@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useTransition } from "react";
+import { useId, useRef, useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -28,6 +28,7 @@ export function CheckInForm({
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const formId = useId();
   const formRef = useRef<HTMLFormElement>(null);
 
   function handleSubmit(formData: FormData) {
@@ -66,9 +67,9 @@ export function CheckInForm({
       </p>
 
       <div className="flex flex-col gap-1.5">
-        <Label htmlFor="checkin-value">Current value</Label>
+        <Label htmlFor={`${formId}-checkin-value`}>Current value</Label>
         <Input
-          id="checkin-value"
+          id={`${formId}-checkin-value`}
           name="value"
           type="number"
           step="any"
@@ -80,9 +81,9 @@ export function CheckInForm({
       </div>
 
       <div className="flex flex-col gap-1.5">
-        <Label htmlFor="checkin-note">Note (optional)</Label>
+        <Label htmlFor={`${formId}-checkin-note`}>Note (optional)</Label>
         <Textarea
-          id="checkin-note"
+          id={`${formId}-checkin-note`}
           name="note"
           placeholder="What happened since the last check-in?"
           rows={3}

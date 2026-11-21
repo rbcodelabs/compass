@@ -66,7 +66,7 @@ describe("DashboardPage", () => {
     mockWorkspaceMember.findMany.mockResolvedValue([
       { workspace: { id: "ws-1", slug: "core", name: "Core", description: null, organization: { slug: "acme", name: "Acme" } } },
     ]);
-    await expect(DashboardPage()).rejects.toThrow("NEXT_REDIRECT:/acme/core/okrs");
+    await expect(DashboardPage()).rejects.toThrow("NEXT_REDIRECT:/acme/core/home");
     // The read-only fallback must not even be consulted when a real
     // membership already resolves the redirect.
     expect(mockGetUserWorkspaces).not.toHaveBeenCalled();
@@ -83,7 +83,7 @@ describe("DashboardPage", () => {
     mockGetUserWorkspaces.mockResolvedValue([
       { id: "ws-9", name: "Nine", slug: "nine", orgSlug: "org-9", orgName: "Org Nine", isReadOnly: true },
     ]);
-    await expect(DashboardPage()).rejects.toThrow("NEXT_REDIRECT:/org-9/nine/okrs");
+    await expect(DashboardPage()).rejects.toThrow("NEXT_REDIRECT:/org-9/nine/home");
   });
 
   it("ignores a non-read-only entry from getUserWorkspaces when deciding the fallback (defense in depth)", async () => {

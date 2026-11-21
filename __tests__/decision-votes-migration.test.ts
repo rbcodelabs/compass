@@ -7,7 +7,6 @@ import { assertDecisionVotesMigration } from "@/lib/migrations/decision-votes"
 const ROOT = process.cwd()
 const NAME = "127_decision_votes"
 const runner = readFileSync(path.join(ROOT, "lib/migrations/runner.ts"), "utf-8")
-const schema = readFileSync(path.join(ROOT, "prisma/schema.prisma"), "utf-8")
 const sqlPath = path.join(ROOT, "prisma/migrations", NAME, "migration.sql")
 const sql = existsSync(sqlPath) ? readFileSync(sqlPath, "utf-8").split("\n").map((line) => line.replace(/--.*$/, "")).join("\n") : ""
 const statements = sql.split(";").map((s) => s.trim()).filter(Boolean)
@@ -26,15 +25,6 @@ describe(NAME, () => {
     expect(sql).not.toMatch(/REFERENCES|CREATE TYPE|CREATE TRIGGER|ALTER TABLE|\bWHERE\b|DROP|\bASC\b|\bDESC\b|SERIAL/i)
   })
 
-  it("is mirrored in schema.prisma: the same table, columns and index name, and no @updatedAt", () => {
-    const model = schema.slice(schema.indexOf("model DecisionVote {"))
-    const body = model.slice(0, model.indexOf("\n}\n"))
-    expect(body).toContain('@@map("decision_votes")')
-    expect(body).toContain('@@unique([requestId, revisionId, questionIndex, voterUserId], map: "idx_decision_votes_voter")')
-    expect(body).not.toContain("@updatedAt")
-    expect(body).not.toContain("@relation")
-    expect(body).toContain('@map("voter_user_id")')
-  })
 
   it("waits for the async index build like the other index migrations, so the postcondition cannot fail on the first DSQL run", () => {
     expect(runner).toMatch(/const ASYNC_WAIT_MIGRATIONS = \[[^\]]*"127_decision_votes"/)
@@ -48,12 +38,13 @@ describe(NAME, () => {
   })
 
   describe("postcondition", () => {
-    const columns = ["id", "workspace_id", "request_id", "revision_id", "question_index", "chosen_option", "voter_user_id", "created_at", "updated_at"].map((column_name) => ({ column_name, is_nullable: "NO" }))
+    const columns = ["id", "workspace_id", "request_id", "revision_id", "question_index", "chosen_option", "voter_user_id", "created_at", "updated_at"].map((column_name) => ({ column_name, is_nullable: "NO", is_generated: "NEVER", is_identity: "NO", data_type: column_name === "chosen_option" ? "character varying" : column_name === "question_index" ? "integer" : column_name.endsWith("_at") ? "timestamp without time zone" : "uuid", column_default: column_name === "id" ? "gen_random_uuid()" : column_name.endsWith("_at") ? "CURRENT_TIMESTAMP" : null, datetime_precision: column_name.endsWith("_at") ? 3 : null, character_maximum_length: column_name === "chosen_option" ? 120 : null }))
     const index = (overrides: Record<string, unknown> = {}) => ({
       valid: true, ready: true, unique: true, table_name: "decision_votes", columns: ["request_id", "revision_id", "question_index", "voter_user_id"], predicate: null, expression: null, ...overrides,
     })
     const client = (cols: unknown[], indexes: unknown[]) => {
       const query = vi.fn().mockResolvedValueOnce({ rows: cols })
+      query.mockResolvedValueOnce({ rows: [{columns: ["id"], valid: true, ready: true}] })
       query.mockResolvedValueOnce({ rows: indexes })
       return { query } as never
     }

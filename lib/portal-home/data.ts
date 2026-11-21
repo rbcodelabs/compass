@@ -47,11 +47,36 @@ export interface TopIdea {
   voteCount: number
 }
 
+/** Team-only: an active Artifact as a gallery card. */
+export interface ArtifactCardItem {
+  id: string
+  title: string
+  kind: string | null
+  sourceType: string
+  updatedAt: string
+  href: string
+  /** In-app thumbnail URL (signed-in readers only), or null when no screenshot was captured. */
+  thumbnailSrc: string | null
+}
+
+/** Team-only: an objective with its key results' average progress (0-100). */
+export interface OkrObjectiveItem {
+  id: string
+  title: string
+  status: string
+  progress: number
+  keyResultCount: number
+  /** The objective's own cycle (null for a cycle-less objective); shown per row when objectives are hand-picked. */
+  cycleTitle: string | null
+}
+
 export type ResolvedWidgetData =
   | { type: "announcement" }
   | { type: "rich_text" }
   | { type: "key_links"; links: PortalHomeLink[] }
   | { type: "docs"; docs: DocCardItem[] }
+  | { type: "artifact_gallery"; artifacts: ArtifactCardItem[]; galleryHref: string }
+  | { type: "okr_summary"; cycleTitle: string | null; objectives: OkrObjectiveItem[]; okrsHref: string }
   | { type: "roadmap_spotlight"; items: SpotlightItem[]; auto: boolean; roadmapHref: string }
   | { type: "recent_updates"; items: UpdateItem[]; roadmapHref: string }
   | { type: "feedback_cta"; feedbackHref: string; topIdeas: TopIdea[] }
