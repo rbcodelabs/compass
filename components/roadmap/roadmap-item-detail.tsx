@@ -50,6 +50,7 @@ import { peekPanelSeed, clearPanelSeed } from "@/lib/panel-seed";
 import type { CustomFieldWithValue } from "@/lib/custom-field-definitions";
 import type { Horizon, MemberData, SquadData } from "@/lib/types";
 import type { RoadmapCardData } from "./roadmap-card";
+import { usePanelHeaderActions } from "@/components/panels/panel-header-actions";
 
 type RoadmapItemData = {
   id: string;
@@ -237,6 +238,15 @@ function RoadmapItemDetailBody({ itemId, orgSlug, workspaceSlug, variant, onRetr
   const { notifyEntityMutated } = usePanelContext();
   const labels = useLabels();
   const { data, error, displayId, mutate, refresh } = useEntityDetail<RoadmapItemData>("roadmapItem", itemId, orgSlug, workspaceSlug);
+  // In the panel the shell shows Follow / Request decision as header icons; on the full page they stay inline.
+  const inShell = usePanelHeaderActions(
+    data
+      ? {
+          follow: { subjectType: "ROADMAP_ITEM", subjectId: data.id },
+          decision: { subjectType: "ROADMAP_ITEM", subjectId: data.id, subjectTitle: data.title },
+        }
+      : {},
+  );
   const discussionRef = useRef<HTMLElement>(null);
   const discussionId = useId();
   const [actionError, setActionError] = useState<string | null>(null);
@@ -358,15 +368,19 @@ function RoadmapItemDetailBody({ itemId, orgSlug, workspaceSlug, variant, onRetr
             >
               <MessageSquare className="size-4" /> Discussion
             </Button>
-            <FollowButton orgSlug={orgSlug} workspaceSlug={workspaceSlug} subjectType="ROADMAP_ITEM" subjectId={itemId} />
-            <RequestDecisionLink
-              orgSlug={orgSlug}
-              workspaceSlug={workspaceSlug}
-              subjectType="ROADMAP_ITEM"
-              subjectId={data.id}
-              subjectTitle={data.title}
-              className="inline-flex h-7 items-center gap-1.5 rounded-md border px-2 text-xs font-medium hover:bg-muted"
-            />
+            {!inShell && (
+              <>
+              <FollowButton orgSlug={orgSlug} workspaceSlug={workspaceSlug} subjectType="ROADMAP_ITEM" subjectId={itemId} />
+              <RequestDecisionLink
+                orgSlug={orgSlug}
+                workspaceSlug={workspaceSlug}
+                subjectType="ROADMAP_ITEM"
+                subjectId={data.id}
+                subjectTitle={data.title}
+                className="inline-flex h-7 items-center gap-1.5 rounded-md border px-2 text-xs font-medium hover:bg-muted"
+              />
+              </>
+            )}
           </div>
           {actionError && <p role="alert" className="text-sm text-destructive">{actionError}</p>}
           <EditableText

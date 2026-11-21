@@ -9,7 +9,7 @@ export default async function MarketingLayout({ children }: { children: ReactNod
   return (
     <>
       {/* Marketing nav */}
-      <header className="border-b border-border-default bg-surface-panel">
+      <header className="border-b border-border-default bg-surface-panel" style={{ paddingTop: "env(safe-area-inset-top)" }}>
         <div className="max-w-6xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between gap-2 sm:gap-4">
           <Link
             href="/"

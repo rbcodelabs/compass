@@ -1,4 +1,4 @@
-import { sortWidgets, type PortalHomeWidget } from "./schema"
+import { isTeamOnlyWidgetType, sortWidgets, type PortalHomeWidget } from "./schema"
 import { isWidgetVisibleToCustomer, isWidgetVisibleToTeam, type HomeViewer } from "./visibility"
 import type { WidgetResolution } from "./data"
 import type { CustomerResolveContext, ResolveContext, ResolveInput, TeamResolveContext } from "./resolvers/context"
@@ -7,6 +7,8 @@ import { resolveRoadmapSpotlight } from "./resolvers/roadmap-spotlight"
 import { resolveRecentUpdates } from "./resolvers/recent-updates"
 import { resolveFeedbackCta } from "./resolvers/feedback-cta"
 import { resolveDocs } from "./resolvers/docs"
+import { resolveArtifactGallery } from "./resolvers/artifact-gallery"
+import { resolveOkrSummary } from "./resolvers/okr-summary"
 
 async function resolveWidget(ctx: ResolveContext, widget: PortalHomeWidget): Promise<WidgetResolution> {
   switch (widget.type) {
@@ -26,6 +28,10 @@ async function resolveWidget(ctx: ResolveContext, widget: PortalHomeWidget): Pro
       return resolveFeedbackCta(ctx, widget.config)
     case "docs":
       return resolveDocs(ctx, widget.config)
+    case "artifact_gallery":
+      return resolveArtifactGallery(ctx, widget.config)
+    case "okr_summary":
+      return resolveOkrSummary(ctx, widget.config)
   }
 }
 
@@ -48,7 +54,7 @@ export async function resolveHomeForCustomer(
   viewer: HomeViewer,
 ): Promise<ResolvedHome> {
   const customerCtx: CustomerResolveContext = { ...ctx, audience: "customer" }
-  const visible = sortWidgets(widgets).filter((widget) => isWidgetVisibleToCustomer(widget, viewer))
+  const visible = sortWidgets(widgets).filter((widget) => !isTeamOnlyWidgetType(widget.type) && isWidgetVisibleToCustomer(widget, viewer))
   const resolutions = await Promise.all(visible.map((widget) => resolveWidget(customerCtx, widget)))
   const shown: PortalHomeWidget[] = []
   const resolved: Record<string, WidgetResolution> = {}
@@ -149,6 +155,7 @@ export async function resolveCustomerAvailability(
   const customerCtx: CustomerResolveContext = { ...ctx, audience: "customer" }
   const entries = await Promise.all(
     sortWidgets(widgets).map(async (widget): Promise<[string, CustomerAvailability]> => {
+      if (isTeamOnlyWidgetType(widget.type)) return [widget.id, { shown: false, reason: "This internal widget is Team only." }]
       if (!isWidgetVisibleToCustomer(widget, { signedIn: true })) {
         return [widget.id, { shown: false, reason: VISIBILITY_REASON[widget.visibility] ?? "Not visible to customers." }]
       }
