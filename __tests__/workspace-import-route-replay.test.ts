@@ -18,7 +18,7 @@ vi.mock("@/lib/artifact-storage", () => ({ getArtifactStorage: () => ({}) }))
 vi.mock("@/lib/workspace-export/upload", () => ({
   verifyBundleReceipt: state.verify, loadStagedBundle: state.load, MAX_BUNDLE_BYTES: 1000,
 }))
-vi.mock("@/lib/workspace-export/receipt-binding", () => ({ readImportReceiptResult: state.result }))
+vi.mock("@/lib/workspace-export/receipt-binding", () => ({ readImportReceiptResult: state.result, bindImportReceipt: vi.fn() }))
 vi.mock("@/lib/workspace-export/import", () => ({ importWorkspaceBundle: state.apply, WorkspaceImportError: class extends Error {}, WorkspaceImportRecoveryRequired: class extends Error {} }))
 vi.mock("@/lib/workspace-export/blobs", () => ({ defaultBlobAdapters: vi.fn() }))
 
@@ -54,16 +54,16 @@ it("uses the held operation after duplicate publication and verifies the winner 
   const owner = { workspaceId, attemptId: "7238c0cf-3418-4764-bc50-876af6686108", epoch: 3 }
   const report = { workspaceId, alreadyImported: true }
   const findFirst = vi.fn().mockResolvedValue({ id: workspaceId })
-  const query = vi.fn().mockResolvedValue([{ epoch: owner.epoch }])
+  const query = vi.fn().mockResolvedValueOnce([{ epoch: owner.epoch, phase: "applying" }]).mockResolvedValueOnce([{ phase: "applying", bundle_digest: "digest" }]).mockResolvedValue([{ epoch: owner.epoch }])
   const tx = { workspace: { findFirst }, $queryRawUnsafe: query }
   const claim = vi.fn().mockResolvedValueOnce([{ epoch: owner.epoch }]).mockResolvedValue([])
   Object.assign(state.db, { $queryRawUnsafe: claim, $transaction: (run: (client: typeof tx) => Promise<void>) => run(tx) })
-  state.result.mockReset().mockResolvedValueOnce(null).mockResolvedValueOnce(null).mockResolvedValue(report)
+  state.result.mockReset().mockResolvedValueOnce(null).mockResolvedValue(report)
   const discard = vi.fn()
   state.load.mockResolvedValue({ bytes: new Uint8Array([1]), discard })
   state.apply.mockImplementation(async (_db, _bytes, callbacks) => {
-    await callbacks.startOperation(workspaceId)
-    await callbacks.recordExisting(report)
+    await callbacks.startOperation(workspaceId, "digest")
+    await callbacks.recordExisting(report, "digest")
     return report
   })
   const { POST } = await import("@/app/api/workspace-import/[orgSlug]/route")
@@ -71,8 +71,8 @@ it("uses the held operation after duplicate publication and verifies the winner 
     method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ receipt: "signed" }),
   }), { params: Promise.resolve({ orgSlug: "org" }) })
   expect(findFirst).toHaveBeenCalledWith({ where: { id: workspaceId, organizationId: "org" }, select: { id: true } })
-  expect(query.mock.calls.filter(([sql]) => sql.includes("INSERT INTO"))).toHaveLength(0)
-  const attempt = claim.mock.calls[0][3]
+  expect(query.mock.calls.filter(([sql]) => sql.includes("INSERT INTO"))).toHaveLength(1)
+  const attempt = query.mock.calls[0][3]
   expect(query).toHaveBeenCalledWith(expect.stringContaining("UPDATE"), workspaceId, attempt, owner.epoch, JSON.stringify(report))
   expect(res.status).toBe(200)
   expect(discard).toHaveBeenCalledOnce()

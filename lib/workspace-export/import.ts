@@ -86,7 +86,7 @@ export type ImportOptions = {
   }
   startOperation?(workspaceId: string, bundleDigest: string): Promise<void | "applying" | "recovering">
   resumeRecovered?(): Promise<void>
-  recordExisting?(report: ImportReport): Promise<void>
+  recordExisting?(report: ImportReport, digest: string): Promise<void>
   bindWorkspace?(workspaceId: string): Promise<void>
   publishResult?(tx: unknown, report: ImportReport): Promise<void>
   blobs: BlobAdapters
@@ -219,11 +219,12 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
   }
   const newWorkspaceId = deriveId(importKey, manifest.source.workspaceId)
 
+  const bundleDigest = createHash("sha256").update(bytes).digest("hex")
   await opts.bindWorkspace?.(newWorkspaceId)
   const existing = await delegateFor(client, "Workspace").findMany({ where: { id: newWorkspaceId }, take: 1 })
   if (existing[0]) {
     const report = alreadyImportedReport(existing[0], manifest)
-    await opts.recordExisting?.(report)
+    await opts.recordExisting?.(report, bundleDigest)
     return report
   }
 
@@ -413,7 +414,7 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
     return row
   }
 
-  const phase = await opts.startOperation?.(newWorkspaceId, createHash("sha256").update(bytes).digest("hex"))
+  const phase = await opts.startOperation?.(newWorkspaceId, bundleDigest)
   async function write<T>(phase: "applying" | "rolling_back" | "recovering", mutation: (tx: Client) => Promise<T>) {
     const fence = opts.fenceWrite
     if (!fence) return withRetry(() => mutation(client))
@@ -659,7 +660,7 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
     if (committed[0]) {
       if ((error as { code?: string }).code === "P2002") {
         const report = alreadyImportedReport(committed[0], manifest)
-        await opts.recordExisting?.(report)
+        await opts.recordExisting?.(report, bundleDigest)
         return report
       }
       throw error

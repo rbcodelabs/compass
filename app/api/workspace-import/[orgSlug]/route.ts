@@ -12,7 +12,8 @@ import { WorkspaceImportError, WorkspaceImportRecoveryRequired, importWorkspaceB
 import { MAX_BUNDLE_BYTES, loadStagedBundle, verifyBundleReceipt } from "@/lib/workspace-export/upload"
 import { bindImportReceipt, readImportReceiptResult } from "@/lib/workspace-export/receipt-binding"
 
-import { claimBundleImport, resumeRecoveredImport, commitImportReport, finishImportRollback, renewImportOperation, startImportOperation, type ImportDatabase } from "@/lib/workspace-export/operation"
+import { claimBundleImport, resumeRecoveredImport, commitImportReport, finishImportRollback, renewImportOperation, type ImportDatabase } from "@/lib/workspace-export/operation"
+import { importSchema } from "@/lib/workspace-export/import-schema"
 import type { ImportLeaseOwner } from "@/lib/workspace-export/lease"
 
 export const maxDuration = 300
@@ -98,25 +99,32 @@ export async function POST(req: Request, { params }: { params: Promise<{ orgSlug
           return withRetry(() => prisma.$transaction(tx => verifyImportAsset(tx, active, store, logical, physical)))
         },
       },
-      async bindWorkspace(workspaceId) {
-        if (receiptBinding) await bindImportReceipt(prisma, { ...receiptBinding, workspaceId })
-      },
-      async recordExisting(report) {
-        if (!receiptBinding) return
+      async recordExisting(report, digest) {
         const binding = receiptBinding
-        await prisma.$transaction(async (tx) => {
-          if (await readImportReceiptResult(tx, binding)) return
+        await withRetry(() => prisma.$transaction(async tx => {
           const workspace = await tx.workspace.findFirst({ where: { id: report.workspaceId, organizationId }, select: { id: true } })
-          if (!workspace) throw new WorkspaceImportRecoveryRequired("Imported workspace is unavailable")
-          if (owner && owner.workspaceId !== workspace.id) {
-            throw new WorkspaceImportRecoveryRequired("Imported workspace does not match the active operation")
+          if (!workspace || (owner && owner.workspaceId !== workspace.id)) {
+            throw new WorkspaceImportRecoveryRequired("Imported workspace is unavailable")
           }
-          const existingOwner = owner ?? await startImportOperation(tx, workspace.id, organizationId)
-          await commitImportReport(tx, existingOwner, report)
-        })
+          const [operation] = await tx.$queryRawUnsafe<{ phase: string; bundle_digest: string | null }[]>(
+            `SELECT phase, bundle_digest FROM ${importSchema()}.workspace_import_operations
+             WHERE workspace_id=$1::uuid AND organization_id=$2::uuid`, workspace.id, organizationId,
+          )
+          if (operation && operation.bundle_digest !== digest) throw new WorkspaceImportError("Bundle differs from the original import")
+          if (operation?.phase !== "committed") {
+            const active = owner ?? await claimBundleImport(tx, workspace.id, organizationId, digest)
+            await commitImportReport(tx, active, report)
+          }
+          if (binding) await bindImportReceipt(tx, { ...binding, workspaceId: workspace.id })
+        }))
       },
       async startOperation(workspaceId, digest) {
-        const claimed = await withRetry(() => claimBundleImport(prisma, workspaceId, organizationId, digest))
+        const binding = receiptBinding
+        const claimed = await withRetry(() => prisma.$transaction(async tx => {
+          const attempt = await claimBundleImport(tx, workspaceId, organizationId, digest)
+          if (binding) await bindImportReceipt(tx, { ...binding, workspaceId })
+          return attempt
+        }))
         owner = claimed
         return claimed.phase
       },
