@@ -3,6 +3,10 @@
   "ignoreCommand": "bash scripts/vercel-ignore-build.sh",
   "crons": [
     {
+      "path": "/api/cron/import-asset-cleanup",
+      "schedule": "*/10 * * * *"
+    },
+    {
       "path": "/api/cron/agent-run-sweeper",
       "schedule": "*/5 * * * *"
     },
