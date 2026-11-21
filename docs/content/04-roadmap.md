@@ -181,8 +181,6 @@ Moving a Solution to **In delivery** (from the Discovery card, its detail panel,
 
 On touch screens, swipe over card content to scroll vertically or move horizontally between board columns. Use the dotted drag handle to move a card instead. On desktop, column headers stay visible while their cards scroll.
 
-On desktop, a vertical mouse-wheel turn over a wide board moves it sideways when the area under the pointer has no vertical scrolling of its own. Scrollable columns, nested tables and a vertically scrollable board keep their native wheel behavior, including when the pointer is over an icon. Nested scroll areas keep wheel input at their boundaries. Mainly horizontal trackpad gestures and Shift+wheel remain native; vertical-dominant trackpad input follows the same rules as a mouse wheel. On narrower screens, vertical wheel input keeps its native vertical behavior so you can navigate tall columns. Touch and keyboard scrolling keep their native behavior.
-
 Within each horizon, drag cards to reorder them. Order within a horizon communicates relative priority: items higher in the list are higher priority. This ordering is persisted and visible to all workspace members.
 
 ## Launch Tiers & Checklists
