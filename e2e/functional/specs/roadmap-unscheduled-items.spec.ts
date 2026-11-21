@@ -24,7 +24,7 @@ import { createOpportunityFromBoard } from "../fixtures/opportunity-composer";
 import { openFullPage } from "../fixtures/full-page";
 import type { Locator, Page } from "@playwright/test";
 
-async function dragTo(page: Page, source: Locator, target: Locator, scrollContainer?: Locator) {
+async function dragTo(page: Page, source: Locator, target: Locator, scrollContainer?: Locator, beforeRelease?: () => Promise<void>) {
   await source.scrollIntoViewIfNeeded();
   const sourceBox = await source.boundingBox();
   if (!sourceBox) throw new Error("drag source has no bounding box");
@@ -70,6 +70,7 @@ async function dragTo(page: Page, source: Locator, target: Locator, scrollContai
   const endY = targetBox.y + targetBox.height / 2;
 
   await page.mouse.move(endX, endY, { steps: 40 });
+  await beforeRelease?.();
   await page.mouse.up();
 }
 
@@ -262,12 +263,12 @@ test.describe("Roadmap — not yet on the roadmap", () => {
       await expect(laterColumn.getByText(solTitle).first()).toBeVisible({ timeout: 10_000 });
 
       const laterCard = laterColumn.locator('[data-slot="card"]').filter({ hasText: solTitle });
-      await startDrag(laterCard.getByRole("button", { name: "Drag to reorder" }));
-      const next = (await page.locator("#roadmap-column-NEXT").boundingBox())!;
-      await page.mouse.move(next.x + next.width / 2, next.y + next.height / 2, { steps: 20 });
-      await expect(page.locator("#roadmap-column-NEXT").getByText(solTitle).first()).toBeVisible();
-      await page.keyboard.press("Escape");
-      await page.mouse.up();
+      const cancelTarget = page.locator("#roadmap-column-NEXT");
+      await dragTo(page, laterCard.getByRole("button", { name: "Drag to reorder" }), cancelTarget, roadmapBoard, async () => {
+        await expect.poll(snap).toBe("none");
+        await expect(cancelTarget.getByText(solTitle).first()).toBeVisible();
+        await page.keyboard.press("Escape");
+      });
       await expect(laterCard).toBeVisible();
       await expect.poll(snap).toMatch(/^x(?: |$)/);
 
@@ -281,6 +282,21 @@ test.describe("Roadmap — not yet on the roadmap", () => {
         await expect.poll(() => roadmapBoard.evaluate(element => element.scrollLeft)).toBe(input * 40);
       }
       await expect.poll(snap).toMatch(/^x(?: |$)/);
+      // Restoring proximity snap may settle on a nearby column, but the
+      // completed four-tick gesture must not jump back to the starting column.
+      const settledOffset = await roadmapBoard.evaluate(async element => {
+        let last = element.scrollLeft;
+        let stable = 0;
+        for (let frame = 0; frame < 90; frame++) {
+          await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+          const current = element.scrollLeft;
+          stable = current === last ? stable + 1 : 0;
+          if (stable >= 12) return current;
+          last = current;
+        }
+        throw new Error("Roadmap scroll did not settle");
+      });
+      expect(settledOffset).toBeGreaterThan(0);
 
       // ── 4. Quick-add the bug to NEXT via its card menu (no drag) ────────────
       await bugUnscheduledCard.hover();
