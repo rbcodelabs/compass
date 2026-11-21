@@ -9,8 +9,7 @@
 import { announceRoadmapSync } from "@/lib/ui/roadmap-sync-toast";
 import { announceAgentRun } from "@/lib/ui/agent-run-toast";
 import { useCallback, useEffect, useRef, useState, type SetStateAction } from "react";
-import Link from "next/link";
-import { ExternalLinkIcon, ChevronRightIcon } from "lucide-react";
+import { ChevronRightIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { MarkdownContent } from "@/components/markdown-content";
 import { MarkdownDescriptionEditor } from "@/components/markdown-description-editor";
@@ -166,18 +165,6 @@ export function PanelContainer({
     >
       {children}
     </div>
-  );
-}
-
-export function FullPageLink({ href }: { href: string }) {
-  return (
-    <Link
-      href={href}
-      className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors w-fit"
-    >
-      <ExternalLinkIcon className="size-3" />
-      Open full page
-    </Link>
   );
 }
 

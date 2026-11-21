@@ -190,4 +190,10 @@ describe("ComposerCard", () => {
     const { container } = render(<Harness />)
     expect(container.querySelector('[data-slot="composer-card"]')).toHaveClass("focus-within:border-ring", "focus-within:ring-[3px]", "rounded-xl")
   })
+
+  // Class assertion only: the real layout guard is the 390px/320px e2e (jsdom has no layout).
+  it("wraps its footer chips instead of overflowing the card (TASK-197)", () => {
+    const { container } = render(<Harness chips={<button>Tools</button>} />)
+    expect(container.querySelector('[data-slot="composer-footer"]')).toHaveClass("flex-wrap", "min-w-0")
+  })
 })

@@ -87,5 +87,5 @@ export async function createOrganizationAndWorkspace(
     data: { workspaceId: workspace.id, userId, role: "ADMIN" },
   })
 
-  redirect(`/${orgSlug}/${workspaceSlug}/okrs`)
+  redirect(`/${orgSlug}/${workspaceSlug}/home`)
 }

@@ -138,7 +138,8 @@ export function workspacePageParams(state: State): {
     field: params.get(WORKSPACE_URL_PARAMS.field) ?? undefined,
     fieldValue: params.get(WORKSPACE_URL_PARAMS.fieldValue) ?? undefined,
     groupBy: params.get(WORKSPACE_URL_PARAMS.groupBy) ?? undefined,
-    view: state.display.view,
+    // The workspace roadmap has no table layout (cross-workspace only); a saved view that uses one shows as a board here.
+    view: state.display.view === "table" ? "board" : state.display.view,
   }
 }
 

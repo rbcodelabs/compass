@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo, useTransition, type ReactNode } from "react"
 import { useRouter } from "next/navigation"
-import { ChevronDown, ListFilter, X } from "lucide-react"
+import { ChevronDown, Columns3, ListFilter, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuGroup,
@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { HORIZON_META } from "@/lib/roadmap"
 import { ROADMAP_DELIVERY_STATUS_LABELS } from "@/lib/roadmap-delivery-status"
+import type { RoadmapFieldFacet } from "@/lib/roadmap-views/fields"
 import {
   DEFAULT_ROADMAP_FILTERS, ROADMAP_DELIVERY_STATUSES, ROADMAP_HORIZONS, ROADMAP_LINK_FILTERS,
   countActiveFilters, roadmapHref,
@@ -25,6 +26,7 @@ export type RoadmapViewState = { filters: RoadmapViewFilters; display: RoadmapVi
 type Facets = {
   workspaces: { id: string; name: string; slug: string }[]
   squads: { id: string; name: string; color: string | null; workspaceId: string }[]
+  fields: RoadmapFieldFacet[]
 }
 
 type Props = {
@@ -45,7 +47,9 @@ const LINK_LABELS = { linked: "Linked", unlinked: "Not linked" } as const
 // The cross-workspace roadmap has no Gallery view and no Solution-status grouping (workspace-roadmap only); see withoutGalleryOnlyDisplay.
 type CrossView = Exclude<RoadmapViewDisplay["view"], "gallery">
 type CrossGroupBy = Exclude<RoadmapViewDisplay["groupBy"], "status">
-const VIEW_MODE_LABELS: Record<CrossView, string> = { board: "Board", timeline: "Timeline" }
+const VIEW_MODE_LABELS: Record<CrossView, string> = { board: "Board", timeline: "Timeline", table: "Table" }
+/** Radio value for "group by this custom field"; built-in groupings are their bare names. */
+const FIELD_GROUP_PREFIX = "field:"
 const GROUP_LABELS: Record<CrossGroupBy, string> = {
   horizon: "Horizon", workspace: "Workspace", squad: "Squad", none: "None",
 }
@@ -119,6 +123,23 @@ export function RoadmapToolbar({
   // Clearing filters keeps the display options the user chose.
   // Replace, not merge: the defaults omit optional keys (dates, links), so a spread would leave them set.
   const clearFilters = () => navigate({ filters: DEFAULT_ROADMAP_FILTERS, display })
+
+  const picklistFields = facets.fields.filter((f) => f.fieldType === "SELECT" || f.fieldType === "MULTI_SELECT")
+  const groupField = display.groupByField ? facets.fields.find((f) => f.key === display.groupByField) : undefined
+  const groupValue = groupField ? FIELD_GROUP_PREFIX + groupField.key : display.groupBy
+  const fieldFilterFor = (key: string) => filters.fields.find((f) => f.key === key)
+  const toggleFieldFilterValue = (key: string, label: string) => {
+    const current = fieldFilterFor(key)?.values ?? []
+    const values = toggle(current, label)
+    const rest = filters.fields.filter((f) => f.key !== key)
+    setFilters({ fields: values.length ? [...rest, { key, values }] : rest })
+  }
+  // Selection order is column order: ticking appends, unticking removes.
+  const toggleShownField = (key: string) => setDisplay({ fields: toggle(display.fields, key) })
+  const setGrouping = (value: string) => {
+    if (value.startsWith(FIELD_GROUP_PREFIX)) return setDisplay({ groupByField: value.slice(FIELD_GROUP_PREFIX.length) })
+    setDisplay({ groupBy: value as RoadmapViewDisplay["groupBy"], groupByField: undefined })
+  }
 
   // Squads are only meaningful next to their workspace; when workspaces are narrowed, only offer those.
   const squadWorkspaces = facets.workspaces.filter(
@@ -287,6 +308,29 @@ export function RoadmapToolbar({
                 </label>
               </div>
             </FilterSub>
+
+            {picklistFields.length > 0 && <DropdownMenuSeparator />}
+            {picklistFields.map((field) => (
+              <FilterSub
+                key={field.key}
+                label={field.name}
+                count={fieldFilterFor(field.key)?.values.length ?? 0}
+                testId={"filter-field-" + field.key}
+                contentClassName="max-h-80 w-56 overflow-y-auto"
+              >
+                {field.options.map((option) => (
+                  <DropdownMenuCheckboxItem
+                    key={option.label}
+                    checked={fieldFilterFor(field.key)?.values.includes(option.label) ?? false}
+                    closeOnClick={false}
+                    onCheckedChange={() => toggleFieldFilterValue(field.key, option.label)}
+                  >
+                    {option.color && <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: option.color }} />}
+                    <span className="truncate">{option.label}</span>
+                  </DropdownMenuCheckboxItem>
+                ))}
+              </FilterSub>
+            ))}
           </DropdownMenuContent>
         </DropdownMenu>
 
@@ -297,8 +341,35 @@ export function RoadmapToolbar({
         )}
 
         <DropdownMenu>
+          <DropdownMenuTrigger render={<Button variant="outline" size="sm" className="min-h-11 md:min-h-0" data-testid="fields-menu" />}>
+            <Columns3 />
+            Fields
+            {display.fields.length > 0 && <CountBadge count={display.fields.length} />}
+            <ChevronDown />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="max-h-96 w-60 overflow-y-auto">
+            <DropdownMenuGroup>
+              <DropdownMenuLabel>Show on cards and as table columns</DropdownMenuLabel>
+              {facets.fields.length === 0 && (
+                <p className="px-2 py-1.5 text-xs text-text-subtle">No roadmap item fields yet. Add them in a workspace&apos;s settings.</p>
+              )}
+              {facets.fields.map((field) => (
+                <DropdownMenuCheckboxItem
+                  key={field.key}
+                  checked={display.fields.includes(field.key)}
+                  closeOnClick={false}
+                  onCheckedChange={() => toggleShownField(field.key)}
+                >
+                  <span className="truncate">{field.name}</span>
+                </DropdownMenuCheckboxItem>
+              ))}
+            </DropdownMenuGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+
+        <DropdownMenu>
           <DropdownMenuTrigger render={<Button variant="outline" size="sm" className="min-h-11 md:min-h-0" data-testid="display-menu" />}>
-            {VIEW_MODE_LABELS[display.view as CrossView]} · {GROUP_LABELS[display.groupBy as CrossGroupBy]}
+            {VIEW_MODE_LABELS[display.view as CrossView]} · {groupField ? groupField.name : GROUP_LABELS[display.groupBy as CrossGroupBy]}
             <ChevronDown />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-52">
@@ -313,9 +384,12 @@ export function RoadmapToolbar({
             <DropdownMenuSeparator />
             <DropdownMenuGroup>
               <DropdownMenuLabel>Group by</DropdownMenuLabel>
-              <DropdownMenuRadioGroup value={display.groupBy} onValueChange={(v) => setDisplay({ groupBy: v as RoadmapViewDisplay["groupBy"] })}>
+              <DropdownMenuRadioGroup value={groupValue} onValueChange={setGrouping}>
                 {Object.entries(GROUP_LABELS).map(([v, label]) => (
                   <DropdownMenuRadioItem key={v} value={v}>{label}</DropdownMenuRadioItem>
+                ))}
+                {picklistFields.map((field) => (
+                  <DropdownMenuRadioItem key={field.key} value={FIELD_GROUP_PREFIX + field.key}>{field.name}</DropdownMenuRadioItem>
                 ))}
               </DropdownMenuRadioGroup>
             </DropdownMenuGroup>

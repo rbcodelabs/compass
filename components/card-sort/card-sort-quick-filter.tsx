@@ -21,9 +21,11 @@ type Props = {
   /** All objects in the round. */
   total: number
   className?: string
+  /** Placeholder and accessible name; defaults suit the card sort. */
+  label?: string
 }
 
-export function CardSortQuickFilter({ value, onChange, shown, total, className }: Props) {
+export function CardSortQuickFilter({ value, onChange, shown, total, className, label = "Filter cards" }: Props) {
   const active = value.trim().length > 0
   const inputRef = useRef<HTMLInputElement>(null)
   // Reserve room for the widest possible readout so neighbours don't shift
@@ -48,8 +50,8 @@ export function CardSortQuickFilter({ value, onChange, shown, total, className }
               onChange("")
             }
           }}
-          placeholder="Filter cards…"
-          aria-label="Filter cards"
+          placeholder={`${label}…`}
+          aria-label={label}
           className="h-8 pr-8 pl-8 [&::-webkit-search-cancel-button]:hidden"
         />
         {value && (

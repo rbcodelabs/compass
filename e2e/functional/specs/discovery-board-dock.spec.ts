@@ -45,7 +45,11 @@ function requireLocalE2eDatabase(): pg.Pool {
  * targeted with the plain pointer.
  */
 async function dragTo(page: Page, source: Locator, target: Locator, { alignCard }: { alignCard?: Locator } = {}) {
-  await source.scrollIntoViewIfNeeded();
+  // A full run leaves other Opportunities on the board, so a column can be taller than its scroller: a card (or a drop target) can sit
+  // below the fold, where raw coordinates point at some other element. Scroll the target in first, then hover() the source: it scrolls
+  // it into view and waits until it has stopped moving and is the element that would receive the press.
+  await target.scrollIntoViewIfNeeded();
+  await source.hover();
   const sourceBox = await source.boundingBox();
   if (!sourceBox) throw new Error("drag source has no bounding box");
   const startX = sourceBox.x + sourceBox.width / 2;
@@ -245,6 +249,7 @@ test.describe("Opportunity board dock", () => {
       {
         const activeCount = await tabCount(page, "Active");
         const handle = cardOf(column(page, "EXPLORING"), titles.exploringOne).getByLabel("Drag to reorder");
+        await handle.hover();
         const box = (await handle.boundingBox())!;
         await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
         await page.mouse.down();

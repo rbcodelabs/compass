@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { useId, useRef, useTransition, useState } from "react";
+import { useServerSyncedState } from "@/hooks/use-server-synced-state";
 import {
   DndContext,
   type DragEndEvent,
@@ -22,6 +23,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { ChevronDown, ChevronRight, GripVertical, X } from "lucide-react";
 import type { ObjectiveStatus, CustomFieldDefinitionData, CustomFieldValue, SquadData } from "@/lib/types";
 import { averageProgress, STATUS_BADGE } from "@/lib/okrs";
+import { HighlightMatch } from "@/components/okrs/highlight-match";
 import { KeyResultBar } from "@/components/okrs/key-result-bar";
 import type { SupportingObjectiveOption } from "@/components/okrs/key-result-bar";
 import { AddKeyResultForm } from "@/components/okrs/add-key-result-form";
@@ -99,6 +101,10 @@ interface ObjectiveRowProps {
   hideProgress?: boolean;
   /** Controlled collapsed state. Omit for an uncontrolled row that starts expanded. */
   collapsed?: boolean;
+  /** Keep the row expanded while a name filter is active. */
+  hideCollapseToggle?: boolean;
+  /** Hide a filtered row while preserving its mounted form state. */
+  hidden?: boolean;
   onCollapsedChange?: (collapsed: boolean) => void;
 }
 
@@ -113,6 +119,8 @@ export function ObjectiveRow({
   paceElapsed,
   hideProgress,
   collapsed: collapsedProp,
+  hideCollapseToggle,
+  hidden = false,
   onCollapsedChange,
 }: ObjectiveRowProps) {
   const labels = useLabels();
@@ -133,8 +141,9 @@ export function ObjectiveRow({
   const [isAddKROpen, setIsAddKROpen] = useState(false);
   const actionsRef = useRef<HTMLDivElement>(null);
   const { openPanel, panel } = usePanelContext();
-  const [localParentKRId, setLocalParentKRId] = useState<string | null>(
-    parentKeyResultId ?? null
+  // Follows the server (live refresh) but defers while a link save is in flight.
+  const { state: localParentKRId, setState: setLocalParentKRId } = useServerSyncedState<string | null, string | null>(
+    parentKeyResultId ?? null, (s) => s, isParentKRPending
   );
   const avgProgress = averageProgress(objective.keyResults);
   const badge = STATUS_BADGE[objective.status];
@@ -147,7 +156,7 @@ export function ObjectiveRow({
     transform,
     transition,
     isDragging,
-  } = useSortable({ id: objective.id });
+  } = useSortable({ id: objective.id, disabled: { draggable: hidden, droppable: hidden } });
 
   const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
@@ -220,6 +229,7 @@ export function ObjectiveRow({
   return (
     <EntityCard
       ref={setNodeRef}
+      hidden={hidden}
       style={style}
       interactive
       selected={isPanelOpen(panel, "objective", objective.id)}
@@ -238,7 +248,7 @@ export function ObjectiveRow({
       }
       title={
         <span className="flex items-center gap-2">
-              <button
+              {!hideCollapseToggle && <button
                 type="button"
                 onClick={toggleCollapsed}
                 aria-expanded={!collapsed}
@@ -247,7 +257,7 @@ export function ObjectiveRow({
                 className="shrink-0 rounded text-text-subtle hover:text-text-default focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-border-focus"
               >
                 {collapsed ? <ChevronRight className="size-4" /> : <ChevronDown className="size-4" />}
-              </button>
+              </button>}
               {objective.squad && (
                 <span
                   className="w-2.5 h-2.5 rounded-full shrink-0"
@@ -260,7 +270,7 @@ export function ObjectiveRow({
                 onClick={() => openPanel("objective", objective.id)}
                 className="text-left font-medium text-base hover:underline underline-offset-2"
               >
-                {objective.title}
+                <HighlightMatch text={objective.title} />
               </button>
         </span>
       }
@@ -398,7 +408,7 @@ export function ObjectiveRow({
  * resolves the nearest SortableContext, so an enclosing key-result context
  * would swallow the objective drag and reorder would silently do nothing.
  */
-function SortableKeyResults({
+export function SortableKeyResults({
   keyResults: initialKeyResults,
   objectiveId,
   orgSlug,
@@ -417,8 +427,11 @@ function SortableKeyResults({
   paceElapsed?: number | null;
   hideProgress?: boolean;
 }) {
-  const [keyResults, setKeyResults] = useState(initialKeyResults);
-  const [, startTransition] = useTransition();
+  const [isSaving, startTransition] = useTransition();
+  const [reorderFailed, setReorderFailed] = useState(false);
+  // A drag in progress also defers adoption: the list must not change under the pointer.
+  const [isDragging, setIsDragging] = useState(false);
+  const { state: keyResults, setState: setKeyResults } = useServerSyncedState(initialKeyResults, (k) => k, isSaving || isDragging);
 
   // Stable across server and client; without it @dnd-kit numbers its
   // aria-describedby ids from a global counter and hydration mismatches.
@@ -429,8 +442,9 @@ function SortableKeyResults({
   );
 
   function handleDragEnd(event: DragEndEvent) {
+    setIsDragging(false);
     const { active, over } = event;
-    if (!over || active.id === over.id) return;
+    if (isSaving || !over || active.id === over.id) return;
 
     const activeId = active.id as string;
     const oldIndex = keyResults.findIndex((kr) => kr.id === activeId);
@@ -438,16 +452,23 @@ function SortableKeyResults({
 
     if (oldIndex !== -1 && newIndex !== -1 && oldIndex !== newIndex) {
       setKeyResults(arrayMove(keyResults, oldIndex, newIndex));
+      setReorderFailed(false);
       startTransition(async () => {
-        await reorderKeyResult(activeId, newIndex, revalidatePathStr);
+        try {
+          await reorderKeyResult(activeId, newIndex, revalidatePathStr);
+        } catch {
+          setKeyResults(keyResults);
+          setReorderFailed(true);
+        }
       });
     }
   }
 
   return (
-    <DndContext id={dndId} sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+    <DndContext id={dndId} sensors={sensors} collisionDetection={closestCenter} onDragStart={() => setIsDragging(true)} onDragCancel={() => setIsDragging(false)} onDragEnd={handleDragEnd}>
       <SortableContext items={keyResults.map((kr) => kr.id)} strategy={verticalListSortingStrategy}>
         <div className="okx-krs">
+          {reorderFailed && <p role="alert" className="text-sm text-destructive">Could not save the new order. Try moving the row again.</p>}
           {keyResults.map((kr) => (
             <KeyResultBar
               key={kr.id}

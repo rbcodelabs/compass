@@ -88,6 +88,11 @@ const USES_NAME_MAP_HELPER = /panelTitles|linkedTypeLabels|linkedTypePluralLabel
  * exception cannot hide another file's regression.
  */
 const FILE_EXCEPTIONS: Record<string, Record<string, string>> = {
+  "components/okrs/add-key-result-form.tsx": {
+    "kr-title": "an input ID, now scoped to each form instance",
+    "kr-target": "an input ID, now scoped to each form instance",
+    "kr-unit": "an input ID, now scoped to each form instance",
+  },
   "components/panels/objective-panel.tsx": { "/{}/{}/okrs": "a route, not copy: #332 appends cycleRouteSegment(cycle?.id)" },
   "components/discovery/opportunity-field-board.tsx": { solution: "now plural(count, labels.solution); pinned by 'opportunity-field-board' in classic-text.test.tsx" },
   "components/discovery/discovery-group-by-toggle.tsx": {

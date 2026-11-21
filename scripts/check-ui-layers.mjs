@@ -47,6 +47,8 @@ const LAYER_OWNERS = {
     "components/ui/popover.tsx",
     "components/ui/context-menu.tsx",
     "components/ui/tooltip.tsx",
+    // SheetContent `raised`: sheets opened from inside the detail panel (composer pickers, sub-agent team pill) sit on this layer, backdrop included.
+    "components/ui/sheet.tsx",
     // Transient floating actions beside a text selection; may sit over the detail panel (60) and dialogs (70).
     "components/selection-ask-pill.tsx",
     // Hover card for entity pills; a transient popup opened from chat, docs and panels (60), so it must clear the detail panel and dialogs (70).

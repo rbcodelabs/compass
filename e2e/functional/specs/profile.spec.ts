@@ -1,6 +1,14 @@
+import pg from "pg"
 import { test, expect } from "../fixtures/index"
+import { isolatedE2EConnectionString } from "../fixtures/isolated-database"
+import { E2E_ORG_SLUG, E2E_WORKSPACE_SLUG } from "../fixtures/seed-e2e"
 
-test("Profile updates past and future comment names and account navigation", async ({ page, base }, testInfo) => {
+// #593 replaced roadmap-item "Discussion" comments with Conversations. A person's own turns do not show their name in the
+// transcript, so "the rename reaches past and future comments" is asserted where the author name is served: the conversation's
+// messages API (live name lookup by authorUserId), which is what the transcript renders from.
+type Message = { content: string; role: string; authorName: string | null; editedAt?: unknown }
+
+test("Profile updates past and future conversation author names and account navigation", async ({ page, base }, testInfo) => {
   await page.setViewportSize({ width: 1280, height: 800 })
   await page.goto("/settings/profile")
   const originalName = await page.getByLabel("Display name").inputValue()
@@ -8,21 +16,55 @@ test("Profile updates past and future comment names and account navigation", asy
   await expect(page.getByLabel("Email", { exact: true })).toHaveAttribute("readonly", "")
   const title = `Profile discussion ${Date.now()}`
   let failed = false
+  const pool = new pg.Pool({ connectionString: isolatedE2EConnectionString() })
+  const conversationPanel = () =>
+    page
+      .locator('[data-slot="pinned-panel"]')
+      .filter({ has: page.getByRole("heading", { name: "Conversation", exact: true }) })
+      .or(page.getByRole("dialog", { name: "Conversation", exact: true }))
+  const openedConversationId = () => {
+    const detail = new URL(page.url()).searchParams.get("detail") ?? ""
+    return detail.startsWith("conversation:") ? detail.slice("conversation:".length) : ""
+  }
+  const messages = async (workspaceId: string, conversationId: string) => {
+    const response = await page.request.get(`/api/agent/conversations/${conversationId}/messages?workspaceId=${workspaceId}`)
+    expect(response.status()).toBe(200)
+    return ((await response.json()) as { messages: Message[] }).messages
+  }
   try {
+    const { rows: [scope] } = await pool.query<{ id: string }>(
+      "SELECT w.id FROM compass_dev.workspaces w JOIN compass_dev.organizations o ON o.id=w.organization_id WHERE o.slug=$1 AND w.slug=$2",
+      [E2E_ORG_SLUG, E2E_WORKSPACE_SLUG],
+    )
+    const workspaceId = scope.id
     await page.goto(`${base}/roadmap`)
     await page.getByRole("button", { name: "Add item" }).nth(1).click()
     await page.getByLabel("Title", { exact: true }).fill(title)
     await page.getByRole("button", { name: "Add Item", exact: true }).click()
     const card = page.locator('[data-slot="card"]').filter({ hasText: title })
     await card.getByRole("button", { name: title }).click()
-    let panel = page.locator('[data-slot="sheet-content"]')
-    await panel.getByLabel("Add comment").fill("A comment before the rename")
-    await panel.getByRole("button", { name: "Post comment" }).click()
-    await expect(panel.getByText("A comment before the rename", { exact: true })).toBeVisible()
-    await panel.getByRole("button", { name: /^Reply to / }).click()
-    await panel.getByRole("textbox", { name: /^Reply to / }).fill("A reply before the rename")
-    await panel.getByRole("button", { name: "Post reply" }).click()
-    await expect(panel.getByText("A reply before the rename", { exact: true })).toBeVisible()
+    const itemPanel = page.locator('[data-slot="sheet-content"]')
+    const itemConversations = itemPanel.getByTestId("object-conversations-section")
+    await itemConversations.getByTestId("object-conversation-composer").fill("A comment before the rename")
+    await itemConversations.getByRole("button", { name: "Send", exact: true }).click()
+    // Send opens the new conversation in the Conversation panel, where the follow-up is the old "reply".
+    await expect(conversationPanel().getByTestId("conversation-message").getByText("A comment before the rename", { exact: true })).toBeVisible()
+    await expect.poll(openedConversationId).not.toBe("")
+    const conversationId = openedConversationId()
+    const reply = "A reply before the rename"
+    await conversationPanel().getByPlaceholder(/message the agent/i).fill(reply)
+    const replyAccepted = page.waitForResponse((response) => {
+      const request = response.request()
+      if (request.method() !== "POST" || new URL(response.url()).pathname !== "/api/agent/turn") return false
+      const payload = request.postDataJSON()
+      return payload?.conversationId === conversationId && payload?.message === reply
+    })
+    await conversationPanel().getByRole("button", { name: "Send message" }).click()
+    expect((await replyAccepted).status()).toBe(200)
+    await expect.poll(async () => (await messages(workspaceId, conversationId)).length).toBe(2)
+    // Shared conversations poll every four seconds and skip ticks while sending. Wait for the stored row.
+    await expect(conversationPanel().getByTestId("conversation-message").getByText(reply, { exact: true }))
+      .toBeVisible({ timeout: 15_000 })
 
     await page.goto("/settings/profile")
     await page.getByLabel("Display name").fill("   ")
@@ -46,19 +88,25 @@ test("Profile updates past and future comment names and account navigation", asy
 
     await page.goto(`${base}/roadmap`)
     await card.getByRole("button", { name: title }).click()
-    panel = page.locator('[data-slot="sheet-content"]')
-    await expect(panel.getByText(desiredName, { exact: true })).toHaveCount(2)
-    await expect(panel.getByText("Edited", { exact: true })).toHaveCount(0)
-    await panel.getByLabel("Add comment").fill("A comment after the rename")
-    await panel.getByRole("button", { name: "Post comment" }).click()
-    await expect(panel.getByText(desiredName, { exact: true })).toHaveCount(3)
+    await page.locator('[data-slot="sheet-content"]').getByTestId("object-conversations-section").getByRole("button", { name: /^A comment before the rename/ }).click()
+    await expect(conversationPanel().getByText("A reply before the rename", { exact: true })).toBeVisible()
+    // Past messages now carry the new name; renaming is not an edit.
+    const past = await messages(workspaceId, conversationId)
+    expect(past.map((message) => message.authorName)).toEqual([desiredName, desiredName])
+    for (const message of past) expect(message.editedAt ?? null).toBeNull()
+    await conversationPanel().getByPlaceholder(/message the agent/i).fill("A comment after the rename")
+    await conversationPanel().getByRole("button", { name: "Send message" }).click()
+    await expect(conversationPanel().getByText("A comment after the rename", { exact: true })).toBeVisible()
+    await expect.poll(async () => (await messages(workspaceId, conversationId)).map((message) => message.authorName)).toEqual([desiredName, desiredName, desiredName])
     await page.reload()
-    await expect(panel).toBeVisible()
-    await expect(panel.getByText(desiredName, { exact: true })).toHaveCount(3)
+    await expect(conversationPanel()).toBeVisible()
+    await expect(conversationPanel().getByText("A comment after the rename", { exact: true })).toBeVisible()
+    expect((await messages(workspaceId, conversationId)).map((message) => message.authorName)).toEqual([desiredName, desiredName, desiredName])
   } catch (error) {
     failed = true
     throw error
   } finally {
+    await pool.end()
     if (!page.isClosed()) {
       try {
         await page.goto("/settings/profile")
