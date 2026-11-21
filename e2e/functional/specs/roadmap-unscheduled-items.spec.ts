@@ -271,6 +271,8 @@ test.describe("Roadmap — not yet on the roadmap", () => {
         await page.mouse.move(x, y);
         await page.mouse.down();
         await page.mouse.move(x + 10, y, { steps: 5 });
+        await expect(scheduled).toHaveAttribute("data-dragging", "true");
+        await page.mouse.move(x + 14, y, { steps: 2 });
         if (ontoNeighbor) {
           await page.mouse.move(x, y + other.y + other.height / 2 - card.y - card.height / 2, { steps: 20 });
         }
