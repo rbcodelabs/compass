@@ -51,7 +51,7 @@ describe("cover derivation", () => {
 describe("keys and hrefs", () => {
   it("scopes identity by org since slugs are only unique per org", () => {
     expect(workspaceKey({ orgSlug: "a", slug: "x" })).not.toBe(workspaceKey({ orgSlug: "b", slug: "x" }))
-    expect(workspaceHref({ orgSlug: "a", slug: "x" })).toBe("/a/x/okrs")
+    expect(workspaceHref({ orgSlug: "a", slug: "x" })).toBe("/a/x/home")
   })
 })
 

@@ -48,13 +48,23 @@ test("Profile updates past and future conversation author names and account navi
     await itemConversations.getByTestId("object-conversation-composer").fill("A comment before the rename")
     await itemConversations.getByRole("button", { name: "Send", exact: true }).click()
     // Send opens the new conversation in the Conversation panel, where the follow-up is the old "reply".
-    await expect(conversationPanel().getByText("A comment before the rename", { exact: true })).toBeVisible()
+    await expect(conversationPanel().getByTestId("conversation-message").getByText("A comment before the rename", { exact: true })).toBeVisible()
     await expect.poll(openedConversationId).not.toBe("")
     const conversationId = openedConversationId()
-    await conversationPanel().getByPlaceholder(/message the agent/i).fill("A reply before the rename")
+    const reply = "A reply before the rename"
+    await conversationPanel().getByPlaceholder(/message the agent/i).fill(reply)
+    const replyAccepted = page.waitForResponse((response) => {
+      const request = response.request()
+      if (request.method() !== "POST" || new URL(response.url()).pathname !== "/api/agent/turn") return false
+      const payload = request.postDataJSON()
+      return payload?.conversationId === conversationId && payload?.message === reply
+    })
     await conversationPanel().getByRole("button", { name: "Send message" }).click()
-    await expect(conversationPanel().getByText("A reply before the rename", { exact: true })).toBeVisible()
+    expect((await replyAccepted).status()).toBe(200)
     await expect.poll(async () => (await messages(workspaceId, conversationId)).length).toBe(2)
+    // Shared conversations poll every four seconds and skip ticks while sending. Wait for the stored row.
+    await expect(conversationPanel().getByTestId("conversation-message").getByText(reply, { exact: true }))
+      .toBeVisible({ timeout: 15_000 })
 
     await page.goto("/settings/profile")
     await page.getByLabel("Display name").fill("   ")

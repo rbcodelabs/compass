@@ -3,16 +3,18 @@ import { DsqlSigner } from "@aws-sdk/dsql-signer"
 import { applyMigrations, getMigrationStatus } from "../../lib/migrations/runner"
 import { assertSchema, migrateToReady, previewMigrationsReady } from "./database"
 import { required } from "./resolve"
+import { createInspectionPool } from "../../lib/migrations/inspection-pool"
 
 async function main() {
   const schema = required("PREVIEW_SCHEMA")
   assertSchema(schema)
   if (process.env.DATABASE_URL || process.env.PGUSER !== `${schema}_migrate`) throw new Error("Migration worker requires a scoped preview role")
   const signer = new DsqlSigner({ hostname: required("PGHOST"), region: required("AWS_REGION"), expiresIn: 900 })
-  const pool = new Pool({ host: required("PGHOST"), user: `${schema}_migrate`, database: "postgres", port: 5432, ssl: true, password: () => signer.getDbConnectAuthToken(), max: 1 })
+  const connectionConfig = { host: required("PGHOST"), user: `${schema}_migrate`, database: "postgres", port: 5432, ssl: true, password: () => signer.getDbConnectAuthToken(), max: 1 }
+  const pool = new Pool(connectionConfig)
   try {
     await migrateToReady(async () => (await applyMigrations(pool, schema, undefined, { preProvisionedSchema: true, includeExplicitOnly: true })).status, async () => {
-      const status = await (await getMigrationStatus(pool, schema)).json()
+      const status = await (await getMigrationStatus(pool, schema, () => createInspectionPool(connectionConfig, false))).json()
       const indexes = await pool.query("SELECT COUNT(*) AS pending FROM pg_index i JOIN pg_class t ON t.oid=i.indrelid JOIN pg_namespace n ON n.oid=t.relnamespace WHERE n.nspname=$1 AND (NOT i.indisvalid OR NOT i.indisready)", [schema])
       // Both halves of this gate read the runner's grouped current state, not
       // its raw history. `pending` is the applicable-and-unapplied set, which

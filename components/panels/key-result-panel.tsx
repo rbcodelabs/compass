@@ -7,7 +7,6 @@ import {
   PanelSkeleton,
   PanelError,
   PanelContainer,
-  FullPageLink,
   PanelTitle,
   Section,
   RelationList,
@@ -27,6 +26,7 @@ import { Combobox, ComboboxContent } from "@/components/ui/combobox";
 import { listKeyResultMoveTargets, moveKeyResult } from "@/app/[orgSlug]/[workspaceSlug]/okrs/actions";
 import type { KeyResultMoveTarget } from "@/lib/okr-hierarchy";
 import "@/components/okrs/okrs-gallery.css";
+import { usePanelHeaderActions } from "./panel-header-actions";
 
 type KeyResultData = {
   id: string;
@@ -161,6 +161,9 @@ export function KeyResultPanel({
     orgSlug,
     workspaceSlug
   );
+  usePanelHeaderActions(
+    data?.objective ? { fullPageHref: `/${orgSlug}/${workspaceSlug}/okrs/${cycleRouteSegment(data.objective.cycleId)}` } : {},
+  );
 
   // Fixed at mount: the panel is client-fetched (never server-rendered), so there is no hydration drift,
   // and the sparkline/pace marker don't jitter between renders.
@@ -223,12 +226,6 @@ export function KeyResultPanel({
 
   return (
     <PanelContainer entity={{ type: edit.type, id: edit.id, title: data.title }}>
-      {data.objective && (
-        <FullPageLink
-          href={`/${orgSlug}/${workspaceSlug}/okrs/${cycleRouteSegment(data.objective.cycleId)}`}
-        />
-      )}
-
       <PanelTitle displayId={displayId} title={data.title} edit={edit} />
       <MeasurementsPanel orgSlug={orgSlug} workspaceSlug={workspaceSlug} target={{ targetType: "KEY_RESULT", targetId: data.id }} compact />
 
