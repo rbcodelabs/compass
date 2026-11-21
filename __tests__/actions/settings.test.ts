@@ -246,6 +246,7 @@ import {
   updateWorkspaceMemberRole,
   removeWorkspaceMember,
   setActiveScoringModel,
+  updateAgentGithubRepos,
 } from "@/app/[orgSlug]/[workspaceSlug]/settings/actions";
 
 import { deleteWorkspaceCascade } from "@/lib/delete-workspace-cascade";
@@ -1564,5 +1565,16 @@ describe("setActiveScoringModel", () => {
       error: "Forbidden: workspace admin required",
     });
     expect(mockWorkspaceScoringConfig.upsert).not.toHaveBeenCalled();
+  });
+});
+
+describe("updateAgentGithubRepos", () => {
+  it("rejects a repo update with omitted access before writing settings", async () => {
+    const input = { repos: ["acme/a"] } as Parameters<typeof updateAgentGithubRepos>[2];
+    await expect(updateAgentGithubRepos("org", "ws", input)).resolves.toEqual({
+      ok: false,
+      error: "Access must be code-read, read or write",
+    });
+    expect(mockWorkspace.update).not.toHaveBeenCalled();
   });
 });
