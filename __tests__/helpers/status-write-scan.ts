@@ -21,6 +21,7 @@ export type StatusWriteSite = {
   evidence: "literal" | "dynamic"
   /** Wrapped in captureWorkspaceMutation, the adapter that emits following events. */
   viaAdapter: boolean
+  helper?: string
 }
 
 /** Prisma delegate name -> the column that carries lifecycle state for it. */
@@ -81,7 +82,11 @@ function inAdapter(node: ts.Node): boolean {
   return false
 }
 
-export function scanStatusWrites(root: string, dirs: string[] = ["lib", "app"]): StatusWriteSite[] {
+export function scanStatusWrites(
+  root: string,
+  dirs: string[] = ["lib", "app"],
+  taskDateGuardCalls: Array<{ file: string; viaAdapter: boolean }> = [],
+): StatusWriteSite[] {
   const files: string[] = []
   for (const dir of dirs) {
     const full = path.join(root, dir)
@@ -90,7 +95,11 @@ export function scanStatusWrites(root: string, dirs: string[] = ["lib", "app"]):
   const sites: StatusWriteSite[] = []
   for (const file of files.sort()) {
     const source = ts.createSourceFile(file, readFileSync(file, "utf8"), ts.ScriptTarget.Latest, true, file.endsWith("x") ? ts.ScriptKind.TSX : ts.ScriptKind.TS)
+    const relative = path.relative(root, file).split(path.sep).join("/")
     const visit = (node: ts.Node) => {
+      if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === "updateTaskWithDateGuard") {
+        taskDateGuardCalls.push({ file: relative, viaAdapter: inAdapter(node) })
+      }
       if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
         const operation = node.expression.name.text
         const target = node.expression.expression
@@ -100,10 +109,13 @@ export function scanStatusWrites(root: string, dirs: string[] = ["lib", "app"]):
           if (field) {
             const evidence = dataEvidence(node.arguments[0], field, operation)
             if (evidence) {
+              let owner: ts.Node | undefined = node.parent
+              while (owner && !ts.isFunctionLike(owner)) owner = owner.parent
+              const helper = owner && ts.isFunctionDeclaration(owner) ? owner.name?.text : undefined
               sites.push({
-                file: path.relative(root, file).split(path.sep).join("/"),
+                file: relative,
                 line: source.getLineAndCharacterOfPosition(node.getStart()).line + 1,
-                model, operation, evidence, viaAdapter: inAdapter(node),
+                model, operation, evidence, viaAdapter: inAdapter(node), helper,
               })
             }
           }

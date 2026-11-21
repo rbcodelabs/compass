@@ -18,7 +18,7 @@ function normVal(v: unknown): unknown {
   return v
 }
 
-function createInMemoryPrisma(seed: Record<string, Row[]> = {}) {
+function createInMemoryPrisma(seed: Record<string, Row[]> = {}, missingVoteTable = false) {
   const modelByDelegate = new Map([...dmmfModels.keys()].map((m) => [delegateKey(m), m]))
   const tables: Record<string, Row[]> = {}
   for (const [model, rows] of Object.entries(seed)) {
@@ -70,6 +70,7 @@ function createInMemoryPrisma(seed: Record<string, Row[]> = {}) {
         orderBy?: { id?: "asc" | "desc" }
         select?: Record<string, boolean>
       } = {}) {
+        if (model === "DecisionVote" && missingVoteTable) throw { code: "P2021" }
         let list = rows().filter((r) => matches(r, args.where))
         if (args.orderBy?.id === "asc") {
           list = [...list].sort((a, b) => String(a.id).localeCompare(String(b.id)))
@@ -171,6 +172,50 @@ const noopBlobs: BlobAdapters = {
 }
 
 describe("importWorkspaceBundle unique-key deduplication on collapsed users", () => {
+  it("exports a workspace before the vote table exists", async () => {
+    const org = randomUUID(), workspace = randomUUID()
+    const db = createInMemoryPrisma({ Organization: [{ id: org }], Workspace: [{ id: workspace, organizationId: org, slug: "ws", name: "WS" }] }, true)
+    const bundle = await exportWorkspaceToBuffer(db.client, workspace, noopBlobs)
+    expect(new BundleReader(bundle).manifest().counts.DecisionVote).toBe(0)
+  })
+  it.each(["none", "one", "collision", "duplicate-first", "duplicate-last", "content-collision"])("refuses unsafe vote identities before writing any workspace data (%s)", async (mode) => {
+    const sourceOrg = randomUUID(), targetOrg = randomUUID(), workspace = randomUUID(), importer = randomUUID()
+    const request = randomUUID(), revision = randomUUID(), matchedUser = randomUUID(), matchedSecond = randomUUID()
+    const voters = [randomUUID(), randomUUID()]
+    const db = createInMemoryPrisma({
+      Organization: [{ id: sourceOrg }, { id: targetOrg }],
+      Workspace: [{ id: workspace, organizationId: sourceOrg, slug: "votes", name: "Votes" }],
+      User: [...voters.map((id, i) => ({ id, email: `voter${mode === "collision" ? 0 : i}@source.example` })), { id: importer, email: "importer@target.example" }, ...(mode !== "none" ? [{ id: matchedUser, email: "voter0@source.example" }] : []), ...(["duplicate-first", "duplicate-last", "content-collision"].includes(mode) ? [{ id: matchedSecond, email: "voter1@source.example" }] : [])],
+      OrganizationMember: [{ id: randomUUID(), organizationId: targetOrg, userId: importer, role: "ADMIN" }, ...(mode !== "none" ? [{ id: randomUUID(), organizationId: targetOrg, userId: matchedUser, role: "MEMBER" }] : []), ...(["duplicate-first", "duplicate-last", "content-collision"].includes(mode) ? [{ id: randomUUID(), organizationId: targetOrg, userId: matchedSecond, role: "MEMBER" }] : [])],
+      ReviewRequest: [{ id: request, workspaceId: workspace, currentRevisionId: revision }],
+      ReviewRevision: [{ id: revision, requestId: request }],
+      DecisionVote: voters.map((voterUserId, i) => ({ id: randomUUID(), workspaceId: workspace, requestId: request, revisionId: revision, questionIndex: 0, chosenOption: i ? "No" : "Yes", voterUserId, createdAt: new Date(), updatedAt: new Date() })),
+    })
+    let bundle = await exportWorkspaceToBuffer(db.client, workspace, noopBlobs)
+    if (["duplicate-first", "duplicate-last", "content-collision"].includes(mode)) {
+      const reader = new BundleReader(bundle)
+      const files: Record<string, Uint8Array> = {}
+      for (const name of reader.list("")) files[name] = reader.read(name)!
+      if (mode === "content-collision") {
+        const entry = reader.list("data/ReviewRequest.")[0]
+        const row = JSON.parse(reader.readText(entry)!.trim())
+        row.id = voters[0]
+        files[entry] = new TextEncoder().encode(JSON.stringify(row) + "\n")
+      } else {
+        const manifest = reader.manifest()
+        const original = manifest.users.find((user) => user.id === voters[0])!
+        const duplicate = { ...original, email: "unmatched@source.example" }
+        if (mode === "duplicate-first") manifest.users.unshift(duplicate)
+        else manifest.users.push(duplicate)
+        files["manifest.json"] = new TextEncoder().encode(JSON.stringify(manifest))
+      }
+      bundle = Buffer.from(zipSync(files))
+    }
+    await expect(importWorkspaceBundle(db.client, bundle, { organizationId: targetOrg, importerUserId: importer, blobs: noopBlobs, nonce: "unmatched-votes" })).rejects.toThrow(/voter.*match/i)
+    expect(db.tables.Workspace).toHaveLength(1)
+    expect(db.tables.DecisionVote).toHaveLength(2)
+    expect(db.tables.DecisionVote.every((row) => row.voterUserId !== importer)).toBe(true)
+  })
   it("deduplicates CardSortProposal and Follow rows when 5 unmatched source users collapse onto the importer", async () => {
     const srcOrgId = randomUUID()
     const dstOrgId = randomUUID()

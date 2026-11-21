@@ -31,6 +31,7 @@ import {
   getDocLinkedTasks,
   restoreDocVersion,
   resolveDocEmbedRefs,
+  setDecisionVote,
 } from "@/app/[orgSlug]/[workspaceSlug]/docs/actions";
 import { DocEmbedCardsProvider, type EmbedEditing } from "@/components/docs/doc-embed-cards";
 import { createSlashController } from "@/components/docs/spec-slash-extension";
@@ -115,6 +116,8 @@ interface DocEditorProps {
   recordCreators?: RecordCreators;
   /** Test seam: how a card edit writes a record. Defaults to the record page's own patchEntityField. */
   patchRecordField?: EmbedEditing["patch"];
+  /** Test seam: how a card vote is sent. Defaults to the setDecisionVote server action. */
+  castVote?: EmbedEditing["vote"];
   /** People and agents the @ picker offers in comments. */
   mentionOptions?: MentionOptions;
   /** Agents that already hold a task from a comment in this doc. */
@@ -183,7 +186,7 @@ function captureAnchor(editor: Editor): PendingAnchor | null {
   };
 }
 
-export function DocEditor({ doc, versions, comments: initialComments, revalidatePathStr, orgSlug, workspaceSlug, workspaceId, linkedTasks, decisionAction, followAction, publishAction, specHeader, specScopes, readOnly = false, recordCreators, patchRecordField, initialCommentsPin, initialHistoryPin, initialFocusedCommentId = null, mentionOptions = NO_MENTION_OPTIONS, confirmedAgentIds: initialConfirmedAgentIds = [], taskCards: initialTaskCards = {}, lastWriter }: DocEditorProps) {
+export function DocEditor({ doc, versions, comments: initialComments, revalidatePathStr, orgSlug, workspaceSlug, workspaceId, linkedTasks, decisionAction, followAction, publishAction, specHeader, specScopes, readOnly = false, recordCreators, patchRecordField, castVote, initialCommentsPin, initialHistoryPin, initialFocusedCommentId = null, mentionOptions = NO_MENTION_OPTIONS, confirmedAgentIds: initialConfirmedAgentIds = [], taskCards: initialTaskCards = {}, lastWriter }: DocEditorProps) {
   const [title, setTitle] = useState(doc.title);
   const titleRef = useRef<HTMLTextAreaElement>(null);
   // Grow the one-row title textarea to its content (a long title wraps; it must never clip or scroll sideways).
@@ -421,8 +424,12 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
     () => ({
       editable: !readOnly,
       patch: patchRecordField ?? ((type, id, field, value) => patchEntityField(type, id, orgSlug, workspaceSlug, field, value)),
+      vote: castVote ?? (async (requestId, questionIndex, option, revisionId) => {
+        const result = await setDecisionVote(docId, requestId, questionIndex, option, revisionId);
+        return "error" in result ? result.error : null;
+      }),
     }),
-    [readOnly, patchRecordField, orgSlug, workspaceSlug]
+    [readOnly, patchRecordField, castVote, docId, orgSlug, workspaceSlug]
   );
 
   const editor = useEditor({
