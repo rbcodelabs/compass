@@ -554,3 +554,34 @@ it("aborts workspace publication when writing its import result fails", async ()
   expect(published).toBeTruthy()
   expect(db.tables.Workspace.map((row) => row.id)).toEqual([wsId])
 })
+
+it("preserves the import when the outcome of workspace publication cannot be read", async () => {
+  const orgId = randomUUID()
+  const wsId = randomUUID()
+  const userId = randomUUID()
+  const db = createInMemoryPrisma({
+    Organization: [{ id: orgId, slug: "org", name: "Org" }],
+    User: [{ id: userId, name: "Importer", email: "importer@example.com" }],
+    OrganizationMember: [{ id: randomUUID(), organizationId: orgId, userId, role: "ADMIN" }],
+    Workspace: [{ id: wsId, organizationId: orgId, name: "Source", slug: "source", ssoEnabled: false }],
+  })
+  const bundle = await exportWorkspaceToBuffer(db.client, wsId, noopBlobs)
+  const workspace = db.client.workspace as { findMany: (...args: unknown[]) => Promise<Row[]> }
+  let uncertain = false
+  db.client.workspace = {
+    ...workspace, async findMany(...args: unknown[]) {
+      if (uncertain) throw new Error("commit read unavailable")
+      return workspace.findMany(...args)
+    },
+  }
+  db.client.$transaction = async (fn: (tx: unknown) => Promise<void>) => {
+    await fn(db.client)
+    uncertain = true
+    throw new Error("commit response lost")
+  }
+  await expect(importWorkspaceBundle(db.client, bundle, {
+    organizationId: orgId, importerUserId: userId, blobs: noopBlobs, nonce: "uncertain",
+  })).rejects.toThrow(/outcome.*unknown/i)
+  expect(db.tables.Workspace).toHaveLength(2)
+  expect(db.tables.WorkspaceMember).toHaveLength(1)
+})

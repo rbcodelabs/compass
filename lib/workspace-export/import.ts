@@ -64,6 +64,7 @@ const REKEY_COLUMNS = new Set(["DecisionRecord.idempotencyKey", "DecisionApplica
 const MAX_ROWS_PER_MODEL = 2_000_000
 
 export class WorkspaceImportError extends Error {}
+export class WorkspaceImportRecoveryRequired extends Error {}
 
 export type ImportOptions = {
   organizationId: string
@@ -548,13 +549,15 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
     // The Workspace row is the commit point. If it exists, a request with the same nonce finished first (two concurrent
     // submissions derive identical ids, and the loser fails at the Workspace insert). Rolling back would delete the
     // winner's rows, so treat it as "already imported" and leave everything alone.
-    const committed = await delegateFor(client, "Workspace").findMany({ where: { id: newWorkspaceId }, take: 1 }).catch(() => [])
+    const committed = await delegateFor(client, "Workspace").findMany({ where: { id: newWorkspaceId }, take: 1 }).catch((cause: unknown) => {
+      throw new WorkspaceImportRecoveryRequired("Workspace import outcome is unknown and needs reconciliation", { cause })
+    })
     if (committed[0]) {
       if ((error as { code?: string }).code === "P2002") return alreadyImportedReport(committed[0], manifest)
       throw error
     }
     await rollbackImport(client, reader, importKey, newWorkspaceId, uploaded, opts.blobs).catch((rollbackError) => {
-      console.error("[workspace-import] rollback failed; partial rows may remain for workspace", newWorkspaceId, rollbackError)
+      throw new WorkspaceImportRecoveryRequired("Workspace import rollback needs reconciliation", { cause: rollbackError })
     })
     throw error
   }

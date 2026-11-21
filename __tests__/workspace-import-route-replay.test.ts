@@ -29,7 +29,7 @@ it("returns the committed result for a verified receipt before opening staging",
   expect(await res.json()).toMatchObject({ ok: true, workspaceId: "restored" })
   expect(state.verify).toHaveBeenCalledWith("signed", "org", "user", expect.any(Number), "replay")
   expect(state.result).toHaveBeenCalledWith(state.db, {
-    organizationId: "org", userId: "user", nonce: "prepared-upload", digest: createHash("sha256").update("signed").digest("hex"),
+    organizationId: "org", userId: "user", nonce: "prepared-upload", digest: createHash("sha256").update(JSON.stringify(["workspace-import", "org", "user", "prepared-upload"])).digest("hex"),
   })
   expect(state.load).not.toHaveBeenCalled()
 })

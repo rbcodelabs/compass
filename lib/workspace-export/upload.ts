@@ -45,8 +45,9 @@ export async function prepareBundleUpload(input: { organizationId: string; userI
 }
 
 export function verifyBundleReceipt(receipt: string, organizationId: string, userId: string, now = Date.now(), purpose: "upload" | "replay" = "upload"): Payload {
-  const [encoded, signature, extra] = receipt.split(".")
-  if (!encoded || !signature || extra) throw new Error("Invalid upload receipt")
+  const parts = receipt.split(".")
+  const [encoded, signature] = parts
+  if (!encoded || !signature || parts.length !== 2) throw new Error("Invalid upload receipt")
   const expected = Buffer.from(sign(encoded))
   const actual = Buffer.from(signature)
   if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) throw new Error("Invalid upload receipt")

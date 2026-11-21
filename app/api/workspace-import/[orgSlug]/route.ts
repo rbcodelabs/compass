@@ -4,7 +4,7 @@ import { auth } from "@/auth"
 import { getArtifactStorage } from "@/lib/artifact-storage"
 import { isPermissionError, resolveOrgAdmin } from "@/lib/permissions"
 import { defaultBlobAdapters } from "@/lib/workspace-export/blobs"
-import { WorkspaceImportError, importWorkspaceBundle } from "@/lib/workspace-export/import"
+import { WorkspaceImportError, WorkspaceImportRecoveryRequired, importWorkspaceBundle } from "@/lib/workspace-export/import"
 import { MAX_BUNDLE_BYTES, loadStagedBundle, verifyBundleReceipt } from "@/lib/workspace-export/upload"
 import { bindImportReceipt, readImportReceiptResult } from "@/lib/workspace-export/receipt-binding"
 
@@ -46,7 +46,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ orgSlug
       if (!body.receipt) return NextResponse.json({ error: "receipt is required" }, { status: 400 })
       const verified = verifyBundleReceipt(body.receipt, organizationId, userId, Date.now(), "replay")
       const nonce = body.nonce ?? verified.uploadId
-      const digest = createHash("sha256").update(body.receipt).digest("hex")
+      const digest = createHash("sha256").update(JSON.stringify(["workspace-import", organizationId, userId, verified.uploadId])).digest("hex")
       const result = await readImportReceiptResult(prisma, { organizationId, userId, nonce, digest })
       if (result) return NextResponse.json({ ok: true, ...result })
       const staged = await loadStagedBundle(body.receipt, organizationId, userId, getArtifactStorage())
@@ -93,7 +93,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ orgSlug
     return NextResponse.json({ ok: true, ...report })
   } catch (error) {
     if (error instanceof WorkspaceImportError) return NextResponse.json({ error: error.message }, { status: 422 })
+    if (error instanceof WorkspaceImportRecoveryRequired) return NextResponse.json({ error: error.message }, { status: 503 })
     console.error("[workspace-import] failed", error)
-    return NextResponse.json({ error: "The import failed and was rolled back. Try again, or contact support if it keeps failing." }, { status: 500 })
+    return NextResponse.json({ error: "The import could not be completed. Retry with the same import identity." }, { status: 500 })
   }
 }

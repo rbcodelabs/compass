@@ -938,3 +938,8 @@ it("waits for migration 131 indexes and verifies the catalog before recording co
   expect(runner).toContain(completion)
   expect(runner.indexOf(hook)).toBeLessThan(runner.indexOf(completion))
 })
+
+it("keeps the unapplied import recovery migration out of fixture migration replay", () => {
+  const fixtureRunner = readFileSync(path.join(ROOT, "__tests__/helpers/replay-migrations.ts"), "utf8")
+  expect(fixtureRunner).toMatch(/SKIP_IN_REPLAY = new Set\(\[[^\]]*"131_workspace_import_recovery"/)
+})
