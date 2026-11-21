@@ -314,10 +314,9 @@ export async function startConversationContinuationRun(
       model: turnModel,
       budgetMs,
       now,
-      fenceConversation: true,
     })
   } catch (error) {
-    if (error instanceof AgentRunError && error.code === "RUN_IN_FLIGHT") {
+    if (error instanceof AgentRunError && ["RUN_IN_FLIGHT", "SANDBOX_OPERATION_IN_FLIGHT"].includes(error.code)) {
       return { status: "already_running", conversationId: input.conversationId }
     }
     throw error
