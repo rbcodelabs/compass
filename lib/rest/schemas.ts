@@ -1,4 +1,5 @@
 import { z } from "zod"
+import { parsePublicFileUrl } from "@/lib/public-file-keys"
 
 export const uuid = z.string().uuid()
 export const cursorQuery = z.object({
@@ -204,13 +205,30 @@ export const taskLinkSchema = z.object({
   linkedTitle: z.string(),
 })
 
-export const uploadPreparationSchema = z.object({
-  clientToken: z.string(),
+export const blobUploadCredential = z.object({ clientToken: z.string().min(1) })
+export const s3UploadCredential = z.object({
+  clientToken: z.literal(""),
+  backend: z.literal("s3"),
+  upload: z.object({
+    method: z.literal("PUT"),
+    url: z.string().url(),
+    headers: z.record(z.string(), z.string()),
+  }),
+})
+const publicFeedbackFileUrl = z.string().regex(/^\/api\/files\/public\/feedback\//)
+  .refine((url) => parsePublicFileUrl(url) !== null)
+export const feedbackAttachmentUrl = z.union([z.string().url(), publicFeedbackFileUrl])
+
+const uploadPreparation = z.object({
   receipt: z.string(),
   pathname: z.string(),
   expiresAt: z.number(),
   attachmentId: uuid,
 })
+export const uploadPreparationSchema = z.union([
+  uploadPreparation.extend(s3UploadCredential.shape).extend({ url: publicFeedbackFileUrl }),
+  uploadPreparation.extend(blobUploadCredential.shape),
+])
 
 export const identitySchema = z.object({
   purpose: z.string(),

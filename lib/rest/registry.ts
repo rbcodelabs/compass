@@ -6,6 +6,7 @@ import {
   objectiveSchema, okrCycleSchema, scoreSchema, scoringMetricSchema, scoringModelSchema, squadSchema, typedLinkSchema,
   entityLinkRelationshipSchema, opportunityObjectiveRelationshipSchema, opportunitySchema, roadmapItemSchema, solutionKeyResultRelationshipSchema,
   solutionSchema, taskLinkSchema, taskSchema, uploadPreparationSchema, uuid, workspaceSchema,
+  blobUploadCredential, feedbackAttachmentUrl, s3UploadCredential,
 } from "@/lib/rest/schemas"
 import { FEEDBACK_ATTACHMENT_ALLOWED_MIME_TYPES, FEEDBACK_ATTACHMENT_MAX_FILE_BYTES } from "@/lib/feedback-attachment-rules"
 import { FEEDBACK_STATUSES } from "@/lib/feedback-meta"
@@ -189,7 +190,11 @@ const launchItemResponse = z.object({ id: uuid, label: z.string(), status: z.enu
 const launchTierResponse = z.object({ item: z.object({ id: uuid, title: z.string(), tier: z.enum(["TIER_1", "TIER_2", "TIER_3"]), horizon: z.literal("LAUNCHING") }).strict(), checklist: z.object({ id: uuid, name: z.string(), tier: z.enum(["TIER_1", "TIER_2", "TIER_3"]), itemCount: z.number().int().nonnegative() }).strict() }).strict()
 const launchChecklistResponse = z.object({ items: z.array(launchItemResponse), count: z.number().int().nonnegative() }).strict()
 const releaseRunResponse = z.object({ id: uuid, state: z.enum(["PREPARING", "READY_FOR_APPROVAL", "DECISION_RECORDING", "DISPATCH_QUEUED", "BLOCKED", "SUPERSEDED", "CANCELLED"]), provider: z.literal("GITHUB"), repositoryOwner: z.string(), repositoryName: z.string(), pullRequestNumber: z.number().int().positive(), pullRequestUrl: z.string().url(), baseRef: z.string(), headSha: z.string(), targetEnvironment: z.string(), releasePolicyId: z.string(), sourceFingerprint: z.string(), authorizationDecisionRecordId: uuid.nullable(), taskIds: z.array(uuid), dispatches: z.array(z.object({ id: uuid, status: z.string(), updatedAt: timestamp }).strict()), lastErrorCode: z.string().nullable(), createdAt: timestamp, updatedAt: timestamp }).strict()
-const docImagePreparation = z.object({ imageId: uuid, imageName: z.string(), pathname: z.string(), url: z.string().regex(/^\/api\/docs\/images\//), filename: z.string(), fileType: z.enum(DOC_IMAGE_ALLOWED_MIME_TYPES), fileSize: z.number().int().positive(), clientToken: z.string().min(1), expiresAt: z.union([z.string(), z.number()]), access: z.literal("private"), markdown: z.string() })
+const docImagePreparationBase = z.object({ imageId: uuid, imageName: z.string(), pathname: z.string(), url: z.string().regex(/^\/api\/docs\/images\//), filename: z.string(), fileType: z.enum(DOC_IMAGE_ALLOWED_MIME_TYPES), fileSize: z.number().int().positive(), expiresAt: z.union([z.string(), z.number()]), access: z.literal("private"), markdown: z.string() })
+const docImagePreparation = z.union([
+  docImagePreparationBase.extend(s3UploadCredential.shape),
+  docImagePreparationBase.extend(blobUploadCredential.shape),
+])
 const commentTarget = z.enum(COMMENT_TARGET_TYPES)
 const commentTargetPath = z.object({ workspaceId: uuid, targetType: commentTarget, targetId: uuid })
 const commentCreate = z.object({ body: z.string().trim().min(1), parentId: uuid.optional() }).strict()
@@ -227,7 +232,7 @@ const evidenceTarget = z.union([
 const evidenceCreate = z.object({ sourceType: z.enum(["interview", "feedback", "support_ticket", "experiment_result", "analytics"]), excerpt: z.string().trim().min(1).max(20_000), confidence: z.enum(["high", "medium", "low"]).optional(), sourceUrl: z.string().url().optional() }).and(evidenceTarget)
 const evidencePatch = evidenceTarget
 const evidenceQuery = cursorQuery.extend({ nodeType: z.enum(["opportunity", "solution", "assumption"]), nodeId: uuid }).strict()
-const attachmentComplete = z.object({ url: z.string().url(), receipt: z.string().min(1).max(8_192) }).strict()
+const attachmentComplete = z.object({ url: feedbackAttachmentUrl, receipt: z.string().min(1).max(8_192) }).strict()
 const promotionCreate = z.object({ operationId: uuid, horizon: z.enum(["NOW", "NEXT", "LATER", "SHIPPED"]), isPrivate: z.boolean().optional() }).strict()
 const scoringAssignmentPath = z.object({ workspaceId: uuid, entityType: z.enum(["OPPORTUNITY", "SOLUTION"]) })
 const scoringAssignmentPatch = z.object({ scoringModelId: uuid.nullable() }).strict()

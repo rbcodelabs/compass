@@ -54,6 +54,34 @@ Deployed HTML Artifacts require `ARTIFACT_BLOB_READ_WRITE_TOKEN` for a **private
 
 When upgrading an existing installation, point this credential at the private store that already contains its Artifact revisions, or migrate those files before switching stores. Revisions retain storage paths, so changing the credential alone does not move existing files.
 
+### Storing files on Amazon S3 instead of Vercel Blob
+
+Vercel Blob is the default and needs no extra setting. An administrator who hosts Compass elsewhere can store the same files in one Amazon S3 bucket by setting `COMPASS_STORAGE_BACKEND`:
+
+| Variable | Meaning |
+| --- | --- |
+| `COMPASS_STORAGE_BACKEND` | `blob` (default when unset), `s3`, or `local` (development and self-hosted runs with `DATABASE_URL` set, never on Vercel). An unknown value stops the first storage call with an error; nothing falls back silently. |
+| `COMPASS_S3_BUCKET` | Required with `s3`: the bucket name. |
+| `COMPASS_S3_REGION` | Optional. Falls back to `AWS_REGION` and the standard AWS configuration. |
+| `COMPASS_S3_FORCE_PATH_STYLE` | Set to `1` to use path-style addressing, for an S3-compatible server such as MinIO (together with `AWS_ENDPOINT_URL_S3`). |
+
+Credentials come from the standard AWS credential chain (environment variables, shared config, or an attached role); Compass never reads an access key of its own. The bucket stays **private**. Each store is a prefix in it: `artifacts/`, `capability-packs/`, `research/`, `agent-sessions/`, and `public/`. Set an expiration lifecycle rule on `tmp/` for abandoned artifact and workspace ZIP uploads and their consumed markers. Set the expiration longer than the 30-minute maximum upload window. In a versioned bucket, configure noncurrent version expiration on this prefix too. Docs images and feedback files use durable prefixes, so scope the expiration rule to `tmp/`.
+
+Browser and agent uploads use a create-only presigned PUT that signs the object key, content type and byte length. The bucket CORS rule must allow `PUT` from the Compass origin and allow `If-None-Match`, `Content-Type`, `Cache-Control` and `Content-Disposition`. Upload clients send the raw file and the returned headers.
+
+Set `ARTIFACT_UPLOAD_RECEIPT_SECRET` and `FEEDBACK_UPLOAD_RECEIPT_SECRET` when running without Blob credentials. The first signs artifact and workspace import receipts. The second signs feedback attachment receipts.
+
+Files that Vercel Blob serves from a public URL (feedback attachments, embedded-feedback screenshots, workspace logos) are served by Compass itself at `/api/files/public/<key>` on S3. Only keys of the shapes Compass generates, each containing a random UUID, are served, with or without a session; this is the same exposure as an unguessable Blob URL. Private stores are never reachable through that route.
+
+Use S3 for new installations. For an installation with existing files, keep the current backend until you have a verified migration and rollback for private files, public URLs, and outstanding upload receipts. Public reads can use both stores while the original Blob credentials and S3 bucket configuration remain available. Private reads use the selected backend. Clients that only understand Vercel Blob upload tokens continue to work on Blob and need an update before using S3.
+
+Rehearse any backend change against isolated fixtures before requesting production approval:
+
+1. Record application references and inventory both stores by workspace and logical key. Reconcile every private Artifact revision, embedded document file and research attachment to its expected destination key. Compare byte lengths and independently computed checksums. Record source-only, destination-only and mismatched entries separately.
+2. Stop issuing uploads and pause writes during the rehearsal. Wait for the last outstanding receipt and upload credential to expire, or finish those receipts on the backend that issued them before switching reads. Verify that new receipts and writes stay paused until reconciliation completes.
+3. Run an export and restore on the fixture backend. Treat an access denial as a failed check. A verified missing object needs a recorded disposition before proceeding. Compare manifest entries and restored checksums, and test representative private downloads and public URLs.
+4. Rehearse rollback with writes on both sides of the switch. Pause writes again, inventory changes since cutover, reconcile new and updated objects back to the original store, and verify reads before restoring traffic. Retain the original inventory and object versions for comparison. An application flag change alone cannot recover data written after cutover.
+
 Artifacts have stable identities and appear alongside Docs and Diagrams in the Library. They are not nested into the Page hierarchy. An Artifact can be linked to multiple Solutions, and a Solution can link to multiple Artifacts.
 
 Artifacts can also be attached to **Experiments**: the Artifact page has a **Linked experiments** section where you can choose an experiment to link or unlink, and the experiment shows the same relationship under **Linked artifacts** (see [Experiments](/help/03-experiments)). Archived Artifacts cannot be newly linked to an experiment, but existing links stay visible and removable.

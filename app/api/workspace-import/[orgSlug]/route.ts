@@ -1,9 +1,10 @@
+import { resolveStorageBackend } from "@/lib/storage/config"
 import { NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { getArtifactStorage } from "@/lib/artifact-storage"
 import { isPermissionError, resolveOrgAdmin } from "@/lib/permissions"
 import { defaultBlobAdapters } from "@/lib/workspace-export/blobs"
-import { WorkspaceImportError, importWorkspaceBundle } from "@/lib/workspace-export/import"
+import { WorkspaceImportError, WorkspaceImportRecoveryRequired, findCommittedWorkspaceImport, importWorkspaceBundle, type ImportReport } from "@/lib/workspace-export/import"
 import { MAX_BUNDLE_BYTES, loadStagedBundle } from "@/lib/workspace-export/upload"
 
 export const maxDuration = 300
@@ -31,16 +32,22 @@ export async function POST(req: Request, { params }: { params: Promise<{ orgSlug
   const userId = session!.user!.id!
 
   let bytes: Uint8Array
-  let discard: (() => Promise<void>) | undefined
+  let commit: ((apply: () => Promise<ImportReport>) => Promise<ImportReport>) | undefined
   let fields: { name?: string; slug?: string; nonce?: string } = {}
   try {
     if ((req.headers.get("content-type") ?? "").includes("application/json")) {
       const body = (await req.json()) as { receipt?: string; name?: string; slug?: string; nonce?: string }
       if (!body.receipt) return NextResponse.json({ error: "receipt is required" }, { status: 400 })
-      const staged = await loadStagedBundle(body.receipt, organizationId, userId, getArtifactStorage())
+      if (body.nonce !== undefined && typeof body.nonce !== "string") return NextResponse.json({ error: "Invalid nonce" }, { status: 400 })
+      const staged = await loadStagedBundle(body.receipt, organizationId, userId, getArtifactStorage(), {
+        nonce: body.nonce, persistResult: resolveStorageBackend() === "s3",
+        canReleaseClaim: (error) => !(error instanceof WorkspaceImportRecoveryRequired),
+        recover: (zip, nonce) => findCommittedWorkspaceImport(prisma, zip, organizationId, nonce),
+      })
+      if ("result" in staged) return NextResponse.json({ ok: true, ...staged.result })
       bytes = staged.bytes
-      discard = staged.discard
-      fields = body
+      commit = staged.commit
+      fields = { ...body, nonce: staged.nonce ?? body.nonce }
     } else {
       const form = await req.formData()
       const file = form.get("file")
@@ -55,7 +62,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ orgSlug
   }
 
   try {
-    const report = await importWorkspaceBundle(prisma, bytes, {
+    const importBundle = () => importWorkspaceBundle(prisma, bytes, {
       organizationId,
       importerUserId: userId,
       name: fields.name,
@@ -63,7 +70,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ orgSlug
       nonce: fields.nonce,
       blobs: defaultBlobAdapters(),
     })
-    await discard?.()
+    const report = await (commit ? commit(importBundle) : importBundle())
     const { revalidatePath } = await import("next/cache")
     revalidatePath("/dashboard")
     revalidatePath("/", "layout")
@@ -71,6 +78,6 @@ export async function POST(req: Request, { params }: { params: Promise<{ orgSlug
   } catch (error) {
     if (error instanceof WorkspaceImportError) return NextResponse.json({ error: error.message }, { status: 422 })
     console.error("[workspace-import] failed", error)
-    return NextResponse.json({ error: "The import failed and was rolled back. Try again, or contact support if it keeps failing." }, { status: 500 })
+    return NextResponse.json({ error: "The import could not be confirmed. Retry with the same receipt or nonce, or contact support if it keeps failing." }, { status: 500 })
   }
 }

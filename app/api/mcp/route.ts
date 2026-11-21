@@ -3422,8 +3422,9 @@ const _handler = createMcpHandler(
       {
         title: "Prepare Feedback Attachment Upload",
         description:
-          "Prepares a short-lived direct-to-Vercel-Blob upload for a feedback attachment up to 10 MiB. " +
-          "Upload with the returned client token, then call add_feedback_attachment with the Blob URL and signed receipt.",
+          "Prepares a short-lived direct upload for a feedback attachment up to 10 MiB. " +
+          "On Vercel Blob, upload with the returned client token; on the S3 backend, POST the file to the returned upload target. " +
+          "Then call add_feedback_attachment with the resulting URL (the Blob URL, or the returned app-route url on S3) and signed receipt.",
         inputSchema: {
           workspaceId: z.string().uuid().describe("UUID of the workspace that will own the attachment"),
           filename: z.string().min(1).max(255).describe("Original filename shown in Compass"),
@@ -3446,7 +3447,7 @@ const _handler = createMcpHandler(
           feedbackId: z.string().uuid().describe("UUID of the feedback item"),
           inline: inlineFeedbackAttachmentSchema.optional().describe("Small inline attachment"),
           uploaded: z.object({
-            url: z.string().url().describe("Blob URL returned after the direct upload"),
+            url: z.union([z.string().url(), z.string().startsWith("/api/files/public/").max(1024)]).describe("Blob URL returned after the direct upload, or the /api/files/public/... url returned by prepare_feedback_attachment_upload on the S3 backend"),
             receipt: z.string().min(1).describe("Signed receipt returned by prepare_feedback_attachment_upload"),
           }).optional().describe("Completed direct upload"),
         },
@@ -3578,7 +3579,7 @@ const _handler = createMcpHandler(
       "prepare_doc_image_upload",
       {
         title: "Prepare Docs Image Upload",
-        description: "Prepares a short-lived upload to private Docs image storage. Upload with the returned client token, then embed the returned relative image URL or Markdown in a Compass Doc.",
+        description: "Prepares a short-lived upload to private Docs image storage. Upload with the returned client token (Vercel Blob) or PUT to the returned upload target (S3 backend), then embed the returned relative image URL or Markdown in a Compass Doc.",
         inputSchema: {
           workspaceId: z.string().uuid().describe("UUID of the workspace that will own the image"),
           filename: z.string().min(1).max(255).describe("Original filename used in the Markdown alt text"),
@@ -3884,7 +3885,7 @@ const _handler = createMcpHandler(
     register("prepare_artifact_upload", {
       title: "Prepare Artifact HTML Upload",
       description: "Prepares a short-lived direct upload (up to 2 MiB) to private storage for an HTML artifact so the file never has to be pasted into a tool call. " +
-        "Upload the file from disk with the returned client token, then pass the returned receipt as uploadReceipt to create_artifact or update_artifact. Prefer this over inline html for anything beyond a few KB.",
+        "Upload the file from disk with the returned client token (Vercel Blob) or PUT it to the returned upload target (S3 backend), then pass the returned receipt as uploadReceipt to create_artifact or update_artifact. Prefer this over inline html for anything beyond a few KB.",
       inputSchema: {
         workspaceId: z.string().uuid().describe("UUID of the workspace that will own the artifact"),
         filename: z.string().min(1).max(255).describe("Filename ending in .html"),

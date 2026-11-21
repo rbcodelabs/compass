@@ -1,11 +1,13 @@
 "use server";
 
+import type { PresignedUploadTarget } from "@/lib/storage/direct-upload-client";
 import { revalidatePath } from "next/cache";
 import type { Prisma } from "@prisma/client";
 import { auth } from "@/auth";
 import getPrisma from "@/lib/db";
 import { assertWorkspaceWritable, requireWorkspaceContextOrThrow } from "@/lib/workspace-context";
 import { feedbackOpportunityLinkData, validateFeedbackInput } from "@/lib/feedback";
+import { feedbackAttachmentsAvailable } from "@/lib/storage/availability";
 import {
   deleteFeedbackBlobs,
   prepareFeedbackAttachmentUpload,
@@ -196,14 +198,24 @@ export async function createFeedback(
 export type PrepareFeedbackAttachmentResult =
   | {
       ok: true;
-      upload: { clientToken: string; receipt: string; pathname: string; expiresAt: number };
+      upload: {
+        /** Vercel Blob backend: client token for @vercel/blob/client put(). */
+        /** Empty on the S3 backend, where `presignedUpload` is the target instead. */
+        clientToken: string;
+        /** S3 backend: PUT the raw file using the signed headers; `url` is the app route to store. */
+        presignedUpload?: PresignedUploadTarget;
+        url?: string;
+        receipt: string;
+        pathname: string;
+        expiresAt: number;
+      };
     }
   | { ok: false; error: string };
 
 /**
  * Step one of an in-app attachment: validate the file's metadata and mint a
- * single-use, size- and type-locked client token for a direct browser→Blob
- * upload, plus a signed receipt that `createFeedback` later verifies.
+ * single-use, size- and type-locked client token (Vercel Blob) or presigned PUT
+ * (S3 backend) for a direct browser upload, plus a signed receipt that `createFeedback` later verifies.
  *
  * Same storage, limits and receipt format as the MCP
  * `prepare_feedback_attachment_upload` tool — only the caller's identity check
@@ -229,7 +241,7 @@ export async function prepareFeedbackAttachment(
     const workspace = await findMemberWorkspace(orgSlug, workspaceSlug, session.user!.id!);
     if (!workspace) return { ok: false, error: "Workspace not found" };
 
-    if (!process.env.BLOB_READ_WRITE_TOKEN) {
+    if (!feedbackAttachmentsAvailable()) {
       return { ok: false, error: "Attachments aren’t available in this environment." };
     }
     const prepared = await prepareFeedbackAttachmentUpload({
@@ -238,6 +250,19 @@ export async function prepareFeedbackAttachment(
       fileType: file.fileType,
       fileSize: file.fileSize,
     });
+    if ("upload" in prepared) {
+      return {
+        ok: true,
+        upload: {
+          clientToken: "",
+          presignedUpload: prepared.upload,
+          url: prepared.url,
+          receipt: prepared.receipt,
+          pathname: prepared.pathname,
+          expiresAt: prepared.expiresAt,
+        },
+      };
+    }
     return {
       ok: true,
       upload: {

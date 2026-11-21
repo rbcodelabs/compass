@@ -1,3 +1,4 @@
+import { parsePublicFileUrl } from "@/lib/public-file-keys"
 import { createHash, randomUUID } from "node:crypto"
 import { normalizeWorkspaceRole } from "@/lib/roles"
 import { SLUG_PATTERN, isReservedWorkspaceSlug } from "@/lib/slug"
@@ -11,7 +12,6 @@ import { IMPORT_OVERRIDES, SECRET_COLUMNS } from "@/lib/workspace-export/model-r
 import {
   capabilityPackArtifactPath,
   confineStoragePath,
-  isOwnFeedbackAttachmentUrl,
   type PrivateBlobStore,
 } from "@/lib/workspace-export/path-confinement"
 import {
@@ -64,6 +64,7 @@ const REKEY_COLUMNS = new Set(["DecisionRecord.idempotencyKey", "DecisionApplica
 const MAX_ROWS_PER_MODEL = 2_000_000
 
 export class WorkspaceImportError extends Error {}
+export class WorkspaceImportRecoveryRequired extends AggregateError {}
 
 export type ImportOptions = {
   organizationId: string
@@ -157,6 +158,23 @@ function allowedModels(): Set<string> {
   return new Set(["Workspace", ...exportOrder()])
 }
 
+function workspaceImportKey(exportId: string, organizationId: string, nonce: string): string {
+  return createHash("sha256").update(`${exportId}:${organizationId}:${nonce}`).digest("hex")
+}
+
+/** Read the commit point for an authenticated staged retry, without applying the bundle again. */
+export async function findCommittedWorkspaceImport(client: Client, bytes: Uint8Array, organizationId: string, nonce: string): Promise<ImportReport | undefined> {
+  let manifest: BundleManifest
+  try {
+    manifest = new BundleReader(bytes).manifest()
+  } catch {
+    return undefined
+  }
+  const id = deriveId(workspaceImportKey(manifest.exportId, organizationId, nonce), manifest.source.workspaceId)
+  const [workspace] = await delegateFor(client, "Workspace").findMany({ where: { id, organizationId }, take: 1 })
+  return workspace ? alreadyImportedReport(workspace, manifest) : undefined
+}
+
 export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, opts: ImportOptions): Promise<ImportReport> {
   let reader: BundleReader
   try {
@@ -188,9 +206,7 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
   if (!org[0]) throw new WorkspaceImportError("Target organization not found")
 
   // ---- identity: every exported row id gets a deterministic new id ---------------------------------------------------
-  const importKey = createHash("sha256")
-    .update(`${manifest.exportId}:${opts.organizationId}:${opts.nonce ?? randomUUID()}`)
-    .digest("hex")
+  const importKey = workspaceImportKey(manifest.exportId, opts.organizationId, opts.nonce ?? randomUUID())
   const idSet = new Set<string>([manifest.source.workspaceId.toLowerCase()])
   for (const model of ["Workspace", ...exportOrder()]) {
     if (!modelHasId(model)) continue
@@ -270,25 +286,17 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
   if (slug.length > 100) throw new WorkspaceImportError("Slug must be 100 characters or fewer")
   const requestedReserved = isReservedWorkspaceSlug(slug) ? slug : null
   if (requestedReserved) slug = `${slug}-workspace`
-  if (!opts.slug) {
-    const base = slug
-    for (let i = 2; (await wsDelegate.count({ where: { organizationId: opts.organizationId, slug } })) > 0; i++) slug = `${base}-${i}`
-  } else if ((await wsDelegate.count({ where: { organizationId: opts.organizationId, slug } })) > 0) {
-    throw new WorkspaceImportError(`A workspace with the slug "${slug}" already exists in this organization`)
-  }
-
-  const slugWarnings = requestedReserved
-    ? [`The URL slug "${requestedReserved}" is reserved by Compass, so the workspace uses "${slug}" instead.`]
-    : []
 
   // ---- row transform -----------------------------------------------------------------------------------------------------
   let referencesCleared = 0
-  const warnings = [...manifest.warnings, ...slugWarnings]
+  const warnings = [...manifest.warnings]
   if (retiredSeen.size > 0) warnings.push(`Ignored retired legacy link data in the bundle (${[...retiredSeen].sort().join(", ")}); links are restored from the bundle's EntityLink rows.`)
   /** Only objects THIS import created. Rollback deletes exactly these, never a pre-existing object. */
   const uploaded: { store: "artifact" | "research" | "feedback"; key: string }[] = []
   const sourceWorkspaceId = manifest.source.workspaceId
 
+  let omittedBrandingLogo = false
+  let omittedEmbedScreenshot = false
   const dropped: Record<string, number> = {}
   const deduped: Record<string, number> = {}
   const droppedIds = new Set<string>()
@@ -306,6 +314,15 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
       // Prisma rejects an explicit null there, so leave the key out and let the column default apply.
       if (value === null && !OPTIONAL_FIELDS[model]?.includes(name)) {
         delete row[name]
+        continue
+      }
+      const isBrandingLogo = model === "Workspace" && name === "brandingLogoUrl"
+      const isEmbedScreenshot = (model === "CommentElementAnchor" || model === "FeedbackElementAnchor") && name === "screenshotUrl"
+      if ((isBrandingLogo || isEmbedScreenshot) && parsePublicFileUrl(value)) {
+        row[name] = null
+        referencesCleared++
+        omittedBrandingLogo ||= isBrandingLogo
+        omittedEmbedScreenshot ||= isEmbedScreenshot
         continue
       }
       const pathRule = PATH_COLUMNS[`${model}.${name}`]
@@ -375,7 +392,24 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
 
   const rewritePath = rewriteText
 
+  // Multiple receipts and the multipart path can address the same derived
+  // workspace. Check for a completed retry again after acquiring its claim.
+  const releaseImport = await opts.blobs.claimImport?.(newWorkspaceId)
+  let writesStarted = false
+  let canReleaseClaim = true
   try {
+    if (releaseImport) {
+      const [committed] = await wsDelegate.findMany({ where: { id: newWorkspaceId }, take: 1 })
+      if (committed) return alreadyImportedReport(committed, manifest)
+    }
+    if (!opts.slug) {
+      const base = slug
+      for (let i = 2; (await wsDelegate.count({ where: { organizationId: opts.organizationId, slug } })) > 0; i++) slug = `${base}-${i}`
+    } else if ((await wsDelegate.count({ where: { organizationId: opts.organizationId, slug } })) > 0) {
+      throw new WorkspaceImportError(`A workspace with the slug "${slug}" already exists in this organization`)
+    }
+    if (requestedReserved) warnings.push(`The URL slug "${requestedReserved}" is reserved by Compass, so the workspace uses "${slug}" instead.`)
+    writesStarted = true
     // ---- blobs first: a failure here writes nothing to the database ------------------------------------------------------
     let blobsCopied = 0
     for (const b of manifest.blobs) {
@@ -397,7 +431,14 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
       const storage = b.store === "research" ? opts.blobs.research : opts.blobs.artifact
       // Never overwrite: the target prefix is brand new, so an existing object is not ours to replace (or to delete later).
       const put = await storage.put(target, data, b.contentType, { overwrite: false })
-      if (put.created !== false) uploaded.push({ store: b.store, key: target })
+      if (put.created === false) {
+        const stored = await storage.get(target)
+        if (!stored || !Buffer.from(stored).equals(data)) {
+          throw new WorkspaceImportError("The existing private file differs from the bundle")
+        }
+      } else {
+        uploaded.push({ store: b.store, key: target })
+      }
       blobsCopied++
     }
 
@@ -452,13 +493,9 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
             row.url = await opts.blobs.putPublic(key, data, String(raw.fileType ?? "application/octet-stream"))
             uploaded.push({ store: "feedback", key: row.url as string })
             blobsCopied++
-          } else if (isOwnFeedbackAttachmentUrl(raw.url, sourceWorkspaceId)) {
-            // Only this deployment's own public-store URLs survive, and verbatim (not run through the id rewrite).
-            row.url = raw.url
-            warnings.push(`Feedback attachment ${raw.id} bytes were not in the bundle; its original URL was kept`)
           } else {
             dropped.FeedbackAttachment = (dropped.FeedbackAttachment ?? 0) + 1
-            warnings.push(`Feedback attachment ${raw.id} had no bytes in the bundle and an external URL; it was skipped`)
+            warnings.push(`Feedback attachment ${raw.id} had no bytes in the bundle; it was skipped`)
             continue
           }
         }
@@ -517,6 +554,8 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
     if (!wsRaw) throw new WorkspaceImportError("Bundle has no Workspace row")
     const wsRow = transform("Workspace", wsRaw)
     if (!wsRow) throw new WorkspaceImportError("Bundle Workspace row is invalid")
+    if (omittedBrandingLogo) warnings.push("Cleared the S3 branding logo reference because its file was not bundled.")
+    if (omittedEmbedScreenshot) warnings.push("Cleared S3 embed screenshot references because their files were not bundled.")
     Object.assign(wsRow, { id: newWorkspaceId, organizationId: opts.organizationId, name: baseName, slug })
     const memberRows = members.map((m) => ({ workspaceId: newWorkspaceId, userId: m.userId, role: normalizeWorkspaceRole(m.role) }))
     if (!memberRows.some((m) => m.userId === opts.importerUserId)) {
@@ -550,18 +589,29 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
       warnings,
     }
   } catch (error) {
+    if (!writesStarted) throw error
     // The Workspace row is the commit point. If it exists, a request with the same nonce finished first (two concurrent
     // submissions derive identical ids, and the loser fails at the Workspace insert). Rolling back would delete the
     // winner's rows, so treat it as "already imported" and leave everything alone.
-    const committed = await delegateFor(client, "Workspace").findMany({ where: { id: newWorkspaceId }, take: 1 }).catch(() => [])
+    canReleaseClaim = false
+    const committed = await delegateFor(client, "Workspace").findMany({ where: { id: newWorkspaceId }, take: 1 }).catch((statusError) => {
+      if (releaseImport) throw new WorkspaceImportRecoveryRequired([error, statusError], "Could not verify the import outcome before rollback")
+      return []
+    })
     if (committed[0]) {
+      canReleaseClaim = true
       if ((error as { code?: string }).code === "P2002") return alreadyImportedReport(committed[0], manifest)
       throw error
     }
-    await rollbackImport(client, reader, importKey, newWorkspaceId, uploaded, opts.blobs).catch((rollbackError) => {
+    await rollbackImport(client, reader, importKey, newWorkspaceId, uploaded, opts.blobs).then(() => { canReleaseClaim = true }).catch((rollbackError) => {
       console.error("[workspace-import] rollback failed; partial rows may remain for workspace", newWorkspaceId, rollbackError)
+      if (releaseImport) throw new WorkspaceImportRecoveryRequired([error, rollbackError], "Could not complete import rollback")
     })
     throw error
+  } finally {
+    if (canReleaseClaim) await releaseImport?.().catch((error: unknown) => {
+      console.error("[workspace-import] could not release import claim", error)
+    })
   }
 }
 
@@ -610,8 +660,11 @@ async function rollbackImport(
     pending = next
   }
   for (const u of uploaded) {
-    if (u.store === "feedback") await blobs.delPublic(u.key)
-    else await (u.store === "research" ? blobs.research : blobs.artifact).del(u.key).catch(() => undefined)
+    if (u.store === "feedback") {
+      if (blobs.rollbackPublic) await blobs.rollbackPublic(u.key)
+      else await blobs.delPublic(u.key)
+    }
+    else await (u.store === "research" ? blobs.research : blobs.artifact).del(u.key)
   }
 }
 

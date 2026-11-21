@@ -68,7 +68,7 @@ export function ImportWorkspacePanel({ orgSlug }: Props) {
       if (plan.mode === "direct") {
         setStage("Uploading bundle…");
         const { uploadToTarget } = await import("@/lib/storage/direct-upload-client");
-        await uploadToTarget({ pathname: plan.pathname, clientToken: plan.clientToken, access: "private" }, file, { contentType: "application/zip" });
+        await uploadToTarget({ pathname: plan.pathname, clientToken: plan.clientToken, access: "private", ...(plan.upload ? { upload: plan.upload } : {}) }, file, { contentType: "application/zip" });
         setStage("Importing workspace… this can take a few minutes");
         response = await fetch(base, {
           method: "POST",

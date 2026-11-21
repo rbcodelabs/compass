@@ -1,5 +1,6 @@
 "use client";
 
+import type { PresignedUploadTarget } from "@/lib/storage/direct-upload-client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { uploadToTarget } from "@/lib/storage/direct-upload-client";
 
@@ -39,7 +40,16 @@ export type AttachmentTransport = {
   upload: (
     pathname: string,
     file: File,
-    options: { token: string; contentType: string; onProgress: (percentage: number) => void; signal: AbortSignal },
+    options: {
+      token: string;
+      contentType: string;
+      onProgress: (percentage: number) => void;
+      signal: AbortSignal;
+      /** S3 backend: upload with this presigned PUT instead of a Blob client token. */
+      presignedUpload?: PresignedUploadTarget;
+      /** S3 backend: the app-route URL the finished upload is served at. */
+      url?: string;
+    },
   ) => Promise<{ url: string }>;
   discard: (upload: UploadedFeedbackAttachment) => Promise<unknown>;
 };
@@ -47,8 +57,12 @@ export type AttachmentTransport = {
 export function defaultAttachmentTransport(orgSlug: string, workspaceSlug: string): AttachmentTransport {
   return {
     prepare: (file) => prepareFeedbackAttachment(orgSlug, workspaceSlug, file),
-    upload: (pathname, file, { token, contentType, onProgress, signal }) =>
-      uploadToTarget({ pathname, clientToken: token, access: "public" }, file, { contentType, signal, onProgress }),
+    upload: (pathname, file, { token, contentType, onProgress, signal, presignedUpload, url }) =>
+      uploadToTarget(
+        { pathname, clientToken: token, access: "public", ...(presignedUpload ? { upload: presignedUpload } : {}), ...(url ? { url } : {}) },
+        file,
+        { contentType, signal, onProgress },
+      ),
     discard: (upload) => discardFeedbackAttachment(orgSlug, workspaceSlug, upload),
   };
 }
@@ -136,6 +150,8 @@ export function useFeedbackAttachmentUploads({
         if (controller.signal.aborted) return;
         const blob = await transportRef.current.upload(prepared.upload.pathname, file, {
           token: prepared.upload.clientToken,
+          presignedUpload: prepared.upload.presignedUpload,
+          url: prepared.upload.url,
           contentType: file.type,
           signal: controller.signal,
           onProgress: (percentage) => patch(localId, { progress: Math.min(99, Math.round(percentage)) }),

@@ -5,6 +5,7 @@ import { getMcpActor } from "@/lib/mcp-authz"
 import { isAgentIdentityActor } from "@/lib/agent-access"
 import { createV0Artifact, refreshV0Artifact } from "@/lib/v0-artifacts"
 import { loadStagedArtifactUpload, prepareArtifactUpload } from "@/lib/artifact-upload"
+import { S3_UPLOAD_INSTRUCTIONS } from "@/lib/storage/instructions"
 import {
   archiveArtifact as archiveArtifactCore,
   createExternalArtifact,
@@ -102,7 +103,9 @@ export async function prepareArtifactUploadTool(input: { workspaceId: string; fi
   try {
     const prepared = await prepareArtifactUpload(input)
     return ok(["**Private Artifact HTML upload prepared**", `Upload ID: ${prepared.uploadId}`, `Pathname: ${prepared.pathname}`, `Expires: ${new Date(prepared.expiresAt).toISOString()}`,
-      "Upload the file from disk (do NOT paste its contents into a tool call) with @vercel/blob/client put(pathname, file, { access: \"private\", token: clientToken, contentType: \"text/html\" }),",
+      "upload" in prepared
+        ? `Upload the file from disk (do NOT paste its contents into a tool call). ${S3_UPLOAD_INSTRUCTIONS}`
+        : "Upload the file from disk (do NOT paste its contents into a tool call) with @vercel/blob/client put(pathname, file, { access: \"private\", token: clientToken, contentType: \"text/html\" }),",
       "then call create_artifact or update_artifact with uploadReceipt set to the returned receipt and no html."].join("\n"), prepared)
   } catch (error) { return fail(error instanceof Error ? error.message : "Could not prepare artifact upload.") }
 }
@@ -136,10 +139,10 @@ export async function createArtifact(input: { workspaceId: string; title: string
       return fail("EXTERNAL_LINK requires url and does not accept html, uploadReceipt or filename.")
     }
     const staged = input.sourceType === "HTML_UPLOAD" && input.uploadReceipt !== undefined ? await loadStagedArtifactUpload(input.uploadReceipt, input.workspaceId, getArtifactStorage()) : null
+    const createHtml = () => createHtmlArtifact({ workspaceId: input.workspaceId, title: input.title, description: input.description, filename: staged?.filename ?? input.filename ?? "prototype.html", mimeType: "text/html", bytes: staged?.bytes ?? new TextEncoder().encode(input.html ?? ""), kind, source: "MCP" }, getArtifactStorage())
     const artifact = input.sourceType === "HTML_UPLOAD"
-      ? await createHtmlArtifact({ workspaceId: input.workspaceId, title: input.title, description: input.description, filename: staged?.filename ?? input.filename ?? "prototype.html", mimeType: "text/html", bytes: staged?.bytes ?? new TextEncoder().encode(input.html ?? ""), kind, source: "MCP" }, getArtifactStorage())
+      ? await (staged ? staged.commit(createHtml) : createHtml())
       : await createExternalArtifact({ workspaceId: input.workspaceId, title: input.title, description: input.description, url: input.url ?? "", source: "MCP" })
-    await staged?.discard()
     if (input.sourceType === "EXTERNAL_LINK" && artifact.currentRevisionId) {
       scheduleArtifactThumbnailCapture({ artifactId: artifact.id, workspaceId: input.workspaceId, revisionId: artifact.currentRevisionId })
     }
@@ -172,8 +175,8 @@ export async function updateArtifact(input: { artifactId: string; workspaceId: s
     if (input.url !== undefined) validateExternalUrl(input.url)
     let revisionId: string | undefined
     if (htmlBytes !== undefined) {
-      revisionId = (await replaceHtmlArtifactRevision({ artifactId: input.artifactId, workspaceId: input.workspaceId, filename: htmlFilename, mimeType: "text/html", bytes: htmlBytes, title: input.title, description: input.description, kind, source: "MCP" }, getArtifactStorage())).id
-      await staged?.discard()
+      const replaceHtml = () => replaceHtmlArtifactRevision({ artifactId: input.artifactId, workspaceId: input.workspaceId, filename: htmlFilename, mimeType: "text/html", bytes: htmlBytes, title: input.title, description: input.description, kind, source: "MCP" }, getArtifactStorage())
+      revisionId = (await (staged ? staged.commit(replaceHtml) : replaceHtml())).id
     }
     else if (input.url !== undefined) {
       revisionId = (await replaceExternalArtifactRevision({ artifactId: input.artifactId, workspaceId: input.workspaceId, url: input.url, title: input.title, description: input.description, source: "MCP" })).id

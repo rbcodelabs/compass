@@ -1,3 +1,5 @@
+import { parsePublicFileUrl } from "@/lib/public-file-keys";
+import { headPublicObject } from "@/lib/storage/s3";
 import { NextRequest, NextResponse } from "next/server";
 import getPrisma from "@/lib/db";
 import { getPortalSession } from "@/lib/portal-auth";
@@ -5,6 +7,7 @@ import {
   type FeedbackAttachmentMetadata,
   validateFeedbackAttachmentMetadata,
 } from "@/lib/feedback-attachments";
+import { isOwnFeedbackAttachmentUrl } from "@/lib/workspace-export/path-confinement";
 import { PORTAL_FEEDBACK_SOURCE, PUBLIC_FEEDBACK_SELECT, publicFeedbackItemWhere, serializePublicFeedbackItem } from "@/lib/public-feedback";
 import { allocateOneSeq, withSequenceTransaction } from "@/lib/work-item-sequence"
 
@@ -122,6 +125,10 @@ export async function POST(
     return NextResponse.json({ error: "Feedback is not enabled for this workspace" }, { status: 403 });
   }
 
+  if (validatedAttachments.some((attachment) => !isOwnFeedbackAttachmentUrl(attachment.url, workspace.id))) {
+    return NextResponse.json({ error: "Invalid attachment URL" }, { status: 422 });
+  }
+
   // Resolve identity: if this workspace requires a verified portal account,
   // a valid session is mandatory and its email is authoritative — any
   // client-supplied submitterEmail is ignored so a signed-in visitor can't
@@ -140,6 +147,13 @@ export async function POST(
     }
     portalAccountId = session.portalAccountId;
     effectiveSubmitterEmail = session.email;
+  }
+
+  for (const attachment of validatedAttachments) {
+    const key = parsePublicFileUrl(attachment.url);
+    if (key && !(await headPublicObject(key))) {
+      return NextResponse.json({ error: "Attachment is no longer available" }, { status: 422 });
+    }
   }
 
   const item = await withSequenceTransaction(prisma, async (tx) => tx.feedbackItem.create({

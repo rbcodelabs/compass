@@ -1,6 +1,10 @@
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto"
 import { head } from "@vercel/blob"
+import { isPublicFileKey, parsePublicFileUrl, publicFileUrl } from "@/lib/public-file-keys"
 import { createDirectUpload } from "@/lib/storage/direct-upload"
+import { feedbackUploadReceiptSecret } from "@/lib/storage/availability"
+import { publicBlobStoreHostname } from "@/lib/storage/config"
+import { headPublicObject } from "@/lib/storage/s3"
 import { getPublicFileStore } from "@/lib/storage/public-store"
 
 import {
@@ -62,6 +66,10 @@ export function validateFeedbackAttachmentMetadata(
   if (typeof url !== "string" || typeof filename !== "string" || typeof fileType !== "string") return false
   if (!filename || filename.length > 255 || !allowedMimeTypes.has(fileType)) return false
   if (typeof fileSize !== "number" || !Number.isInteger(fileSize) || fileSize < 1 || fileSize > FEEDBACK_ATTACHMENT_MAX_FILE_BYTES) return false
+  // Rows written by the S3 backend store the app route, not a bucket URL. Only
+  // the feedback shape qualifies, so an embed screenshot or a branding logo URL
+  // cannot be attached as though it were a feedback attachment.
+  if (parsePublicFileUrl(url)?.startsWith("feedback/")) return true
   try {
     const parsed = new URL(url)
     return parsed.protocol === "https:" && parsed.hostname.endsWith(".public.blob.vercel-storage.com")
@@ -159,7 +167,7 @@ export async function uploadInlineFeedbackAttachments(
 }
 
 function receiptSecret(): string {
-  const secret = process.env.FEEDBACK_UPLOAD_RECEIPT_SECRET ?? process.env.BLOB_READ_WRITE_TOKEN
+  const secret = feedbackUploadReceiptSecret()
   if (!secret) throw new Error("Feedback direct uploads are not configured.")
   return secret
 }
@@ -172,12 +180,11 @@ function receiptSecret(): string {
  * proves a URL is hosted on *some* Vercel Blob public store, not this one.
  */
 export function configuredBlobStoreHostname(): string {
-  const token = process.env.BLOB_READ_WRITE_TOKEN
-  const storeId = token?.split("_")[3]
-  if (!storeId || !/^[a-zA-Z0-9-]+$/.test(storeId)) {
+  const hostname = publicBlobStoreHostname()
+  if (!hostname) {
     throw new Error("Feedback direct uploads are not configured with a valid Blob store.")
   }
-  return `${storeId.toLowerCase()}.public.blob.vercel-storage.com`
+  return hostname
 }
 
 function signReceiptPayload(encodedPayload: string): string {
@@ -246,6 +253,7 @@ export async function prepareFeedbackAttachmentUpload(input: {
   const pathname = `feedback/${input.workspaceId}/${randomUUID()}-${sanitizeFeedbackAttachmentFilename(input.filename)}`
   const attachmentId = randomUUID()
   const expiresAt = Date.now() + DIRECT_UPLOAD_TTL_MS
+  const receipt = createFeedbackUploadReceipt({ version: 1, attachmentId, ...input, pathname, expiresAt })
   const credential = await createDirectUpload({
     store: "public",
     pathname,
@@ -255,7 +263,6 @@ export async function prepareFeedbackAttachmentUpload(input: {
     ttlSeconds: DIRECT_UPLOAD_TTL_MS / 1000,
     allowOverwrite: false,
   })
-  const receipt = createFeedbackUploadReceipt({ version: 1, attachmentId, ...input, pathname, expiresAt })
   return { ...credential, receipt, pathname, expiresAt, attachmentId }
 }
 
@@ -271,6 +278,11 @@ export function verifyFeedbackUploadOwnership(
 ): UploadReceiptPayload {
   const payload = verifyFeedbackUploadReceipt(input.receipt, options)
   if (payload.workspaceId !== input.workspaceId) throw new Error("Upload receipt does not belong to this workspace.")
+  // S3 backend: the stored URL is the app route, derived from the signed pathname.
+  if (parsePublicFileUrl(input.url) !== null) {
+    if (input.url !== publicFileUrl(payload.pathname)) throw new Error("Upload URL does not match its receipt.")
+    return payload
+  }
   let parsed: URL
   try {
     parsed = new URL(input.url)
@@ -297,6 +309,22 @@ export async function verifyCompletedFeedbackUpload(
 ): Promise<FeedbackAttachmentMetadata & { attachmentId: string }> {
   const payload = verifyFeedbackUploadReceipt(input.receipt, options)
   if (payload.workspaceId !== input.workspaceId) throw new Error("Upload receipt does not belong to this workspace.")
+  if (parsePublicFileUrl(input.url) !== null) {
+    if (input.url !== publicFileUrl(payload.pathname) || !isPublicFileKey(payload.pathname)) {
+      throw new Error("Completed upload does not match its receipt.")
+    }
+    const head = await headPublicObject(payload.pathname)
+    if (!head || head.contentType !== payload.fileType || head.contentLength !== payload.fileSize) {
+      throw new Error("Completed upload does not match its receipt.")
+    }
+    return {
+      attachmentId: payload.attachmentId,
+      url: input.url,
+      filename: payload.filename,
+      fileType: payload.fileType,
+      fileSize: payload.fileSize,
+    }
+  }
   let uploadedUrl: URL
   try {
     uploadedUrl = new URL(input.url)

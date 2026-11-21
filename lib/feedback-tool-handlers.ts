@@ -21,6 +21,7 @@ import { CompassUrlNotConfiguredError, feedbackItemUrl, safeEntityUrl, withUrlLi
 import { FEEDBACK_STATUSES, type FeedbackStatus } from "@/lib/feedback-meta"
 import { workspaceMutationSource, type ProgrammaticSource } from "@/lib/programmatic-source"
 import { isUniqueConflict, RoadmapPromotionConflict } from "@/lib/roadmap-promotion"
+import { S3_UPLOAD_INSTRUCTIONS } from "@/lib/storage/instructions"
 import { allocateOneSeq, withSequenceTransaction } from "@/lib/work-item-sequence"
 
 const feedbackCursorSchema = z.object({
@@ -546,7 +547,9 @@ export async function prepareFeedbackAttachmentUploadTool(input: {
         "**Direct upload prepared**",
         `Pathname: ${prepared.pathname}`,
         `Expires: ${new Date(prepared.expiresAt).toISOString()}`,
-        "Upload with @vercel/blob/client put(pathname, file, { access: \"public\", token: clientToken, contentType: fileType }), then call add_feedback_attachment with the returned Blob URL and receipt.",
+        "upload" in prepared
+          ? `${S3_UPLOAD_INSTRUCTIONS} Then call add_feedback_attachment with the returned url and receipt.`
+          : "Upload with @vercel/blob/client put(pathname, file, { access: \"public\", token: clientToken, contentType: fileType }), then call add_feedback_attachment with the returned Blob URL and receipt.",
       ].join("\n"),
       prepared,
     )

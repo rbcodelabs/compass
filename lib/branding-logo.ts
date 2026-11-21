@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto"
+import { parsePublicFileUrl } from "@/lib/public-file-keys"
 
 /**
  * Workspace branding logos: what may be uploaded and which stored URLs
@@ -46,6 +47,9 @@ function ownBlobHost(env: Record<string, string | undefined> = process.env): str
  * fragments are all refused.
  */
 export function isOwnBrandingLogoUrl(value: string): boolean {
+  // S3 backend: the app's own public-file route, `branding/` keys only.
+  const key = parsePublicFileUrl(value)
+  if (key !== null) return key.startsWith("branding/")
   try {
     const url = new URL(value)
     return (

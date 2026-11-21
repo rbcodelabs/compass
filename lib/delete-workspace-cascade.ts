@@ -1,3 +1,5 @@
+import { ownedS3FeedbackUrls } from "@/lib/public-file-keys";
+import { deleteS3PublicFilesByUrl } from "@/lib/storage/public-files";
 import { customFieldInheritanceTableExists } from "@/lib/feature-tables";
 import type { AppPrismaClient } from "@/lib/db";
 import { getArtifactStorage } from "@/lib/artifact-storage";
@@ -158,6 +160,15 @@ export async function deleteWorkspaceCascade(prisma: AppPrismaClient, workspaceI
     prisma.feedbackItem.findMany({ where: { workspaceId }, select: { id: true } })
   );
   if (feedbackIds.length > 0) {
+    if (!options.skipBlobCleanup && process.env.COMPASS_S3_BUCKET?.trim()) {
+      for (const batch of chunked(feedbackIds)) {
+        const attachments = await prisma.feedbackAttachment.findMany({
+          where: { feedbackItemId: { in: batch } }, select: { url: true },
+        });
+        const urls = ownedS3FeedbackUrls(workspaceId, attachments);
+        if (urls.length) await deleteS3PublicFilesByUrl(urls);
+      }
+    }
     await prisma.feedbackVote.deleteMany({
       where: { feedbackId: { in: feedbackIds } },
     });

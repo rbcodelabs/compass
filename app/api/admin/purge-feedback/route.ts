@@ -1,3 +1,5 @@
+import { ownedS3FeedbackUrls } from "@/lib/public-file-keys";
+import { deleteS3PublicFilesByUrl } from "@/lib/storage/public-files";
 // One-time-ops admin endpoint: hard-deletes an explicit, caller-supplied set
 // of feedback items from a single workspace.
 //
@@ -95,6 +97,22 @@ export async function POST(req: NextRequest) {
       requested: feedbackIds.length,
       resolved: 0,
     });
+  }
+
+  if (process.env.COMPASS_S3_BUCKET?.trim()) {
+    const attachments = await prisma.feedbackAttachment.findMany({
+      where: { feedbackItemId: { in: scopedIds } }, select: { url: true },
+    });
+    const urls = ownedS3FeedbackUrls(workspace.id, attachments);
+    if (urls.length) {
+      const retained = await prisma.feedbackAttachment.findMany({
+        where: { url: { in: urls }, feedbackItemId: { notIn: scopedIds }, feedbackItem: { workspaceId: workspace.id } },
+        select: { url: true },
+      });
+      const stillReferenced = new Set(retained.map(({ url }) => url));
+      const retired = urls.filter((url) => !stillReferenced.has(url));
+      if (retired.length) await deleteS3PublicFilesByUrl(retired);
+    }
   }
 
   // Delete children first (votes, attachments), then the items themselves —

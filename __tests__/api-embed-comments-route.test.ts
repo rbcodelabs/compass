@@ -367,6 +367,8 @@ describe("POST /api/embed/comments — submission", () => {
   // to an internal reviewer — which is to say, a tracking pixel aimed at the
   // organisation if it were honoured.
   it.each([
+    ["a screenshot from another workspace", `${BLOB_HOST}/embed-feedback/ws-2/source-1/capture.jpg`],
+    ["an S3 screenshot from another source", "/api/files/public/embed-feedback/ws-1/source-2/capture-0f8fad5b-d9cb-469f-a165-70867728950e.jpg"],
     ["a URL on an attacker's host", "https://evil.example.com/embed-feedback/ws-1/source-1/x.jpg"],
     ["a plain-http blob URL", `${BLOB_HOST.replace("https:", "http:")}/embed-feedback/ws-1/source-1/x.jpg`],
     ["a blob object outside the embed prefix", `${BLOB_HOST}/feedback/ws-1/x.jpg`],
