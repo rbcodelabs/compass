@@ -150,7 +150,7 @@ describe("scoped settings navigation", () => {
       params: Promise.resolve({ orgSlug: "acme", workspaceSlug: "growth" }),
     }));
 
-    const nav = within(screen.getByRole("navigation", { name: "Settings", exact: true }));
+    const nav = within(screen.getByRole("navigation", { name: "Settings" }));
     const link = nav.queryByRole("link", { name: "Agent snapshot" });
     if (showPlatform) expect(link).toHaveAttribute("href", "/settings/admin/agent-snapshot");
     else expect(link).not.toBeInTheDocument();
@@ -163,7 +163,7 @@ describe("scoped settings navigation", () => {
     getSessionUser.mockResolvedValue({ ...session.user, email });
     render(await OrgSettingsLayout({ children: <div />, params: Promise.resolve({ orgSlug: "acme" }) }));
 
-    const nav = within(screen.getByRole("navigation", { name: "Settings", exact: true }));
+    const nav = within(screen.getByRole("navigation", { name: "Settings" }));
     const link = nav.queryByRole("link", { name: "Agent snapshot" });
     if (showPlatform) expect(link).toHaveAttribute("href", "/settings/admin/agent-snapshot");
     else expect(link).not.toBeInTheDocument();
@@ -180,13 +180,13 @@ describe("scoped settings navigation", () => {
 
     cookiesGet.mockImplementation((name: string) => name === LAST_WORKSPACE_COOKIE ? { value: "acme/platform" } : undefined);
     render(await OrgSettingsLayout({ children: <div />, params }));
-    expect(within(screen.getByRole("navigation", { name: "Settings", exact: true })).getByRole("link", { name: "Workspace settings" }))
+    expect(within(screen.getByRole("navigation", { name: "Settings" })).getByRole("link", { name: "Workspace settings" }))
       .toHaveAttribute("href", "/acme/platform/settings");
     cleanup();
 
     cookiesGet.mockImplementation((name: string) => name === LAST_WORKSPACE_COOKIE ? { value: "globex/ops" } : undefined);
     render(await OrgSettingsLayout({ children: <div />, params }));
-    expect(within(screen.getByRole("navigation", { name: "Settings", exact: true })).getByRole("link", { name: "Workspace settings" }))
+    expect(within(screen.getByRole("navigation", { name: "Settings" })).getByRole("link", { name: "Workspace settings" }))
       .toHaveAttribute("href", "/acme/growth/settings");
   });
 });
