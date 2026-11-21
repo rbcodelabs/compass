@@ -472,12 +472,14 @@ test.describe("Re-QA a022c39e", () => {
       await editor.click();
       await page.keyboard.type("do it @Adv Agent");
       await selectAgent(agentName);
-      await page.getByRole("button", { name: "Comment & create task" }).click();
+      // A submit click schedules picker dismissal on blur, which can close the next mention.
+      await editor.press("Control+Enter");
       await expect(confirm).toBeVisible();
+      await expect(editor).toBeFocused();
     }
     // (a) Backspace the chip behind the confirm.
     await openConfirm();
-    await editor.click(); await page.keyboard.press("End");
+    await editor.press("End");
     await page.keyboard.press("Backspace"); await page.keyboard.press("Backspace");
     await expect(page.getByTestId("mention-chip")).toHaveCount(0);
     await expect(confirm).toBeHidden();
