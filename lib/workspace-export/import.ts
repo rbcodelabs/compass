@@ -76,6 +76,7 @@ export type ImportOptions = {
   slug?: string
   /** Retrying with the same nonce resumes the same import; a new nonce makes a fresh copy. */
   nonce?: string
+  rollbackComplete?(): Promise<void>
   fenceWrite?(tx: unknown, phase: "applying" | "rolling_back"): Promise<void>
   providerIO?<T>(io: () => Promise<T>): Promise<T>
   journal?: {
@@ -605,6 +606,7 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
     await rollbackImport(client, reader, importKey, newWorkspaceId, uploaded, opts.blobs, mutation => write("rolling_back", mutation)).catch((rollbackError) => {
       throw new WorkspaceImportRecoveryRequired("Workspace import rollback needs reconciliation", { cause: rollbackError })
     })
+    await opts.rollbackComplete?.()
     throw error
   }
 }

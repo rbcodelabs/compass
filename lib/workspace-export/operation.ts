@@ -10,9 +10,13 @@ export type ImportDatabase = {
 export async function startImportOperation(db: ImportDatabase, workspaceId: string, organizationId: string, schema?: string): Promise<ImportLeaseOwner> {
   const attemptId = randomUUID()
   const rows = await db.$queryRawUnsafe<{ epoch: number }[]>(
-    `INSERT INTO ${importSchema(schema)}.workspace_import_operations (workspace_id, organization_id, attempt_id, phase, lease_expires_at, updated_at)
+    `INSERT INTO ${importSchema(schema)}.workspace_import_operations AS operation (workspace_id, organization_id, attempt_id, phase, lease_expires_at, updated_at)
      VALUES ($1::uuid, $2::uuid, $3::uuid, 'applying', CURRENT_TIMESTAMP + interval '5 minutes', CURRENT_TIMESTAMP)
-     ON CONFLICT (workspace_id) DO NOTHING RETURNING epoch`, workspaceId, organizationId, attemptId,
+     ON CONFLICT (workspace_id) DO UPDATE
+       SET attempt_id=EXCLUDED.attempt_id, epoch=operation.epoch+1, phase='applying',
+           lease_expires_at=EXCLUDED.lease_expires_at, updated_at=CURRENT_TIMESTAMP
+       WHERE operation.organization_id=EXCLUDED.organization_id AND operation.phase='rolled_back'
+     RETURNING epoch`, workspaceId, organizationId, attemptId,
   )
   if (!rows.length) throw new Error("Workspace import is already in progress or awaiting recovery")
   return { workspaceId, attemptId, epoch: rows[0].epoch }
@@ -38,6 +42,16 @@ export async function renewImportOperation(
      WHERE workspace_id = $1::uuid AND attempt_id = $2::uuid AND epoch = $3 AND (phase = $4 OR ($4 = 'rolling_back' AND phase = 'applying'))
        AND lease_expires_at > CURRENT_TIMESTAMP RETURNING epoch`,
     owner.workspaceId, owner.attemptId, owner.epoch, phase,
+  )
+  if (rows.length !== 1) throw new ImportOwnershipChanged()
+}
+
+
+export async function finishImportRollback(db: ImportDatabase, owner: ImportLeaseOwner, schema?: string): Promise<void> {
+  const rows = await db.$queryRawUnsafe<{ epoch: number }[]>(
+    `UPDATE ${importSchema(schema)}.workspace_import_operations SET phase='rolled_back', updated_at=CURRENT_TIMESTAMP
+     WHERE workspace_id=$1::uuid AND attempt_id=$2::uuid AND epoch=$3 AND phase='rolling_back'
+       AND lease_expires_at>CURRENT_TIMESTAMP RETURNING epoch`, owner.workspaceId, owner.attemptId, owner.epoch,
   )
   if (rows.length !== 1) throw new ImportOwnershipChanged()
 }

@@ -99,3 +99,27 @@ it.skipIf(!integrationDatabaseUrl)("renews only an unexpired lease owned by the 
     await pool.end()
   }
 })
+
+it.skipIf(!integrationDatabaseUrl)("releases a completed rollback for a fresh attempt without releasing a successor's lease", async () => {
+  const pool = new Pool({ connectionString: integrationDatabaseUrl })
+  const db = await pool.connect()
+  try {
+    await db.query(`CREATE TEMP TABLE workspace_import_operations (
+      workspace_id uuid PRIMARY KEY, organization_id uuid, attempt_id uuid, epoch integer DEFAULT 1,
+      phase text, lease_expires_at timestamp, updated_at timestamp)`)
+    const tx = { async $queryRawUnsafe<T>(sql: string, ...params: unknown[]) { return (await db.query(sql, params)).rows as T } }
+    const { startImportOperation, renewImportOperation, finishImportRollback } = await import("@/lib/workspace-export/operation")
+    const ws = randomUUID(), org = randomUUID()
+    const first = await startImportOperation(tx, ws, org)
+    await renewImportOperation(tx, first, "rolling_back")
+    await finishImportRollback(tx, first)
+    const second = await startImportOperation(tx, ws, org)
+    expect(second.attemptId).not.toBe(first.attemptId)
+    expect(second.epoch).toBeGreaterThan(first.epoch)
+    await expect(finishImportRollback(tx, first)).rejects.toThrow(/ownership changed/i)
+    await expect(renewImportOperation(tx, second, "applying")).resolves.toBeUndefined()
+  } finally {
+    db.release()
+    await pool.end()
+  }
+})
