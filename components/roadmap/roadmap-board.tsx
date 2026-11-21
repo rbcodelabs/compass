@@ -281,6 +281,7 @@ export function RoadmapBoard({
   // optimistic move. `isPending` covers every save below because they all run
   // inside an awaited startTransition(async ...).
   const [activeItem, setActiveItem] = useState<RoadmapCardData | null>(null);
+  const [dragging, setDragging] = useState(false);
   const [activeUnscheduledItem, setActiveUnscheduledItem] = useState<UnscheduledItem | null>(null);
   // Track the horizon the drag started from so handleDragEnd can detect cross-column moves.
   const [dragSourceHorizon, setDragSourceHorizon] = useState<Horizon | null>(null);
@@ -318,6 +319,7 @@ export function RoadmapBoard({
   // Swimlanes. The spec lives in state (above) because a lane drop updates it
   // optimistically (custom-field values); dragSourceLane is the lane the active
   // card started in, so handleDragEnd can tell a lane change from a plain move.
+  const dragSnapshot = useRef<{ item: RoadmapCardData; horizon: Horizon; index: number; lane: Lane | null } | null>(null);
   const [dragSourceLane, setDragSourceLane] = useState<string | null>(null);
   const [laneError, setLaneError] = useState<string | null>(null);
   const lanes = spec ? buildLanes(spec) : null;
@@ -506,6 +508,8 @@ export function RoadmapBoard({
   }
 
   function handleDragStart(event: DragStartEvent) {
+    setDragging(true);
+    dragSnapshot.current = null;
     const id = event.active.id as string;
 
     const parsed = parseUnscheduledDragId(id);
@@ -518,6 +522,12 @@ export function RoadmapBoard({
     for (const horizon of HORIZONS) {
       const found = columns[horizon].find((i) => i.id === id);
       if (found) {
+        dragSnapshot.current = {
+          item: found,
+          horizon,
+          index: columns[horizon].indexOf(found),
+          lane: spec && lanes ? lanes.find(lane => lane.key === laneKeyForCard(spec, found)) ?? null : null,
+        };
         setActiveItem(found);
         setDragSourceHorizon(horizon);
         setDragSourceLane(spec ? laneKeyForCard(spec, found) : null);
@@ -584,16 +594,50 @@ export function RoadmapBoard({
     });
   }
 
+  function endDragScroll() {
+    setDragging(false);
+  }
+
+  function cancelDrag() {
+    endDragScroll();
+    const snapshot = dragSnapshot.current;
+    dragSnapshot.current = null;
+    if (snapshot) {
+      const { item, horizon, index, lane } = snapshot;
+      setColumns(prev => {
+        const currentHorizon = findHorizon(prev, item.id);
+        if (!currentHorizon) return prev;
+        const current = prev[currentHorizon].find(card => card.id === item.id)!;
+        const next = { ...prev, [currentHorizon]: prev[currentHorizon].filter(card => card.id !== item.id) };
+        const original = [...next[horizon]];
+        original.splice(index, 0, { ...current, horizon, squad: item.squad });
+        return { ...next, [horizon]: original };
+      });
+      if (lane) {
+        setSpec(prev => prev?.mode === "customField" ? assignCardToLane(prev, item, lane).spec : prev);
+      }
+    }
+    setActiveItem(null);
+    setActiveUnscheduledItem(null);
+    setDragSourceHorizon(null);
+    setDragSourceLane(null);
+  }
+
   function handleDragEnd(event: DragEndEvent) {
-    const { active, over } = event;
+    if (!event.over) {
+      cancelDrag();
+      return;
+    }
+    dragSnapshot.current = null;
+    endDragScroll();
+    const { active } = event;
+    const over = event.over;
     setActiveItem(null);
 
     const activeId = active.id as string;
     const parsed = parseUnscheduledDragId(activeId);
     if (parsed) {
       setActiveUnscheduledItem(null);
-      if (!over) return;
-
       const overId = droppedOnId(over);
       const { horizon: destHorizon, laneKey } = resolveDrop(overId);
       if (!destHorizon) return; // dropped somewhere that isn't a horizon column/card
@@ -613,14 +657,6 @@ export function RoadmapBoard({
     const sourceLaneKey = dragSourceLane;
     const sourceLane = sourceLaneKey && lanes ? (lanes.find((l) => l.key === sourceLaneKey) ?? null) : null;
     setDragSourceLane(null);
-
-    if (!over) {
-      // Cancelled mid-drag: undo any optimistic lane/horizon hop.
-      if (sourceLane) applyLane(activeId, sourceLane);
-      if (dragSourceHorizon) setColumns((prev) => moveCardToHorizon(prev, activeId, dragSourceHorizon));
-      setDragSourceHorizon(null);
-      return;
-    }
 
     const overId = droppedOnId(over);
 
@@ -724,8 +760,9 @@ export function RoadmapBoard({
       onDragStart={handleDragStart}
       onDragOver={handleDragOver}
       onDragEnd={handleDragEnd}
+      onDragCancel={cancelDrag}
     >
-      <div ref={containerRef} className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto md:overflow-hidden">
+      <div ref={containerRef} data-dragging={dragging} className="group/roadmap-drag flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto md:overflow-hidden">
         {laneError ? (
           <p
             role="alert"
@@ -737,13 +774,14 @@ export function RoadmapBoard({
         <div className="flex min-h-0 min-w-0 flex-1 flex-col md:flex-row">
         <Board
           label="Roadmap board"
+          wheelSnapControl={!spec}
           fadeEnd={dockedColumnIds.length > 0}
           className={cn(
             "block min-h-[24rem] flex-1 scroll-px-3 overflow-x-auto p-0 sm:scroll-px-4",
             // Lanes stack vertically, so the board scrolls both ways in lane mode. Snapping is off there:
             // the only snap target would be the "Not scheduled" column, which yanks a freshly loaded
             // board to its far right and leaves the first lane column under the sidebar.
-            spec ? "snap-none overflow-y-auto" : "md:overflow-y-hidden",
+            spec ? "snap-none overflow-y-auto" : "md:overflow-y-hidden md:snap-x md:group-data-[dragging=true]/roadmap-drag:snap-none md:data-[wheel-panning=true]:snap-none",
           )}
         >
           <div
