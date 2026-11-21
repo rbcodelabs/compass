@@ -649,3 +649,30 @@ it("stops before writing imported rows if the applying transaction loses ownersh
   expect(phases).toEqual(["applying"])
   expect(db.tables.Doc).toHaveLength(1)
 })
+
+it("writes private bytes to a reserved attempt key and refuses to publish unverified bytes", async () => {
+  const org = randomUUID(), ws = randomUUID(), user = randomUUID()
+  const db = createInMemoryPrisma({
+    Organization: [{ id: org, name: "Org", slug: "org" }],
+    Workspace: [{ id: ws, organizationId: org, name: "Source", slug: "src", ssoEnabled: false }],
+    User: [{ id: user, name: "User", email: "user@example.com" }],
+    OrganizationMember: [{ id: randomUUID(), organizationId: org, userId: user, role: "ADMIN" }],
+    Doc: [{ id: randomUUID(), workspaceId: ws, title: "Diagram", content: `![diagram](/api/docs/images/${ws}/${randomUUID()}.png)` }],
+  })
+  const source = { ...noopBlobs, artifact: { ...noopBlobs.artifact, get: async () => new Uint8Array([1]) } }
+  const bytes = await exportWorkspaceToBuffer(db.client, ws, source)
+  const calls: string[] = []
+  const target = { ...noopBlobs, artifact: { ...noopBlobs.artifact,
+    async put(pathname: string) { calls.push("put:" + pathname); return { pathname, created: true } },
+    async get(pathname: string) { calls.push("get:" + pathname); return new Uint8Array([2]) },
+  } }
+  await expect(importWorkspaceBundle(db.client, bytes, {
+    organizationId: org, importerUserId: user, nonce: "journal", blobs: target,
+    journal: {
+      async reserve() { calls.push("reserve"); return "attempt/diagram" },
+      async verify() { calls.push("verify") },
+    },
+  })).rejects.toThrow(/verification failed/i)
+  expect(calls).toEqual(["reserve", "put:attempt/diagram", "get:attempt/diagram"])
+  expect(db.tables.Workspace).toHaveLength(1)
+})

@@ -1,3 +1,5 @@
+import { reserveImportAsset, verifyImportAsset } from "@/lib/workspace-export/asset-journal"
+import { withRetry } from "@/lib/workspace-export/leaf-first"
 import { createHash } from "node:crypto"
 import { NextResponse } from "next/server"
 import { auth } from "@/auth"
@@ -75,6 +77,18 @@ export async function POST(req: Request, { params }: { params: Promise<{ orgSlug
       slug: fields.slug,
       nonce: fields.nonce,
       blobs: defaultBlobAdapters(),
+      journal: {
+        reserve(store, logical) {
+          const active = owner
+          if (!active) throw new Error("Missing workspace import owner")
+          return withRetry(() => prisma.$transaction(tx => reserveImportAsset(tx, active, store, logical)))
+        },
+        verify(store, logical, physical) {
+          const active = owner
+          if (!active) throw new Error("Missing workspace import owner")
+          return withRetry(() => prisma.$transaction(tx => verifyImportAsset(tx, active, store, logical, physical)))
+        },
+      },
       async bindWorkspace(workspaceId) {
         if (receiptBinding) await bindImportReceipt(prisma, { ...receiptBinding, workspaceId })
       },

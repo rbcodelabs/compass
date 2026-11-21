@@ -75,6 +75,10 @@ export type ImportOptions = {
   /** Retrying with the same nonce resumes the same import; a new nonce makes a fresh copy. */
   nonce?: string
   fenceWrite?(tx: unknown, phase: "applying" | "rolling_back"): Promise<void>
+  journal?: {
+    reserve(store: PrivateBlobStore, logical: string): Promise<string>
+    verify(store: PrivateBlobStore, logical: string, physical: string): Promise<void>
+  }
   startOperation?(workspaceId: string): Promise<void>
   recordExisting?(report: ImportReport): Promise<void>
   bindWorkspace?(workspaceId: string): Promise<void>
@@ -406,8 +410,17 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
       }
       const storage = b.store === "research" ? opts.blobs.research : opts.blobs.artifact
       // Never overwrite: the target prefix is brand new, so an existing object is not ours to replace (or to delete later).
-      const put = await storage.put(target, data, b.contentType, { overwrite: false })
-      if (put.created !== false) uploaded.push({ store: b.store, key: target })
+      const physical = opts.journal ? await opts.journal.reserve(b.store, target) : target
+      const put = await storage.put(physical, data, b.contentType, { overwrite: false })
+      if (opts.journal) {
+        const bytes = await storage.get(physical)
+        if (put.pathname !== physical || !bytes || !Buffer.from(data).equals(bytes)) {
+          throw new WorkspaceImportRecoveryRequired("Import asset verification failed")
+        }
+        await opts.journal.verify(b.store, target, physical)
+      } else if (put.created !== false) {
+        uploaded.push({ store: b.store, key: physical })
+      }
       blobsCopied++
     }
 
