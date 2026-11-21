@@ -2,6 +2,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 vi.mock("ai", () => ({ gateway: { tools: { perplexitySearch: vi.fn() } }, generateText: vi.fn(), stepCountIs: vi.fn() }))
 
+const { mockAgentCoreFetch } = vi.hoisted(() => ({ mockAgentCoreFetch: vi.fn() }))
+vi.mock("aws4fetch", () => ({
+  AwsClient: class {
+    fetch = mockAgentCoreFetch
+  },
+}))
+vi.mock("@aws-sdk/credential-providers", () => ({
+  fromNodeProviderChain: () => async () => ({
+    accessKeyId: "test-access-key",
+    secretAccessKey: "test-secret-key",
+  }),
+}))
+
 import {
   MAX_SEARCHES_PER_TURN,
   MAX_SEARCH_ATTEMPTS_PER_TURN,
@@ -262,7 +275,11 @@ describe("Bedrock Web Search backend", () => {
 describe("AgentCore Gateway web search backend", () => {
   const url = "https://gw-abc123.gateway.bedrock-agentcore.us-east-1.amazonaws.com/mcp"
 
-  afterEach(() => { vi.restoreAllMocks() })
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.unstubAllEnvs()
+    mockAgentCoreFetch.mockReset()
+  })
 
   it("maps connector results (text -> snippet, publishedDate -> date) and rejects odd payloads", () => {
     const text = JSON.stringify({
@@ -299,7 +316,32 @@ describe("AgentCore Gateway web search backend", () => {
   })
 
   it("reports upstream when the URL is missing", async () => {
+    vi.stubEnv("AGENT_WEB_SEARCH_GATEWAY_URL", undefined)
     vi.spyOn(console, "error").mockImplementation(() => {})
     expect(await agentCoreWebSearch("q", 5, new AbortController().signal)).toEqual({ ok: false, reason: "upstream" })
+  })
+
+  it("preserves valid gateway results when the connector returns a null entry", async () => {
+    vi.stubEnv("VERCEL", undefined)
+    vi.stubEnv("AGENT_WEB_SEARCH_GATEWAY_URL", url)
+    vi.spyOn(console, "error").mockImplementation(() => {})
+    const resultUrl = "https://example.test/report"
+    mockAgentCoreFetch.mockResolvedValueOnce(Response.json({
+      jsonrpc: "2.0",
+      id: 1,
+      result: {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            results: [null, { title: "Report", url: resultUrl, text: "One\n\ntwo" }],
+          }),
+        }],
+      },
+    }))
+
+    expect(await agentCoreWebSearch("q", 1, new AbortController().signal)).toEqual({
+      ok: true,
+      results: [{ title: "Report", url: resultUrl, snippet: "One two" }],
+    })
   })
 })

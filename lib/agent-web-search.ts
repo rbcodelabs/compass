@@ -378,6 +378,7 @@ export function shapeAgentCoreResults(toolText: string, maxResults: number): Web
   if (!Array.isArray(results)) return null
   return shapeResults(
     results.map(item => {
+      if (typeof item !== "object" || item === null) return null
       const r = item as Record<string, unknown>
       return {
         title: r.title,
