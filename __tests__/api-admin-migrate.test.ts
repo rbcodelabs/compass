@@ -1156,3 +1156,28 @@ describe.each([
   expect(await run("none", false)).toEqual({ status: 500, trace: ["catalog"] })
  })
 })
+
+describe("131 import recovery DSQL retry after index creation", () => {
+  it.each(["valid", "absent", "invalid"] as const)("checks the %s catalog before finishing a no-job retry", async state => {
+    delete process.env.DATABASE_URL
+    const fallback = mocks.query.getMockImplementation()!
+    const trace: string[] = []
+    mocks.query.mockImplementation(async (value: unknown, params?: unknown[]) => {
+      const sql = String(value)
+      if (/CREATE INDEX ASYNC IF NOT EXISTS/i.test(sql)) return { rows: [] }
+      if (sql.includes("AS present") && sql.includes("to_regclass")) {
+        return { rows: (params?.[1] as string[]).map(name => ({ name, present: true })) }
+      }
+      if (sql.includes("i.indisvalid AS valid") && Array.isArray(params?.[1]) && params[1].includes("idx_workspace_import_operations_phase_lease_expires_at")) {
+        trace.push("catalog")
+        const names = params?.[1] as string[]
+        return { rows: names.slice(state === "absent" ? 1 : 0).map((name, i) => ({ name, valid: state !== "invalid" || i !== 0 })) }
+      }
+      if (sql.includes("SET finished_at = CURRENT_TIMESTAMP")) trace.push("receipt")
+      return fallback(value, params)
+    })
+    const result = await applyMigrations({ connect: mocks.connect } as never, "compass_dev", "131_workspace_import_recovery")
+    expect(result.status).toBe(state === "valid" ? 200 : 500)
+    expect(trace).toEqual(state === "valid" ? ["catalog", "receipt"] : ["catalog"])
+  })
+})

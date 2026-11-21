@@ -77,7 +77,9 @@ describe.skipIf(!integrationDatabaseUrl)("schema-first migration batch on Postgr
 
   it("applies the five exact migrations in order, preserves existing data, and replays finished receipts", async () => {
     const manifest = partitionPendingMigrations(schema, new Set()).pending
-    expect(manifest.slice(-migrations.length).map(({ name }) => name)).toEqual(migrations)
+    const first = manifest.findIndex(({ name }) => name === migrations[0])
+    expect(first).toBeGreaterThanOrEqual(0)
+    expect(manifest.slice(first, first + migrations.length).map(({ name }) => name)).toEqual(migrations)
     assertReviewedManagedManifest(manifest)
 
     for (const name of migrations) {
