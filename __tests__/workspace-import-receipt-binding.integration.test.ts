@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto"
 import { Pool } from "pg"
-import { expect, it } from "vitest"
+import { expect, it, vi } from "vitest"
 import { integrationDatabaseUrl } from "@/__tests__/helpers/integration-database"
+
+vi.mock("@/lib/schema", () => ({ getActiveSchema: () => "pg_temp" }))
 
 it.skipIf(!integrationDatabaseUrl)("binds a receipt once and replays only its scoped committed result", async () => {
   const pool = new Pool({ connectionString: integrationDatabaseUrl })

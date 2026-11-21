@@ -1,3 +1,4 @@
+import { importSchema } from "./import-schema"
 import type { ImportDatabase } from "./operation"
 import type { ImportReport } from "@/lib/workspace-export/import"
 
@@ -12,9 +13,9 @@ type ReceiptScope = {
 
 type ReceiptBinding = ReceiptScope & { workspaceId: string; expiresAt: Date }
 
-export async function bindImportReceipt(db: ReceiptDatabase, binding: ReceiptBinding): Promise<void> {
+export async function bindImportReceipt(db: ReceiptDatabase, binding: ReceiptBinding, schema?: string): Promise<void> {
   const rows = await db.$queryRawUnsafe<{ receipt_digest: string }[]>(
-    `INSERT INTO workspace_import_receipts
+    `INSERT INTO ${importSchema(schema)}.workspace_import_receipts
        (receipt_digest, workspace_id, organization_id, user_id, effective_nonce, expires_at)
      VALUES ($1, $2::uuid, $3::uuid, $4::uuid, $5, $6::timestamp)
      ON CONFLICT (receipt_digest) DO UPDATE SET effective_nonce = EXCLUDED.effective_nonce
@@ -29,11 +30,11 @@ export async function bindImportReceipt(db: ReceiptDatabase, binding: ReceiptBin
   if (rows.length !== 1) throw new Error("Workspace import receipt binding conflicts with an earlier request")
 }
 
-export async function readImportReceiptResult(db: ReceiptDatabase, scope: ReceiptScope): Promise<ImportReport | null> {
+export async function readImportReceiptResult(db: ReceiptDatabase, scope: ReceiptScope, schema?: string): Promise<ImportReport | null> {
   const [row] = await db.$queryRawUnsafe<{ result_text: string }[]>(
     `SELECT operation.result_text
-     FROM workspace_import_receipts AS receipt
-     JOIN workspace_import_operations AS operation
+     FROM ${importSchema(schema)}.workspace_import_receipts AS receipt
+     JOIN ${importSchema(schema)}.workspace_import_operations AS operation
        ON operation.workspace_id = receipt.workspace_id
        AND operation.organization_id = receipt.organization_id
      WHERE receipt.receipt_digest = $1 AND receipt.organization_id = $2::uuid

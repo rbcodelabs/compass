@@ -1,3 +1,4 @@
+import { importSchema } from "./import-schema"
 import type { PoolClient } from "pg"
 
 type LeaseTransaction = Pick<PoolClient, "query">
@@ -16,9 +17,10 @@ export async function fenceImportLease(
   tx: LeaseTransaction,
   owner: ImportLeaseOwner,
   phase: ImportLeasePhase,
+  schema?: string,
 ): Promise<void> {
   const { rowCount } = await tx.query(
-    `UPDATE workspace_import_operations
+    `UPDATE ${importSchema(schema)}.workspace_import_operations
      SET updated_at = CURRENT_TIMESTAMP
      WHERE workspace_id = $1 AND attempt_id = $2 AND epoch = $3 AND phase = $4
        AND lease_expires_at > CURRENT_TIMESTAMP`,
@@ -33,9 +35,10 @@ export async function takeOverImportLease(
   owner: ImportLeaseOwner,
   nextAttemptId: string,
   leaseMs: number,
+  schema?: string,
 ): Promise<ImportLeaseOwner | null> {
   const { rows } = await tx.query<ImportLeaseOwner>(
-    `UPDATE workspace_import_operations
+    `UPDATE ${importSchema(schema)}.workspace_import_operations
      SET attempt_id = $4, epoch = epoch + 1, phase = 'recovering',
          updated_at = CURRENT_TIMESTAMP,
          lease_expires_at = CURRENT_TIMESTAMP + $5::integer * interval '1 millisecond'

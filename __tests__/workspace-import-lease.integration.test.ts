@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto"
 import { Pool } from "pg"
-import { expect, it } from "vitest"
+import { expect, it, vi } from "vitest"
 import { integrationDatabaseUrl } from "@/__tests__/helpers/integration-database"
+
+vi.mock("@/lib/schema", () => ({ getActiveSchema: () => "pg_temp" }))
 
 it.skipIf(!integrationDatabaseUrl)("rejects a stale import mutation after database-time takeover", async () => {
   const pool = new Pool({ connectionString: integrationDatabaseUrl })
@@ -50,6 +52,28 @@ it.skipIf(!integrationDatabaseUrl)("publishes a recorded report only for the liv
     expect(rows[0].phase).toBe("committed")
     expect(JSON.parse(rows[0].result_text)).toEqual(report)
   } finally {
+    db.release()
+    await pool.end()
+  }
+})
+
+it.skipIf(!integrationDatabaseUrl)("acquires the operation in the application schema with an empty search path", async () => {
+  const pool = new Pool({ connectionString: integrationDatabaseUrl })
+  const db = await pool.connect()
+  const schema = "import_fixture_" + randomUUID().replaceAll("-", "")
+  try {
+    await db.query("BEGIN")
+    await db.query(`CREATE SCHEMA "${schema}"`)
+    await db.query(`CREATE TABLE "${schema}".workspace_import_operations (
+      workspace_id uuid PRIMARY KEY, organization_id uuid, attempt_id uuid, epoch integer DEFAULT 1,
+      phase text, lease_expires_at timestamp, updated_at timestamp)`)
+    await db.query("SET LOCAL search_path TO pg_catalog")
+    const { startImportOperation } = await import("@/lib/workspace-export/operation")
+    const tx = { async $queryRawUnsafe<T>(sql: string, ...args: unknown[]) { return (await db.query(sql, args)).rows as T } }
+    const workspaceId = randomUUID()
+    expect((await startImportOperation(tx, workspaceId, randomUUID(), schema)).workspaceId).toBe(workspaceId)
+  } finally {
+    await db.query("ROLLBACK")
     db.release()
     await pool.end()
   }
