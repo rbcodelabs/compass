@@ -33,6 +33,7 @@ const STATUS_TABLE: Partial<Record<DocEmbedKind, readonly Entry[]>> = {
   task: [["BACKLOG", "notStarted", "Backlog"], ["TODO", "ready", "To do"], ["IN_PROGRESS", "progress", "In progress"], ["BLOCKED", "blocked", "Blocked"], ["IN_REVIEW", "review", "In review"], ["DONE", "done", "Done"], ["CANCELLED", "stopped", "Cancelled"]],
   objective: [["ON_TRACK", "onTrack", "On track"], ["AT_RISK", "atRisk", "At risk"], ["OFF_TRACK", "offTrack", "Off track"], ["COMPLETE", "done", "Complete"]],
   roadmapItem: [["ACTIVE", "active", "Active"], ["ARCHIVED", "archived", "Archived"]],
+  decision: [["PENDING", "review", "Awaiting decision"], ["DECIDED", "done", "Decided"], ["SUPERSEDED", "archived", "Superseded"], ["EXPIRED", "stale", "Expired"], ["CANCELLED", "stopped", "Cancelled"]],
   artifact: [["ACTIVE", "active", "Active"], ["ARCHIVED", "archived", "Archived"]],
   metric: [["fresh", "onTrack", "Up to date"], ["stale", "stale", "Stale"], ["failed", "offTrack", "Sync failed"], ["ARCHIVED", "archived", "Archived"]],
 }
@@ -56,6 +57,7 @@ const PEEK_LABELS: Record<DocEmbedKind, readonly string[]> = {
   metric: ["Latest"],
   roadmapItem: ["Horizon"],
   artifact: ["Type"],
+  decision: ["Decided", "Options"],
   doc: ["Type"],
 }
 
@@ -63,7 +65,7 @@ const PEEK_LABELS: Record<DocEmbedKind, readonly string[]> = {
 export function peekFact(kind: DocEmbedKind, facts: readonly { label: string; value: string }[]): string | null {
   for (const label of PEEK_LABELS[kind]) {
     const found = facts.find((fact) => fact.label === label)
-    if (found) return label === "Latest" || label === "Horizon" || label === "Type" ? found.value : `${label} ${found.value}`
+    if (found) return label === "Latest" || label === "Horizon" || label === "Type" || label === "Decided" ? found.value : `${label} ${found.value}`
   }
   return null
 }

@@ -2,7 +2,7 @@
  * The icons on an embed card's compact row: one per record kind (lucide) and one status glyph per StatusGlyphName (drawn here so the shapes
  * stay exactly the vocabulary in lib/spec-docs/embed-visual.ts). Decorative: the caller supplies the accessible name.
  */
-import { ChartColumn, CircleHelp, FileText, FlaskConical, Flag, Gauge, Layers, Lightbulb, Map as MapIcon, SquareCheck, Target, type LucideIcon } from "lucide-react"
+import { ChartColumn, CircleHelp, FileText, FlaskConical, Flag, Gauge, Layers, Lightbulb, Map as MapIcon, Scale, SquareCheck, Target, type LucideIcon } from "lucide-react"
 import type { DocEmbedKind } from "@/lib/doc-embeds"
 import type { StatusGlyphName, StatusTone } from "@/lib/spec-docs/embed-visual"
 
@@ -18,6 +18,7 @@ export const KIND_ICON: Record<DocEmbedKind, LucideIcon> = {
   roadmapItem: MapIcon,
   doc: FileText,
   artifact: Layers,
+  decision: Scale,
 }
 
 export const TONE_CLASS: Record<StatusTone, string> = {

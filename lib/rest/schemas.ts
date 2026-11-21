@@ -87,6 +87,7 @@ export const taskSchema = numberedResourceSchema.extend({
   assigneeAgentId: uuid.nullable(),
   ownerName: z.string().nullable(),
   storyPoints: z.number().nullable(),
+  startDate: z.string().nullable(),
   dueDate: z.string().nullable(),
   iteration: z.string().nullable(),
 })

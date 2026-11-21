@@ -36,6 +36,7 @@ export type TaskCardData = {
   assignee?: import("@/lib/task-assignment").ResolvedTaskAssignee | null;
   ownerName: string | null;
   storyPoints: number | null;
+  startDate: string | null;
   dueDate: string | null;
   iteration: string | null;
   parentTaskId: string | null;

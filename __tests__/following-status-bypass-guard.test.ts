@@ -64,8 +64,17 @@ const PENDING_SLICE_3: Array<Allow & { subjectType: FollowableSubjectType }> = [
 ]
 
 const root = process.cwd()
-const sites = scanStatusWrites(root)
-const direct = sites.filter((site) => !site.viaAdapter)
+const taskDateGuardCalls: Array<{ file: string; viaAdapter: boolean }> = []
+const sites = scanStatusWrites(root, ["lib", "app"], taskDateGuardCalls)
+// These dynamic task writes are shared by the three mutation wrappers. The
+// non-date branch updates by ID; the date branch filters by workspace and the
+// current opposite endpoint. Both can carry status, so their callers must stay
+// inside captureWorkspaceMutation.
+const dateGuardWrites = sites.filter((site) =>
+  site.file === "lib/task-assignment.ts" && site.helper === "updateTaskWithDateGuard" &&
+  site.model === "task" && site.evidence === "dynamic" &&
+  ["update", "updateMany"].includes(site.operation))
+const direct = sites.filter((site) => !site.viaAdapter && !dateGuardWrites.includes(site))
 
 function countBy(list: StatusWriteSite[]) {
   const counts = new Map<string, number>()
@@ -77,6 +86,15 @@ describe("status-write bypass guard", () => {
   it("scans a meaningful number of sites (a broken scanner must not pass silently)", () => {
     expect(sites.length).toBeGreaterThan(40)
     expect(sites.filter((s) => s.viaAdapter).length).toBeGreaterThan(20)
+  })
+
+  it("keeps exactly the three task date guard callers inside mutation capture", () => {
+    expect(dateGuardWrites.map(key)).toEqual(["lib/task-assignment.ts::task.update", "lib/task-assignment.ts::task.updateMany"])
+    expect(taskDateGuardCalls).toEqual([
+      { file: "app/[orgSlug]/[workspaceSlug]/tasks/actions.ts", viaAdapter: true },
+      { file: "lib/entity-mutations.ts", viaAdapter: true },
+      { file: "lib/task-tool-handlers.ts", viaAdapter: true },
+    ])
   })
 
   it("fails on any status write that is neither adapter-wrapped nor listed", () => {

@@ -1,4 +1,5 @@
-import getPrisma from "@/lib/db";
+import getPrisma, { type AppTransactionClient } from "@/lib/db";
+import type { Prisma } from "@prisma/client";
 import { agentEligibleInWorkspace, agentKind, type AgentRecord, agentOwner, findAgentById, findAgentsByIds, withAgentColumns } from "@/lib/agent-ownership";
 import { UNASSIGNED_ASSIGNEE_FILTER } from "@/lib/task-assignee-display";
 import type { TaskLinkRecordType } from "@/lib/types";
@@ -88,6 +89,46 @@ export async function eligibleTaskAssignees(workspaceId: string): Promise<Resolv
     const ownerMember = owner?.type === "USER" ? members.find(m => m.userId === owner.userId) : undefined;
     return { type: "AGENT" as const, id: agent.id, displayName: agent.name, agentKind: agentKind(agent), available: true, ownerName: ownerMember?.user.name || ownerMember?.user.email };
   })];
+}
+
+/**
+ * A task may have a start date, a due date, both or neither; when both are present the start cannot be after the due date.
+ * Pass the values the row will have AFTER the write (a partial update merges the stored value for the field it leaves out).
+ * Throws like validateTaskReferences, so callers reuse the same error handling.
+ */
+export function validateTaskDates(startDate: Date | null | undefined, dueDate: Date | null | undefined) {
+  if (startDate && Number.isNaN(startDate.getTime())) throw new Error("Invalid startDate");
+  if (dueDate && Number.isNaN(dueDate.getTime())) throw new Error("Invalid dueDate");
+  if (startDate && dueDate && startDate.getTime() > dueDate.getTime()) throw new Error("startDate cannot be after dueDate");
+}
+
+export class TaskDateConflict extends Error {
+  constructor() {
+    super("Task date range changed; reload and retry");
+  }
+}
+
+/** Apply partial date edits against the row's current opposite endpoint in the UPDATE predicate. */
+export async function updateTaskWithDateGuard(
+  tx: AppTransactionClient,
+  id: string,
+  workspaceId: string,
+  data: Prisma.TaskUncheckedUpdateManyInput & { startDate?: Date | null; dueDate?: Date | null },
+) {
+  const { startDate, dueDate } = data;
+  const where = { id, workspaceId };
+  if (startDate === undefined && dueDate === undefined) return tx.task.update({ where: { id }, data });
+
+  validateTaskDates(startDate, dueDate);
+  const oppositeDate: Prisma.TaskWhereInput =
+    startDate && dueDate === undefined
+      ? { OR: [{ dueDate: null }, { dueDate: { gte: startDate } }] }
+      : dueDate && startDate === undefined
+        ? { OR: [{ startDate: null }, { startDate: { lte: dueDate } }] }
+        : {};
+  const { count } = await tx.task.updateMany({ where: { ...where, ...oppositeDate }, data });
+  if (count !== 1) throw new TaskDateConflict();
+  return tx.task.findUniqueOrThrow({ where });
 }
 
 export async function validateTaskReferences(workspaceId: string, input: { squadId?: string | null; parentTaskId?: string | null }) {

@@ -5,6 +5,8 @@ const mockTask = {
   findMany: vi.fn(),
   create: vi.fn(),
   update: vi.fn(),
+  updateMany: vi.fn(),
+  findUniqueOrThrow: vi.fn(),
   findFirst: vi.fn(),
 };
 // The link writer (lib/task-link-writes.ts, entity_links) has its own tests; this file pins what the actions ask of it.
@@ -155,8 +157,10 @@ describe("updateTask", () => {
   });
 
   it("clears a field when explicitly passed null", async () => {
+    mockTask.updateMany.mockResolvedValueOnce({ count: 1 });
+    mockTask.findUniqueOrThrow.mockResolvedValueOnce({ id: "task-1", workspaceId: "ws-1" });
     await updateTask("task-1", { assigneeUserId: null, dueDate: null }, "/path");
-    const call = mockTask.update.mock.calls[0][0];
+    const call = mockTask.updateMany.mock.calls[0][0];
     expect(call.data.assigneeUserId).toBeNull();
     expect(call.data.dueDate).toBeNull();
   });

@@ -91,18 +91,18 @@ test("Profile updates past and future conversation author names and account navi
     await page.goto(`${base}/roadmap`)
     await card.getByRole("button", { name: title }).click()
     await page.locator('[data-slot="sheet-content"]').getByTestId("object-conversations-section").getByRole("button", { name: /^A comment before the rename/ }).click()
-    await expect(conversationPanel().getByText("A reply before the rename", { exact: true })).toBeVisible()
+    await expect(conversationPanel().getByTestId("conversation-message").getByText("A reply before the rename", { exact: true })).toBeVisible()
     // Past messages now carry the new name; renaming is not an edit.
     const past = await messages(workspaceId, conversationId)
     expect(past.map((message) => message.authorName)).toEqual([desiredName, desiredName])
     for (const message of past) expect(message.editedAt ?? null).toBeNull()
     await conversationPanel().getByPlaceholder(/message the agent/i).fill("A comment after the rename")
     await conversationPanel().getByRole("button", { name: "Send message" }).click()
-    await expect(conversationPanel().getByText("A comment after the rename", { exact: true })).toBeVisible()
+    await expect(conversationPanel().getByTestId("conversation-message").getByText("A comment after the rename", { exact: true })).toBeVisible()
     await expect.poll(async () => (await messages(workspaceId, conversationId)).map((message) => message.authorName)).toEqual([desiredName, desiredName, desiredName])
     await page.reload()
     await expect(conversationPanel()).toBeVisible()
-    await expect(conversationPanel().getByText("A comment after the rename", { exact: true })).toBeVisible()
+    await expect(conversationPanel().getByTestId("conversation-message").getByText("A comment after the rename", { exact: true })).toBeVisible()
     expect((await messages(workspaceId, conversationId)).map((message) => message.authorName)).toEqual([desiredName, desiredName, desiredName])
   } catch (error) {
     failed = true

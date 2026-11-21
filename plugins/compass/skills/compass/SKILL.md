@@ -279,10 +279,10 @@ requests a decision, persist its request ID, report `AWAITING_DECISION`, and sto
 #### Tasks
 | Tool | Description |
 |---|---|
-| `create_task` | Create a standalone task (title required; optional description, status, priority, `squadId`, `assigneeUserId`, `ownerName` freeform owner, `storyPoints`, `dueDate`, `iteration` sprint placeholder, `parentTaskId` for Epic→Task→Subtask). Response ends with an `ID:` line |
+| `create_task` | Create a standalone task (title required; optional description, status, priority, `squadId`, `assigneeUserId`, `ownerName` freeform owner, `storyPoints`, `startDate` (optional, not after `dueDate`; a task with only a due date is a milestone), `dueDate`, `iteration` sprint placeholder, `parentTaskId` for Epic→Task→Subtask). Response ends with an `ID:` line |
 | `get_task` | Full detail for one task, including resolved links (each `TaskLink` rendered with its target's human title) |
 | `list_tasks` | Tasks for a workspace; filter by `status`, `priority`, `squadId`, `assigneeUserId`, or `parentTaskId`; recency-filterable |
-| `update_task` | Partial update of any task field (title, description, priority, assignee/owner, story points, due date, iteration, parent) |
+| `update_task` | Partial update of any task field (title, description, priority, assignee/owner, story points, start date, due date, iteration, parent) |
 | `move_task_status` | Move a task to a new status column (BACKLOG / TODO / IN_PROGRESS / BLOCKED / IN_REVIEW / DONE / CANCELLED) |
 | `link_task` | Link a task to another object — `linkedType` one of OPPORTUNITY / SOLUTION / ROADMAP_ITEM / OBJECTIVE / KEY_RESULT / DOC / EXPERIMENT / FEEDBACK_ITEM — plus `linkedId`. Idempotent (re-linking the same pair is a no-op). Many-to-many. Always use this tool for task links: `TASK_REFERENCES` in `entity_links` is only a flagged mirror of them and `link_entities` refuses it |
 | `unlink_task` | Remove a task↔object link |

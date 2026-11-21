@@ -25,6 +25,7 @@ import { peekFact, statusVisual } from "@/lib/spec-docs/embed-visual";
 import { KIND_ICON, StatusGlyphIcon, TONE_CLASS } from "@/components/docs/embed-card-icons";
 import { PANEL_ENTITY_TYPES, useOptionalPanelContext, type EntityPanelType } from "@/components/panels/panel-context";
 import { useEmbedEditing, useEmbedEntry, useNearViewport, type EmbedEntry } from "@/components/docs/doc-embed-cards";
+import { DecisionTallyView, type VoteFn } from "@/components/docs/decision-tally";
 
 /** Server hrefs are app-relative; anything else (a scheme, a protocol-relative URL) is not rendered as a link. */
 export function safeInternalHref(href: string): string | null {
@@ -142,7 +143,7 @@ function CardMenu({ label, onRemove }: { label: string; onRemove: () => void }) 
   );
 }
 
-function OkCard({ kind, card, edit, onRemove, defaultExpanded }: { kind: DocEmbedKind; card: Extract<DocEmbedCardView, { state: "ok" }>; edit: CardEditControls | null; onRemove: (() => void) | null; defaultExpanded: boolean }) {
+function OkCard({ kind, card, edit, onRemove, defaultExpanded, vote }: { kind: DocEmbedKind; card: Extract<DocEmbedCardView, { state: "ok" }>; edit: CardEditControls | null; onRemove: (() => void) | null; defaultExpanded: boolean; vote: VoteFn | null }) {
   const href = safeInternalHref(card.href);
   // View state only: opening or closing a card never makes an editor transaction, so it cannot trigger the doc's autosave.
   const [expanded, setExpanded] = useState(defaultExpanded);
@@ -302,6 +303,7 @@ function OkCard({ kind, card, edit, onRemove, defaultExpanded }: { kind: DocEmbe
               ))}
             </dl>
           ) : null}
+          {card.tally ? <DecisionTallyView tally={card.tally} vote={vote} /> : null}
           <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
             {statusControl || visual ? status : null}
             {edit ? (
@@ -333,7 +335,7 @@ function OkCard({ kind, card, edit, onRemove, defaultExpanded }: { kind: DocEmbe
 }
 
 /** Presentational: `entry` undefined is the loading state. `edit` and `onRemove` are given only to viewers who may use them. */
-export function SpecEmbedCard({ kind, entry, edit = null, onRemove = null, defaultExpanded = false }: { kind: DocEmbedKind; entry: EmbedEntry | undefined; edit?: CardEditControls | null; onRemove?: (() => void) | null; defaultExpanded?: boolean }) {
+export function SpecEmbedCard({ kind, entry, edit = null, onRemove = null, defaultExpanded = false, vote = null }: { kind: DocEmbedKind; entry: EmbedEntry | undefined; edit?: CardEditControls | null; onRemove?: (() => void) | null; defaultExpanded?: boolean; vote?: VoteFn | null }) {
   if (!entry) {
     return (
       <div data-slot="spec-embed-card" data-state="loading" aria-busy="true" className={CARD}>
@@ -369,14 +371,14 @@ export function SpecEmbedCard({ kind, entry, edit = null, onRemove = null, defau
       </div>
     );
   }
-  return <OkCard kind={kind} card={card} edit={edit} onRemove={onRemove} defaultExpanded={defaultExpanded} />;
+  return <OkCard kind={kind} card={card} edit={edit} onRemove={onRemove} defaultExpanded={defaultExpanded} vote={vote} />;
 }
 
 function SpecEmbedLive({ kind, id, onRemove }: { kind: DocEmbedKind; id: string; onRemove: () => void }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const near = useNearViewport(containerRef);
   const { entry, request } = useEmbedEntry({ kind, id });
-  const { store, canEdit, patch } = useEmbedEditing();
+  const { store, canEdit, patch, vote: castVote } = useEmbedEditing();
   useEffect(() => {
     if (near) request();
   }, [near, request]);
@@ -398,12 +400,29 @@ function SpecEmbedLive({ kind, id, onRemove }: { kind: DocEmbedKind; id: string;
           },
         }
       : null;
+  // Voting (ADR-0030) needs the same gate as editing: a writable page and a server answer that the viewer is a direct workspace member.
+  const vote: VoteFn | null =
+    canEdit && castVote && store && kind === "decision" && ready?.state === "ok" && ready.tally
+      ? async (questionIndex, option) => {
+          const failure = await castVote(id, questionIndex, option, ready.tally!.revisionId);
+          if (failure) {
+            try { await store.refresh({ kind, id }); } catch { /* Keep the actionable failure visible. */ }
+            return failure;
+          }
+          try {
+            await store.refresh({ kind, id });
+          } catch {
+            return "Your vote was saved, but the card could not refresh. Reload to see the new count.";
+          }
+          return null;
+        }
+      : null;
   // Remove edits the document, so it needs only a writable page; it is offered for a card that is unavailable or resolved (not mid-load or failed).
   const removable = canEdit && ready !== null;
 
   return (
     <div ref={containerRef}>
-      <SpecEmbedCard kind={kind} entry={entry} edit={edit} onRemove={removable ? onRemove : null} />
+      <SpecEmbedCard kind={kind} entry={entry} edit={edit} onRemove={removable ? onRemove : null} vote={vote} defaultExpanded={ready?.state === "ok" && ready.tally?.open === true} />
     </div>
   );
 }

@@ -26,6 +26,7 @@ const ENTITY_TYPE_OF_KIND: Record<DocEmbedKind, LinkableEntityType> = {
   assumption: "ASSUMPTION",
   roadmapItem: "ROADMAP_ITEM",
   artifact: "ARTIFACT",
+  decision: "REVIEW_REQUEST",
 }
 
 const MAX_REPORTED = 5
