@@ -10,6 +10,7 @@
  * keeps the surface deliberately small — the panel is for quick edits, not a
  * general-purpose entity editor.
  */
+import type { Prisma } from "@prisma/client";
 import { applyInheritanceRules } from "@/lib/custom-field-inheritance";
 import getPrisma from "@/lib/db";
 import { captureWorkspaceMutation } from "@/lib/workspace-update-mutations";
@@ -20,7 +21,7 @@ import { SETTABLE_HORIZONS, isLaunchHorizon } from "@/lib/roadmap";
 import { LAUNCH_WORKFLOW_DISABLED_MESSAGE } from "@/lib/launch-checklist";
 import { isModuleEnabled } from "@/lib/modules/server"
 import { syncRoadmapOnSolutionChange, type SolutionSyncResult } from "@/lib/roadmap/solution-sync";
-import { assignmentUpdate, type TaskAssignee } from "@/lib/task-assignment";
+import { assignmentUpdate, TaskDateConflict, updateTaskWithDateGuard, validateTaskDates, type TaskAssignee } from "@/lib/task-assignment";
 import type { TaskPriority, TaskStatus } from "@/lib/types";
 import { BATCH_DESCRIPTION_MAX_LENGTH } from "@/lib/batch-create-limits";
 import { OPPORTUNITY_SEGMENT_MAX_LENGTH } from "@/lib/opportunity-draft";
@@ -130,7 +131,7 @@ async function parseRoadmapItemField(
 
 export type UpdateResult =
   | { ok: true; /** Set when a solution status change reached the roadmap (auto-add or a followed item). */ roadmapSync?: SolutionSyncResult }
-  | { ok: false; status: 400 | 404; error: string };
+  | { ok: false; status: 400 | 404 | 409; error: string };
 
 /**
  * Validate `field`/`value` against EDIT_CONFIG for `type`, then apply the edit
@@ -336,7 +337,7 @@ async function updateTaskField(
   value: unknown,
   actor: MutationActor,
 ): Promise<UpdateResult> {
-  let data: Record<string, unknown>;
+  let data: Prisma.TaskUncheckedUpdateManyInput & { startDate?: Date | null; dueDate?: Date | null };
 
   switch (field) {
     case "title": {
@@ -361,14 +362,14 @@ async function updateTaskField(
       if (typeof value !== "string" || !TASK_STATUSES.includes(value as TaskStatus)) {
         return { ok: false, status: 400, error: "Invalid status" };
       }
-      data = { status: value };
+      data = { status: value as TaskStatus };
       break;
     }
     case "priority": {
       if (typeof value !== "string" || !TASK_PRIORITIES.includes(value as TaskPriority)) {
         return { ok: false, status: 400, error: "Invalid priority" };
       }
-      data = { priority: value };
+      data = { priority: value as TaskPriority };
       break;
     }
     case "assigneeUserId": {
@@ -419,6 +420,20 @@ async function updateTaskField(
       }
       break;
     }
+    case "startDate": {
+      if (value === null) {
+        data = { startDate: null };
+      } else if (typeof value === "string") {
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) {
+          return { ok: false, status: 400, error: "Invalid startDate" };
+        }
+        data = { startDate: date };
+      } else {
+        return { ok: false, status: 400, error: "startDate must be a date string or null" };
+      }
+      break;
+    }
     case "dueDate": {
       if (value === null) {
         data = { dueDate: null };
@@ -458,10 +473,29 @@ async function updateTaskField(
   const prisma = getPrisma();
   const exists = await prisma.task.findFirst({
     where: entityScopeWhere("task", id, workspaceId),
-    select: { id: true },
+    select: { id: true, startDate: true, dueDate: true },
   });
   if (!exists) return { ok: false, status: 404, error: "Not found" };
 
-  await captureWorkspaceMutation(prisma, "task", "update", { actorType: actor.kind === "USER" ? "USER" : "SYSTEM", actorId: actor.id }, id, tx => tx.task.update({ where: { id }, data }));
+  if ("startDate" in data || "dueDate" in data) {
+    // Editing one date keeps the other as stored, so the order check runs against the merged pair.
+    try {
+      validateTaskDates(
+        "startDate" in data ? (data.startDate as Date | null) : exists.startDate,
+        "dueDate" in data ? (data.dueDate as Date | null) : exists.dueDate,
+      );
+    } catch (error) {
+      return { ok: false, status: 400, error: error instanceof Error ? error.message : "Invalid task dates" };
+    }
+  }
+
+  try {
+    await captureWorkspaceMutation(prisma, "task", "update", { actorType: actor.kind === "USER" ? "USER" : "SYSTEM", actorId: actor.id }, id,
+      tx => updateTaskWithDateGuard(tx, id, workspaceId, data),
+      { atomic: "startDate" in data || "dueDate" in data });
+  } catch (error) {
+    if (error instanceof TaskDateConflict) return { ok: false, status: 409, error: error.message };
+    throw error;
+  }
   return { ok: true };
 }

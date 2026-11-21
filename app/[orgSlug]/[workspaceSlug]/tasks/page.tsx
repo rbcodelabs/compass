@@ -131,7 +131,7 @@ export default async function TasksPage({ params, searchParams }: TasksPageProps
       select: {
         id: true, seqPrefix: true, seqNumber: true, title: true, description: true, status: true, priority: true,
         sortOrder: true, squadId: true, assigneeUserId: true, assigneeAgentId: true, ownerName: true,
-        storyPoints: true, dueDate: true, iteration: true, parentTaskId: true,
+        storyPoints: true, startDate: true, dueDate: true, iteration: true, parentTaskId: true,
       },
     }),
     prisma.workspaceMember.findMany({

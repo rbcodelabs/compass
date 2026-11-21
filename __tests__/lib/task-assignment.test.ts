@@ -6,7 +6,7 @@ const { prisma } = vi.hoisted(() => ({ prisma: {
   agentWorkspaceGrant: { findFirst: vi.fn(), findMany: vi.fn() },
 } }));
 vi.mock("@/lib/db", () => ({ default: () => prisma }));
-import { assignmentUpdate, eligibleTaskAssignees, parseAssigneeFilter, resolveTaskAssignees } from "@/lib/task-assignment";
+import { assignmentUpdate, eligibleTaskAssignees, parseAssigneeFilter, resolveTaskAssignees, validateTaskDates } from "@/lib/task-assignment";
 import { UNASSIGNED_ASSIGNEE_FILTER } from "@/lib/task-assignee-display";
 
 beforeEach(() => {
@@ -185,3 +185,25 @@ describe("eligibleTaskAssignees", () => {
     expect((await eligibleTaskAssignees("ws")).filter((a) => a.type === "AGENT")).toEqual([]);
   });
 });
+
+describe("validateTaskDates", () => {
+  const early = new Date("2026-09-01T00:00:00.000Z")
+  const late = new Date("2026-09-04T00:00:00.000Z")
+  it("accepts a missing start, a missing due date, equal dates and an ordered range", () => {
+    expect(() => validateTaskDates(null, late)).not.toThrow()
+    expect(() => validateTaskDates(undefined, undefined)).not.toThrow()
+    expect(() => validateTaskDates(early, null)).not.toThrow()
+    expect(() => validateTaskDates(early, early)).not.toThrow()
+    expect(() => validateTaskDates(early, late)).not.toThrow()
+  })
+  it("rejects a start after the due date", () => {
+    expect(() => validateTaskDates(late, early)).toThrow("startDate cannot be after dueDate")
+  })
+  it("rejects an invalid start date", () => {
+    expect(() => validateTaskDates(new Date("nope"), late)).toThrow("Invalid startDate")
+  })
+  it("rejects an invalid due date whether or not a start is present", () => {
+    expect(() => validateTaskDates(null, new Date("nope"))).toThrow("Invalid dueDate")
+    expect(() => validateTaskDates(early, new Date("nope"))).toThrow("Invalid dueDate")
+  })
+})
