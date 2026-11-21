@@ -77,3 +77,27 @@ it("uses the held operation after duplicate publication and verifies the winner 
   expect(res.status).toBe(200)
   expect(discard).toHaveBeenCalledOnce()
 })
+
+it("keeps a fresh receipt unbound when its bytes differ from the committed operation", async () => {
+  const { bindImportReceipt } = await import("@/lib/workspace-export/receipt-binding")
+  vi.mocked(bindImportReceipt).mockClear()
+  state.result.mockResolvedValue(null)
+  const discard = vi.fn()
+  state.load.mockResolvedValue({ bytes: new Uint8Array([2]), discard })
+  const workspaceId = "fe1e28d3-2ecb-4638-88ff-b4c393ad701e"
+  const tx = {
+    workspace: { findFirst: vi.fn().mockResolvedValue({ id: workspaceId }) },
+    $queryRawUnsafe: vi.fn().mockResolvedValue([{ phase: "committed", bundle_digest: "original" }]),
+  }
+  Object.assign(state.db, { $transaction: (fn: (db: typeof tx) => unknown) => fn(tx) })
+  state.apply.mockImplementation(async (_db, _bytes, callbacks) => {
+    await callbacks.recordExisting({ workspaceId }, "different")
+  })
+  const { POST } = await import("@/app/api/workspace-import/[orgSlug]/route")
+  const res = await POST(new Request("http://localhost/import", {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ receipt: "fresh" }),
+  }), { params: Promise.resolve({ orgSlug: "org" }) })
+  expect(res.status).toBe(422)
+  expect(bindImportReceipt).not.toHaveBeenCalled()
+  expect(discard).not.toHaveBeenCalled()
+})
