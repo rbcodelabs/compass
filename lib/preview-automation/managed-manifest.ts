@@ -300,6 +300,7 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   "128_task_start_date": "e357da11f90dbf6030030ee0ba16df9153e2ef2e85bbb5c53ef7db666e5ce66e",
   "129_agent_message_run_id": "f82b208a7648bac31ef3917a3080efeb350730cd485bb347b64f615007a4c9bd",
   "130_agent_sandbox_operations": "a19322f4022bfe3e0595788943adb4bb04320b3ea568a6dea5b09180d33c97d4",
+  "131_workspace_import_recovery": "d440137382b5ac3de292aa7af321f9e1627aecd4082959ded66afeda4271ce25",
 };
 
 /**

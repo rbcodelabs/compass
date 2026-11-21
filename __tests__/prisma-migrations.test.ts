@@ -919,3 +919,29 @@ describe("078_artifact_slide_decks", () => {
     expect(anchor).toMatch(/\bslideIndex\s+Int\?\s+@map\("slide_index"\)/);
   });
 });
+
+describe("workspace import recovery migration (131)", () => {
+  it("registers the durable import operation, receipt and asset tables", () => {
+    const name = "131_workspace_import_recovery"
+    expect(readFileSync(ROUTE, "utf-8")).toContain(`name: "${name}"`)
+    const sql = readFileSync(path.join(MIGRATIONS_DIR, name, "migration.sql"), "utf-8")
+    for (const table of ["workspace_import_operations", "workspace_import_receipts", "workspace_import_assets"]) {
+      expect(sql).toMatch(new RegExp(`CREATE TABLE(?: IF NOT EXISTS)? "?${table}"?\\s*\\(`, "i"))
+    }
+  })
+})
+
+it("waits for migration 131 indexes and verifies the catalog before recording completion", () => {
+  const runner = readFileSync(ROUTE, "utf-8")
+  const hook = 'if (migration.name === "131_workspace_import_recovery") await assertWorkspaceImportRecoveryPostconditions(client, schema)'
+  const completion = 'UPDATE "${schema}"._prisma_migrations SET finished_at = CURRENT_TIMESTAMP'
+  expect(runner.split(String.fromCharCode(10)).find((line) => line.startsWith("const ASYNC_WAIT_MIGRATIONS = "))).toContain('"131_workspace_import_recovery"')
+  expect(runner).toContain(hook)
+  expect(runner).toContain(completion)
+  expect(runner.indexOf(hook)).toBeLessThan(runner.indexOf(completion))
+})
+
+it("keeps the unapplied import recovery migration out of fixture migration replay", () => {
+  const fixtureRunner = readFileSync(path.join(ROOT, "__tests__/helpers/replay-migrations.ts"), "utf8")
+  expect(fixtureRunner).toMatch(/SKIP_IN_REPLAY = new Set\(\[[^\]]*"131_workspace_import_recovery"/)
+})
