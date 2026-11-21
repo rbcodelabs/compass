@@ -96,7 +96,7 @@ export function shouldUseLocalStorage(): boolean {
 
 /** Local development uses private filesystem storage; deployed environments
  * use authenticated private Vercel Blob. The interface is injected in tests. */
-export function getArtifactStorage(): ArtifactStorage {
+function rawArtifactStorage(): ArtifactStorage {
   if (shouldUseLocalStorage()) return localStorage
   // Resolve only for actual I/O, so deleting a workspace without HTML artifacts
   // does not require Blob configuration. Never inherit the public image token.
@@ -116,7 +116,7 @@ export function getCapabilityPackArtifactStorage(): ArtifactStorage {
   return createVercelBlobStorage(token)
 }
 
-export function getResearchArtifactStorage(): ArtifactStorage {
+function rawResearchStorage(): ArtifactStorage {
   if (shouldUseLocalStorage()) return localStorage
   const token = process.env.RESEARCH_BLOB_READ_WRITE_TOKEN?.trim()
   if (!token) throw new Error("Research Blob storage is not configured")
@@ -138,4 +138,30 @@ export function getAgentSessionStorage(): ArtifactStorage {
 /** Whether a session transcript can be stored at all on this deployment. */
 export function agentSessionStorageConfigured(): boolean {
   return Boolean(shouldUseLocalStorage() || process.env.AGENT_SESSION_BLOB_READ_WRITE_TOKEN?.trim())
+}
+
+
+function mappedStorage(provider: ArtifactStorage, store: "artifact" | "research"): ArtifactStorage {
+  async function resolve(path: string) {
+    const [root, workspaceId] = path.split("/")
+    if (!(store === "research" ? root === "research" : root === "docs" || root === "artifacts")) return path
+    if (!workspaceId || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(workspaceId)) return path
+    const [{ default: getPrisma }, { lookupImportAsset }] = await Promise.all([
+      import("@/lib/db"), import("@/lib/workspace-export/asset-journal"),
+    ])
+    return await lookupImportAsset(getPrisma(), workspaceId, store, path) ?? path
+  }
+  return {
+    put: provider.put.bind(provider),
+    async get(path) { return provider.get(await resolve(path)) },
+    async del(path) { await provider.del(await resolve(path)) },
+  }
+}
+
+export function getArtifactStorage(): ArtifactStorage {
+  return mappedStorage(rawArtifactStorage(), "artifact")
+}
+
+export function getResearchArtifactStorage(): ArtifactStorage {
+  return mappedStorage(rawResearchStorage(), "research")
 }
