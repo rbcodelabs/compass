@@ -886,7 +886,7 @@ async function main(): Promise<void> {
     state: { sawAssistant: boolean },
   ): Promise<AttemptOutcome> {
     let finalText: string | undefined
-    let usage: unknown
+    let usage: Record<string, unknown> | undefined
     const abortController = new AbortController()
     activeParkAbort = abortController
     parkedReason = undefined

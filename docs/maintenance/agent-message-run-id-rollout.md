@@ -1,40 +1,28 @@
 # Roll out agent-message run IDs
 
-Migration `129_agent_message_run_id` adds the nullable `agent_messages.run_id`
-column and its index. The runtime Prisma client reads the column, and the
-detached finalizer writes it. A finalizer can record terminal status before an
-old schema rejects the transcript insert, so complete the schema change before
-the application, callback, or cron paths from the new build receive traffic.
+Migration `129_agent_message_run_id` ships separately from this runtime. It
+adds the nullable `agent_messages.run_id` column and its index. A finalizer
+can commit terminal status before a transcript insert fails. A repeat callback
+for a terminal run does not repair the transcript.
 
 1. Arrange a [staged Vercel production deployment](https://vercel.com/docs/deployments/promoting-a-deployment)
-   for the approved integrated revision. Set up the traffic barrier before merging
-   into any branch that automatically promotes. Confirm that the public domains,
-   cron targets, and existing detached-worker callback URLs still point to the
-   current release. Protect the staged URL so only the release operators can use
-   it for the checks below. Capture its deployment ID, commit, and rollback target.
-2. On the staged URL, use the release credential for an authenticated
-   `GET /api/admin/migrate`. Confirm the production environment, database backend,
-   target schema, registered migration name, and any preceding pending or
-   unresolved receipts. On plain Postgres, use the configured session-pooler
-   connection and account for the index build's write-lock window.
-3. After separate production migration approval, send
-   `POST /api/admin/migrate` to the staged URL with the same authentication and
-   body `{"script":"129_agent_message_run_id"}`. Require HTTP 200 and a completed
-   receipt on a fresh status read. The runner checks the writable nullable column
-   and the ready, valid index before it records completion. Resolve any failed
-   attempt and verify the exact receipt before advancing.
-4. Use a designated test workspace on the staged URL. Verify an existing
-   conversation and its prior messages still load. Complete one controlled
-   detached turn and verify its single assistant message is linked to the run.
-   Check that workspace bundle export and import still pass in the designated
-   fixture. Promote the reviewed deployment only after these checks pass and
-   confirm normal traffic and callbacks use the intended revision.
-5. Set any spend-reporting cutoff after old application instances and detached
-   workers that can omit the linkage or failed-run usage have drained. If
-   promotion needs to be rolled back, move traffic back and retain the additive
-   column and index. Reassess the cutoff before using spend totals after rollback.
-
-If the target project cannot isolate the staged build, prepare a separately
-reviewed migration-only release containing the runner registration, catalog
-assertion, and pins with the current runtime Prisma schema. Apply and verify
-its targeted migration before promoting the runtime changes.
+   for the approved integrated revision. Keep public traffic and normal cron on
+   the current release. Capture the staged deployment ID, commit, rollback
+   target, and production schema.
+2. Verify the completed migration 129 receipt and valid index on that schema
+   before moving traffic. Use the authenticated migration status GET and catalog
+   evidence. This application rollout does not submit a migration POST.
+3. Confirm which deployment receives the worker callback
+   (`/api/internal/agent/runs/:id/events`) for each staged test. Continuations use
+   the configured production origin via `trustedCompassBaseUrl().origin`, which
+   can still reach the old revision when initiated from a staged URL. Route or
+   isolate the test so the callback demonstrably reaches the staged revision.
+4. In a designated fixture workspace, read a legacy transcript and complete
+   a controlled detached turn. Read back the single assistant message directly
+   and compare its stored run ID to the finalized run ID. Record the run ID and
+   callback revision. Workspace bundle smoke is general regression coverage.
+   The bundle excludes tiered messages and ephemeral runs.
+5. Promote only after the receipt and readback checks pass. Confirm traffic,
+   callbacks, and cron reach the intended revision. Drain old instances and
+   detached workers before choosing a spend-reporting cutoff. If the application
+   rolls back, retain the additive schema and reassess the reporting cutoff.
