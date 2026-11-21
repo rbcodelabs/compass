@@ -158,3 +158,36 @@ describe("Board wheel scrolling", () => {
     expect(board.scrollLeft).toBe(120);
   });
 });
+
+describe("Roadmap drag precedence", () => {
+  function setup(active: boolean) {
+    const view = (dragActive: boolean) => (
+      <Board label="Roadmap" wheelSnapControl dragActive={dragActive}>Card</Board>
+    );
+    const rendered = render(view(active));
+    const board = rendered.getByRole("region");
+    dimension(board, "scrollWidth", 1200);
+    dimension(board, "clientWidth", 400);
+    return { board, setActive: (next: boolean) => rendered.rerender(view(next)) };
+  }
+
+  it("ends an ongoing wheel burst immediately when dragging starts", () => {
+    const { board, setActive } = setup(false);
+    fireEvent.wheel(board, { deltaY: 40 });
+    expect(board.hasAttribute("data-wheel-panning")).toBe(true);
+    setActive(true);
+    expect(board.hasAttribute("data-wheel-panning")).toBe(false);
+    setActive(false);
+    expect(board.hasAttribute("data-wheel-panning")).toBe(false);
+  });
+
+  it("keeps drag snap and offset when a wheel gesture follows drag activation", () => {
+    const { board, setActive } = setup(true);
+    fireEvent.wheel(board, { deltaY: 40 });
+    expect(board.scrollLeft).toBe(0);
+    expect(board.hasAttribute("data-wheel-panning")).toBe(false);
+    setActive(false);
+    fireEvent.wheel(board, { deltaY: 40 });
+    expect(board.scrollLeft).toBe(40);
+  });
+});
