@@ -257,6 +257,38 @@ test.describe("Roadmap — not yet on the roadmap", () => {
       expect(sourceId).toBeTruthy();
       const browserErrors: string[] = [];
       page.on("pageerror", error => browserErrors.push(error.message));
+      // Observe the browser's hit-test surface without moving the pointer or scrolling.
+      const geometry = await roadmapBoard.evaluateHandle((board) => {
+        const samples: object[] = [];
+        let pointer = { x: -1, y: -1 };
+        const sample = (phase: string) => {
+          const columns = Array.from(board.querySelectorAll('[id^="roadmap-column-"]'));
+          const hits = document.elementsFromPoint(pointer.x, pointer.y);
+          const pointed = hits.map(el => el.closest('[id^="roadmap-column-"]')).find(Boolean);
+          samples.push({
+            phase, time: performance.now(), pointer, viewport: [innerWidth, innerHeight],
+            scrollLeft: board.scrollLeft, clientWidth: board.clientWidth, scrollWidth: board.scrollWidth,
+            board: board.getBoundingClientRect().toJSON(),
+            columns: columns.map(el => [el.id, el.getBoundingClientRect().toJSON()]),
+            hitStack: hits.slice(0, 8).map(el => [el.tagName, el.id, el.getAttribute("data-slot")]),
+            pointed: pointed?.id, cardIds: pointed ? Array.from(pointed.querySelectorAll("[data-flip-id]"), el => el.getAttribute("data-flip-id")) : [],
+            live: document.querySelector('[id^="DndLiveRegion"]')?.textContent,
+          });
+        };
+        const move = (event: PointerEvent) => {
+          pointer = { x: event.clientX, y: event.clientY };
+          sample("pointermove");
+        };
+        const scroll = () => sample("scroll");
+        document.addEventListener("pointermove", move, true);
+        board.addEventListener("scroll", scroll);
+        return { finish() {
+          document.removeEventListener("pointermove", move, true);
+          board.removeEventListener("scroll", scroll);
+          sample("finish");
+          return samples;
+        } };
+      });
       try {
         await dragTo(page, scheduled.getByRole("button", { name: "Drag to reorder" }), nextColumn, roadmapBoard, async () => {
           await expect(nextColumn.getByText(solTitle).first()).toBeVisible();
@@ -273,7 +305,16 @@ test.describe("Roadmap — not yet on the roadmap", () => {
           expect(browserErrors).toEqual([]);
         });
         await expect(nextColumn.getByText(solTitle).first()).toBeVisible();
+      } catch (error) {
+        await test.info().attach("scheduled-drag-failure.png", { body: await page.screenshot(), contentType: "image/png" });
+        throw error;
       } finally {
+        const samples = await geometry.evaluate(observer => observer.finish());
+        console.log("ROADMAP_DRAG_GEOMETRY", JSON.stringify({ last: samples.at(-1), browserErrors }));
+        await test.info().attach("scheduled-drag-geometry.json", {
+          body: JSON.stringify({ samples, browserErrors }), contentType: "application/json",
+        });
+        await geometry.dispose();
         expect(browserErrors).toEqual([]);
       }
 
