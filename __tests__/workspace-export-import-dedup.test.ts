@@ -788,3 +788,27 @@ describe("external-link import identity verification", () => {
     await expect(importWorkspaceBundle(client, bundle, options)).rejects.toThrow(/identity readback/i)
   })
 })
+
+it("keeps the first destination's task when another destination collides with its derived task ID", async () => {
+  const { unzipSync, strFromU8, strToU8 } = await import("fflate")
+  const organizationId = randomUUID(), workspaceId = randomUUID(), importerUserId = randomUUID()
+  const db = createInMemoryPrisma({
+    Organization: [{ id: organizationId, name: "Org", slug: "org" }],
+    OrganizationMember: [{ id: randomUUID(), organizationId, userId: importerUserId, role: "ADMIN" }],
+    User: [{ id: importerUserId, name: "Importer", email: "importer@example.com" }],
+    Workspace: [{ id: workspaceId, organizationId, name: "Source", slug: "src", ssoEnabled: false }],
+    Task: [{ id: randomUUID(), workspaceId, title: "Retain this task" }],
+  })
+  const bundle = await exportWorkspaceToBuffer(db.client, workspaceId, noopBlobs)
+  const options = { organizationId, importerUserId, blobs: noopBlobs, nonce: "collision" }
+  const winner = await importWorkspaceBundle(db.client, bundle, options)
+  const task = db.tables.Task.find(row => row.workspaceId === winner.workspaceId)
+  expect(task).toBeDefined()
+  const entries = unzipSync(bundle)
+  const otherSourceId = randomUUID()
+  for (const [path, bytes] of Object.entries(entries)) {
+    entries[path] = strToU8(strFromU8(bytes).replaceAll(workspaceId, otherSourceId))
+  }
+  await expect(importWorkspaceBundle(db.client, zipSync(entries), options)).rejects.toThrow()
+  expect(db.tables.Task).toContainEqual(task)
+})

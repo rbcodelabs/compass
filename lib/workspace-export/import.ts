@@ -670,8 +670,42 @@ async function rollbackImport(
   blobs: BlobAdapters,
   write: <T>(mutation: (tx: Client) => Promise<T>) => Promise<T>,
 ) {
+  const directScope = (model: string): Row | undefined => {
+    if (model === "Agent") return { ownerType: "WORKSPACE", ownerWorkspaceId: newWorkspaceId }
+    if (modelHasWorkspaceId(model)) return { workspaceId: newWorkspaceId }
+  }
+
+  // Verify each link back to the destination inside the fenced deletion transaction.
+  async function ownedIds(tx: Client, model: string, candidates: string[]): Promise<string[]> {
+    if (!candidates.length) return []
+    const scope = directScope(model)
+    const parent = PARENT[model]
+    if (!scope && !parent) throw new Error("Unknown import ownership for " + model)
+    const rows = await delegateFor(tx, model).findMany({
+      where: { id: { in: candidates }, ...scope },
+      select: scope ? { id: true } : { id: true, [parent.fk]: true },
+    })
+    if (scope) return rows.map(row => String(row.id))
+    const parents = new Set(await ownedIds(tx, parent.model, rows.map(row => String(row[parent.fk]))))
+    return rows.filter(row => parents.has(String(row[parent.fk]))).map(row => String(row.id))
+  }
+
   const deleteModel = async (model: string) => {
-    const delegate = { deleteMany: (args: { where: Row; limit?: number }) => write(tx => delegateFor(tx, model).deleteMany(args)) }
+    const delegate = { deleteMany: (args: { where: Row; limit?: number }) => write(async tx => {
+      const scope = directScope(model)
+      if (scope) return delegateFor(tx, model).deleteMany({ ...args, where: { ...args.where, ...scope } })
+      const parent = PARENT[model]
+      if (!parent) throw new Error("Unknown import ownership for " + model)
+      const idPredicate = args.where.id
+      if (idPredicate) {
+        const candidates = typeof idPredicate === "string" ? [idPredicate] : (idPredicate as { in: string[] }).in
+        const ids = await ownedIds(tx, model, candidates)
+        return delegateFor(tx, model).deleteMany({ where: { id: { in: ids } } })
+      }
+      const candidates = (args.where[parent.fk] as { in: string[] }).in
+      const ids = await ownedIds(tx, parent.model, candidates)
+      return delegateFor(tx, model).deleteMany({ ...args, where: { [parent.fk]: { in: ids } } })
+    }) }
     if (modelHasId(model)) {
       const ids: string[] = []
       for (const row of reader.rows(model)) if (typeof row.id === "string") ids.push(deriveId(importKey, row.id))
