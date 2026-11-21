@@ -1,3 +1,4 @@
+import { configuredBlobStoreHostname } from "@/lib/feedback-attachments"
 import { reserveImportAsset, verifyImportAsset } from "@/lib/workspace-export/asset-journal"
 import { withImportHeartbeat } from "@/lib/workspace-export/heartbeat"
 import { withRetry } from "@/lib/workspace-export/leaf-first"
@@ -87,7 +88,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ orgSlug
         reserve(store, logical, bytes) {
           const active = owner
           if (!active) throw new Error("Missing workspace import owner")
-          const identity = { ...privateProviderIdentity(store), bytes: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex") }
+          const provider = store === "feedback" ? { provider: "blob", namespace: configuredBlobStoreHostname() } : privateProviderIdentity(store)
+          const identity = { ...provider, bytes: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex") }
           return withRetry(() => prisma.$transaction(tx => reserveImportAsset(tx, active, store, logical, identity)))
         },
         verify(store, logical, physical) {

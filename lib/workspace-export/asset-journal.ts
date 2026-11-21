@@ -14,7 +14,9 @@ function logicalIdentity(store: AssetStore, path: string) {
 export async function reserveImportAsset(tx: ImportDatabase, owner: ImportLeaseOwner, store: AssetStore, path: string, identity: ProviderIdentity & { bytes: number; sha256: string }) {
   await renewImportOperation(tx, owner, "applying")
   const logical = logicalIdentity(store, path)
-  const physical = `workspace-import-assets/${owner.workspaceId}/${owner.attemptId}/${store}/${logical.split(":")[1]}`
+  const physical = store === "feedback"
+    ? `feedback/${owner.workspaceId}/${owner.attemptId}-${logical.split(":")[1]}`
+    : `workspace-import-assets/${owner.workspaceId}/${owner.attemptId}/${store}/${logical.split(":")[1]}`
   await tx.$queryRawUnsafe(
     `INSERT INTO ${importSchema()}.workspace_import_assets
        (attempt_id, workspace_id, logical_key, physical_key, backend, state, provider_id, namespace_id, expected_bytes, expected_sha256)

@@ -1,3 +1,5 @@
+import { configuredBlobStoreHostname } from "@/lib/feedback-attachments"
+import { copyPublicImportAsset } from "./public-import-asset"
 import { ImportOwnershipChanged } from "./lease"
 import { createHash, randomUUID } from "node:crypto"
 import { normalizeWorkspaceRole } from "@/lib/roles"
@@ -77,8 +79,8 @@ export type ImportOptions = {
   fenceWrite?(tx: unknown, phase: "applying" | "rolling_back"): Promise<void>
   providerIO?<T>(io: () => Promise<T>): Promise<T>
   journal?: {
-    reserve(store: PrivateBlobStore, logical: string, bytes: Uint8Array): Promise<string>
-    verify(store: PrivateBlobStore, logical: string, physical: string): Promise<void>
+    reserve(store: PrivateBlobStore | "feedback", logical: string, bytes: Uint8Array): Promise<string>
+    verify(store: PrivateBlobStore | "feedback", logical: string, physical: string): Promise<void>
   }
   startOperation?(workspaceId: string): Promise<void>
   recordExisting?(report: ImportReport): Promise<void>
@@ -474,8 +476,14 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
           if (data && typeof raw.id === "string") {
             const filename = String(raw.filename ?? "attachment").replace(/[^A-Za-z0-9._-]/g, "_")
             const key = `feedback/${newWorkspaceId}/${deriveId(importKey, `fb:${raw.id}`)}-${filename}`
-            row.url = await providerIO(() => opts.blobs.putPublic(key, data, String(raw.fileType ?? "application/octet-stream")))
-            uploaded.push({ store: "feedback", key: row.url as string })
+            const contentType = String(raw.fileType ?? "application/octet-stream")
+            const journal = opts.journal
+            if (journal) {
+              row.url = await providerIO(() => copyPublicImportAsset(opts.blobs, journal, key, data, contentType, configuredBlobStoreHostname()))
+            } else {
+              row.url = await providerIO(() => opts.blobs.putPublic(key, data, contentType))
+              uploaded.push({ store: "feedback", key: row.url as string })
+            }
             blobsCopied++
           } else if (isOwnFeedbackAttachmentUrl(raw.url, sourceWorkspaceId)) {
             // Only this deployment's own public-store URLs survive, and verbatim (not run through the id rewrite).
