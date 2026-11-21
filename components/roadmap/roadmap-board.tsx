@@ -257,7 +257,7 @@ const collisionDetection: CollisionDetection = (args) => {
       .find(Boolean);
     if (column) {
       const candidates = args.droppableContainers.filter(container =>
-        container.id !== args.active.id && column.contains(container.node.current)
+        column.contains(container.node.current)
       );
       if (candidates.length) return closestCenter({ ...args, droppableContainers: candidates });
     }
