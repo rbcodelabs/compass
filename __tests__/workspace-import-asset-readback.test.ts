@@ -21,3 +21,17 @@ it("reads and deletes the winning physical Docs image through the standard artif
     vi.unstubAllEnvs()
   }
 })
+
+it("preserves create-only semantics for a published managed path and refuses to overwrite it", async () => {
+  vi.stubEnv("VERCEL", "1")
+  vi.stubEnv("ARTIFACT_BLOB_READ_WRITE_TOKEN", "fixture")
+  try {
+    const logical = "docs/" + randomUUID() + "/images/managed.png"
+    fake.query.mockResolvedValue([{ physical_key: "attempt/managed" }])
+    const storage = getArtifactStorage()
+    await expect(storage.put(logical, new Uint8Array([1]), "image/png", { overwrite: false })).resolves.toEqual({ pathname: logical, created: false })
+    await expect(storage.put(logical, new Uint8Array([2]))).rejects.toThrow(/overwrite/i)
+  } finally {
+    vi.unstubAllEnvs()
+  }
+})

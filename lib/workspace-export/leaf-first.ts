@@ -45,3 +45,15 @@ export async function deleteIdsLeafFirst(delegate: Pick<Delegate, "deleteMany">,
     pending = next
   }
 }
+
+/** A single parent predicate can match far more rows than the parent-ID batch size. */
+export async function deleteScopedImportRows(
+  where: Record<string, unknown>,
+  remove: (args: { where: Record<string, unknown>; limit: number }) => Promise<{ count: number }>,
+): Promise<void> {
+  const limit = 100
+  let count: number
+  do {
+    count = (await remove({ where, limit })).count
+  } while (count === limit)
+}

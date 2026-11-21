@@ -152,7 +152,13 @@ function mappedStorage(provider: ArtifactStorage, store: "artifact" | "research"
     return await lookupImportAsset(getPrisma(), workspaceId, store, path) ?? path
   }
   return {
-    put: provider.put.bind(provider),
+    async put(path, bytes, contentType, options) {
+      if (await resolve(path) !== path) {
+        if (options?.overwrite === false) return { pathname: path, created: false }
+        throw new Error("Cannot overwrite a published import asset")
+      }
+      return provider.put(path, bytes, contentType, options)
+    },
     async get(path) { return provider.get(await resolve(path)) },
     async del(path) { await provider.del(await resolve(path)) },
   }

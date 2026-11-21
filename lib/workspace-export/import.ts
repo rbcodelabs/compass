@@ -7,7 +7,7 @@ import { BundleReader, blobEntry, type BundleManifest } from "@/lib/workspace-ex
 import { type BlobAdapters } from "@/lib/workspace-export/blobs"
 import { decodeRow, fieldInfo } from "@/lib/workspace-export/codec"
 import { OPTIONAL_FIELDS, OPTIONAL_STRING_FIELDS, UNIQUE_KEYS } from "@/lib/workspace-export/schema-meta.generated"
-import { deleteIdsLeafFirst, withRetry } from "@/lib/workspace-export/leaf-first"
+import { deleteIdsLeafFirst, deleteScopedImportRows, withRetry } from "@/lib/workspace-export/leaf-first"
 import { IMPORT_OVERRIDES, SECRET_COLUMNS } from "@/lib/workspace-export/model-registry"
 import {
   capabilityPackArtifactPath,
@@ -610,20 +610,20 @@ async function rollbackImport(
   write: <T>(mutation: (tx: Client) => Promise<T>) => Promise<T>,
 ) {
   const deleteModel = async (model: string) => {
-    const delegate = { deleteMany: (args: { where: Row }) => write(tx => delegateFor(tx, model).deleteMany(args)) }
+    const delegate = { deleteMany: (args: { where: Row; limit?: number }) => write(tx => delegateFor(tx, model).deleteMany(args)) }
     if (modelHasId(model)) {
       const ids: string[] = []
       for (const row of reader.rows(model)) if (typeof row.id === "string") ids.push(deriveId(importKey, row.id))
-      for (const group of chunks(ids, 500)) await deleteIdsLeafFirst(delegate, group)
+      for (const group of chunks(ids, 100)) await deleteIdsLeafFirst(delegate, group)
     } else if (modelHasWorkspaceId(model)) {
-      await withRetry(() => delegate.deleteMany({ where: { workspaceId: newWorkspaceId } }))
+      await deleteScopedImportRows({ workspaceId: newWorkspaceId }, delegate.deleteMany)
     } else {
       // Keyed by its parent (e.g. SolutionPlanProposal.commentId): delete by the derived parent ids.
       const parent = PARENT[model]
       if (!parent) return
       const parentIds: string[] = []
       for (const row of reader.rows(parent.model)) if (typeof row.id === "string") parentIds.push(deriveId(importKey, row.id))
-      for (const group of chunks(parentIds, 500)) await withRetry(() => delegate.deleteMany({ where: { [parent.fk]: { in: group } } }))
+      for (const group of chunks(parentIds, 500)) await deleteScopedImportRows({ [parent.fk]: { in: group } }, delegate.deleteMany)
     }
   }
   // Prisma emulates required relations (relationMode "prisma"), so a delete can be refused while another model
