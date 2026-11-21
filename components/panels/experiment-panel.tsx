@@ -1,6 +1,5 @@
 "use client";
 import { Discussion } from "@/components/comments/discussion";
-import { RequestDecisionLink } from "@/components/decisions/request-decision-link";
 import { FleshThisOutLink } from "@/components/research/flesh-this-out-link";
 import { PmInterviewHistory } from "@/components/research/pm-interview-history";
 
@@ -8,13 +7,13 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { ExternalLinkIcon } from "lucide-react";
 import { EditableText, StatusSelect, type EditContext } from "./panel-parts";
 import { MarkdownContent } from "@/components/markdown-content";
 import { LinkedTasksSection, type LinkedTaskData } from "@/components/tasks/linked-tasks-section";
 import type { MemberData } from "@/lib/types";
 import { LinkedEntitiesSection } from "@/components/links/linked-entities-section";
 import { MeasurementsPanel } from "@/components/analytics/measurements-panel";
+import { usePanelHeaderActions } from "./panel-header-actions";
 
 type ExperimentData = {
   id: string;
@@ -119,6 +118,14 @@ export function ExperimentPanel({
   }, [refresh]);
 
   const fullPageHref = `/${orgSlug}/${workspaceSlug}/experiments/${experimentId}`;
+  usePanelHeaderActions(
+    data
+      ? {
+          fullPageHref,
+          decision: { subjectType: "EXPERIMENT", subjectId: data.id, subjectTitle: data.title },
+        }
+      : {},
+  );
 
   if (error) {
     return (
@@ -151,15 +158,6 @@ export function ExperimentPanel({
 
   return (
     <div className="flex flex-col gap-5 px-5 pb-8 overflow-y-auto">
-      {/* Open full page link */}
-      <Link
-        href={fullPageHref}
-        className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors w-fit"
-      >
-        <ExternalLinkIcon className="size-3" />
-        Open full page
-      </Link>
-
       {/* Status + title */}
       <div className="flex flex-col gap-2 items-start">
         <div className="flex items-center gap-2 flex-wrap">
@@ -189,7 +187,6 @@ export function ExperimentPanel({
           <p className="text-sm text-foreground/80 whitespace-pre-wrap">{data.conclusionReason}</p>
         </div>
       )}
-      <RequestDecisionLink orgSlug={orgSlug} workspaceSlug={workspaceSlug} subjectType="EXPERIMENT" subjectId={data.id} subjectTitle={data.title} />
       <MeasurementsPanel orgSlug={orgSlug} workspaceSlug={workspaceSlug} target={{ targetType: "EXPERIMENT", targetId: data.id }} compact />
       {data.pmInterviewEnabled && <FleshThisOutLink orgSlug={orgSlug} workspaceSlug={workspaceSlug} targetType="EXPERIMENT" targetId={experimentId} />}
 

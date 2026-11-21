@@ -155,7 +155,7 @@ describe("view CRUD", () => {
     const { db } = makeStore([row({ id: "bad", filters: { horizons: ["GONE"] }, display: "junk" })])
     const view = await getRoadmapView(actor(), null, "bad", db)
     expect(view?.filters.horizons).toEqual([])
-    expect(view?.display).toEqual({ view: "board", groupBy: "horizon", sort: "manual" })
+    expect(view?.display).toEqual({ view: "board", groupBy: "horizon", sort: "manual", fields: [] })
   })
 
   it("getRoadmapView hides other people's personal views and views on another surface", async () => {
