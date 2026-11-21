@@ -13,6 +13,7 @@ const EXTERNAL_LINK_COLUMNS: readonly ExpectedColumn[] = [
   {"column":"provider","maxLength":30,"dataType":"character varying","nullable":false},
   {"column":"url","maxLength":1000,"dataType":"character varying","nullable":false},
   {"column":"external_key","maxLength":1000,"dataType":"character varying","nullable":false},
+  {"column":"external_key_hash","maxLength":64,"dataType":"character varying","nullable":false},
   {"column":"title","maxLength":255,"dataType":"character varying","nullable":false},
   {"column":"relation","maxLength":20,"dataType":"character varying","nullable":false},
   {"column":"status_snapshot","dataType":"text","nullable":true},
@@ -23,13 +24,13 @@ const EXTERNAL_LINK_COLUMNS: readonly ExpectedColumn[] = [
 ]
 
 export const EXTERNAL_LINKS_INDEXES = [
-  { table: EXTERNAL_LINKS_TABLE, name: "idx_external_links_subject_key", columns: "subject_type,subject_id,provider,external_key", unique: true },
-  { table: EXTERNAL_LINKS_TABLE, name: "idx_external_links_workspace_key", columns: "workspace_id,provider,external_key", unique: false },
+  { table: EXTERNAL_LINKS_TABLE, name: "idx_external_links_subject_key", columns: "subject_type,subject_id,provider,external_key_hash", unique: true },
+  { table: EXTERNAL_LINKS_TABLE, name: "idx_external_links_workspace_key", columns: "workspace_id,provider,external_key_hash", unique: false },
 ] as const
 
 export async function assertExternalLinksMigration(client: PoolClient, schema: string) {
-  const result = await client.query<{ column_name: string; data_type: string; is_nullable: string; character_maximum_length: number | null; datetime_precision: number | null; column_default: string | null }>(
-    "SELECT column_name, data_type, is_nullable, character_maximum_length, datetime_precision, column_default FROM information_schema.columns WHERE table_schema = $1 AND table_name = $2",
+  const result = await client.query<{ column_name: string; data_type: string; is_nullable: string; character_maximum_length: number | null; datetime_precision: number | null; column_default: string | null; is_generated: string; is_identity: string }>(
+    "SELECT column_name, data_type, is_nullable, character_maximum_length, datetime_precision, column_default, is_generated, is_identity FROM information_schema.columns WHERE table_schema = $1 AND table_name = $2",
     [schema, EXTERNAL_LINKS_TABLE],
   )
   const actual = new Map(result.rows.map((row) => [row.column_name, row]))
@@ -39,6 +40,9 @@ export async function assertExternalLinksMigration(client: PoolClient, schema: s
       throw new Error(
         `${EXTERNAL_LINKS_MIGRATION}: column postcondition failed: ${EXTERNAL_LINKS_TABLE}.${column} missing`,
       )
+    }
+    if (row.is_generated !== "NEVER" || row.is_identity !== "NO") {
+      throw new Error(`${EXTERNAL_LINKS_MIGRATION}: writability postcondition failed: ${EXTERNAL_LINKS_TABLE}.${column}`)
     }
     if (row.data_type !== dataType) {
       throw new Error(

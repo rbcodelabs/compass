@@ -1861,6 +1861,8 @@ model ExternalLink {
   url            String   @db.VarChar(1000)
   /// The identity the provider uses, and the dedupe key: owner/repo#482, site/PROJ-456, a Drive file id, or the URL for OTHER.
   externalKey    String   @map("external_key") @db.VarChar(1000)
+  /// Application-computed SHA-256 lowercase hex of externalKey; full-key readback guards digest collisions.
+  externalKeyHash String  @map("external_key_hash") @db.VarChar(64)
   title          String   @db.VarChar(255)
   /// IMPLEMENTS | TRACKS | DESIGN | DOCS | DISCUSSION | RELATED
   relation       String   @db.VarChar(20)
@@ -1872,8 +1874,8 @@ model ExternalLink {
   createdAt      DateTime @default(now()) @map("created_at")
   updatedAt      DateTime @default(now()) @map("updated_at")
 
-  @@unique([subjectType, subjectId, provider, externalKey], map: "idx_external_links_subject_key")
-  @@index([workspaceId, provider, externalKey], map: "idx_external_links_workspace_key")
+  @@unique([subjectType, subjectId, provider, externalKeyHash], map: "idx_external_links_subject_key")
+  @@index([workspaceId, provider, externalKeyHash], map: "idx_external_links_workspace_key")
   @@map("external_links")
 }
 

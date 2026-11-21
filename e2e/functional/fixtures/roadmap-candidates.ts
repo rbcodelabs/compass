@@ -93,7 +93,7 @@ export async function createFreshWorkspace(page: Page, orgSlug: string, name: st
   await page.getByLabel("Name", { exact: true }).fill(name);
   await expect(page.getByLabel("URL slug", { exact: true })).toHaveValue(slug);
   await page.getByRole("button", { name: "Create Workspace", exact: true }).click();
-  await page.waitForURL(`**/${orgSlug}/${slug}/okrs`, { timeout: 20_000 });
+  await page.waitForURL(`**/${orgSlug}/${slug}/home`, { timeout: 20_000 });
   return `/${orgSlug}/${slug}`;
 }
 

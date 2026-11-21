@@ -12,6 +12,40 @@ import path from "node:path";
 
 const THEME_STORAGE_KEY = "compass-theme";
 
+for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 }]) {
+  for (const initialScheme of ["light", "dark"] as const) {
+    test(`leaving workspace restores viewport metadata at ${viewport.width}px in ${initialScheme}`, async ({ page, base }) => {
+      await page.setViewportSize(viewport);
+      await page.emulateMedia({ colorScheme: initialScheme });
+      await page.goto(`${base}/settings`);
+      const preference = page.getByRole("button", { name: initialScheme === "light" ? "Dark" : "Light", exact: true });
+      await preference.click();
+      await expect(preference).toHaveAttribute("aria-pressed", "true");
+      await expect(page.locator('meta[data-workspace-theme-color]')).toHaveCount(1);
+
+      await page.locator("html").evaluate((root) => { root.dataset.themeQaNavigation = "same-document"; });
+      const guide = page.locator('a[href="/help"]:visible').first();
+      if (!(await guide.count())) {
+        await page.getByRole("button", { name: viewport.width === 390 ? "Account" : "Account menu", exact: true }).click();
+      }
+      await guide.click();
+      await expect(page).toHaveURL(/\/help\/00-overview\/?$/);
+      await expect(page.locator("html")).toHaveAttribute("data-theme-qa-navigation", "same-document");
+      await expect(page.locator('meta[data-workspace-theme-color]')).toHaveCount(0);
+
+      const tags = page.locator('meta[name="theme-color"]');
+      await expect(tags).toHaveCount(2);
+      for (const scheme of ["light", "dark"] as const) {
+        await page.emulateMedia({ colorScheme: scheme });
+        await expect.poll(() => tags.evaluateAll((nodes) => nodes
+          .filter((node) => !node.getAttribute("media") || matchMedia(node.getAttribute("media")!).matches)
+          .map((node) => node.getAttribute("content"))
+        )).toEqual([scheme === "light" ? "#F4F2ED" : "#1B1A18"]);
+      }
+    });
+  }
+}
+
 type FirstFrameTheme = {
   classIsDark: boolean;
   dataTheme: string | undefined;

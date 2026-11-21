@@ -33,7 +33,7 @@ test.describe("Docs pending decision toolbar", () => {
     await expect(page.getByRole("link", { name: "Request decision", exact: true })).toBeHidden()
     await page.goto(reviewUrl)
     await page.getByRole("link", { name: "Create revised request" }).click()
-    await page.getByLabel("Context").fill("Rollout timing is now documented.")
+    await page.getByRole("textbox", { name: "Context Markdown supported.", exact: true }).fill("Rollout timing is now documented.")
     await page.getByRole("button", { name: "Request decision", exact: true }).click()
     await expect(page.getByRole("heading", { name: question })).toBeVisible()
     await page.getByRole("link", { name: /Launch readiness/ }).first().click()

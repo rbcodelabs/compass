@@ -20,7 +20,7 @@ export type ExternalLinkRelation = (typeof EXTERNAL_LINK_RELATIONS)[number]
 export const EXTERNAL_LINK_SUBJECT_TYPES = ["SOLUTION", "TASK"] as const
 export type ExternalLinkSubjectType = (typeof EXTERNAL_LINK_SUBJECT_TYPES)[number]
 
-// Longest URL (and external key) we store. Keeps the unique index well inside a btree entry.
+// Longest URL (and external key) we store. Indexes use a separate fixed-width digest; the full key remains intact.
 export const EXTERNAL_LINK_MAX_URL_LENGTH = 1000
 export const EXTERNAL_LINK_MAX_TITLE_LENGTH = 255
 

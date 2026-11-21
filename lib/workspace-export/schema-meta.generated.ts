@@ -283,7 +283,7 @@ export const UNIQUE_KEYS: Readonly<Record<string, readonly (readonly string[])[]
   Evidence: [["workspaceId","findingKey"]],
   EvidenceResearchSource: [["evidenceId","researchTurnId"]],
   Experiment: [["workspaceId","seqPrefix","seqNumber"]],
-  ExternalLink: [["subjectType","subjectId","provider","externalKey"]],
+  ExternalLink: [["subjectType","subjectId","provider","externalKeyHash"]],
   FeedbackItem: [["workspaceId","seqPrefix","seqNumber"]],
   FeedbackSourceToken: [["tokenHash"]],
   FeedbackVote: [["feedbackId","voterEmail"]],

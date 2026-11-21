@@ -9,23 +9,26 @@ type CatalogColumn = {
   character_maximum_length: number | null
   datetime_precision: number | null
   column_default: string | null
+  is_generated: string
+  is_identity: string
 }
 
 const columns: CatalogColumn[] = [
-  {"column_name":"id","data_type":"uuid","is_nullable":"NO","character_maximum_length":null,"datetime_precision":null,"column_default":"gen_random_uuid()"},
-  {"column_name":"workspace_id","data_type":"uuid","is_nullable":"NO","character_maximum_length":null,"datetime_precision":null,"column_default":null},
-  {"column_name":"subject_type","data_type":"character varying","is_nullable":"NO","character_maximum_length":40,"datetime_precision":null,"column_default":null},
-  {"column_name":"subject_id","data_type":"uuid","is_nullable":"NO","character_maximum_length":null,"datetime_precision":null,"column_default":null},
-  {"column_name":"provider","data_type":"character varying","is_nullable":"NO","character_maximum_length":30,"datetime_precision":null,"column_default":null},
-  {"column_name":"url","data_type":"character varying","is_nullable":"NO","character_maximum_length":1000,"datetime_precision":null,"column_default":null},
-  {"column_name":"external_key","data_type":"character varying","is_nullable":"NO","character_maximum_length":1000,"datetime_precision":null,"column_default":null},
-  {"column_name":"title","data_type":"character varying","is_nullable":"NO","character_maximum_length":255,"datetime_precision":null,"column_default":null},
-  {"column_name":"relation","data_type":"character varying","is_nullable":"NO","character_maximum_length":20,"datetime_precision":null,"column_default":null},
-  {"column_name":"status_snapshot","data_type":"text","is_nullable":"YES","character_maximum_length":null,"datetime_precision":null,"column_default":null},
-  {"column_name":"source","data_type":"character varying","is_nullable":"NO","character_maximum_length":20,"datetime_precision":null,"column_default":"'UI'::character varying"},
-  {"column_name":"created_by_id","data_type":"uuid","is_nullable":"YES","character_maximum_length":null,"datetime_precision":null,"column_default":null},
-  {"column_name":"created_at","data_type":"timestamp without time zone","is_nullable":"NO","character_maximum_length":null,"datetime_precision":3,"column_default":"CURRENT_TIMESTAMP"},
-  {"column_name":"updated_at","data_type":"timestamp without time zone","is_nullable":"NO","character_maximum_length":null,"datetime_precision":3,"column_default":"CURRENT_TIMESTAMP"},
+  {"is_identity":"NO","is_generated":"NEVER","column_name":"id","data_type":"uuid","is_nullable":"NO","character_maximum_length":null,"datetime_precision":null,"column_default":"gen_random_uuid()"},
+  {"is_identity":"NO","is_generated":"NEVER","column_name":"workspace_id","data_type":"uuid","is_nullable":"NO","character_maximum_length":null,"datetime_precision":null,"column_default":null},
+  {"is_identity":"NO","is_generated":"NEVER","column_name":"subject_type","data_type":"character varying","is_nullable":"NO","character_maximum_length":40,"datetime_precision":null,"column_default":null},
+  {"is_identity":"NO","is_generated":"NEVER","column_name":"subject_id","data_type":"uuid","is_nullable":"NO","character_maximum_length":null,"datetime_precision":null,"column_default":null},
+  {"is_identity":"NO","is_generated":"NEVER","column_name":"provider","data_type":"character varying","is_nullable":"NO","character_maximum_length":30,"datetime_precision":null,"column_default":null},
+  {"is_identity":"NO","is_generated":"NEVER","column_name":"url","data_type":"character varying","is_nullable":"NO","character_maximum_length":1000,"datetime_precision":null,"column_default":null},
+  {"is_identity":"NO","is_generated":"NEVER","column_name":"external_key","data_type":"character varying","is_nullable":"NO","character_maximum_length":1000,"datetime_precision":null,"column_default":null},
+  {"is_identity":"NO","is_generated":"NEVER","column_name":"external_key_hash","data_type":"character varying","is_nullable":"NO","character_maximum_length":64,"datetime_precision":null,"column_default":null},
+  {"is_identity":"NO","is_generated":"NEVER","column_name":"title","data_type":"character varying","is_nullable":"NO","character_maximum_length":255,"datetime_precision":null,"column_default":null},
+  {"is_identity":"NO","is_generated":"NEVER","column_name":"relation","data_type":"character varying","is_nullable":"NO","character_maximum_length":20,"datetime_precision":null,"column_default":null},
+  {"is_identity":"NO","is_generated":"NEVER","column_name":"status_snapshot","data_type":"text","is_nullable":"YES","character_maximum_length":null,"datetime_precision":null,"column_default":null},
+  {"is_identity":"NO","is_generated":"NEVER","column_name":"source","data_type":"character varying","is_nullable":"NO","character_maximum_length":20,"datetime_precision":null,"column_default":"'UI'::character varying"},
+  {"is_identity":"NO","is_generated":"NEVER","column_name":"created_by_id","data_type":"uuid","is_nullable":"YES","character_maximum_length":null,"datetime_precision":null,"column_default":null},
+  {"is_identity":"NO","is_generated":"NEVER","column_name":"created_at","data_type":"timestamp without time zone","is_nullable":"NO","character_maximum_length":null,"datetime_precision":3,"column_default":"CURRENT_TIMESTAMP"},
+  {"is_identity":"NO","is_generated":"NEVER","column_name":"updated_at","data_type":"timestamp without time zone","is_nullable":"NO","character_maximum_length":null,"datetime_precision":3,"column_default":"CURRENT_TIMESTAMP"},
 ]
 
 function client(columnChange?: (rows: typeof columns) => typeof columns, indexChange?: (row: Record<string, unknown>) => Record<string, unknown>, primaryKey = ["id"]): PoolClient {
@@ -45,6 +48,7 @@ describe("external links catalog completion", () => {
  it("rejects the wrong primary key", async () => { await expect(assertExternalLinksMigration(client(undefined, undefined, ["subject_id"]), "isolated")).rejects.toThrow(/primary key postcondition/) })
  it.each([
   ["external_key", {character_maximum_length: 10}],
+  ["external_key_hash", {character_maximum_length: 63}],
   ["external_key", {column_default: "'unexpected'::character varying"}],
   ["created_at", {datetime_precision: 6}],
   ["id", {column_default: null}],

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition, useId } from "react";
+import { useState, useTransition, useId, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   DndContext,
@@ -18,6 +18,8 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { groupableObjectiveFields } from "@/lib/okr-grouping";
+import { useOkrFilter } from "@/components/okrs/okr-filter-context";
+import { objectiveMatches, normalizeQuery } from "@/lib/okr-name-filter";
 import { ObjectiveRow } from "@/components/okrs/objective-row";
 import { useLabels } from "@/components/thinking-model/thinking-model-provider";
 import {
@@ -83,9 +85,21 @@ export function ObjectivesList({
 }: Props) {
   const [objectives, setObjectives] = useState(initialObjectives);
   const labels = useLabels();
+  const { query, setCounts } = useOkrFilter();
+  const filterActive = normalizeQuery(query) !== "";
+  // Reorder state stays on the full list; the filter only narrows what is rendered.
+  const visibleObjectives = filterActive ? objectives.filter((o) => objectiveMatches(o, query)) : objectives;
+  const shownCount = visibleObjectives.length;
+  const totalCount = objectives.length;
+  const objectiveIds = visibleObjectives.map((o) => o.id);
+  const visibleIds = new Set(objectiveIds);
+  useEffect(() => {
+    setCounts({ shown: shownCount, total: totalCount });
+  }, [shownCount, totalCount, setCounts]);
   // Collapsed ids are view state only (not persisted); everything starts expanded.
   const [collapsedIds, setCollapsedIds] = useState<ReadonlySet<string>>(() => new Set());
-  const [, startTransition] = useTransition();
+  const [isSaving, startTransition] = useTransition();
+  const [reorderFailed, setReorderFailed] = useState(false);
   const searchParams = useSearchParams();
 
   // The picker lives in the page header (OkrGroupByToggle); this list only reads
@@ -127,7 +141,8 @@ export function ObjectivesList({
 
   function handleDragEnd(event: DragEndEvent) {
     const { active, over } = event;
-    if (!over || active.id === over.id) return;
+    if (isSaving || !over || active.id === over.id) return;
+    if (!visibleIds.has(String(active.id)) || !visibleIds.has(String(over.id))) return;
 
     const activeId = active.id as string;
     const overId = over.id as string;
@@ -141,14 +156,18 @@ export function ObjectivesList({
         sortOrder: idx,
       }));
       setObjectives(reordered);
+      setReorderFailed(false);
 
       startTransition(async () => {
-        await reorderObjective(activeId, newIndex, cyclePath);
+        try {
+          await reorderObjective(activeId, { anchorId: overId, position: oldIndex < newIndex ? "after" : "before" }, cyclePath);
+        } catch {
+          setObjectives(objectives);
+          setReorderFailed(true);
+        }
       });
     }
   }
-
-  const objectiveIds = objectives.map((o) => o.id);
 
   function setCollapsed(id: string, collapsed: boolean) {
     setCollapsedIds((prev) => {
@@ -162,10 +181,12 @@ export function ObjectivesList({
   const allCollapsed = objectives.length > 0 && objectives.every((o) => collapsedIds.has(o.id));
   const toggleAllLabel = `${allCollapsed ? "Expand" : "Collapse"} all ${labels.objective.lowerPlural}`;
 
+  // Keep each row mounted so filtering preserves open forms and their draft inputs.
   const renderRow = (obj: ObjectiveData) => (
     <ObjectiveRow
       key={obj.id}
       objective={obj}
+      hidden={!visibleIds.has(obj.id)}
       orgSlug={orgSlug}
       workspaceSlug={workspaceSlug}
       revalidatePathStr={cyclePath}
@@ -174,14 +195,22 @@ export function ObjectivesList({
       supportingObjectiveOptions={supportingObjectiveOptions}
       paceElapsed={paceElapsed}
       hideProgress={hideProgress}
-      collapsed={collapsedIds.has(obj.id)}
+      // While filtering, matches stay expanded so a key-result hit is visible.
+      collapsed={filterActive ? false : collapsedIds.has(obj.id)}
+      hideCollapseToggle={filterActive}
       onCollapsedChange={(c) => setCollapsed(obj.id, c)}
     />
   );
 
   return (
     <>
-    {objectives.length > 1 && (
+    {reorderFailed && <p role="alert" className="text-sm text-destructive">Could not save the new order. Try moving the row again.</p>}
+    {filterActive && visibleObjectives.length === 0 && (
+      <div className="rounded-lg border border-dashed border-border-default p-8 text-center text-sm text-text-secondary">
+        No {labels.objective.lowerPlural} or {labels.keyResult.lowerPlural} match &ldquo;{query.trim()}&rdquo;.
+      </div>
+    )}
+    {objectives.length > 1 && !filterActive && (
       <div className="flex justify-end">
         <button
           type="button"
@@ -199,20 +228,24 @@ export function ObjectivesList({
       onDragEnd={handleDragEnd}
     >
       {groups ? (
-        groups.map((g) => (
-          <section key={g.key} className="flex flex-col gap-3">
-            <h3 className="flex items-center gap-2 text-sm font-semibold">
-              {g.color && (
-                <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: g.color }} />
-              )}
-              {g.label}
-              <span className="text-xs font-normal text-text-subtle">{g.items.length}</span>
-            </h3>
-            <SortableContext items={g.items.map((o) => o.id)} strategy={verticalListSortingStrategy}>
-              {g.items.map(renderRow)}
-            </SortableContext>
-          </section>
-        ))
+        groups.map((g) => {
+          const visibleGroupIds = g.items.filter((o) => visibleIds.has(o.id)).map((o) => o.id);
+          const hidden = visibleGroupIds.length === 0;
+          return (
+            <section key={g.key} hidden={hidden} className={hidden ? "hidden" : "flex flex-col gap-3"}>
+              <h3 className="flex items-center gap-2 text-sm font-semibold">
+                {g.color && (
+                  <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: g.color }} />
+                )}
+                {g.label}
+                <span className="text-xs font-normal text-text-subtle">{visibleGroupIds.length}</span>
+              </h3>
+              <SortableContext items={visibleGroupIds} strategy={verticalListSortingStrategy}>
+                {g.items.map(renderRow)}
+              </SortableContext>
+            </section>
+          );
+        })
       ) : (
         <SortableContext items={objectiveIds} strategy={verticalListSortingStrategy}>
           {objectives.map(renderRow)}

@@ -272,7 +272,7 @@ describe("deleteKeyResult", () => {
 describe("reorderObjective", () => {
   it("resolves without error", async () => {
     await expect(
-      reorderObjective("obj-1", 3, "/org/ws/okrs")
+      reorderObjective("obj-1", { anchorId: "obj-2", position: "after" }, "/org/ws/okrs")
     ).resolves.not.toThrow();
   });
 });

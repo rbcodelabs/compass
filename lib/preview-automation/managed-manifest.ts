@@ -293,8 +293,13 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   // Postcondition pinned in REVIEWED_MIGRATION_CODE_SHA256. Digest recorded from the shipped SQL after reading it.
   "125_unified_conversations": "dc6968e7f3573b5bc5aa9982f59c2f147643c807764c7c2ad768b21182333faf",
   // External links (ADR-0028): one additive CREATE TABLE IF NOT EXISTS (external_links) plus two ASYNC indexes (one unique); no existing table altered, no backfill, no FK.
-  // SQL plus the catalog postcondition hook pinned below. Original reviewed SQL is unchanged.
-  "126_external_links": "2e89354af42a034258ac593b9327f2f51f9fd9da407d5515a1b944a4c6b940a7",
+  // Fresh-install revision uses bounded SHA-256 hex index keys. Existing receipts require a separate reviewed recovery path.
+  "126_external_links": "537bceb830cab509929d7258864e7c3af544fe6c3cea19d02379d5a3524a8fa0",
+  "126_doc_version_numbers": "e1082457e986ef1968b13f7460aec087f595fc3e7dfd35f38610d1902f1da58b",
+  "127_decision_votes": "acb304bf3fcb4288c2fa0d3298cc04e51bef8958108176b7f3930649d83f0691",
+  "128_task_start_date": "e357da11f90dbf6030030ee0ba16df9153e2ef2e85bbb5c53ef7db666e5ce66e",
+  "129_agent_message_run_id": "f82b208a7648bac31ef3917a3080efeb350730cd485bb347b64f615007a4c9bd",
+  "130_agent_sandbox_operations": "a19322f4022bfe3e0595788943adb4bb04320b3ea568a6dea5b09180d33c97d4",
 };
 
 /**
@@ -520,7 +525,22 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
   },
   // Candidate pin: requires explicit code review before adoption.
   "126_external_links": {
-    "lib/migrations/external-links.ts": "070ea4d5a971807d704eff074245a0ae87f1d30540728706a1602281855c13f4",
+    "lib/migrations/external-links.ts": "26b233e3a2231c515cf7cb13155a8968d955d3f8a65c52630fe46394e293e2f4",
+  },
+  "126_doc_version_numbers": {
+    "lib/migrations/schema-first-columns.ts": "8cb404f5e3005487345e2aa4b4f521a37db1f54e972a89ef0d7803f7275765dd",
+  },
+  "127_decision_votes": {
+    "lib/migrations/decision-votes.ts": "322fecc3f8d99029f8670ff96c6e52d12b1fcf131b616d9e07f8ca7890bcd2ce",
+  },
+  "128_task_start_date": {
+    "lib/migrations/schema-first-columns.ts": "8cb404f5e3005487345e2aa4b4f521a37db1f54e972a89ef0d7803f7275765dd",
+  },
+  "129_agent_message_run_id": {
+    "lib/migrations/agent-message-run-id.ts": "d9b3a9ae84b5a61f52e919c29d51d83bf9268dbbb15ad79f87e6d6727de7921d",
+  },
+  "130_agent_sandbox_operations": {
+    "lib/migrations/agent-sandbox-operations.ts": "116056a42465597b0d83003ba39be4b6cfb6d2c5115e09c2dfe66435bc76d233",
   },
 };
 
