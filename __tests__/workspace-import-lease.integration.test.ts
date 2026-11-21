@@ -78,3 +78,24 @@ it.skipIf(!integrationDatabaseUrl)("acquires the operation in the application sc
     await pool.end()
   }
 })
+
+it.skipIf(!integrationDatabaseUrl)("renews only an unexpired lease owned by the current attempt", async () => {
+  const pool = new Pool({ connectionString: integrationDatabaseUrl })
+  const db = await pool.connect()
+  try {
+    await db.query(`CREATE TEMP TABLE workspace_import_operations (
+      workspace_id uuid PRIMARY KEY, attempt_id uuid, epoch integer, phase text, updated_at timestamp, lease_expires_at timestamp)`)
+    const owner = { workspaceId: randomUUID(), attemptId: randomUUID(), epoch: 3 }
+    await db.query("INSERT INTO workspace_import_operations VALUES ($1,$2,3,'applying',now(),now()+interval '20 seconds')", [owner.workspaceId, owner.attemptId])
+    const { renewImportOperation } = await import("@/lib/workspace-export/operation")
+    const tx = { async $queryRawUnsafe<T>(sql: string, ...args: unknown[]) { return (await db.query(sql, args)).rows as T } }
+    await renewImportOperation(tx, owner, "applying")
+    expect((await db.query("SELECT lease_expires_at > now()+interval '4 minutes' AS renewed FROM workspace_import_operations")).rows[0].renewed).toBe(true)
+    await expect(renewImportOperation(tx, { ...owner, epoch: 2 }, "applying")).rejects.toThrow(/ownership changed/i)
+    await db.query("UPDATE workspace_import_operations SET lease_expires_at = now()-interval '1 second'")
+    await expect(renewImportOperation(tx, owner, "applying")).rejects.toThrow(/ownership changed/i)
+  } finally {
+    db.release()
+    await pool.end()
+  }
+})

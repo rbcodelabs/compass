@@ -27,3 +27,17 @@ export async function commitImportReport(tx: ImportDatabase, owner: ImportLeaseO
   )
   if (rows.length !== 1) throw new ImportOwnershipChanged()
 }
+
+/** Renew within the transaction whose writes depend on this owner. */
+export async function renewImportOperation(
+  db: ImportDatabase, owner: ImportLeaseOwner, phase: "applying" | "rolling_back" | "recovering", schema?: string,
+): Promise<void> {
+  const rows = await db.$queryRawUnsafe<{ epoch: number }[]>(
+    `UPDATE ${importSchema(schema)}.workspace_import_operations
+     SET lease_expires_at = CURRENT_TIMESTAMP + interval '5 minutes', updated_at = CURRENT_TIMESTAMP
+     WHERE workspace_id = $1::uuid AND attempt_id = $2::uuid AND epoch = $3 AND phase = $4
+       AND lease_expires_at > CURRENT_TIMESTAMP RETURNING epoch`,
+    owner.workspaceId, owner.attemptId, owner.epoch, phase,
+  )
+  if (rows.length !== 1) throw new ImportOwnershipChanged()
+}
