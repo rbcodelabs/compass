@@ -22,7 +22,8 @@ vi.mock("next/navigation", () => ({
 vi.mock("@/components/roadmap/add-item-form", () => ({ AddItemForm: () => null }));
 
 import { PanelProvider } from "@/components/panels/panel-context";
-import { RoadmapBoard } from "@/components/roadmap/roadmap-board";
+import { arrayMove } from "@dnd-kit/sortable";
+import { RoadmapBoard, roadmapCollisionDetection } from "@/components/roadmap/roadmap-board";
 import { RoadmapColumnLayoutProvider, useRoadmapColumnLayoutContext } from "@/components/roadmap/column-layout-context";
 import type { RoadmapCardData } from "@/components/roadmap/roadmap-card";
 import type { UnscheduledItem } from "@/components/roadmap/unscheduled-items-panel";
@@ -337,5 +338,57 @@ describe("RoadmapColumnLayoutProvider with a saved view", () => {
     act(() => rerender(<Page columnLayout={undefined} id="view-2" />));
     expect(screen.getByTestId("stored")).toHaveTextContent("null");
     expect(tabNames()).toEqual(["Not scheduled (1)"]);
+  });
+});
+
+describe("scheduled card collision ranking", () => {
+  it.each([
+    { distance: 9, target: "source", order: ["source", "neighbor"] },
+    { distance: 60, target: "neighbor", order: ["neighbor", "source"] },
+  ])("ranks $target first after moving $distance px", ({ distance, target, order }) => {
+    const column = document.createElement("section");
+    column.id = "roadmap-column-LATER";
+    const source = document.createElement("article");
+    const neighbor = document.createElement("article");
+    column.append(source, neighbor);
+
+    const rect = (top: number, height: number) => ({
+      left: 0, right: 280, top, bottom: top + height, width: 280, height,
+    });
+    const boxes = new Map([
+      ["column-LATER", rect(0, 900)],
+      ["source", rect(20, 48)],
+      ["neighbor", rect(80, 48)],
+    ]);
+    const nodes = new Map([["column-LATER", column], ["source", source], ["neighbor", neighbor]]);
+    const pointer = { x: 140, y: 44 + distance };
+    // jsdom has no layout. Supply only the browser hit-test result; dnd-kit
+    // ranks the real DOM-backed candidates with the production function.
+    const previous = Object.getOwnPropertyDescriptor(document, "elementsFromPoint");
+    Object.defineProperty(document, "elementsFromPoint", {
+      configurable: true,
+      value: (x: number, y: number) => {
+        expect({ x, y }).toEqual(pointer);
+        return [y < 68 ? source : neighbor, column];
+      },
+    });
+    try {
+      const translated = rect(20 + distance, 48);
+      const ranking = roadmapCollisionDetection({
+        active: { id: "source", data: { current: { horizon: "LATER" } },
+          rect: { current: { initial: boxes.get("source")!, translated } } },
+        pointerCoordinates: pointer, collisionRect: translated, droppableRects: boxes,
+        droppableContainers: Array.from(nodes, ([id, node]) => ({
+          id, key: id, disabled: false, data: { current: { horizon: "LATER" } },
+          node: { current: node }, rect: { current: boxes.get(id)! },
+        })),
+      });
+      expect(ranking[0]?.id).toBe(target);
+      const cards = ["source", "neighbor"];
+      expect(arrayMove(cards, 0, cards.indexOf(String(ranking[0].id)))).toEqual(order);
+    } finally {
+      if (previous) Object.defineProperty(document, "elementsFromPoint", previous);
+      else Reflect.deleteProperty(document, "elementsFromPoint");
+    }
   });
 });

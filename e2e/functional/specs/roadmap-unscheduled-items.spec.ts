@@ -80,7 +80,21 @@ async function dragTo(page: Page, source: Locator, target: Locator, scrollContai
   const endY = targetBox.y + targetBox.height / 2;
 
   await page.mouse.move(endX, endY, { steps: 40 });
-  await beforeRelease?.();
+  if (beforeRelease) {
+    // Edge auto-scroll can continue during the approach. The scheduled hold
+    // starts only once the pointer is actually over the destination body.
+    let pointer = { x: endX, y: endY };
+    const overTarget = () => target.evaluate((body, point) =>
+      document.elementsFromPoint(point.x, point.y).some(el => body.contains(el)), pointer);
+    for (let correction = 0; correction < 3 && !(await overTarget()); correction++) {
+      const box = await target.boundingBox();
+      if (!box) throw new Error("scheduled drag target disappeared");
+      pointer = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+      await page.mouse.move(pointer.x, pointer.y, { steps: 8 });
+    }
+    expect(await overTarget(), "scheduled drag pointer must reach the destination body").toBe(true);
+    await beforeRelease();
+  }
   await page.mouse.up();
 }
 
@@ -312,13 +326,81 @@ test.describe("Roadmap — not yet on the roadmap", () => {
       });
       expect(settledOffset).toBeGreaterThan(0);
 
+      // Crossing a horizon remounts the linked card and its popup triggers.
+      // The optimistic move must settle in the pointed column before release.
+      const nextColumn = page.locator("#roadmap-column-NEXT");
+      const scheduled = laterColumn.locator('[data-slot="card"]').filter({ hasText: solTitle });
+      const sourceId = await scheduled.locator("..").getAttribute("data-flip-id");
+      expect(sourceId).toBeTruthy();
+      const browserErrors: string[] = [];
+      page.on("pageerror", error => browserErrors.push(error.message));
+      // Observe the browser's hit-test surface without moving the pointer or scrolling.
+      const geometry = await roadmapBoard.evaluateHandle((board) => {
+        const samples: object[] = [];
+        let pointer = { x: -1, y: -1 };
+        const sample = (phase: string) => {
+          const columns = Array.from(board.querySelectorAll('[id^="roadmap-column-"]'));
+          const hits = document.elementsFromPoint(pointer.x, pointer.y);
+          const pointed = hits.map(el => el.closest('[id^="roadmap-column-"]')).find(Boolean);
+          samples.push({
+            phase, time: performance.now(), pointer, viewport: [innerWidth, innerHeight],
+            scrollLeft: board.scrollLeft, clientWidth: board.clientWidth, scrollWidth: board.scrollWidth,
+            board: board.getBoundingClientRect().toJSON(),
+            columns: columns.map(el => [el.id, el.getBoundingClientRect().toJSON()]),
+            hitStack: hits.slice(0, 8).map(el => [el.tagName, el.id, el.getAttribute("data-slot")]),
+            pointed: pointed?.id, cardIds: pointed ? Array.from(pointed.querySelectorAll("[data-flip-id]"), el => el.getAttribute("data-flip-id")) : [],
+            live: document.querySelector('[id^="DndLiveRegion"]')?.textContent,
+          });
+        };
+        const move = (event: PointerEvent) => {
+          pointer = { x: event.clientX, y: event.clientY };
+          sample("pointermove");
+        };
+        const scroll = () => sample("scroll");
+        document.addEventListener("pointermove", move, true);
+        board.addEventListener("scroll", scroll);
+        return { finish() {
+          document.removeEventListener("pointermove", move, true);
+          board.removeEventListener("scroll", scroll);
+          sample("finish");
+          return samples;
+        } };
+      });
+      try {
+        await dragTo(page, scheduled.getByRole("button", { name: "Drag to reorder" }), nextColumn, roadmapBoard, async () => {
+          await expect(nextColumn.getByText(solTitle).first()).toBeVisible();
+          const horizons = await page.evaluate(async id => {
+            const observed = [];
+            for (let frame = 0; frame < 12; frame++) {
+              await new Promise(requestAnimationFrame);
+              const card = document.querySelector(`[id^="roadmap-column-"] [data-flip-id="${id}"]`);
+              observed.push(card?.closest('[id^="roadmap-column-"]')?.id);
+            }
+            return observed;
+          }, sourceId);
+          expect(horizons).toEqual(Array(12).fill("roadmap-column-NEXT"));
+          expect(browserErrors).toEqual([]);
+        });
+        await expect(nextColumn.getByText(solTitle).first()).toBeVisible();
+      } catch (error) {
+        await test.info().attach("scheduled-drag-failure.png", { body: await page.screenshot(), contentType: "image/png" });
+        throw error;
+      } finally {
+        const samples = await geometry.evaluate(observer => observer.finish());
+        console.log("ROADMAP_DRAG_GEOMETRY", JSON.stringify({ last: samples.at(-1), browserErrors }));
+        await test.info().attach("scheduled-drag-geometry.json", {
+          body: JSON.stringify({ samples, browserErrors }), contentType: "application/json",
+        });
+        await geometry.dispose();
+        expect(browserErrors).toEqual([]);
+      }
+
       // ── 4. Quick-add the bug to NEXT via its card menu (no drag) ────────────
       await bugUnscheduledCard.hover();
       await bugUnscheduledCard.getByLabel("Card actions").click();
       await page.getByRole("menuitem", { name: "Add to Next" }).click();
 
       await expect(bugUnscheduledCard).not.toBeVisible({ timeout: 10_000 });
-      const nextColumn = page.locator("#roadmap-column-NEXT");
       await expect(nextColumn.getByText(bugTitle)).toBeVisible({ timeout: 10_000 });
 
       // ── 5. Timeline: drop the second solution and submit its schedule ──────
