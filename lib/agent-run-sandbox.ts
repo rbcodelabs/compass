@@ -13,7 +13,7 @@ import { connectorGuidance, type ConnectorDefinition } from "@/lib/mcp-connector
 import type { AgentHarness } from "@/lib/agent-harness"
 import { opencodeModel } from "@/lib/agent-harness"
 import { providerSandboxEnv, type ResolvedAgentModel } from "@/lib/agent-model"
-import { developerSandboxEnv, githubRepoList, githubSandboxEnv, githubShellEnabled, githubShellPrompt, shellCapabilitySentence } from "@/lib/agent-github-access"
+import { developerSandboxEnv, githubAccessFromEnvValue, githubRepoList, githubSandboxEnv, githubShellEnabled, githubShellPrompt, shellCapabilitySentence } from "@/lib/agent-github-access"
 
 function claudeProviderEnv(model: Extract<ResolvedAgentModel, { ok: true }> | undefined): Record<string, string> {
   // Fail closed: the Claude harness without a resolved provider would boot with no credential.
@@ -169,7 +169,7 @@ export function buildAgentEnv(opts: {
             : `Operate only in workspace ${opts.workspaceId}. Available host capabilities: compass.product_state, and a local copy of this workspace's docs. ` +
               `Unavailable capabilities include shell, GitHub, Jira, Vercel, Obsidian, hooks, commands, and subagents.${webSentence}\n\n`) +
           DOCS_FILESYSTEM_PROMPT +
-          (shell ? githubShellPrompt(githubRepoList(opts.githubEnv), Boolean(opts.developer?.enabled)) : "")
+          (shell ? githubShellPrompt(githubRepoList(opts.githubEnv), Boolean(opts.developer?.enabled), githubAccessFromEnvValue(opts.githubEnv?.AGENT_GITHUB_ACCESS)) : "")
         : `Operate only in workspace ${opts.workspaceId}. Available host capability: compass.product_state. ` +
           `Unavailable capabilities include local files, shell, GitHub, Jira, Vercel, Obsidian, hooks, commands, and subagents.${webSentence}\n\n`) +
       `The following JSON contains compiled, enabled skill instructions and directly referenced text assets. ` +

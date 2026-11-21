@@ -16,7 +16,7 @@ import { OrgReadOnlyAccessPanel } from "@/components/settings/org-readonly-acces
 import { ManageApiKeysPanel } from "@/components/settings/manage-api-keys-panel";
 import { PortalSettingsPanel } from "@/components/settings/portal-settings-panel";
 import { DeliveryLimitsPanel } from "@/components/settings/delivery-limits-panel";
-import { parseStoredRepos } from "@/lib/agent-github-repos";
+import { parseStoredConfig } from "@/lib/agent-github-repos";
 import { AgentGithubReposPanel } from "@/components/settings/agent-github-repos-panel";
 import { AnthropicKeyPanel } from "@/components/settings/anthropic-key-panel";
 import { readAnthropicKeyLast4 } from "@/lib/workspace-anthropic-key";
@@ -496,11 +496,11 @@ export default async function SettingsPage({ params }: Props) {
         <AgentDeveloperSandboxPanel orgSlug={orgSlug} workspaceSlug={workspaceSlug} initialEnabled={developerSandboxEnabled} canEdit={canManageCapabilityPacks} />
       </SettingsSection>
 
-      <SettingsSection title="Agent GitHub access" description="Repositories agents in this workspace may push branches and open pull requests to. Agents get a short-lived token limited to exactly these repos.">
+      <SettingsSection title="Agent GitHub access" description="Repositories agents in this workspace may work with, read-only or with push and pull request access. Agents get a short-lived token limited to exactly these repos.">
         <AgentGithubReposPanel
           orgSlug={orgSlug}
           workspaceSlug={workspaceSlug}
-          initialRepos={parseStoredRepos(workspace.agentGithubRepos)}
+          initialConfig={parseStoredConfig(workspace.agentGithubRepos)}
           canEdit={canManageCapabilityPacks}
         />
       </SettingsSection>

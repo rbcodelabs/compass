@@ -176,6 +176,7 @@ describe("review request page — \"Send to agent\" on a decided banner", () => 
   beforeEach(() => {
     vi.clearAllMocks()
     auth.mockResolvedValue({ user: { id: "user-1" } })
+    findWorkspace.mockResolvedValue(member)
     findTaskLinks.mockResolvedValue([])
     eligibleAssignees.mockResolvedValue([])
     findArtifacts.mockResolvedValue([])
@@ -236,6 +237,7 @@ describe("review request page — tracked decisions with custom options", () => 
   beforeEach(() => {
     vi.clearAllMocks()
     auth.mockResolvedValue({ user: { id: "user-1" } })
+    findWorkspace.mockResolvedValue(member)
     findTaskLinks.mockResolvedValue([])
     eligibleAssignees.mockResolvedValue([])
     findArtifacts.mockResolvedValue([])
@@ -321,6 +323,7 @@ describe("review request page — multi-question decisions", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     auth.mockResolvedValue({ user: { id: "user-1" } })
+    findWorkspace.mockResolvedValue(member)
     findTaskLinks.mockResolvedValue([])
     eligibleAssignees.mockResolvedValue([])
     findArtifacts.mockResolvedValue([])
