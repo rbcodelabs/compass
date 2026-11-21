@@ -76,7 +76,7 @@ export type ImportOptions = {
   nonce?: string
   fenceWrite?(tx: unknown, phase: "applying" | "rolling_back"): Promise<void>
   journal?: {
-    reserve(store: PrivateBlobStore, logical: string): Promise<string>
+    reserve(store: PrivateBlobStore, logical: string, bytes: Uint8Array): Promise<string>
     verify(store: PrivateBlobStore, logical: string, physical: string): Promise<void>
   }
   startOperation?(workspaceId: string): Promise<void>
@@ -410,7 +410,7 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
       }
       const storage = b.store === "research" ? opts.blobs.research : opts.blobs.artifact
       // Never overwrite: the target prefix is brand new, so an existing object is not ours to replace (or to delete later).
-      const physical = opts.journal ? await opts.journal.reserve(b.store, target) : target
+      const physical = opts.journal ? await opts.journal.reserve(b.store, target, data) : target
       const put = await storage.put(physical, data, b.contentType, { overwrite: false })
       if (opts.journal) {
         const bytes = await storage.get(physical)

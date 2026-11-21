@@ -3,7 +3,7 @@ import { withRetry } from "@/lib/workspace-export/leaf-first"
 import { createHash } from "node:crypto"
 import { NextResponse } from "next/server"
 import { auth } from "@/auth"
-import { getArtifactStorage } from "@/lib/artifact-storage"
+import { getArtifactStorage, privateProviderIdentity } from "@/lib/artifact-storage"
 import { isPermissionError, resolveOrgAdmin } from "@/lib/permissions"
 import { defaultBlobAdapters } from "@/lib/workspace-export/blobs"
 import { WorkspaceImportError, WorkspaceImportRecoveryRequired, importWorkspaceBundle } from "@/lib/workspace-export/import"
@@ -78,10 +78,11 @@ export async function POST(req: Request, { params }: { params: Promise<{ orgSlug
       nonce: fields.nonce,
       blobs: defaultBlobAdapters(),
       journal: {
-        reserve(store, logical) {
+        reserve(store, logical, bytes) {
           const active = owner
           if (!active) throw new Error("Missing workspace import owner")
-          return withRetry(() => prisma.$transaction(tx => reserveImportAsset(tx, active, store, logical)))
+          const identity = { ...privateProviderIdentity(store), bytes: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex") }
+          return withRetry(() => prisma.$transaction(tx => reserveImportAsset(tx, active, store, logical, identity)))
         },
         verify(store, logical, physical) {
           const active = owner

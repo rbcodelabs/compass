@@ -1,3 +1,4 @@
+import { hostname } from "node:os"
 import { del, get, put } from "@vercel/blob"
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises"
 import path from "node:path"
@@ -141,6 +142,14 @@ export function agentSessionStorageConfigured(): boolean {
 }
 
 
+export function privateProviderIdentity(store: "artifact" | "research") {
+  if (shouldUseLocalStorage()) return { provider: "disk", namespace: hostname() + ":" + LOCAL_ROOT }
+  const token = store === "artifact" ? process.env.ARTIFACT_BLOB_READ_WRITE_TOKEN : process.env.RESEARCH_BLOB_READ_WRITE_TOKEN
+  const id = token?.trim().match(/^vercel_blob_rw_([a-zA-Z0-9-]+)_/i)?.[1]
+  if (!id) throw new Error("Private provider namespace is unavailable")
+  return { provider: "blob", namespace: id.toLowerCase() }
+}
+
 function mappedStorage(provider: ArtifactStorage, store: "artifact" | "research"): ArtifactStorage {
   async function resolve(path: string) {
     const [root, workspaceId] = path.split("/")
@@ -149,7 +158,7 @@ function mappedStorage(provider: ArtifactStorage, store: "artifact" | "research"
     const [{ default: getPrisma }, { lookupImportAsset }] = await Promise.all([
       import("@/lib/db"), import("@/lib/workspace-export/asset-journal"),
     ])
-    return await lookupImportAsset(getPrisma(), workspaceId, store, path) ?? path
+    return await lookupImportAsset(getPrisma(), workspaceId, store, path, () => privateProviderIdentity(store)) ?? path
   }
   return {
     async put(path, bytes, contentType, options) {

@@ -1931,7 +1931,7 @@ async function assertResearchVoiceControlPlanePostconditions(client: PoolClient,
 }
 
 async function assertWorkspaceImportRecoveryPostconditions(client: PoolClient, schema: string) {
-  const tables = ["workspace_import_operations", "workspace_import_receipts", "workspace_import_assets"]
+  const tables = ["workspace_import_operations", "workspace_import_receipts", "workspace_import_assets", "workspace_import_required_assets"]
   const { rows } = await client.query<{ name: string; present: boolean }>(
     `SELECT name, to_regclass(format('%I.%I', $1::text, name)) IS NOT NULL AS present
       FROM unnest($2::text[]) AS names(name)`,

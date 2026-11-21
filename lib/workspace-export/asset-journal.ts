@@ -3,6 +3,7 @@ import { importSchema } from "./import-schema"
 import type { ImportLeaseOwner } from "./lease"
 import { renewImportOperation, type ImportDatabase } from "./operation"
 
+export type ProviderIdentity = { provider: string; namespace: string }
 type AssetStore = "artifact" | "research" | "feedback"
 
 function logicalIdentity(store: AssetStore, path: string) {
@@ -10,15 +11,19 @@ function logicalIdentity(store: AssetStore, path: string) {
 }
 
 /** The caller commits this transaction before issuing the provider write. */
-export async function reserveImportAsset(tx: ImportDatabase, owner: ImportLeaseOwner, store: AssetStore, path: string) {
+export async function reserveImportAsset(tx: ImportDatabase, owner: ImportLeaseOwner, store: AssetStore, path: string, identity: ProviderIdentity & { bytes: number; sha256: string }) {
   await renewImportOperation(tx, owner, "applying")
   const logical = logicalIdentity(store, path)
   const physical = `workspace-import-assets/${owner.workspaceId}/${owner.attemptId}/${store}/${logical.split(":")[1]}`
   await tx.$queryRawUnsafe(
     `INSERT INTO ${importSchema()}.workspace_import_assets
-       (attempt_id, workspace_id, logical_key, physical_key, backend, state)
-     VALUES ($1::uuid,$2::uuid,$3,$4,$5,'reserved') RETURNING logical_key`,
-    owner.attemptId, owner.workspaceId, logical, physical, store,
+       (attempt_id, workspace_id, logical_key, physical_key, backend, state, provider_id, namespace_id, expected_bytes, expected_sha256)
+     VALUES ($1::uuid,$2::uuid,$3,$4,$5,'reserved',$6,$7,$8,$9) RETURNING logical_key`,
+    owner.attemptId, owner.workspaceId, logical, physical, store, identity.provider, identity.namespace, identity.bytes, identity.sha256,
+  )
+  await tx.$queryRawUnsafe(
+    `INSERT INTO ${importSchema()}.workspace_import_required_assets (attempt_id, logical_key)
+     VALUES ($1::uuid,$2) RETURNING logical_key`, owner.attemptId, logical,
   )
   return physical
 }
@@ -35,12 +40,22 @@ export async function verifyImportAsset(tx: ImportDatabase, owner: ImportLeaseOw
   if (rows.length !== 1) throw new Error("Import asset reservation is unavailable")
 }
 
-export async function lookupImportAsset(db: ImportDatabase, workspaceId: string, store: AssetStore, path: string) {
-  const [row] = await db.$queryRawUnsafe<{ physical_key: string }[]>(
-    `SELECT a.physical_key FROM ${importSchema()}.workspace_import_assets a
-     JOIN ${importSchema()}.workspace_import_operations o ON o.workspace_id=a.workspace_id AND o.attempt_id=a.attempt_id
-     WHERE o.workspace_id=$1::uuid AND o.phase='committed' AND a.logical_key=$2 AND a.backend=$3 AND a.state='verified'`,
+export async function lookupImportAsset(db: ImportDatabase, workspaceId: string, store: AssetStore, path: string, currentProvider?: () => ProviderIdentity) {
+  const [row] = await db.$queryRawUnsafe<{ physical_key: string | null; provider_id: string; namespace_id: string }[]>(
+    `SELECT a.physical_key, a.provider_id, a.namespace_id FROM ${importSchema()}.workspace_import_operations o
+     JOIN ${importSchema()}.workspace_import_required_assets r ON r.attempt_id=o.attempt_id
+     LEFT JOIN ${importSchema()}.workspace_import_assets a
+       ON a.workspace_id=o.workspace_id AND a.attempt_id=r.attempt_id AND a.logical_key=r.logical_key
+       AND a.backend=$3 AND a.state='verified'
+     WHERE o.workspace_id=$1::uuid AND o.phase='committed' AND r.logical_key=$2`,
     workspaceId, logicalIdentity(store, path), store,
   )
+  if (row && !row.physical_key) throw new Error("Required import asset mapping is unavailable")
+  if (row && currentProvider) {
+    const active = currentProvider()
+    if (row.provider_id !== active.provider || row.namespace_id !== active.namespace) {
+      throw new Error("Import asset provider namespace is unavailable")
+    }
+  }
   return row?.physical_key ?? null
 }
