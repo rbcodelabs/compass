@@ -114,6 +114,35 @@ describe("ComposerCard", () => {
     expect(onStop).not.toHaveBeenCalled()
   })
 
+  describe("pending mention close on blur", () => {
+    afterEach(() => vi.useRealTimers())
+
+    it("cancels the pending timer when the composer unmounts", () => {
+      vi.useFakeTimers()
+      const { unmount } = render(<Harness />)
+      const initial = vi.getTimerCount()
+      fireEvent.blur(screen.getByRole("textbox"))
+      expect(vi.getTimerCount()).toBe(initial + 1)
+      unmount()
+      expect(vi.getTimerCount()).toBe(initial)
+    })
+
+    it("restarts the 120 ms delay on a second blur", () => {
+      vi.useFakeTimers()
+      render(<Harness />)
+      const field = screen.getByRole("textbox")
+      const initial = vi.getTimerCount()
+      fireEvent.blur(field)
+      act(() => vi.advanceTimersByTime(60))
+      fireEvent.blur(field)
+      expect(vi.getTimerCount()).toBe(initial + 1)
+      act(() => vi.advanceTimersByTime(119))
+      expect(vi.getTimerCount()).toBe(initial + 1)
+      act(() => vi.advanceTimersByTime(1))
+      expect(vi.getTimerCount()).toBe(initial)
+    })
+  })
+
   it("Escape stops only while a run is in flight", () => {
     const onStop = vi.fn()
     const { rerender } = render(<Harness onStop={onStop} />)
