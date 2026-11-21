@@ -518,7 +518,7 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
             const contentType = String(raw.fileType ?? "application/octet-stream")
             const journal = opts.journal
             if (journal) {
-              row.url = await providerIO(() => copyPublicImportAsset(opts.blobs, journal, key, data, contentType, configuredBlobStoreHostname()))
+              row.url = await copyPublicImportAsset(opts.blobs, journal, key, data, contentType, configuredBlobStoreHostname(), providerIO)
             } else {
               row.url = await providerIO(() => opts.blobs.putPublic(key, data, contentType))
               uploaded.push({ store: "feedback", key: row.url as string })

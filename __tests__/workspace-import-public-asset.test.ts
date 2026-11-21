@@ -25,3 +25,21 @@ it("reserves the public key and verifies the returned location and bytes before 
   expect(journal.verify).toHaveBeenCalledTimes(1)
   expect(blobs.fetchPublic).toHaveBeenCalledTimes(2)
 })
+
+it("stops before public readback when lease renewal fails during the write", async () => {
+  const hostname = "fixture.public.blob.vercel-storage.com"
+  const key = "feedback/workspace/attempt-file"
+  const blobs = {
+    putPublic: vi.fn(async () => "https://" + hostname + "/" + key),
+    fetchPublic: vi.fn(async () => ({ bytes: Buffer.from([4]), contentType: "image/png" })),
+  }
+  const journal = { reserve: vi.fn(async () => key), verify: vi.fn() }
+  async function loseLeaseAfterIO<T>(io: () => Promise<T>): Promise<T> {
+    await io()
+    throw new Error("lease lost")
+  }
+  await expect(copyPublicImportAsset(blobs, journal, "logical", Buffer.from([4]), "image/png", hostname, loseLeaseAfterIO)).rejects.toThrow("lease lost")
+  expect(blobs.putPublic).toHaveBeenCalledTimes(1)
+  expect(blobs.fetchPublic).not.toHaveBeenCalled()
+  expect(journal.verify).not.toHaveBeenCalled()
+})
