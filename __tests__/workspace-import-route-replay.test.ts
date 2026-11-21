@@ -8,6 +8,7 @@ const state = vi.hoisted(() => ({
   db: {},
   apply: vi.fn(),
 }))
+vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }))
 vi.mock("@/auth", () => ({ auth: async () => ({ user: { id: "user" } }) }))
 vi.mock("@/lib/permissions", () => ({
   isPermissionError: () => false,
