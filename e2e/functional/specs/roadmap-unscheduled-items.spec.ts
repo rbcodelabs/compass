@@ -24,7 +24,7 @@ import { createOpportunityFromBoard } from "../fixtures/opportunity-composer";
 import { openFullPage } from "../fixtures/full-page";
 import type { Locator, Page } from "@playwright/test";
 
-async function dragTo(page: Page, source: Locator, target: Locator, scrollContainer?: Locator) {
+async function dragTo(page: Page, source: Locator, target: Locator, scrollContainer?: Locator, beforeRelease?: () => Promise<void>) {
   await source.scrollIntoViewIfNeeded();
   const sourceBox = await source.boundingBox();
   if (!sourceBox) throw new Error("drag source has no bounding box");
@@ -70,6 +70,7 @@ async function dragTo(page: Page, source: Locator, target: Locator, scrollContai
   const endY = targetBox.y + targetBox.height / 2;
 
   await page.mouse.move(endX, endY, { steps: 40 });
+  await beforeRelease?.();
   await page.mouse.up();
 }
 
@@ -240,13 +241,27 @@ test.describe("Roadmap — not yet on the roadmap", () => {
       // on the card; either occurrence confirms it landed here.
       await expect(laterColumn.getByText(solTitle).first()).toBeVisible({ timeout: 10_000 });
 
+      // Crossing a horizon remounts the linked card and its popup triggers.
+      // The optimistic move must settle in the pointed column before release.
+      const nextColumn = page.locator("#roadmap-column-NEXT");
+      const scheduled = laterColumn.locator('[data-slot="card"]').filter({ hasText: solTitle });
+      const browserErrors: string[] = [];
+      page.on("pageerror", error => browserErrors.push(error.message));
+      try {
+        await dragTo(page, scheduled.getByRole("button", { name: "Drag to reorder" }), nextColumn, roadmapBoard, async () => {
+          await expect(nextColumn.getByText(solTitle).first()).toBeVisible();
+        });
+        await expect(nextColumn.getByText(solTitle).first()).toBeVisible();
+      } finally {
+        expect(browserErrors).toEqual([]);
+      }
+
       // ── 4. Quick-add the bug to NEXT via its card menu (no drag) ────────────
       await bugUnscheduledCard.hover();
       await bugUnscheduledCard.getByLabel("Card actions").click();
       await page.getByRole("menuitem", { name: "Add to Next" }).click();
 
       await expect(bugUnscheduledCard).not.toBeVisible({ timeout: 10_000 });
-      const nextColumn = page.locator("#roadmap-column-NEXT");
       await expect(nextColumn.getByText(bugTitle)).toBeVisible({ timeout: 10_000 });
 
       // ── 5. Timeline: drop the second solution and submit its schedule ──────
