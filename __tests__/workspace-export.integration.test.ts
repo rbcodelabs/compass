@@ -1,3 +1,4 @@
+import { getActiveSchema } from "@/lib/schema"
 import { addExternalLink } from "@/lib/external-links-service"
 import { externalLinkKeyHash } from "@/lib/external-link-key"
 /**
@@ -14,7 +15,7 @@ import { PrismaClient } from "@prisma/client"
 import { PrismaPg } from "@prisma/adapter-pg"
 import { Pool } from "pg"
 import { zipSync } from "fflate"
-import { afterAll, beforeAll, describe, expect, it } from "vitest"
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest"
 import { injectUpdatedAtExtension } from "@/lib/prisma-updated-at"
 import type { AppPrismaClient } from "@/lib/db"
 import type { ArtifactStorage } from "@/lib/artifact-storage"
@@ -45,7 +46,8 @@ function memoryStorage(): ArtifactStorage & { files: Map<string, Uint8Array> } {
 }
 
 describe.skipIf(!databaseUrl)("workspace export/import round trip", () => {
-  const schema = `wx_${randomUUID().replaceAll("-", "")}`
+  const schemaPrefix = `wx_${randomUUID().replaceAll("-", "")}`
+  const schema = getActiveSchema({ ...process.env, PGSCHEMA: schemaPrefix })
   let pool: Pool
     let prisma: AppPrismaClient
   const artifact = memoryStorage()
@@ -81,6 +83,7 @@ describe.skipIf(!databaseUrl)("workspace export/import round trip", () => {
   let bundle: Uint8Array
 
   beforeAll(async () => {
+    vi.stubEnv("PGSCHEMA", schemaPrefix)
     const url = new URL(databaseUrl!)
     if (!["localhost", "127.0.0.1"].includes(url.hostname) || url.pathname !== "/compass_e2e" || url.searchParams.has("schema")) {
       throw new Error("Requires an isolated local compass_e2e URL without a schema override")
@@ -182,6 +185,7 @@ describe.skipIf(!databaseUrl)("workspace export/import round trip", () => {
   }, 180_000)
 
   afterAll(async () => {
+    vi.unstubAllEnvs()
     if (pool) {
       await pool.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`).catch(() => undefined)
       await pool.end()
