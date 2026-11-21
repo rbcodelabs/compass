@@ -46,20 +46,28 @@ async function dragTo(page: Page, source: Locator, target: Locator, scrollContai
     if (!scrollBox) throw new Error("drag scroll container has no bounding box");
 
     const edgeY = Math.min(Math.max(startY, scrollBox.y + 16), scrollBox.y + scrollBox.height - 16);
-    await expect
-      .poll(
-        async () => {
-          const box = await target.boundingBox();
-          if (!box) return false;
-          if (box.x >= scrollBox.x && box.x + box.width <= scrollBox.x + scrollBox.width) return true;
-
-          const edgeX = box.x < scrollBox.x ? scrollBox.x + 8 : scrollBox.x + scrollBox.width - 8;
-          await page.mouse.move(edgeX, edgeY, { steps: 5 });
-          return false;
-        },
-        { timeout: 10_000 }
-      )
-      .toBe(true);
+    const visible = async () => {
+      const box = await target.boundingBox();
+      return !!box && box.x >= scrollBox.x && box.x + box.width <= scrollBox.x + scrollBox.width;
+    };
+    for (let attempt = 0; attempt < 4 && !(await visible()); attempt++) {
+      const box = await target.boundingBox();
+      if (!box) throw new Error("drag target has no bounding box");
+      const direction = box.x < scrollBox.x ? -1 : 1;
+      const edgeX = direction < 0 ? scrollBox.x + 8 : scrollBox.x + scrollBox.width - 8;
+      const offset = await scrollContainer.evaluate(el => el.scrollLeft);
+      // Approach from inside the track so the pointer moves toward the requested edge.
+      await page.mouse.move(scrollBox.x + scrollBox.width / 2, edgeY, { steps: 6 });
+      await page.mouse.move(edgeX, edgeY, { steps: 8 });
+      const progress = await page.waitForFunction(({ el, offset, direction }) =>
+        (el!.scrollLeft - offset) * direction > 0,
+        { el: await scrollContainer.elementHandle(), offset, direction }, { timeout: 1200 }
+      ).catch((error: Error) => {
+        if (error.name !== "TimeoutError") throw error;
+      });
+      await progress?.dispose();
+    }
+    await expect.poll(visible, { timeout: 2500 }).toBe(true);
   }
 
   const targetBox = await target.boundingBox();
