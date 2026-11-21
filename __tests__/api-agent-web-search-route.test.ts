@@ -69,6 +69,14 @@ describe("web_search route gating", () => {
 })
 
 describe("web_search route tool", () => {
+  it.each([["agentcore", 200], ["bedrock", 400], [undefined, 400]] as const)(
+    "advertises the selected backend query limit for %s",
+    async (backend, limit) => {
+      vi.stubEnv("AGENT_WEB_SEARCH_BACKEND", backend)
+      expect(await (await POST(rpc(LIST))).text()).toContain('"maxLength":' + limit)
+    },
+  )
+
   it("exposes exactly one tool, web_search", async () => {
     const response = await POST(rpc(LIST))
     expect(response.status).toBe(200)

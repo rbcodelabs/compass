@@ -379,11 +379,29 @@ export async function reorderKeyResult(
   sortOrder: number,
   revalidatePathStr: string
 ) {
-  await requireProductEntity("keyResult", keyResultId);
+  const { workspaceId } = await requireProductEntity("keyResult", keyResultId);
+  if (!Number.isInteger(sortOrder)) throw new Error("Invalid position");
   const prisma = getPrisma();
-  await prisma.keyResult.update({
-    where: { id: keyResultId },
-    data: { sortOrder },
-  });
+  // Renumber every sibling so the stored order matches the move. Writing only the moved row's
+  // index leaves ties (A0, B1, C0) that the page resolves by createdAt, not by the drop position.
+  await withConflictRetry(() => prisma.$transaction(async (tx) => {
+    const moved = await tx.keyResult.findUnique({
+      where: { id: keyResultId, objective: { workspaceId } }, select: { objectiveId: true },
+    });
+    if (!moved) throw new Error("Not found");
+    const siblings = await tx.keyResult.findMany({
+      where: { objectiveId: moved.objectiveId },
+      orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }, { id: "asc" }],
+      select: { id: true, sortOrder: true },
+    });
+    const item = siblings.find(({ id }) => id === keyResultId);
+    if (!item) throw new Error("Not found");
+    const order = siblings.filter((s) => s.id !== keyResultId);
+    order.splice(Math.max(0, Math.min(sortOrder, order.length)), 0, item);
+    for (const [index, sibling] of order.entries()) {
+      if (sibling.sortOrder === index) continue;
+      await tx.keyResult.update({ where: { id: sibling.id, objectiveId: moved.objectiveId }, data: { sortOrder: index } });
+    }
+  }, { isolationLevel: "RepeatableRead" }));
   revalidatePath(revalidatePathStr);
 }

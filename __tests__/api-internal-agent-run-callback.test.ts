@@ -23,6 +23,20 @@ vi.mock("@/lib/pm-agent-service", () => ({
   reportPmAgentFailure: vi.fn(),
 }))
 
+
+const workerSdk = vi.hoisted(() => ({ query: vi.fn() }))
+vi.mock("@anthropic-ai/claude-agent-sdk", () => ({
+  query: workerSdk.query,
+  createSdkMcpServer: (server: unknown) => server,
+  tool: (name: string, _description: string, _schema: unknown, handler: unknown) => ({ name, handler }),
+}))
+vi.mock("../scripts/agent/interactive-questions.ts", () => ({
+  askUserQuestionsInRun: async ({ onDeadlinePark }: { onDeadlinePark: (reason: string) => void }) => {
+    onDeadlinePark("Paused awaiting an answer")
+    return { formattedText: "Paused awaiting an answer" }
+  },
+}))
+
 import { handleAgentRunCallback } from "@/lib/agent-run-callback"
 import { agentRunSandboxName, hashAgentRunWorkerToken, MAX_AGENT_RUN_CALLBACK_EVENTS } from "@/lib/agent-runs"
 
@@ -227,6 +241,83 @@ describe("terminal events", () => {
     expect(await res.json()).toMatchObject({ status: "FAILED", finalized: true })
     expect(prisma.agentRun.updateMany.mock.calls.at(-1)![0].data).toMatchObject({ status: "FAILED", errorCode: "WORKER_REPORTED", error: "Model provider throttled the request." })
     expect(prisma.agentMessage.create.mock.calls[0][0].data.content).toContain("Model provider throttled the request.")
+  })
+
+  it("records the spend a failed run reported with its error (ADR-0032)", async () => {
+    const prisma = fakePrisma()
+    const res = await handleAgentRunCallback(
+      post({ events: [{ seq: 1, type: "error", payload: { message: "query() ended with subtype: error_max_turns", usage: { totalCostUsd: 0.37, numTurns: 12, durationMs: 4000, usage: { input_tokens: 5, output_tokens: 6 } } } }] }),
+      RUN_ID,
+      "events",
+      prisma,
+      CLEANUP,
+    )
+    expect(await res.json()).toMatchObject({ status: "FAILED", finalized: true })
+    expect(prisma.agentRun.updateMany.mock.calls.at(-1)![0].data).toMatchObject({ status: "FAILED", costUsd: 0.37, numTurns: 12 })
+    expect(prisma.agentMessage.create.mock.calls[0][0].data).toMatchObject({ costUsd: 0.37 })
+  })
+
+  it("carries SDK usage from a parked worker into the interrupted run and linked transcript", async () => {
+    const prisma = fakePrisma()
+    const receipts: unknown[] = []
+    const requests: { events: { type: string; payload: unknown }[] }[] = []
+    const env = {
+      MCP_BASE_URL: "https://c.test",
+      MCP_TOKEN: "mock-mcp-token",
+      AGENT_PROMPT: "Ask a clarifying question",
+      AGENT_SYSTEM_PROMPT: "Test system prompt",
+      AGENT_MODEL: "test-model",
+      ANTHROPIC_API_KEY: "mock-model-token",
+      CLAUDE_CODE_USE_BEDROCK: undefined,
+      AGENT_RUN_ID: RUN_ID,
+      AGENT_RUN_TOKEN: TOKEN,
+      AGENT_SESSION_ID: undefined,
+      DOCS_ROOT: undefined,
+    }
+    for (const [key, value] of Object.entries(env)) vi.stubEnv(key, value)
+    workerSdk.query.mockImplementationOnce(async function* ({ options }) {
+      const ask = options.mcpServers.chat.tools.find((tool: { name: string }) => tool.name === "AskUserQuestion")
+      await ask.handler({ questions: [{ question: "Continue?" }] }, {})
+      expect(options.abortController.signal.aborted).toBe(true)
+      yield {
+        type: "result",
+        subtype: "error_during_execution",
+        duration_ms: 4000,
+        duration_api_ms: 3000,
+        num_turns: 2,
+        total_cost_usd: 0.37,
+        usage: { input_tokens: 5, output_tokens: 6 },
+      }
+    })
+    vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {
+      const request = new Request(url, init)
+      requests.push(await request.clone().json())
+      const response = await handleAgentRunCallback(request, RUN_ID, "events", prisma, CLEANUP)
+      receipts.push(await response.clone().json())
+      return response
+    })
+
+    try {
+      await import("../scripts/agent/turn-entry.ts")
+      await vi.waitFor(() => expect(receipts).toContainEqual(expect.objectContaining({ status: "INTERRUPTED", finalized: true })))
+      expect.soft(requests.flatMap((request) => request.events)).toContainEqual(expect.objectContaining({
+        type: "error",
+        payload: expect.objectContaining({ code: "AWAITING_USER", usage: expect.objectContaining({ totalCostUsd: 0.37 }) }),
+      }))
+      expect.soft(prisma.agentRun.updateMany.mock.calls.at(-1)![0].data).toMatchObject({
+        status: "INTERRUPTED", errorCode: "AWAITING_USER", costUsd: 0.37, inputTokens: 5, outputTokens: 6, numTurns: 2, durationMs: 4000,
+      })
+      expect(prisma.agentMessage.create.mock.calls[0][0].data).toMatchObject({ runId: RUN_ID, costUsd: 0.37 })
+    } finally {
+      vi.unstubAllGlobals()
+      vi.unstubAllEnvs()
+    }
+  })
+
+  it("still finalizes an error event that carries no usage, with cost left null", async () => {
+    const prisma = fakePrisma()
+    await handleAgentRunCallback(post({ events: [{ seq: 1, type: "error", payload: { message: "boom" } }] }), RUN_ID, "events", prisma, CLEANUP)
+    expect(prisma.agentRun.updateMany.mock.calls.at(-1)![0].data.costUsd).toBeNull()
   })
 
   it("finalizes on a *replayed* terminal event too, so a lost response does not strand the run", async () => {

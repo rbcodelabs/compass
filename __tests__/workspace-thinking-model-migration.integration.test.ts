@@ -129,15 +129,29 @@ describe.skipIf(!databaseUrl)("073 workspace thinking_model columns (registered 
       { column_name: "thinking_model", data_type: "character varying", character_maximum_length: 40, is_nullable: "YES", column_default: null },
       { column_name: "thinking_model_labels", data_type: "text", character_maximum_length: null, is_nullable: "YES", column_default: null },
     ]);
-    // No index and no constraint was created on either column.
+    // Scope catalog OIDs before deparsing definitions. Parallel suites can drop their own schemas.
     const indexed = await q(
-      `SELECT indexdef FROM pg_indexes WHERE schemaname = $1 AND tablename = 'workspaces' AND indexdef ~ 'thinking_model'`,
+      `WITH owned_indexes AS MATERIALIZED (
+          SELECT i.indexrelid
+          FROM pg_index i
+          JOIN pg_class t ON t.oid = i.indrelid
+          JOIN pg_namespace n ON n.oid = t.relnamespace
+          WHERE n.nspname = $1 AND t.relname = 'workspaces'
+        )
+        SELECT pg_get_indexdef(indexrelid) AS indexdef FROM owned_indexes
+        WHERE pg_get_indexdef(indexrelid) ~ 'thinking_model'`,
       [schema],
     );
     expect(indexed.rows).toEqual([]);
     const constrained = await q(
-      `SELECT conname FROM pg_constraint c JOIN pg_class t ON t.oid = c.conrelid JOIN pg_namespace n ON n.oid = t.relnamespace
-        WHERE n.nspname = $1 AND t.relname = 'workspaces' AND pg_get_constraintdef(c.oid) ~ 'thinking_model'`,
+      `WITH owned_constraints AS MATERIALIZED (
+          SELECT c.oid, c.conname
+          FROM pg_constraint c
+          JOIN pg_class t ON t.oid = c.conrelid
+          JOIN pg_namespace n ON n.oid = t.relnamespace
+          WHERE n.nspname = $1 AND t.relname = 'workspaces'
+        )
+        SELECT conname FROM owned_constraints WHERE pg_get_constraintdef(oid) ~ 'thinking_model'`,
       [schema],
     );
     expect(constrained.rows).toEqual([]);

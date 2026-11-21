@@ -39,6 +39,15 @@ import { HANDOFF_KINDS, type HandoffKind } from "@/lib/pm-agent-processing"
 import { revokeAgentMcpKey } from "@/lib/agent-mcp-key"
 import { finishInterviewProcessing, reportPmAgentFailure } from "@/lib/pm-agent-service"
 import { stopSandboxByName } from "@/lib/agent-sandbox"
+import { isVercelSandboxQuiescent, prepareVercelSandboxStop } from "@/lib/sandbox-provider-vercel"
+import {
+  findPersistentSandboxStopCandidates,
+  lockSandboxConversation,
+  recoverPersistentSandboxLaunches,
+  stopPersistentSandbox,
+  type PreparePersistentSandboxStop,
+} from "@/lib/agent-sandbox-fence"
+import { withConflictRetry } from "@/lib/transaction-conflict"
 import { AGENT_SANDBOX_IDLE_MS, agentSandboxReuseEnabled, type PreviousRunState } from "@/lib/agent-sandbox-reuse"
 import { deriveConversationSummary, deriveLatestRunActivity, extractLatestPrUrl } from "@/lib/agent-card-derive"
 import { settleStrandedAgentChildRuns, syncAgentChildRunsForBatch } from "@/lib/agent-child-runs"
@@ -308,7 +317,6 @@ export async function createAgentRun({
   packProvenance = "[]",
   budgetMs = DEFAULT_AGENT_RUN_BUDGET_MS,
   now = new Date(),
-  fenceConversation = false,
   model = null,
 }: {
   prisma: AgentRunPrisma
@@ -328,13 +336,6 @@ export async function createAgentRun({
   packProvenance?: string
   budgetMs?: number
   now?: Date
-  /**
-   * Write the conversation row FIRST, inside the transaction, so two concurrent starts for the same conversation serialise on
-   * it (a row lock on Postgres, a write conflict that aborts one of them on Aurora DSQL) instead of both passing the
-   * in-flight check below. For starts that nobody is watching (assignments), where a double click or two tabs would otherwise
-   * start two runs. Off for chat, whose request path has never needed it.
-   */
-  fenceConversation?: boolean
   /** The model the run is about to use (lib/agent-turn-model.ts), recorded up front so the viewer can show it while the run is live. */
   model?: string | null
 }) {
@@ -349,13 +350,13 @@ export async function createAgentRun({
   const credential = createAgentRunCredential()
   const runId = randomUUID()
 
-  const run = await prisma.$transaction(async (tx) => {
-    // At most one non-terminal run per conversation, enforced on the write path.
-    // A partial unique index would be stronger, but DSQL's support for predicate
-    // indexes is unverified here and `assertWorkspaceUpdatesMigration` asserts
-    // `predicate === null` on every unique index this repo ships — so this stays
-    // an application invariant, checked inside the transaction that violates it.
-    if (fenceConversation) await tx.agentConversation.updateMany({ where: { id: conversationId }, data: { updatedAt: now } })
+  const run = await withConflictRetry(() => prisma.$transaction(async (tx) => {
+    if (!(await lockSandboxConversation(tx, conversationId))) {
+      throw new AgentRunError("Agent conversation not found", 404, "CONVERSATION_NOT_FOUND")
+    }
+    if (await tx.agentSandboxOperation.findUnique({ where: { conversationId } })) {
+      throw new AgentRunError("The conversation sandbox is settling; try again shortly", 409, "SANDBOX_OPERATION_IN_FLIGHT")
+    }
     const inFlight = await tx.agentRun.findFirst({
       where: { conversationId, status: { in: [...NON_TERMINAL_AGENT_RUN_STATUSES] } },
       select: { id: true, status: true, deadlineAt: true },
@@ -383,7 +384,7 @@ export async function createAgentRun({
       },
       select: AGENT_RUN_CREATE_SELECT,
     })
-  })
+  }))
 
   return { run, workerToken: credential.rawToken, sandboxName: agentRunSandboxName(run.id) }
 }
@@ -720,6 +721,8 @@ export type AgentRunUsage = {
 
 export type AgentRunCleanup = {
   stopSandbox?: (sandboxName: string) => Promise<void>
+  preparePersistentStop?: PreparePersistentSandboxStop
+  isPersistentSandboxQuiescent?: (name: string, sessionId: string) => Promise<boolean>
   revokeKey?: (apiKeyId: string) => Promise<void>
   finishClaim?: (conversationId: string, claimId: string, successful: boolean) => Promise<void>
 }
@@ -727,6 +730,8 @@ export type AgentRunCleanup = {
 const defaultCleanup: Required<AgentRunCleanup> = {
   // Stopping a conversation sandbox PAUSES it (persistent: the disk is snapshotted and the next turn resumes it); nothing deletes one.
   stopSandbox: (sandboxName) => stopSandboxByName(sandboxName),
+  preparePersistentStop: prepareVercelSandboxStop,
+  isPersistentSandboxQuiescent: isVercelSandboxQuiescent,
   revokeKey: (apiKeyId) => revokeAgentMcpKey(apiKeyId),
   finishClaim: async (conversationId, claimId, successful) => {
     await finishInterviewProcessing(conversationId, claimId, successful)
@@ -857,7 +862,11 @@ export async function finalizeAgentRun({
         role: "assistant",
         content,
         ...author,
-        ...(status === "SUCCEEDED"
+        // Links this message to the run that produced it, so spend is counted once (run cost) and not again (message
+        // cost). Inline turns have no run and keep run_id NULL. See lib/agent-spend.ts and ADR-0032.
+        runId,
+        // A failed or interrupted run that still reported usage keeps its cost: it was real spend.
+        ...(status === "SUCCEEDED" || usage?.totalCostUsd != null
           ? {
               model: run.model ?? AGENT_RUN_MODEL_ID,
               inputTokens: usage?.usage?.input_tokens ?? null,
@@ -922,13 +931,10 @@ export async function finalizeAgentRun({
     }
   }
 
-  // A conversation sandbox that just finished a turn cleanly stays up for the next one; finishedAt (written above)
-  // is its idle clock and the sweeper reaps it after AGENT_SANDBOX_IDLE_MS. Every other outcome pauses it (stop; the
-  // disk is kept): after a failure, cancel or sweep its state is unknown, and a process left from a timed-out run
-  // must not survive into the next turn. The kill switch applies at finalize time too, so turning reuse off drains warm sandboxes.
+  // Persistent stops go through the sweeper's durable owner. This also covers
+  // terminal callbacks that win before the launch has released its reservation.
   const sandboxName = run.sandboxName ?? agentRunSandboxName(runId)
-  const keepWarm = status === "SUCCEEDED" && isConversationSandboxName(sandboxName) && agentSandboxReuseEnabled()
-  if (keepWarm) return { finalized: true as const, status }
+  if (isConversationSandboxName(sandboxName)) return { finalized: true as const, status }
   try {
     await effects.stopSandbox(sandboxName)
     await prisma.agentRun.update({ where: { id: runId }, data: { sandboxStoppedAt: now, updatedAt: now }, select: { id: true } })
@@ -1057,24 +1063,11 @@ export async function sweepAgentRuns({
   return { examined: candidates.length, swept, failed, truncated: candidates.length === limit, idleSandboxes }
 }
 
-/** Idle conversation sandboxes are only looked for this far back; the platform timeout is the backstop beyond it. */
-const IDLE_SANDBOX_LOOKBACK_MS = 2 * 60 * 60_000
-
-/**
- * Stop conversation sandboxes that have sat unused for longer than `idleMs`.
- *
- * A candidate is a SUCCEEDED run on a conversation sandbox that finalize left warm (sandboxStoppedAt null) and
- * that finished more than `idleMs` ago. It is reaped only if its conversation has no other run that is
- * non-terminal OR was created after it, i.e. nothing is using the sandbox and nothing newer owns its state.
- * That check is the safety property: a sandbox with an active run is never stopped here. A turn that starts
- * concurrently is protected by the check above: createAgentRun makes the new run non-terminal before the turn touches the
- * sandbox, so a sweep that starts after it skips the conversation. Only a sweep already between its check and its stop
- * can still meet a starting turn (a milliseconds-wide window; the turn then fails visibly and the next one resumes).
- */
+/** Pause idle and failed persistent generations through the same durable claim. */
 export async function reapIdleConversationSandboxes({
   prisma,
   now = new Date(),
-  idleMs = AGENT_SANDBOX_IDLE_MS,
+  idleMs = agentSandboxReuseEnabled() ? AGENT_SANDBOX_IDLE_MS : 0,
   limit = 25,
   cleanup,
 }: {
@@ -1084,44 +1077,21 @@ export async function reapIdleConversationSandboxes({
   limit?: number
   cleanup?: AgentRunCleanup
 }) {
-  const effects = { ...defaultCleanup, ...cleanup }
-  const candidates = await prisma.agentRun.findMany({
-    where: {
-      status: "SUCCEEDED",
-      sandboxStoppedAt: null,
-      sandboxName: { startsWith: CONVERSATION_SANDBOX_PREFIX },
-      finishedAt: { lte: new Date(now.getTime() - idleMs), gte: new Date(now.getTime() - IDLE_SANDBOX_LOOKBACK_MS) },
-    },
-    orderBy: { finishedAt: "asc" },
-    take: limit,
-    select: { id: true, conversationId: true, sandboxName: true, finishedAt: true },
+  await recoverPersistentSandboxLaunches(prisma, now, limit)
+  const candidates = await findPersistentSandboxStopCandidates(prisma, {
+    now, idleBefore: new Date(now.getTime() - idleMs), limit, prefix: CONVERSATION_SANDBOX_PREFIX,
   })
-
+  const stopSandbox = cleanup?.stopSandbox
+  const prepare = cleanup?.preparePersistentStop ??
+    (stopSandbox ? async (name: string) => ({ sessionId: "fixture", stop: () => stopSandbox(name) }) : defaultCleanup.preparePersistentStop)
+  const isQuiescent = cleanup?.isPersistentSandboxQuiescent ?? defaultCleanup.isPersistentSandboxQuiescent
   const stopped: string[] = []
   const failed: { sandboxName: string; error: string }[] = []
-  const seen = new Set<string>()
   for (const candidate of candidates) {
-    const sandboxName = candidate.sandboxName
-    if (!isConversationSandboxName(sandboxName) || !candidate.finishedAt || seen.has(sandboxName)) continue
-    seen.add(sandboxName)
     try {
-      const newer = await prisma.agentRun.findFirst({
-        where: {
-          conversationId: candidate.conversationId,
-          id: { not: candidate.id },
-          OR: [{ status: { in: [...NON_TERMINAL_AGENT_RUN_STATUSES] } }, { createdAt: { gt: candidate.finishedAt } }],
-        },
-        select: { id: true },
-      })
-      if (newer) continue
-      await effects.stopSandbox(sandboxName)
-      await prisma.agentRun.updateMany({
-        where: { conversationId: candidate.conversationId, sandboxName, sandboxStoppedAt: null },
-        data: { sandboxStoppedAt: now, updatedAt: now },
-      })
-      stopped.push(sandboxName)
+      if (await stopPersistentSandbox(prisma, candidate, now, prepare, isQuiescent)) stopped.push(candidate.sandboxName)
     } catch (error) {
-      failed.push({ sandboxName, error: error instanceof Error ? error.message : String(error) })
+      failed.push({ sandboxName: candidate.sandboxName, error: error instanceof Error ? error.message : String(error) })
     }
   }
   return { examined: candidates.length, stopped, failed }

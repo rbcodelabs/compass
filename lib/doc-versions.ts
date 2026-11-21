@@ -13,9 +13,11 @@
  * for a snapshot should always get one.
  */
 
-import getPrisma from "@/lib/db"
+import getPrisma, { type AppTransactionClient } from "@/lib/db"
 import { Prisma } from "@prisma/client"
 import { randomUUID } from "node:crypto"
+import { getActiveSchema } from "@/lib/schema"
+import { withAtomicRetry } from "@/lib/workspace-updates-capture"
 
 const COALESCE_WINDOW_MS = 5 * 60 * 1000 // 5 minutes
 
@@ -119,4 +121,65 @@ export async function restoreDocVersionCore(
   })
 
   return { id: restored.id, title: restored.title, docId: version.docId, restoredFrom: version.createdAt }
+}
+
+export interface PinDocVersionOptions {
+  authorId?: string | null
+  authorName: string
+}
+
+/**
+ * Pin the doc CURRENT content as the next numbered version (v1, v2, ...).
+ *
+ * Unlike maybeSnapshotDocVersion (which captures the state before an overwrite
+ * and may coalesce), this always captures the live doc as it is right now and
+ * numbers it. Used when a decision is requested so the decision can name the
+ * exact version it covers.
+ *
+ * If the latest numbered version already holds identical title and content, that
+ * version is returned instead of creating a duplicate, so two decisions on an
+ * unchanged doc point at the same version.
+ */
+export async function pinDocVersion(
+  docId: string,
+  opts: PinDocVersionOptions,
+  tx?: AppTransactionClient,
+): Promise<{ id: string; versionNumber: number; created: boolean } | null> {
+  if (!tx) return withAtomicRetry(getPrisma(), (transaction) => pinDocVersion(docId, opts, transaction))
+  const prisma = tx
+  // PostgreSQL locks the parent until commit; DSQL treats FOR UPDATE as a
+  // write-conflict declaration, so the losing transaction retries in full.
+  // This covers the empty-history race without changing the live doc revision.
+  const table = Prisma.raw(`"${getActiveSchema().replaceAll('"', '""')}"."docs"`)
+  const locked = await prisma.$queryRaw<{ id: string }[]>(Prisma.sql`SELECT id FROM ${table} WHERE id = ${docId}::uuid FOR UPDATE`)
+  if (!locked.length) return null
+  const doc = await prisma.doc.findUnique({
+    where: { id: docId },
+    select: { title: true, content: true, metadata: true, icon: true },
+  })
+  if (!doc) return null
+
+  const latest = await prisma.docVersion.findFirst({
+    where: { docId, versionNumber: { not: null } },
+    orderBy: { versionNumber: "desc" },
+    select: { id: true, versionNumber: true, title: true, content: true },
+  })
+  if (latest?.versionNumber != null && latest.title === doc.title && (latest.content ?? null) === (doc.content ?? null)) {
+    return { id: latest.id, versionNumber: latest.versionNumber, created: false }
+  }
+
+  const versionNumber = (latest?.versionNumber ?? 0) + 1
+  const created = await prisma.docVersion.create({
+    data: {
+      docId,
+      title: doc.title,
+      content: doc.content,
+      metadata: doc.metadata ?? undefined,
+      icon: doc.icon,
+      versionNumber,
+      createdById: opts.authorId ?? null,
+      createdByName: opts.authorName,
+    },
+  })
+  return { id: created.id, versionNumber, created: true }
 }

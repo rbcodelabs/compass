@@ -14,6 +14,31 @@ const decided = (overrides: Partial<DecidedDocDecision> = {}): DecidedDocDecisio
 
 afterEach(cleanup)
 
+describe("Docs decision toolbar with pinned versions", () => {
+  it("shows the decided version on the badge and in the summary", async () => {
+    render(<DocDecisionAction {...props} decisions={state([], decided({ docVersion: { id: "v3", number: 3 } }))} versionStatus={{ number: 3, editedSince: false }} />)
+    expect(screen.getByRole("button", { name: /Approved by Ada Lovelace · .* · v3 — decision actions/ })).toBeInTheDocument()
+    expect(screen.getByText("v3")).toBeInTheDocument()
+    expect(screen.queryByText("Edited since")).not.toBeInTheDocument()
+  })
+
+  it("flags a doc edited after the decision and offers a new decision on it", async () => {
+    render(<DocDecisionAction {...props} decisions={state([], decided({ docVersion: { id: "v3", number: 3 } }))} versionStatus={{ number: 3, editedSince: true }} />)
+    const button = screen.getByRole("button", { name: /v3 · edited since — decision actions/ })
+    expect(screen.getByText("Edited since")).toBeInTheDocument()
+    button.focus()
+    fireEvent.keyDown(button, { key: "ArrowDown" })
+    const item = await screen.findByRole("menuitem", { name: "Request a new decision on the edited doc" })
+    expect(item).toHaveAttribute("href", "/org/space/decisions/new?subjectType=DOC&subjectId=doc&subjectTitle=Launch+plan")
+  })
+
+  it("makes no version claim for a decision made before versions were pinned", () => {
+    render(<DocDecisionAction {...props} decisions={state([], decided())} versionStatus={null} />)
+    expect(screen.queryByText(/^v\d+$/)).not.toBeInTheDocument()
+    expect(screen.queryByText("Edited since")).not.toBeInTheDocument()
+  })
+})
+
 describe("Docs decision toolbar", () => {
   it("retains the document-prefilled request link when there are no decisions at all", () => {
     render(<DocDecisionAction {...props} decisions={state()} />)

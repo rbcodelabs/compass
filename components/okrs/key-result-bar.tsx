@@ -2,7 +2,8 @@
 
 import { HighlightMatch } from "@/components/okrs/highlight-match";
 import * as React from "react";
-import { useRef, useState, useTransition } from "react";
+import { useMemo, useRef, useState, useTransition } from "react";
+import { useServerSyncedState } from "@/hooks/use-server-synced-state";
 import { useRouter } from "next/navigation";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -51,6 +52,10 @@ export interface SupportingObjectiveOption {
   cycleTitle: string;
 }
 
+type SupportingObjectives = NonNullable<KeyResultBarProps["keyResult"]["supportingObjectives"]>;
+// Stable identity so an absent list does not look like a new source on every render.
+const NO_SUPPORTING: SupportingObjectives = [];
+
 export function KeyResultBar({ keyResult, objectiveId, orgSlug, workspaceSlug, supportingObjectiveOptions, paceElapsed, hideProgress }: KeyResultBarProps) {
   const router = useRouter();
   const labels = useLabels();
@@ -59,11 +64,18 @@ export function KeyResultBar({ keyResult, objectiveId, orgSlug, workspaceSlug, s
   const [linkError, setLinkError] = useState<string | null>(null);
   const [isLinkOpen, setIsLinkOpen] = useState(false);
   const actionsRef = useRef<HTMLDivElement>(null);
-  const [localSupportingObjectives, setLocalSupportingObjectives] = useState(
-    keyResult.supportingObjectives ?? []
+  // Follow the server (live refresh) but defer while a link mutation is in flight, so the
+  // optimistic link/unlink is not overwritten by props that predate it.
+  const supportingSource = keyResult.supportingObjectives ?? NO_SUPPORTING;
+  const optionsSource = useMemo(
+    () => (supportingObjectiveOptions ?? []).filter((option) => option.id !== objectiveId),
+    [supportingObjectiveOptions, objectiveId]
   );
-  const [localSupportingOptions, setLocalSupportingOptions] = useState(
-    (supportingObjectiveOptions ?? []).filter((option) => option.id !== objectiveId)
+  const { state: localSupportingObjectives, setState: setLocalSupportingObjectives } = useServerSyncedState(
+    supportingSource, (s) => s, isLinkPending
+  );
+  const { state: localSupportingOptions, setState: setLocalSupportingOptions } = useServerSyncedState(
+    optionsSource, (s) => s, isLinkPending
   );
   const { openPanel } = usePanelContext();
   const progress = clampProgress(keyResult.current, keyResult.target);

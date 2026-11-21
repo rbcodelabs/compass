@@ -38,7 +38,7 @@ function task(id: string, title: string): TaskCardData {
     assignee: null,
     ownerName: null,
     storyPoints: null,
-    dueDate: null,
+    startDate: null, dueDate: null,
     iteration: null,
     parentTaskId: null,
     subtaskCount: 0,

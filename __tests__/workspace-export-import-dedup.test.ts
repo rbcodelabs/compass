@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto"
 import { zipSync } from "fflate"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import type { BlobAdapters } from "@/lib/workspace-export/blobs"
 import { BundleReader } from "@/lib/workspace-export/bundle"
 import { exportWorkspaceToBuffer } from "@/lib/workspace-export/export"
@@ -18,7 +18,7 @@ function normVal(v: unknown): unknown {
   return v
 }
 
-function createInMemoryPrisma(seed: Record<string, Row[]> = {}) {
+function createInMemoryPrisma(seed: Record<string, Row[]> = {}, missingVoteTable = false) {
   const modelByDelegate = new Map([...dmmfModels.keys()].map((m) => [delegateKey(m), m]))
   const tables: Record<string, Row[]> = {}
   for (const [model, rows] of Object.entries(seed)) {
@@ -70,6 +70,7 @@ function createInMemoryPrisma(seed: Record<string, Row[]> = {}) {
         orderBy?: { id?: "asc" | "desc" }
         select?: Record<string, boolean>
       } = {}) {
+        if (model === "DecisionVote" && missingVoteTable) throw { code: "P2021" }
         let list = rows().filter((r) => matches(r, args.where))
         if (args.orderBy?.id === "asc") {
           list = [...list].sort((a, b) => String(a.id).localeCompare(String(b.id)))
@@ -171,6 +172,50 @@ const noopBlobs: BlobAdapters = {
 }
 
 describe("importWorkspaceBundle unique-key deduplication on collapsed users", () => {
+  it("exports a workspace before the vote table exists", async () => {
+    const org = randomUUID(), workspace = randomUUID()
+    const db = createInMemoryPrisma({ Organization: [{ id: org }], Workspace: [{ id: workspace, organizationId: org, slug: "ws", name: "WS" }] }, true)
+    const bundle = await exportWorkspaceToBuffer(db.client, workspace, noopBlobs)
+    expect(new BundleReader(bundle).manifest().counts.DecisionVote).toBe(0)
+  })
+  it.each(["none", "one", "collision", "duplicate-first", "duplicate-last", "content-collision"])("refuses unsafe vote identities before writing any workspace data (%s)", async (mode) => {
+    const sourceOrg = randomUUID(), targetOrg = randomUUID(), workspace = randomUUID(), importer = randomUUID()
+    const request = randomUUID(), revision = randomUUID(), matchedUser = randomUUID(), matchedSecond = randomUUID()
+    const voters = [randomUUID(), randomUUID()]
+    const db = createInMemoryPrisma({
+      Organization: [{ id: sourceOrg }, { id: targetOrg }],
+      Workspace: [{ id: workspace, organizationId: sourceOrg, slug: "votes", name: "Votes" }],
+      User: [...voters.map((id, i) => ({ id, email: `voter${mode === "collision" ? 0 : i}@source.example` })), { id: importer, email: "importer@target.example" }, ...(mode !== "none" ? [{ id: matchedUser, email: "voter0@source.example" }] : []), ...(["duplicate-first", "duplicate-last", "content-collision"].includes(mode) ? [{ id: matchedSecond, email: "voter1@source.example" }] : [])],
+      OrganizationMember: [{ id: randomUUID(), organizationId: targetOrg, userId: importer, role: "ADMIN" }, ...(mode !== "none" ? [{ id: randomUUID(), organizationId: targetOrg, userId: matchedUser, role: "MEMBER" }] : []), ...(["duplicate-first", "duplicate-last", "content-collision"].includes(mode) ? [{ id: randomUUID(), organizationId: targetOrg, userId: matchedSecond, role: "MEMBER" }] : [])],
+      ReviewRequest: [{ id: request, workspaceId: workspace, currentRevisionId: revision }],
+      ReviewRevision: [{ id: revision, requestId: request }],
+      DecisionVote: voters.map((voterUserId, i) => ({ id: randomUUID(), workspaceId: workspace, requestId: request, revisionId: revision, questionIndex: 0, chosenOption: i ? "No" : "Yes", voterUserId, createdAt: new Date(), updatedAt: new Date() })),
+    })
+    let bundle = await exportWorkspaceToBuffer(db.client, workspace, noopBlobs)
+    if (["duplicate-first", "duplicate-last", "content-collision"].includes(mode)) {
+      const reader = new BundleReader(bundle)
+      const files: Record<string, Uint8Array> = {}
+      for (const name of reader.list("")) files[name] = reader.read(name)!
+      if (mode === "content-collision") {
+        const entry = reader.list("data/ReviewRequest.")[0]
+        const row = JSON.parse(reader.readText(entry)!.trim())
+        row.id = voters[0]
+        files[entry] = new TextEncoder().encode(JSON.stringify(row) + "\n")
+      } else {
+        const manifest = reader.manifest()
+        const original = manifest.users.find((user) => user.id === voters[0])!
+        const duplicate = { ...original, email: "unmatched@source.example" }
+        if (mode === "duplicate-first") manifest.users.unshift(duplicate)
+        else manifest.users.push(duplicate)
+        files["manifest.json"] = new TextEncoder().encode(JSON.stringify(manifest))
+      }
+      bundle = Buffer.from(zipSync(files))
+    }
+    await expect(importWorkspaceBundle(db.client, bundle, { organizationId: targetOrg, importerUserId: importer, blobs: noopBlobs, nonce: "unmatched-votes" })).rejects.toThrow(/voter.*match/i)
+    expect(db.tables.Workspace).toHaveLength(1)
+    expect(db.tables.DecisionVote).toHaveLength(2)
+    expect(db.tables.DecisionVote.every((row) => row.voterUserId !== importer)).toBe(true)
+  })
   it("deduplicates CardSortProposal and Follow rows when 5 unmatched source users collapse onto the importer", async () => {
     const srcOrgId = randomUUID()
     const dstOrgId = randomUUID()
@@ -675,4 +720,71 @@ it("writes private bytes to a reserved attempt key and refuses to publish unveri
   })).rejects.toThrow(/verification failed/i)
   expect(calls).toEqual(["reserve", "put:attempt/diagram", "get:attempt/diagram"])
   expect(db.tables.Workspace).toHaveLength(1)
+})
+
+describe("external-link import/export digest contract", () => {
+  it.each([undefined, "0".repeat(64)])("derives the digest instead of trusting a bundle digest %s", async (externalKeyHash) => {
+    const { createHash } = await import("node:crypto")
+    const organizationId = randomUUID()
+    const workspaceId = randomUUID()
+    const importerUserId = randomUUID()
+    const taskId = randomUUID()
+    const prefix = "https://example.com/" + workspaceId + "/"
+    const url = prefix + "a".repeat(1000 - prefix.length)
+    const db = createInMemoryPrisma({
+      Organization: [{id: organizationId, slug: "external-key-org", name: "External key org"}],
+      User: [{id: importerUserId, email: "importer@example.com", name: "Importer"}],
+      OrganizationMember: [{id: randomUUID(), organizationId, userId: importerUserId, role: "ADMIN"}],
+      Workspace: [{id: workspaceId, organizationId, slug: "source-links", name: "Source links", ssoEnabled: false}],
+      Task: [{id: taskId, workspaceId, title: "Task"}],
+      ExternalLink: [{id: randomUUID(), workspaceId, subjectType: "TASK", subjectId: taskId, provider: "OTHER", url, externalKey: url, externalKeyHash, title: "Long link", relation: "RELATED", source: "UI", createdById: null, createdAt: new Date(), updatedAt: new Date()}],
+    })
+    const bundle = await exportWorkspaceToBuffer(db.client, workspaceId, noopBlobs)
+    const report = await importWorkspaceBundle(db.client, bundle, {organizationId, importerUserId, blobs: noopBlobs, nonce: "external-key-digest-" + String(externalKeyHash)})
+    const imported = db.tables.ExternalLink.find(row => row.workspaceId === report.workspaceId)!
+    expect(imported.externalKey).toBe(url)
+    expect(imported.externalKeyHash).toBe(createHash("sha256").update(url, "utf8").digest("hex"))
+    expect(report.counts.ExternalLink).toBe(1)
+    const exportedAgain = await exportWorkspaceToBuffer(db.client, report.workspaceId, noopBlobs)
+    const reader = new BundleReader(exportedAgain)
+    expect([...reader.rows("ExternalLink")][0].externalKey).toBe(url)
+    expect([...reader.rows("ExternalLink")][0].externalKeyHash).toBe(imported.externalKeyHash)
+  })
+})
+
+
+describe("external-link import identity verification", () => {
+  async function fixture(urls: string[]) {
+    const organizationId = randomUUID(), workspaceId = randomUUID(), importerUserId = randomUUID(), taskId = randomUUID()
+    const db = createInMemoryPrisma({
+      Organization: [{id: organizationId, slug: "collision-org", name: "Collision org"}],
+      User: [{id: importerUserId, email: "importer@example.com", name: "Importer"}],
+      OrganizationMember: [{id: randomUUID(), organizationId, userId: importerUserId, role: "ADMIN"}],
+      Workspace: [{id: workspaceId, organizationId, slug: "collision-source", name: "Collision source", ssoEnabled: false}],
+      Task: [{id: taskId, workspaceId, title: "Task"}],
+      ExternalLink: urls.map(url => ({id: randomUUID(), workspaceId, subjectType: "TASK", subjectId: taskId, provider: "OTHER", url, externalKey: url, title: "Link", relation: "RELATED", source: "UI", createdAt: new Date(), updatedAt: new Date()})),
+    })
+    const bundle = await exportWorkspaceToBuffer(db.client, workspaceId, noopBlobs)
+    return {db, bundle, options: {organizationId, importerUserId, blobs: noopBlobs, nonce: "identity-verification"}}
+  }
+  it("rejects a digest collision before unique-key deduplication can hide a different full key", async () => {
+    const {db, bundle, options} = await fixture(["https://example.com/a", "https://example.com/b"])
+    const hashing = await import("@/lib/external-link-key")
+    const digest = vi.spyOn(hashing, "externalLinkKeyHash").mockReturnValue("f".repeat(64))
+    try {
+      await expect(importWorkspaceBundle(db.client, bundle, options)).rejects.toThrow(/collision/i)
+    } finally { digest.mockRestore() }
+  })
+  it("rejects a different full key in the persisted import readback", async () => {
+    const {db, bundle, options} = await fixture(["https://example.com/a"])
+    const client = new Proxy(db.client, {get(target, property) {
+      const delegate = Reflect.get(target, property)
+      if (property !== "externalLink") return delegate
+      return {...delegate, async findMany(args: {select?: Row}) {
+        const rows = await delegate.findMany(args)
+        return args.select?.externalKeyHash ? rows.map((row: Row) => ({...row, externalKey: "https://example.com/different"})) : rows
+      }}
+    }})
+    await expect(importWorkspaceBundle(client, bundle, options)).rejects.toThrow(/identity readback/i)
+  })
 })

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition, useId, useEffect } from "react";
+import { useServerSyncedState } from "@/hooks/use-server-synced-state";
 import { useSearchParams } from "next/navigation";
 import {
   DndContext,
@@ -83,7 +84,12 @@ export function ObjectivesList({
   paceElapsed,
   hideProgress,
 }: Props) {
-  const [objectives, setObjectives] = useState(initialObjectives);
+  const [isSaving, startTransition] = useTransition();
+  const [reorderFailed, setReorderFailed] = useState(false);
+  // Follows the server (live refresh) but defers adopting it while a reorder/save is in flight.
+  // A drag in progress also defers adoption: the list must not change under the pointer.
+  const [isDragging, setIsDragging] = useState(false);
+  const { state: objectives, setState: setObjectives } = useServerSyncedState(initialObjectives, (o) => o, isSaving || isDragging);
   const labels = useLabels();
   const { query, setCounts } = useOkrFilter();
   const filterActive = normalizeQuery(query) !== "";
@@ -98,8 +104,6 @@ export function ObjectivesList({
   }, [shownCount, totalCount, setCounts]);
   // Collapsed ids are view state only (not persisted); everything starts expanded.
   const [collapsedIds, setCollapsedIds] = useState<ReadonlySet<string>>(() => new Set());
-  const [isSaving, startTransition] = useTransition();
-  const [reorderFailed, setReorderFailed] = useState(false);
   const searchParams = useSearchParams();
 
   // The picker lives in the page header (OkrGroupByToggle); this list only reads
@@ -130,6 +134,9 @@ export function ObjectivesList({
         },
       ].filter((g) => g.items.length > 0)
     : null;
+  const sortableIds = groups
+    ? groups.flatMap(({ items }) => items.flatMap(({ id }) => visibleIds.has(id) ? [id] : []))
+    : objectiveIds;
 
   // Stable across server and client; without it @dnd-kit numbers its
   // aria-describedby ids from a global counter and hydration mismatches.
@@ -140,6 +147,7 @@ export function ObjectivesList({
   );
 
   function handleDragEnd(event: DragEndEvent) {
+    setIsDragging(false);
     const { active, over } = event;
     if (isSaving || !over || active.id === over.id) return;
     if (!visibleIds.has(String(active.id)) || !visibleIds.has(String(over.id))) return;
@@ -225,32 +233,28 @@ export function ObjectivesList({
       id={dndId}
       sensors={sensors}
       collisionDetection={closestCenter}
+      onDragStart={() => setIsDragging(true)}
+      onDragCancel={() => setIsDragging(false)}
       onDragEnd={handleDragEnd}
     >
-      {groups ? (
-        groups.map((g) => {
-          const visibleGroupIds = g.items.filter((o) => visibleIds.has(o.id)).map((o) => o.id);
-          const hidden = visibleGroupIds.length === 0;
-          return (
-            <section key={g.key} hidden={hidden} className={hidden ? "hidden" : "flex flex-col gap-3"}>
-              <h3 className="flex items-center gap-2 text-sm font-semibold">
+      <SortableContext items={sortableIds} strategy={verticalListSortingStrategy}>
+        {/* Headers and rows share a parent so a row keeps its draft when it changes groups. */}
+        <div className={groups ? "flex flex-col gap-3" : "contents"}>
+          {groups ? groups.flatMap((g) => {
+            const count = g.items.filter(({ id }) => visibleIds.has(id)).length;
+            const heading = count > 0 ? (
+              <h3 key={`group:${g.key}`} className="flex items-center gap-2 text-sm font-semibold">
                 {g.color && (
                   <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: g.color }} />
                 )}
                 {g.label}
-                <span className="text-xs font-normal text-text-subtle">{visibleGroupIds.length}</span>
+                <span className="text-xs font-normal text-text-subtle">{count}</span>
               </h3>
-              <SortableContext items={visibleGroupIds} strategy={verticalListSortingStrategy}>
-                {g.items.map(renderRow)}
-              </SortableContext>
-            </section>
-          );
-        })
-      ) : (
-        <SortableContext items={objectiveIds} strategy={verticalListSortingStrategy}>
-          {objectives.map(renderRow)}
-        </SortableContext>
-      )}
+            ) : null;
+            return [heading, ...g.items.map(renderRow)];
+          }) : objectives.map(renderRow)}
+        </div>
+      </SortableContext>
     </DndContext>
     </>
   );

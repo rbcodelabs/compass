@@ -181,21 +181,30 @@ recorded on each assistant message is the one the turn actually ran with.
 ### Web search backend
 
 The agent's `web_search` tool uses Perplexity Search through the Vercel AI Gateway by
-default. A deployment that runs the agent on Bedrock can opt in to Amazon Bedrock Web
-Search instead. Nothing changes unless `AGENT_WEB_SEARCH_BACKEND` is set to `bedrock`.
+default. A deployment on AWS can opt in to Amazon Bedrock Web Search or to an Amazon
+Bedrock AgentCore Gateway web-search connector instead. Nothing changes unless
+`AGENT_WEB_SEARCH_BACKEND` is set to `bedrock` or `agentcore`.
 
 | Variable | Meaning | Default |
 |---|---|---|
-| `AGENT_WEB_SEARCH_BACKEND` | `bedrock` selects Bedrock Web Search; anything else keeps the AI Gateway | unset |
+| `AGENT_WEB_SEARCH_BACKEND` | `bedrock` selects Bedrock Web Search, `agentcore` selects an AgentCore Gateway; anything else keeps the AI Gateway | unset |
 | `BEDROCK_API_KEY` | Required for the Bedrock backend (the same key as the model provider) | none |
 | `BEDROCK_WEB_SEARCH_MODEL` | Model that runs the search | `openai.gpt-5.6-terra` |
 | `BEDROCK_WEB_SEARCH_REGION` | Region for the Bedrock endpoint | `AWS_REGION`, else `us-east-1` |
 | `BEDROCK_WEB_SEARCH_BASE_URL` | Overrides the endpoint | `https://bedrock-mantle.<region>.api.aws/openai/v1` |
+| `AGENT_WEB_SEARCH_GATEWAY_URL` | Required for `agentcore`: MCP URL of an [AgentCore Gateway](https://aws.amazon.com/blogs/aws/announcing-web-search-on-amazon-bedrock-agentcore-ground-your-ai-agents-in-current-accurate-web-knowledge/) with the Web Search connector target (`AWS_IAM` auth) | none |
+| `AGENT_WEB_SEARCH_GATEWAY_TOOL` | Tool name on that gateway | `web-search___WebSearch` |
 
 Results are the URL citations the model returns, with the cited text as the snippet.
 The request sets `external_web_access: false`, so retrieval stays inside AWS. See the
 [Amazon Bedrock web search documentation](https://docs.aws.amazon.com/bedrock/latest/userguide/web-search.html)
 for supported models and regions.
+
+The AgentCore backend is model-independent, so it works with the Claude agent. It signs
+each request (SigV4, service `bedrock-agentcore`) with the deployment's AWS credentials:
+Vercel OIDC via `AWS_ROLE_ARN` on Vercel, otherwise the standard AWS credential chain. That
+identity needs `bedrock-agentcore:InvokeGateway` on the gateway. The region comes from the
+gateway URL, else `AWS_REGION`, else `us-east-1`. No search API key is stored.
 
 ### Harness and provider
 

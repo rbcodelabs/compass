@@ -1,3 +1,6 @@
+import { getActiveSchema } from "@/lib/schema"
+import { addExternalLink } from "@/lib/external-links-service"
+import { externalLinkKeyHash } from "@/lib/external-link-key"
 /**
  * Workspace export -> import round trip against a real PostgreSQL schema.
  * Proves: content is copied with fresh ids and consistent references, secrets
@@ -12,7 +15,7 @@ import { PrismaClient } from "@prisma/client"
 import { PrismaPg } from "@prisma/adapter-pg"
 import { Pool } from "pg"
 import { zipSync } from "fflate"
-import { afterAll, beforeAll, describe, expect, it } from "vitest"
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest"
 import { injectUpdatedAtExtension } from "@/lib/prisma-updated-at"
 import type { AppPrismaClient } from "@/lib/db"
 import type { ArtifactStorage } from "@/lib/artifact-storage"
@@ -43,7 +46,8 @@ function memoryStorage(): ArtifactStorage & { files: Map<string, Uint8Array> } {
 }
 
 describe.skipIf(!databaseUrl)("workspace export/import round trip", () => {
-  const schema = `wx_${randomUUID().replaceAll("-", "")}`
+  const schemaPrefix = `wx_${randomUUID().replaceAll("-", "")}`
+  const schema = getActiveSchema({ ...process.env, PGSCHEMA: schemaPrefix })
   let pool: Pool
     let prisma: AppPrismaClient
   const artifact = memoryStorage()
@@ -79,6 +83,7 @@ describe.skipIf(!databaseUrl)("workspace export/import round trip", () => {
   let bundle: Uint8Array
 
   beforeAll(async () => {
+    vi.stubEnv("PGSCHEMA", schemaPrefix)
     const url = new URL(databaseUrl!)
     if (!["localhost", "127.0.0.1"].includes(url.hostname) || url.pathname !== "/compass_e2e" || url.searchParams.has("schema")) {
       throw new Error("Requires an isolated local compass_e2e URL without a schema override")
@@ -124,6 +129,7 @@ describe.skipIf(!databaseUrl)("workspace export/import round trip", () => {
     await prisma.solution.create({ data: { workspaceId: ws.id, opportunityId: opp.id, title: "Wizard", createdById: bobId } })
     await prisma.opportunityScore.create({ data: { opportunityId: opp.id, scoringModelId, scoredByUserId: bobId, modelVersion: 1, formulaSnapshot: {}, rawValues: {}, rawScore: 1, normalizedScore: 1 } })
     const task = await prisma.task.create({ data: { workspaceId: wsId, title: "Build wizard", createdById: aliceId, seqPrefix: "TASK", seqNumber: 7 } })
+    await addExternalLink(prisma, {workspaceId: wsId, subjectType: "TASK", subjectId: task.id, url: "https://example.com/" + "a".repeat(1000 - "https://example.com/".length)})
     await prisma.entityLink.create({
       data: { workspaceId: wsId, linkType: "RELATES_TO", fromType: "TASK", fromId: task.id, toType: "OPPORTUNITY", toId: opp.id },
     })
@@ -179,6 +185,7 @@ describe.skipIf(!databaseUrl)("workspace export/import round trip", () => {
   }, 180_000)
 
   afterAll(async () => {
+    vi.unstubAllEnvs()
     if (pool) {
       await pool.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`).catch(() => undefined)
       await pool.end()
@@ -204,6 +211,11 @@ describe.skipIf(!databaseUrl)("workspace export/import round trip", () => {
     expect(report.workspaceId).not.toBe(wsId)
     expect(report.slug).toBe("alpha-imported")
     expect(report.usersMatched).toBe(2)
+
+    const externalLink = await prisma.externalLink.findFirstOrThrow({where: {workspaceId: report.workspaceId}})
+    expect(externalLink.externalKey).toBe("https://example.com/" + "a".repeat(1000 - "https://example.com/".length))
+    expect(externalLink.externalKeyHash).toBe(externalLinkKeyHash(externalLink.externalKey))
+    expect(await prisma.task.count({where: {id: externalLink.subjectId, workspaceId: report.workspaceId}})).toBe(1)
 
     const ws = await prisma.workspace.findUniqueOrThrow({ where: { id: report.workspaceId } })
     expect(ws.ssoEnabled).toBe(false)

@@ -1,3 +1,4 @@
+import { AGENT_SANDBOX_OPERATIONS_MIGRATION } from "@/lib/migrations/agent-sandbox-operations";
 import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import path from "node:path";
@@ -27,7 +28,8 @@ const ROUTE = path.join(ROOT, "lib/migrations/runner.ts");
 /** Names registered in the migrate route's MIGRATIONS manifest, in order. */
 function registeredMigrations(): string[] {
   const src = readFileSync(ROUTE, "utf-8");
-  return [...src.matchAll(/name:\s*"([^"]+)"/g)].map((m) => m[1]);
+  const entries = src.matchAll(/name:\s*(?:"([^"]+)"|(AGENT_SANDBOX_OPERATIONS_MIGRATION)\b)/g);
+  return [...entries].map(([, literal]) => literal ?? AGENT_SANDBOX_OPERATIONS_MIGRATION);
 }
 
 it("preserves independently deployed PM and main migrations sharing numeric prefixes", () => {
