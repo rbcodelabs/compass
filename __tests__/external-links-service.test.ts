@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client"
 import { describe, expect, it, vi } from "vitest"
 
 // The transaction wrapper needs a real client; here the work simply runs against the in-memory fake.
@@ -47,6 +48,11 @@ function makeDb(seed: { solutions?: Row[]; tasks?: Row[]; links?: Row[] }) {
   }
   return {
     links,
+    $queryRaw: async function (query: Prisma.Sql) {
+      const subjects = query.sql.includes('."solutions"') ? seed.solutions : seed.tasks
+      const [id, workspaceId] = query.values
+      return (subjects ?? []).filter(row => matches(row, { id, workspaceId }))
+    },
     solution: { findFirst: finder(seed.solutions ?? []) },
     task: { findFirst: finder(seed.tasks ?? []) },
     externalLink: {

@@ -1,17 +1,19 @@
+import { getActiveSchema } from "@/lib/schema"
 import { randomUUID } from "node:crypto"
 import { readFileSync } from "node:fs"
 import { Pool } from "pg"
 import { PrismaClient } from "@prisma/client"
 import { PrismaPg } from "@prisma/adapter-pg"
-import { afterAll, beforeAll, describe, expect, it } from "vitest"
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest"
 import { integrationDatabaseUrl } from "@/__tests__/helpers/integration-database"
 import { applyMigrations } from "@/lib/migrations/runner"
-import { addExternalLink, findSubjectsByExternalKey } from "@/lib/external-links-service"
+import { addExternalLink, findSubjectsByExternalKey, MAX_EXTERNAL_LINKS_PER_SUBJECT } from "@/lib/external-links-service"
 import { parseExternalLink } from "@/lib/external-links"
 
 // Run only on an explicitly opted-in throwaway PostgreSQL database. It cannot prove DSQL's asynchronous job behavior.
 describe.skipIf(!integrationDatabaseUrl)("external-link index byte budget", () => {
-  const schema = `external_key_${randomUUID().replaceAll("-", "")}`
+  const schemaPrefix = `external_key_${randomUUID().replaceAll("-", "")}`
+  const schema = getActiveSchema({ ...process.env, PGSCHEMA: schemaPrefix })
   const workspaceId = randomUUID()
   const taskId = randomUUID()
   const pool = new Pool({ connectionString: integrationDatabaseUrl, max: 6 })
@@ -19,6 +21,7 @@ describe.skipIf(!integrationDatabaseUrl)("external-link index byte budget", () =
   let prisma: PrismaClient
   let created = false
   beforeAll(async () => {
+    vi.stubEnv("PGSCHEMA", schemaPrefix)
     process.env.DATABASE_URL = integrationDatabaseUrl
     await pool.query(`CREATE SCHEMA "${schema}"`)
     created = true
@@ -31,6 +34,7 @@ describe.skipIf(!integrationDatabaseUrl)("external-link index byte budget", () =
     prisma = new PrismaClient({ adapter: new PrismaPg(pool, { schema }) })
   })
   afterAll(async () => {
+    vi.unstubAllEnvs()
     await prisma?.$disconnect()
     if (created) await pool.query(`DROP SCHEMA "${schema}" CASCADE`)
     await pool.end()
@@ -90,5 +94,34 @@ describe.skipIf(!integrationDatabaseUrl)("external-link index byte budget", () =
     expect(new Set(results.map(result => result.link.id)).size).toBe(1)
     expect(results.filter(result => result.created)).toHaveLength(1)
     expect(results[0].link.externalKey).toBe(url)
+  })
+  it("enforces the subject cap when distinct keys compete for the last slot", async () => {
+    const subjectId = randomUUID()
+    await pool.query(`INSERT INTO "${schema}".tasks VALUES ($1,$2)`, [subjectId, workspaceId])
+    const add = (key: number) => addExternalLink(prisma as never, {
+      workspaceId, subjectType: "TASK", subjectId, url: `https://example.com/cap/${key}`,
+    })
+    for (let key = 0; key < MAX_EXTERNAL_LINKS_PER_SUBJECT - 1; key++) await add(key)
+
+    // Slow inserts in PostgreSQL so concurrent callers have time to contend at the boundary.
+    await pool.query(`CREATE FUNCTION "${schema}".delay_external_link_insert() RETURNS trigger
+      LANGUAGE plpgsql AS $$ BEGIN PERFORM pg_sleep(0.25); RETURN NEW; END; $$`)
+    await pool.query(`CREATE TRIGGER delay_external_link_insert BEFORE INSERT ON "${schema}".external_links
+      FOR EACH ROW EXECUTE FUNCTION "${schema}".delay_external_link_insert()`)
+    try {
+      const keys = [100, 101, 102, 103]
+      const results = await Promise.allSettled(keys.map(add))
+      const count = await prisma.externalLink.count({ where: { workspaceId, subjectId } })
+      expect(count, "committed links after concurrent distinct-key adds").toBe(MAX_EXTERNAL_LINKS_PER_SUBJECT)
+      expect(results.filter(result => result.status === "fulfilled")).toHaveLength(1)
+      for (const result of results) {
+        if (result.status === "rejected") expect(result.reason).toMatchObject({ code: "TOO_MANY" })
+      }
+      const winner = keys[results.findIndex(result => result.status === "fulfilled")]
+      expect(await add(winner)).toMatchObject({ created: false })
+    } finally {
+      await pool.query(`DROP TRIGGER delay_external_link_insert ON "${schema}".external_links`)
+      await pool.query(`DROP FUNCTION "${schema}".delay_external_link_insert()`)
+    }
   })
 })

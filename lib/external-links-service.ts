@@ -1,3 +1,5 @@
+import { Prisma } from "@prisma/client"
+import { getActiveSchema } from "@/lib/schema"
 import { externalLinkKeyHash } from "@/lib/external-link-key"
 // External links service (ADR-0028). The single read/write module for the external_links table: only this file names the
 // ExternalLink model, so the invariants live in one reviewed place.
@@ -75,12 +77,16 @@ function toRecord(row: Record<string, unknown>): ExternalLinkRecord {
   return row as unknown as ExternalLinkRecord
 }
 
-// The subject must exist in THIS workspace. A NULL workspace (legacy Solution rows) fails closed, like every other link.
-async function assertSubject(tx: Tx, workspaceId: string, subjectType: ExternalLinkSubjectType, subjectId: string): Promise<void> {
-  const row =
-    subjectType === "SOLUTION"
-      ? await tx.solution.findFirst({ where: { id: subjectId, workspaceId }, select: { id: true } })
-      : await tx.task.findFirst({ where: { id: subjectId, workspaceId }, select: { id: true } })
+// PostgreSQL locks the subject row. DSQL adjudicates it at commit and the transaction retry rechecks the cap.
+async function lockSubject(tx: Tx, workspaceId: string, subjectType: ExternalLinkSubjectType, subjectId: string): Promise<void> {
+  const schema = getActiveSchema().replaceAll('"', '""')
+  const table = subjectType === "SOLUTION" ? "solutions" : "tasks"
+  const qualifiedTable = Prisma.raw(`"${schema}"."${table}"`)
+  const [row] = await tx.$queryRaw<{ id: string }[]>(Prisma.sql`
+    SELECT id FROM ${qualifiedTable}
+    WHERE id = ${subjectId}::uuid AND workspace_id = ${workspaceId}::uuid
+    FOR UPDATE
+  `)
   if (!row) throw new ExternalLinkError("That item was not found in this workspace.", "NOT_FOUND")
 }
 
@@ -117,7 +123,7 @@ export async function addExternalLink(prisma: AppPrismaClient, input: AddExterna
   const title = (input.title ?? "").trim().slice(0, EXTERNAL_LINK_MAX_TITLE_LENGTH) || parsed.title
 
   return runTypedLinkTransaction(prisma, async function (tx) {
-    await assertSubject(tx, input.workspaceId, subjectType, input.subjectId)
+    await lockSubject(tx, input.workspaceId, subjectType, input.subjectId)
     const where = { subjectType, subjectId: input.subjectId, provider: parsed.provider, externalKeyHash: externalLinkKeyHash(parsed.externalKey) }
     const existing = await tx.externalLink.findFirst({ where: { workspaceId: input.workspaceId, ...where }, select: SELECT })
     if (existing) {
