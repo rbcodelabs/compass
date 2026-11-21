@@ -28,6 +28,13 @@ export function BoardScroller({ children, className, label, wheelSnapControl }: 
   useEffect(() => {
     const board = ref.current;
     if (!board) return;
+    let wheelIdle: ReturnType<typeof setTimeout> | undefined;
+    function restoreSnap() {
+      clearTimeout(wheelIdle);
+      wheelIdle = undefined;
+      board?.removeAttribute("data-wheel-panning");
+    }
+
     function onWheel(event: WheelEvent) {
       if (!board || event.ctrlKey || event.shiftKey || event.defaultPrevented) return;
       // Match BoardColumn's md scrollports; recheck on each gesture after a viewport resize.
@@ -44,15 +51,27 @@ export function BoardScroller({ children, className, label, wheelSnapControl }: 
       }
       // deltaMode 1 = lines, 2 = pages; normalise to pixels.
       const unit = event.deltaMode === 1 ? 40 : event.deltaMode === 2 ? board.clientWidth : 1;
-      // Keep the wheel's pixel offsets between events on boards that opt
-      // into resting snap points. Re-enabling snap between inputs can undo them.
-      if (board.hasAttribute("data-wheel-snap-control")) board.dataset.wheelPanning = "true";
       const before = board.scrollLeft;
-      board.scrollLeft += event.deltaY * unit;
-      if (board.scrollLeft !== before) event.preventDefault();
+      const delta = event.deltaY * unit;
+      if ((delta < 0 && before <= 0) || (delta > 0 && before >= board.scrollWidth - board.clientWidth)) return;
+      const managesSnap = board.hasAttribute("data-wheel-snap-control");
+      if (managesSnap) board.dataset.wheelPanning = "true";
+      board.scrollLeft += delta;
+      if (board.scrollLeft !== before) {
+        event.preventDefault();
+        if (managesSnap) {
+          clearTimeout(wheelIdle);
+          wheelIdle = setTimeout(restoreSnap, 400);
+        }
+      } else if (managesSnap && wheelIdle === undefined) {
+        restoreSnap();
+      }
     }
     board.addEventListener("wheel", onWheel, { passive: false });
-    return () => board.removeEventListener("wheel", onWheel);
+    return () => {
+      restoreSnap();
+      board.removeEventListener("wheel", onWheel);
+    };
   }, []);
 
   return (
