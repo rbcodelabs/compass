@@ -129,6 +129,7 @@ export function isPublicPath(pathname: string): boolean {
     // fails closed when neither is configured. Enumerated rather than a
     // `startsWith("/api/cron/")` so a future cron route is not public by default.
     pathname === "/api/cron/agent-run-sweeper" ||
+    pathname === "/api/cron/import-asset-cleanup" ||
     pathname === "/api/cron/agent-wakeups" ||
     // Same contract for the daily agent-data retention job: it authenticates CRON_SECRET (or MIGRATION_SECRET) itself and fails closed.
     pathname === "/api/cron/agent-retention" ||
