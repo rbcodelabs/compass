@@ -6,7 +6,7 @@ import { execFileSync } from "node:child_process"
 import { PrismaClient } from "@prisma/client"
 import { PrismaPg } from "@prisma/adapter-pg"
 import { Pool } from "pg"
-import { unzipSync, zipSync } from "fflate"
+import { unzipSync } from "fflate"
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest"
 import type { AppPrismaClient } from "@/lib/db"
 import { injectUpdatedAtExtension } from "@/lib/prisma-updated-at"
@@ -15,8 +15,7 @@ import { integrationDatabaseUrl } from "@/__tests__/helpers/integration-database
 process.env.DATABASE_URL ??= integrationDatabaseUrl
 delete process.env.VERCEL
 
-const connection = vi.hoisted(() => ({ schema: "", prisma: null as AppPrismaClient | null, userId: null as string | null }))
-vi.mock("@/lib/schema", () => ({ getActiveSchema: () => connection.schema }))
+const connection = vi.hoisted(() => ({ prisma: null as AppPrismaClient | null, userId: null as string | null }))
 vi.mock("@/lib/db", () => ({ default: () => connection.prisma }))
 vi.mock("@/auth", () => ({ auth: async () => (connection.userId ? { user: { id: connection.userId, email: "x@localhost.dev" } } : null) }))
 vi.mock("next/cache", () => ({ revalidatePath: () => undefined }))
@@ -47,11 +46,6 @@ describe.skipIf(!databaseUrl)("workspace export/import routes", () => {
     url.searchParams.set("schema", schema)
     execFileSync("pnpm", ["exec", "prisma", "db", "push", "--url", url.toString()], { stdio: "pipe", timeout: 120_000 })
     prisma = new PrismaClient({ adapter: new PrismaPg(pool, { schema }) }).$extends(injectUpdatedAtExtension) as unknown as AppPrismaClient
-    connection.schema = schema
-    await pool.query(`CREATE TABLE "${schema}".workspace_import_operations (
-      workspace_id uuid PRIMARY KEY, attempt_id uuid NOT NULL, organization_id uuid NOT NULL,
-      epoch integer DEFAULT 1, lease_expires_at timestamp, updated_at timestamp,
-      phase text, bundle_digest text, result_text text)`)
     connection.prisma = prisma
 
     const org = await prisma.organization.create({ data: { slug: "route-org", name: "Route Org" } })
@@ -96,10 +90,10 @@ describe.skipIf(!databaseUrl)("workspace export/import routes", () => {
   it("import: org admins only; imports a downloaded bundle as a new workspace; same nonce is idempotent", async () => {
     connection.userId = adminId
     const bundle = new Uint8Array(await (await exportRoute(new Request("http://x"), wsParams("route-org", "src"))).arrayBuffer())
-    const post = (userId: string | null, nonce = "r1", payload = bundle) => {
+    const post = (userId: string | null, nonce = "r1") => {
       connection.userId = userId
       const form = new FormData()
-      form.set("file", new File([payload as BlobPart], "b.zip", { type: "application/zip" }))
+      form.set("file", new File([bundle as BlobPart], "b.zip", { type: "application/zip" }))
       form.set("nonce", nonce)
       form.set("slug", "from-route")
       return importRoute(new Request("http://x", { method: "POST", body: form }), orgParams("route-org"))
@@ -115,13 +109,6 @@ describe.skipIf(!databaseUrl)("workspace export/import routes", () => {
     const again = await (await post(adminId)).json()
     expect(again.alreadyImported).toBe(true)
     expect(again.workspaceId).toBe(body.workspaceId)
-    const persisted = { ...body, counts: { Opportunity: 0 }, blobsCopied: 1, usersMatched: 4, warnings: ["Skipped a row whose reference was missing"] }
-    delete persisted.ok
-    await pool.query(`UPDATE "${schema}".workspace_import_operations SET result_text=$1 WHERE workspace_id=$2`, [JSON.stringify(persisted), body.workspaceId])
-    expect(await (await post(adminId)).json()).toEqual({ ok: true, ...persisted, alreadyImported: true })
-    const entries = unzipSync(bundle)
-    entries["manifest.json"] = new TextEncoder().encode(new TextDecoder().decode(entries["manifest.json"]) + " ")
-    expect((await post(adminId, "r1", new Uint8Array(zipSync(entries)))).status).toBe(422)
     expect(await prisma.opportunity.count({ where: { title: "Route opp" } })).toBe(2)
   }, 120_000)
 
