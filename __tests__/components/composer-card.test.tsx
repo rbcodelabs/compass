@@ -114,6 +114,35 @@ describe("ComposerCard", () => {
     expect(onStop).not.toHaveBeenCalled()
   })
 
+  describe("pending mention close on blur", () => {
+    afterEach(() => vi.useRealTimers())
+
+    it("cancels the pending timer when the composer unmounts", () => {
+      vi.useFakeTimers()
+      const { unmount } = render(<Harness />)
+      const initial = vi.getTimerCount()
+      fireEvent.blur(screen.getByRole("textbox"))
+      expect(vi.getTimerCount()).toBe(initial + 1)
+      unmount()
+      expect(vi.getTimerCount()).toBe(initial)
+    })
+
+    it("restarts the 120 ms delay on a second blur", () => {
+      vi.useFakeTimers()
+      render(<Harness />)
+      const field = screen.getByRole("textbox")
+      const initial = vi.getTimerCount()
+      fireEvent.blur(field)
+      act(() => vi.advanceTimersByTime(60))
+      fireEvent.blur(field)
+      expect(vi.getTimerCount()).toBe(initial + 1)
+      act(() => vi.advanceTimersByTime(119))
+      expect(vi.getTimerCount()).toBe(initial + 1)
+      act(() => vi.advanceTimersByTime(1))
+      expect(vi.getTimerCount()).toBe(initial)
+    })
+  })
+
   it("Escape stops only while a run is in flight", () => {
     const onStop = vi.fn()
     const { rerender } = render(<Harness onStop={onStop} />)
@@ -189,5 +218,11 @@ describe("ComposerCard", () => {
   it("puts the focus ring on the whole card", () => {
     const { container } = render(<Harness />)
     expect(container.querySelector('[data-slot="composer-card"]')).toHaveClass("focus-within:border-ring", "focus-within:ring-[3px]", "rounded-xl")
+  })
+
+  // Class assertion only: the real layout guard is the 390px/320px e2e (jsdom has no layout).
+  it("wraps its footer chips instead of overflowing the card (TASK-197)", () => {
+    const { container } = render(<Harness chips={<button>Tools</button>} />)
+    expect(container.querySelector('[data-slot="composer-footer"]')).toHaveClass("flex-wrap", "min-w-0")
   })
 })

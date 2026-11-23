@@ -1,18 +1,49 @@
+import { createSign } from "node:crypto"
 import { ConnectError, getTokenResponse } from "@vercel/connect"
+import { DEFAULT_AGENT_GITHUB_ACCESS, type AgentGithubAccess } from "@/lib/agent-github-access-level"
 
 /**
- * GitHub App installation tokens come from Vercel Connect (connector named by
- * COMPASS_GITHUB_CONNECTOR). Connect holds the App's private key; Compass never
- * does. Unset means the feature is off and agent turns run without push access.
+ * GitHub App installation tokens come from one of two sources. On Vercel, a
+ * Vercel Connect connector (COMPASS_GITHUB_CONNECTOR) holds the App's private key.
+ * Off Vercel, Compass signs with the key itself (COMPASS_GITHUB_APP_ID and
+ * COMPASS_GITHUB_APP_PRIVATE_KEY). The connector wins when both are set. Neither
+ * means the feature is off and agent turns run without push access.
  */
 export const GITHUB_CONNECTOR_ENV = "COMPASS_GITHUB_CONNECTOR"
+export const GITHUB_APP_ID_ENV = "COMPASS_GITHUB_APP_ID"
+export const GITHUB_APP_PRIVATE_KEY_ENV = "COMPASS_GITHUB_APP_PRIVATE_KEY"
 
 export function githubConnectorUid(): string | null {
   return process.env[GITHUB_CONNECTOR_ENV]?.trim() || null
 }
 
+function directAppCredentials(): { appId: string; privateKey: string } | null {
+  const appId = process.env[GITHUB_APP_ID_ENV]?.trim()
+  // Accept a key pasted with literal "\n" escapes as well as real newlines.
+  const privateKey = process.env[GITHUB_APP_PRIVATE_KEY_ENV]?.replace(/\\n/g, "\n").trim()
+  return appId && privateKey ? { appId, privateKey } : null
+}
+
+/** Whether this deployment can mint GitHub App tokens by either path. */
+export function githubAppConfigured(): boolean {
+  return Boolean(githubConnectorUid() || directAppCredentials())
+}
+
+export { DEFAULT_AGENT_GITHUB_ACCESS, isAgentGithubAccess, type AgentGithubAccess } from "@/lib/agent-github-access-level"
+
 /** Least privilege for agent development work: branches, commits, PRs. Nothing else. */
 export const AGENT_GITHUB_PERMISSIONS = ["contents:write", "pull_requests:write", "metadata:read"] as const
+
+/** Read-only variant: clone and inspect, no pushes, no PR creation. */
+export const AGENT_GITHUB_READ_PERMISSIONS = ["contents:read", "pull_requests:read", "metadata:read"] as const
+
+/** Code-only read: no pull request access at all. */
+export const AGENT_GITHUB_CODE_READ_PERMISSIONS = ["contents:read", "metadata:read"] as const
+
+export function permissionsForAccess(access: AgentGithubAccess): readonly string[] {
+  if (access === "code-read") return AGENT_GITHUB_CODE_READ_PERMISSIONS
+  return access === "read" ? AGENT_GITHUB_READ_PERMISSIONS : AGENT_GITHUB_PERMISSIONS
+}
 
 const REPO_PART = /^[A-Za-z0-9._-]+$/
 
@@ -36,44 +67,155 @@ export function parseAgentRepos(input: string[]): { ok: true; repos: string[] } 
 }
 
 /**
- * Mints a short-lived app installation token through Vercel Connect, refined to
- * the given repositories (all under one owner) and AGENT_GITHUB_PERMISSIONS
- * regardless of what the app itself is granted. Connect caches and refreshes;
- * the token is returned to the caller and never stored or logged here.
+ * Mints a short-lived app installation token, refined to the given repositories
+ * (all under one owner) and AGENT_GITHUB_PERMISSIONS regardless of what the app
+ * itself is granted. The token is returned to the caller and never stored or
+ * logged here.
  */
 export async function mintRepoInstallationToken(
-  /** `permissions` overrides the default agent set (e.g. read-only PR lookups). */
+  /** `permissions` overrides the access level's set (capability packs, installation probes). */
   repo: { owner: string; names: string[]; permissions?: readonly string[] },
+  access: AgentGithubAccess = DEFAULT_AGENT_GITHUB_ACCESS,
 ): Promise<{ token: string; expiresAt: number }> {
-  const uid = githubConnectorUid()
-  if (!uid) throw new Error(`${GITHUB_CONNECTOR_ENV} must be configured`)
+  if (!githubAppConfigured()) throw new Error(`${GITHUB_CONNECTOR_ENV} or ${GITHUB_APP_ID_ENV} and ${GITHUB_APP_PRIVATE_KEY_ENV} must be configured`)
   if (!REPO_PART.test(repo.owner) || !repo.names.length || !repo.names.every(n => REPO_PART.test(n))) throw new Error("Invalid repository")
-  try {
-    const minted = await getTokenResponse(uid, {
-      subject: { type: "app" },
-      authorizationDetails: [
-        { type: "github_app_installation", org: repo.owner, repositories: repo.names, permissions: [...(repo.permissions ?? AGENT_GITHUB_PERMISSIONS)] },
-      ],
-    })
-    return { token: minted.token, expiresAt: minted.expiresAt }
-  } catch (error) {
-    // Never echo upstream bodies: surface only the Connect error code/status.
-    if (error instanceof ConnectError) throw new Error(`Vercel Connect GitHub token request failed (${error.code ?? error.status ?? "error"})`)
-    throw new Error("Vercel Connect GitHub token request failed")
+  return requestInstallationToken(repo.owner, repo.names, repo.permissions ?? permissionsForAccess(access))
+}
+
+class InstallationTokenError extends Error {
+  constructor(message: string, readonly reason: "probe_failed" | "not_installed" | "scope_rejected" = "probe_failed") {
+    super(message)
   }
 }
 
-/**
- * Whether the GitHub App can be granted this repo. Connect's refined token
- * request fails when the repo is outside the installation, so a successful mint
- * is the proof. Never throws on a plain "no".
- */
-export async function isAppInstalledOn(repo: { owner: string; name: string }): Promise<boolean> {
+async function requestInstallationToken(owner: string, names: string[], permissions: readonly string[]): Promise<{ token: string; expiresAt: number }> {
+  const uid = githubConnectorUid()
+  if (uid) {
+    try {
+      const minted = await getTokenResponse(uid, {
+        subject: { type: "app" },
+        authorizationDetails: [
+          { type: "github_app_installation", org: owner, repositories: names, permissions: [...permissions] },
+        ],
+      })
+      return { token: minted.token, expiresAt: minted.expiresAt }
+    } catch (error) {
+      // Never propagate upstream messages or bodies.
+      const status = error instanceof ConnectError ? error.status : undefined
+      const message = typeof status === "number" ? `Vercel Connect GitHub token request failed (${status})` : "Vercel Connect GitHub token request failed"
+      if (status === 422) throw new InstallationTokenError(message, "scope_rejected")
+      throw new Error(message)
+    }
+  }
+  const credentials = directAppCredentials()
+  if (!credentials) throw new Error("The GitHub App is not configured for this deployment")
   try {
-    await mintRepoInstallationToken({ owner: repo.owner, names: [repo.name] })
-    return true
+    return await mintDirectInstallationToken(credentials, owner, names, permissions)
+  } catch (error) {
+    if (error instanceof InstallationTokenError) throw error
+    // Network and JSON parser exceptions can contain upstream request or response data.
+    throw new InstallationTokenError("GitHub App token request failed")
+  }
+}
+
+const GITHUB_API = "https://api.github.com"
+
+/** RS256 app JWT. iat is backdated a minute for clock drift; GitHub rejects exp more than 10 minutes out. */
+export function signAppJwt(appId: string, privateKey: string, nowSeconds = Math.floor(Date.now() / 1000)): string {
+  const encode = (value: object) => Buffer.from(JSON.stringify(value)).toString("base64url")
+  const unsigned = `${encode({ alg: "RS256", typ: "JWT" })}.${encode({ iat: nowSeconds - 60, exp: nowSeconds + 540, iss: appId })}`
+  return `${unsigned}.${createSign("RSA-SHA256").update(unsigned).sign(privateKey, "base64url")}`
+}
+
+/** ["contents:write", "metadata:read"] -> { contents: "write", metadata: "read" } */
+function permissionsObject(permissions: readonly string[]): Record<string, string> {
+  return Object.fromEntries(permissions.map(p => p.split(":") as [string, string]))
+}
+
+const installationIds = new Map<string, number>()
+
+function githubHeaders(bearer: string): Record<string, string> {
+  return { Authorization: `Bearer ${bearer}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" }
+}
+
+async function installationIdFor(owner: string, jwt: string): Promise<number> {
+  const key = owner.toLowerCase()
+  const cached = installationIds.get(key)
+  if (cached) return cached
+  for (const kind of ["orgs", "users"]) {
+    const res = await fetch(`${GITHUB_API}/${kind}/${owner}/installation`, { headers: githubHeaders(jwt), cache: "no-store" })
+    if (res.status === 404) continue
+    if (!res.ok) throw new InstallationTokenError(`GitHub App installation lookup failed (${res.status})`)
+    const id = ((await res.json()) as { id?: number }).id
+    if (!id) throw new InstallationTokenError("GitHub App installation lookup failed")
+    installationIds.set(key, id)
+    return id
+  }
+  throw new InstallationTokenError(`GitHub App is not installed on ${owner}`, "not_installed")
+}
+
+/**
+ * Signs an app JWT and exchanges it for an installation token refined to `names`
+ * and `permissions`. GitHub itself enforces the refinement. Upstream bodies are
+ * never echoed; errors carry only the HTTP status.
+ */
+async function mintDirectInstallationToken(
+  credentials: { appId: string; privateKey: string },
+  owner: string,
+  names: string[],
+  permissions: readonly string[],
+): Promise<{ token: string; expiresAt: number }> {
+  let jwt: string
+  try {
+    jwt = signAppJwt(credentials.appId, credentials.privateKey)
   } catch {
-    return false
+    throw new InstallationTokenError(`${GITHUB_APP_PRIVATE_KEY_ENV} is not a valid private key`)
+  }
+  const id = await installationIdFor(owner, jwt)
+  const res = await fetch(`${GITHUB_API}/app/installations/${id}/access_tokens`, {
+    method: "POST",
+    headers: { ...githubHeaders(jwt), "Content-Type": "application/json" },
+    body: JSON.stringify({ repositories: names, permissions: permissionsObject(permissions) }),
+    cache: "no-store",
+  })
+  if (res.status === 404) installationIds.delete(owner.toLowerCase())
+  const failureMessage = `GitHub App token request failed (${res.status})`
+  if (res.status === 422) throw new InstallationTokenError(failureMessage, "scope_rejected")
+  if (!res.ok) throw new InstallationTokenError(failureMessage)
+  const body = (await res.json()) as { token?: string; expires_at?: string }
+  if (!body.token || !body.expires_at) throw new InstallationTokenError("GitHub App token request failed")
+  return { token: body.token, expiresAt: Date.parse(body.expires_at) }
+}
+
+/** Test hook: forget cached installation ids. */
+export function resetGithubAppInstallationCache(): void {
+  installationIds.clear()
+}
+
+/**
+ * Whether the GitHub App can be granted this repo at the given access level.
+ * Connect's refined token request fails when the repo is outside the installation
+ * and when the app lacks a requested permission. After a scope rejection, try a
+ * metadata-only token. A successful retry confirms that the requested access
+ * level is the problem. Other failures leave the installation status unknown.
+ */
+export type RepoAccessCheck = "ok" | "not_installed" | "missing_permission" | "probe_failed"
+
+export async function checkAppAccessOn(repo: { owner: string; name: string }, access: AgentGithubAccess): Promise<RepoAccessCheck> {
+  const target = { owner: repo.owner, names: [repo.name] }
+  try {
+    await mintRepoInstallationToken(target, access)
+    return "ok"
+  } catch (error) {
+    if (!(error instanceof InstallationTokenError) || error.reason === "probe_failed") return "probe_failed"
+    if (error.reason === "not_installed") return "not_installed"
+  }
+
+  try {
+    await mintRepoInstallationToken({ ...target, permissions: ["metadata:read"] }, access)
+    return "missing_permission"
+  } catch (error) {
+    return error instanceof InstallationTokenError && error.reason === "not_installed" ? "not_installed" : "probe_failed"
   }
 }
 
@@ -82,15 +224,15 @@ export async function isAppInstalledOn(repo: { owner: string; name: string }): P
  * list, or `{}` when the list is empty or the connector isn't configured. Failure is
  * non-fatal (the turn runs without push access) and logs only the message.
  */
-export async function mintAgentGithubEnv(repos: string[]): Promise<Record<string, string>> {
-  if (!repos.length || !githubConnectorUid()) return {}
+export async function mintAgentGithubEnv(repos: string[], access: AgentGithubAccess = DEFAULT_AGENT_GITHUB_ACCESS): Promise<Record<string, string>> {
+  if (!repos.length || !githubAppConfigured()) return {}
   const parsed = parseAgentRepos(repos)
   if (!parsed.ok || !parsed.repos.length) return {}
   const owner = parsed.repos[0].split("/")[0]
   const names = parsed.repos.map(r => r.split("/")[1])
   try {
-    const { token } = await mintRepoInstallationToken({ owner, names })
-    return { GH_TOKEN: token, GITHUB_TOKEN: token, AGENT_GITHUB_REPOS: parsed.repos.join(",") }
+    const { token } = await mintRepoInstallationToken({ owner, names }, access)
+    return { GH_TOKEN: token, GITHUB_TOKEN: token, AGENT_GITHUB_REPOS: parsed.repos.join(","), AGENT_GITHUB_ACCESS: access }
   } catch (error) {
     console.error("[agent-github] could not mint installation token", error instanceof Error ? error.message : "unknown error")
     return {}

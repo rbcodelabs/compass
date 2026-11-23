@@ -41,7 +41,7 @@ import { resolveWorkspaceAgentModel } from "@/lib/workspace-anthropic-key"
 import { agentRunCredentialSource, logAgentRunCredentialSource } from "@/lib/agent-credential-source"
 import { resolveAgentHandoffContext } from "@/lib/agent-context"
 import { resolveAgentPageContext } from "@/lib/agent-page-context"
-import { resolveConversationAccess } from "@/lib/agent-conversation-access"
+import { isClosedToNewTurns, resolveConversationAccess } from "@/lib/agent-conversation-access"
 import { clearConversationPendingQuestions } from "@/lib/agent-inbox-questions"
 import { cancelAllPendingConversationWakeups } from "@/lib/agent-scheduled-wakeups"
 import { getOrchestratorSkillAppendixForConversation } from "@/lib/orchestrator/skill"
@@ -61,6 +61,12 @@ import { resolveRunSnapshot } from "@/lib/agent-sandbox-class"
 import { agentCapReachedBody, checkAgentRunCaps, checkAgentUsageLimit } from "@/lib/agent-limits"
 import { isMutationTool, bareToolName } from "@/lib/agent-mutations"
 import { acquireConversationSandbox, bootSandboxFromSnapshot } from "@/lib/agent-sandbox"
+import {
+  dispatchPersistentSandboxLaunch,
+  PERSISTENT_SANDBOX_LOOKUP_FAILED,
+  releasePersistentSandboxLaunch,
+  reservePersistentSandboxLaunch,
+} from "@/lib/agent-sandbox-fence"
 import { AGENT_SANDBOX_IDLE_MS, agentSandboxReuseEnabled, sandboxNetworkProfile } from "@/lib/agent-sandbox-reuse"
 import { resolveGatewayCredential, resolveAgentHarness, agentModelForHarness } from "@/lib/agent-harness"
 import { AgentSelectionError, resolveRunAgent } from "@/lib/agent-run-identity"
@@ -68,7 +74,7 @@ import { effectiveTurnModel, parseRequestedTurnModel } from "@/lib/agent-turn-mo
 import { BUILT_IN_AGENT_SELECTION } from "@/lib/agent-defaults"
 import { agentMayUseOwnerConnectors, type AgentRecord } from "@/lib/agent-ownership"
 import { mintAgentMcpKey, revokeAgentMcpKey } from "@/lib/agent-mcp-key"
-import { readWorkspaceAgentRepos } from "@/lib/agent-github-repos"
+import { readWorkspaceAgentGithub } from "@/lib/agent-github-repos"
 import { mintAgentGithubEnv } from "@/lib/github-app-token"
 import { gitAuthorEnv, readAgentGitAuthor } from "@/lib/agent-git-author"
 import { turnEgressPolicy, developerNpmToken, githubShellEnabled } from "@/lib/agent-github-access"
@@ -175,6 +181,11 @@ function assemblePrompt(
   return [framing, seedSection, transcript, pageContextBlock, userTurn(userMessage, currentUserId), "Assistant:"]
     .filter(Boolean)
     .join("\n\n")
+}
+
+/** 404 like a lost-access conversation (existence is not newly revealed: the caller can already read it), but marked so the client can show "archived" instead of an error. */
+function archivedConversationResponse() {
+  return new Response("Conversation archived.", { status: 404, headers: { "x-conversation-state": "archived" } })
 }
 
 export async function POST(request: NextRequest) {
@@ -297,6 +308,7 @@ export async function POST(request: NextRequest) {
     let passiveConvo: { id: string } | null = null
     if (typeof conversationId === "string") {
       const access = await resolveConversationAccess(prisma, { conversationId, workspaceId, userId })
+      if (access && isClosedToNewTurns(access)) return archivedConversationResponse()
       if (!access) {
         return new Response("Conversation not found or access denied.", { status: 404 })
       }
@@ -398,6 +410,7 @@ export async function POST(request: NextRequest) {
   let convo: { id: string } | null = null
   if (typeof conversationId === "string") {
     const access = await resolveConversationAccess(prisma, { conversationId, workspaceId, userId })
+    if (access && isClosedToNewTurns(access)) return archivedConversationResponse()
     if (!access) {
       return new Response("Conversation not found or access denied.", { status: 404 })
     }
@@ -786,6 +799,8 @@ export async function POST(request: NextRequest) {
     logAgentRunCredentialSource({ runId: run.id, workspaceId, source: agentRunCredentialSource({ harness, model: resolved?.ok ? resolved : undefined }) })
 
     let apiKeyId: string | undefined
+    let launchReservation: string | null = null
+    let launchMayBeInFlight = false
     try {
       // The key and the sandbox both have to outlive `deadlineAt`, or a run that
       // finishes in its last second loses its tool access mid-sentence. The
@@ -802,7 +817,8 @@ export async function POST(request: NextRequest) {
       // An agent-scoped key is honoured only while a live run names it, so the run must name it before the sandbox exists.
       if (runAgent && !(await attachAgentRunKey({ prisma, runId: run.id, apiKeyId }))) throw new Error("agent run ended before its key could be attached")
       // A named agent may commit as a configured identity (migration 111); otherwise the sandbox keeps the bot author.
-      const githubEnv = { ...(await mintAgentGithubEnv(await readWorkspaceAgentRepos(prisma, workspaceId))), ...(runAgent ? gitAuthorEnv(await readAgentGitAuthor(prisma, runAgent.id)) : {}) }
+      const githubConfig = await readWorkspaceAgentGithub(prisma, workspaceId)
+      const githubEnv = { ...(await mintAgentGithubEnv(githubConfig.repos, githubConfig.access)), ...(runAgent ? gitAuthorEnv(await readAgentGitAuthor(prisma, runAgent.id)) : {}) }
       // Bash + GitHub only when the docs tree will be materialized (same condition as docMaterial below). Every sandbox, shell or not, is created with a deny-by-default
       // egress allowlist, so there is never a moment where the agent can run with open egress.
       const githubShell = githubShellEnabled({ githubEnv, harness, docs: !scope && harness !== "opencode" })
@@ -813,6 +829,16 @@ export async function POST(request: NextRequest) {
       // (different snapshot, egress policy, npm token).
       const reuseSandbox = agentSandboxReuseEnabled() && kind === "CHAT" && harness === "claude" && !scope
       const runSandboxName = reuseSandbox ? agentConversationSandboxName(conversationIdResolved, { developer: developer.enabled }) : sandboxName
+      // ADR 0019: materialize the doc tree and hand the sandbox a host-signed
+      // manifest of what it was shown. This request will be gone before the agent
+      // finishes, so the manifest is what lets the sandbox's own post-turn call to
+      // /api/internal/agent/runs/:runId/docs be reconciled without any server-side
+      // baseline storage. Skipped for claim-scoped runs (see buildAgentEnv).
+      // opencode has no file tools, so it gets no materialized tree (docs stay reachable through the MCP tools).
+      const docMaterial = scope || harness === "opencode" ? undefined : await materializeDocTree(workspaceId)
+      const manifestFiles = docMaterial
+        ? [{ path: DOC_MANIFEST_FILE, content: JSON.stringify(signDocManifest(run.id, workspaceId, docMaterial.baseline)) }]
+        : []
       let sandbox: Awaited<ReturnType<typeof bootSandboxFromSnapshot>>
       if (!reuseSandbox) {
         sandbox = await bootSandboxFromSnapshot(snapshotId, {
@@ -822,10 +848,12 @@ export async function POST(request: NextRequest) {
           ...(networkPolicy ? { networkPolicy } : {}),
         })
       } else {
-        // The run must name the sandbox before it exists, so finalize and the sweeper can reach it even if this
-        // request dies mid-boot (they derive the per-run name otherwise).
-        await prisma.agentRun.updateMany({ where: { id: run.id, status: "QUEUED" }, data: { sandboxName: runSandboxName } })
         const previous = await findPreviousRunForSandboxReuse(prisma, conversationIdResolved, run.id)
+        launchReservation = await reservePersistentSandboxLaunch(prisma, conversationIdResolved, run.id, runSandboxName)
+        if (!launchReservation || !(await dispatchPersistentSandboxLaunch(prisma, conversationIdResolved, run.id, runSandboxName, launchReservation))) {
+          throw new Error("The persistent sandbox launch could not be reserved")
+        }
+        launchMayBeInFlight = true
         const requiredMs = budgetMs + 2 * RUN_INFRA_GRACE_MS
         const profile = sandboxNetworkProfile(networkPolicy)
         const acquired = await acquireConversationSandbox({
@@ -839,16 +867,6 @@ export async function POST(request: NextRequest) {
         })
         sandbox = acquired.sandbox
       }
-      // ADR 0019: materialize the doc tree and hand the sandbox a host-signed
-      // manifest of what it was shown. This request will be gone before the agent
-      // finishes, so the manifest is what lets the sandbox's own post-turn call to
-      // /api/internal/agent/runs/:runId/docs be reconciled without any server-side
-      // baseline storage. Skipped for claim-scoped runs (see buildAgentEnv).
-      // opencode has no file tools, so it gets no materialized tree (docs stay reachable through the MCP tools).
-      const docMaterial = scope || harness === "opencode" ? undefined : await materializeDocTree(workspaceId)
-      const manifestFiles = docMaterial
-        ? [{ path: DOC_MANIFEST_FILE, content: JSON.stringify(signDocManifest(run.id, workspaceId, docMaterial.baseline)) }]
-        : []
       await sandbox.writeFiles([
         { path: "entry.ts", content: entryScript },
         ...entryModules,
@@ -889,11 +907,21 @@ export async function POST(request: NextRequest) {
         detached: true,
         timeoutMs: budgetMs,
       })
+      launchMayBeInFlight = false
+      if (launchReservation) {
+        await releasePersistentSandboxLaunch(prisma, conversationIdResolved, launchReservation)
+        launchReservation = null
+      }
       // QUEUED → RUNNING only now: before this, there was nothing to revoke or
       // stop, and a run that dies short of here is collected off `statusChangedAt`.
       await markAgentRunStarted({ prisma, runId: run.id, apiKeyId, sandboxName: runSandboxName })
     } catch (error) {
-      console.error("[agent-turn] detached run failed to start", { runId: run.id, error })
+      if (launchReservation && (!launchMayBeInFlight || (error instanceof Error && error.name === PERSISTENT_SANDBOX_LOOKUP_FAILED))) {
+        await releasePersistentSandboxLaunch(prisma, conversationIdResolved, launchReservation).catch((releaseError) => {
+          console.error("[agent-turn] launch reservation release failed", { runId: run.id, releaseError })
+        })
+      }
+      console.error("[agent-turn] detached run failed to start", { runId: run.id, persistentSandboxReserved: Boolean(launchReservation), error })
       // `apiKeyId` is not on the row yet, so finalize's own revocation cannot see
       // it — revoke here, then let finalize write the failure transcript, release
       // the interview claim, and stop the sandbox by its derived name.
@@ -948,7 +976,8 @@ export async function POST(request: NextRequest) {
         const minted = await analysisStep(() => mintAgentMcpKey(userId, workspaceId, scope), deadline, abort, late => revokeAgentMcpKey(late.apiKeyId))
         apiKeyId = minted.apiKeyId
         const token = minted.token
-        const githubEnv = await mintAgentGithubEnv(await readWorkspaceAgentRepos(prisma, workspaceId))
+        const githubConfig = await readWorkspaceAgentGithub(prisma, workspaceId)
+        const githubEnv = await mintAgentGithubEnv(githubConfig.repos, githubConfig.access)
         const preparedPacks = await step(() => prepareCapabilityPacksForTurn(activePacks, { get: (pathname) => getCapabilityPackArtifactStorage().get(pathname) }))
         packProvenance = preparedPacks.provenanceJson
         sse("status", { phase: "booting", conversationId: conversationIdResolved })

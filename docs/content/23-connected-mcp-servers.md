@@ -20,7 +20,7 @@ a connector's authorization also exists at the provider.
 
 ## Connect a server
 
-1. Open **Settings → Agents** and find **Connected MCP servers**.
+1. Open **Settings → My agents** (in the Account group) and find **Connected MCP servers**.
 2. Choose **Connect** next to the server you want. Compass sends you to that
    provider's own sign-in and consent screen.
 3. Approve there. The provider returns you to this page, which then shows the
@@ -230,7 +230,7 @@ Until `COMPASS_GOOGLE_CONNECTOR` is set, Google Drive shows as **Not configured
 on this deployment** and cannot be connected. If the connector is not linked to
 the project or environment, connecting fails with a message naming that cause.
 Connecting Drive through the earlier Compass-hosted flow is gone: anyone who
-connected before the move to Connect reconnects once in Settings → Agents.
+connected before the move to Connect reconnects once in Settings → My agents.
 
 The same variable enables **Continue with Google** on the sign-in page; with it
 unset that button is hidden and magic link and passkey sign-in are unaffected.

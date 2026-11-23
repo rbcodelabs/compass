@@ -12,7 +12,7 @@ import {
   type RawSearchParams,
 } from "@/lib/roadmap-views/schema";
 import { RoadmapToolbar } from "@/components/roadmap/cross-workspace/roadmap-toolbar";
-import { RoadmapBoardResults, RoadmapTimelineResults } from "@/components/roadmap/cross-workspace/roadmap-results";
+import { RoadmapBoardResults, RoadmapTableResults, RoadmapTimelineResults } from "@/components/roadmap/cross-workspace/roadmap-results";
 
 export const metadata = { title: "Roadmap · All workspaces" };
 
@@ -48,12 +48,19 @@ export default async function OrgRoadmapPage({ params, searchParams }: OrgRoadma
   const state = withoutGalleryOnlyDisplay(resolveRoadmapState(query, savedView));
   const readableIds = actor.workspaces.map((w) => w.id);
 
-  const [facets, { items, truncated }] = await Promise.all([
+  const [facets, { items, truncated, fieldSearchIncomplete }] = await Promise.all([
     loadRoadmapFacets(readableIds),
     loadCrossWorkspaceRoadmap(readableIds, state.filters, state.display),
   ]);
 
-  const groups = groupRoadmapItems(items, state.display.groupBy, state.filters, facets.workspaces);
+  // A saved view can name a field no workspace defines any more; it then degrades to the built-in grouping / no column.
+  const fieldByKey = new Map(facets.fields.map((f) => [f.key, f]));
+  const shownFields = state.display.fields.flatMap((key) => fieldByKey.get(key) ?? []);
+  const groupField = state.display.groupByField ? (fieldByKey.get(state.display.groupByField) ?? null) : null;
+  const groups = groupRoadmapItems(items, state.display.groupBy, state.filters, facets.workspaces, groupField);
+  // The grouping field is the heading already; repeating it on every card is noise.
+  const cardFields = shownFields.filter((f) => f.key !== groupField?.key);
+  const groupLabel = groupField ? "field" : state.display.groupBy;
   const modified = savedView !== null && roadmapStateKey(state) !== roadmapStateKey(savedView);
 
   return (
@@ -78,16 +85,24 @@ export default async function OrgRoadmapPage({ params, searchParams }: OrgRoadma
         </p>
       )}
 
+      {fieldSearchIncomplete && (
+        <p role="status" className="mx-4 mt-4 rounded-lg border border-status-warning/30 bg-status-warning-surface px-3 py-2 text-sm text-status-warning md:mx-6">
+          Custom field search reached its limit. Narrow by workspace or other filters to see complete results.
+        </p>
+      )}
+
       {items.length === 0 ? (
         <div className="p-6">
           <p data-testid="cross-roadmap-empty" className="rounded-lg border border-dashed border-border-default p-6 text-sm text-text-secondary">
-            No roadmap items match these filters.
+            {fieldSearchIncomplete ? "No matches among the items searched." : "No roadmap items match these filters."}
           </p>
         </div>
       ) : state.display.view === "timeline" ? (
-        <RoadmapTimelineResults orgSlug={orgSlug} groups={groups} groupBy={state.display.groupBy} />
+        <RoadmapTimelineResults orgSlug={orgSlug} groups={groups} groupBy={groupLabel} />
+      ) : state.display.view === "table" ? (
+        <RoadmapTableResults orgSlug={orgSlug} groups={groups} groupBy={groupLabel} fields={shownFields} />
       ) : (
-        <RoadmapBoardResults orgSlug={orgSlug} groups={groups} groupBy={state.display.groupBy} />
+        <RoadmapBoardResults orgSlug={orgSlug} groups={groups} groupBy={groupLabel} fields={cardFields} />
       )}
     </div>
   );

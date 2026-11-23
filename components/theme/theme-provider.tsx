@@ -4,7 +4,9 @@ import * as React from "react"
 
 import {
   THEME_STORAGE_KEY,
+  clearThemeColorMeta,
   getResolvedTheme,
+  syncThemeColorMeta,
   isThemePreference,
   type ThemePreference,
 } from "@/lib/theme"
@@ -24,6 +26,7 @@ function applyTheme(preference: ThemePreference) {
   document.documentElement.classList.toggle("dark", resolved === "dark")
   document.documentElement.dataset.theme = resolved
   document.documentElement.style.colorScheme = resolved
+  syncThemeColorMeta(resolved)
 }
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
@@ -38,6 +41,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
       document.documentElement.classList.remove("dark")
       document.documentElement.removeAttribute("data-theme")
       document.documentElement.style.removeProperty("color-scheme")
+      clearThemeColorMeta()
     }
   }, [])
 

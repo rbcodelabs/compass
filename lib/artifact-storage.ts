@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto"
+import { hostname } from "node:os"
 import { del, get, put } from "@vercel/blob"
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises"
 import path from "node:path"
@@ -96,7 +98,7 @@ export function shouldUseLocalStorage(): boolean {
 
 /** Local development uses private filesystem storage; deployed environments
  * use authenticated private Vercel Blob. The interface is injected in tests. */
-export function getArtifactStorage(): ArtifactStorage {
+function rawArtifactStorage(): ArtifactStorage {
   if (shouldUseLocalStorage()) return localStorage
   // Resolve only for actual I/O, so deleting a workspace without HTML artifacts
   // does not require Blob configuration. Never inherit the public image token.
@@ -116,7 +118,7 @@ export function getCapabilityPackArtifactStorage(): ArtifactStorage {
   return createVercelBlobStorage(token)
 }
 
-export function getResearchArtifactStorage(): ArtifactStorage {
+function rawResearchStorage(): ArtifactStorage {
   if (shouldUseLocalStorage()) return localStorage
   const token = process.env.RESEARCH_BLOB_READ_WRITE_TOKEN?.trim()
   if (!token) throw new Error("Research Blob storage is not configured")
@@ -138,4 +140,50 @@ export function getAgentSessionStorage(): ArtifactStorage {
 /** Whether a session transcript can be stored at all on this deployment. */
 export function agentSessionStorageConfigured(): boolean {
   return Boolean(shouldUseLocalStorage() || process.env.AGENT_SESSION_BLOB_READ_WRITE_TOKEN?.trim())
+}
+
+
+export function privateProviderIdentity(store: "artifact" | "research") {
+  if (shouldUseLocalStorage()) return { provider: "disk", namespace: hostname() + ":" + LOCAL_ROOT }
+  const token = store === "artifact" ? process.env.ARTIFACT_BLOB_READ_WRITE_TOKEN : process.env.RESEARCH_BLOB_READ_WRITE_TOKEN
+  const id = token?.trim().match(/^vercel_blob_rw_([a-zA-Z0-9-]+)_/i)?.[1]
+  if (!id) throw new Error("Private provider namespace is unavailable")
+  return { provider: "blob", namespace: id.toLowerCase() }
+}
+
+function mappedStorage(provider: ArtifactStorage, store: "artifact" | "research"): ArtifactStorage {
+  async function resolve(path: string) {
+    const [root, workspaceId] = path.split("/")
+    if (!(store === "research" ? root === "research" : root === "docs" || root === "artifacts")) return null
+    if (!workspaceId || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(workspaceId)) return null
+    const [{ default: getPrisma }, { lookupImportAssetMapping }] = await Promise.all([
+      import("@/lib/db"), import("@/lib/workspace-export/asset-journal"),
+    ])
+    return await lookupImportAssetMapping(getPrisma(), workspaceId, store, path, () => privateProviderIdentity(store))
+  }
+  return {
+    async put(path, bytes, contentType, options) {
+      const mapping = await resolve(path)
+      if (mapping) {
+        if (options?.overwrite !== false) throw new Error("Cannot overwrite a published import asset")
+        if (createHash("sha256").update(bytes).digest("hex") !== mapping.digest) {
+          if (await provider.get(mapping.path)) return { pathname: path, created: false }
+          throw new Error("Recreated import asset differs from its verified content")
+        }
+        const result = await provider.put(mapping.path, bytes, contentType, options)
+        return { pathname: path, created: result.created }
+      }
+      return provider.put(path, bytes, contentType, options)
+    },
+    async get(path) { return provider.get((await resolve(path))?.path ?? path) },
+    async del(path) { await provider.del((await resolve(path))?.path ?? path) },
+  }
+}
+
+export function getArtifactStorage(): ArtifactStorage {
+  return mappedStorage(rawArtifactStorage(), "artifact")
+}
+
+export function getResearchArtifactStorage(): ArtifactStorage {
+  return mappedStorage(rawResearchStorage(), "research")
 }

@@ -18,7 +18,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
 import { MentionEditor, type MentionOption, type MentionOptions } from "@/components/docs/mention-editor"
-import { mentionRoles, suggestTaskTitle, uniqueMentions, type MentionRef } from "@/lib/comment-mentions"
+import { suggestTaskTitle, uniqueMentions, type MentionRef } from "@/lib/comment-mentions"
 import { cn } from "@/lib/utils"
 import type { TaskPriority } from "@/lib/types"
 
@@ -54,6 +54,16 @@ interface DocCommentComposerProps {
   onBodyChange?: (body: string) => void
   /** Blocks posting (for example while the surrounding thread is still loading). */
   disabled?: boolean
+  /** Host hooks for the editor itself: the Conversations section keeps its own test id, Enter-to-send and compact look. */
+  editorTestId?: string
+  editorClassName?: string
+  submitOnEnter?: boolean
+  /** Whether "Create task" starts on when someone is mentioned. Docs and Discussion keep true; the Conversations section opts in (false). */
+  defaultTaskOn?: boolean
+  /** Mentionable but never a task assignee (the built-in workspace agent has no task queue). They still notify and still render as chips. */
+  excludedAssigneeIds?: string[]
+  /** Replaces the sub-line under the task toggle, for hosts whose plain path is not a notification-only mention. */
+  taskToggleHint?: string
   onSubmit: (payload: ComposerPayload) => Promise<ComposerResult>
   onCancel?: () => void
 }
@@ -73,6 +83,11 @@ const ERROR_COPY: Record<string, string> = {
   INVALID_PRIORITY: "Choose a priority from the list.",
   INVALID_DUE_DATE: "That due date is not a real date.",
   TASK_FAILED: "The task could not be created, so the comment was not posted.",
+  COMMENT_FAILED: "The comment could not be posted. Please try again.",
+  EMPTY_BODY: "Write something before posting.",
+  PARENT_IS_REPLY: "You can only reply to the first comment of a thread.",
+  PARENT_NOT_FOUND: "The comment you are replying to is no longer there.",
+  AGENT_SCOPE_CONFIRMATION_REQUIRED: "Confirm what this agent will receive before assigning it.",
 }
 
 function chipClass(kind: "user" | "agent", outside: boolean) {
@@ -82,9 +97,10 @@ function chipClass(kind: "user" | "agent", outside: boolean) {
 export function DocCommentComposer({
   options, confirmedAgentIds, docTitle, targetNoun = "doc", anchorText, placeholder = "Add a comment…", ariaLabel = "Comment",
   idleLabel, compact, autoFocus, disabled, initialBody = "", onBodyChange, onSubmit, onCancel,
+  editorTestId = "doc-comment-editor", editorClassName, submitOnEnter, defaultTaskOn = true, excludedAssigneeIds, taskToggleHint,
 }: DocCommentComposerProps) {
   const [body, setBody] = useState(initialBody)
-  const [taskOn, setTaskOn] = useState(true)
+  const [taskOn, setTaskOn] = useState(defaultTaskOn)
   const [title, setTitle] = useState("")
   const [titleTouched, setTitleTouched] = useState(false)
   const [due, setDue] = useState("")
@@ -109,8 +125,15 @@ export function DocCommentComposer({
     return map
   }, [options])
 
-  const mentions = useMemo(() => uniqueMentions(body), [body])
-  const roles = useMemo(() => mentionRoles(body, promoted), [body, promoted])
+  const allMentions = useMemo(() => uniqueMentions(body), [body])
+  const excluded = useMemo(() => new Set((excludedAssigneeIds ?? []).map(id => id.toLowerCase())), [excludedAssigneeIds])
+  // Mentions that can hold a task. An excluded one is still mentioned, but is never the assignee, never a watcher row.
+  const mentions = useMemo(() => allMentions.filter(ref => !(ref.kind === "agent" && excluded.has(ref.id.toLowerCase()))), [allMentions, excluded])
+  const roles = useMemo(() => {
+    const wanted = promoted ? mentions.find(ref => ref.kind === promoted.kind && ref.id === promoted.id.toLowerCase()) : undefined
+    const assignee = wanted ?? mentions[0] ?? null
+    return { assignee, watchers: mentions.filter(ref => ref !== assignee) }
+  }, [mentions, promoted])
   const assignee = roles.assignee
   const assigneeOption = assignee ? known.get(`${assignee.kind}:${assignee.id}`) : undefined
   const assignable = Boolean(assigneeOption && !assigneeOption.outsideWorkspace)
@@ -139,6 +162,12 @@ export function DocCommentComposer({
         agentScopeConfirmed,
       })
       if (!result.ok) {
+        if (result.error === "AGENT_SCOPE_CONFIRMATION_REQUIRED" && assigneeKey) {
+          // The server does not know this agent yet: show the scope step rather than an error.
+          confirmOpenedAt.current = Date.now()
+          setConfirmingFor(assigneeKey)
+          return
+        }
         setError(ERROR_COPY[result.error] ?? result.message)
         setConfirmingFor(null)
         return
@@ -146,7 +175,7 @@ export function DocCommentComposer({
       // Reset for the next comment: remount the editor, clear task fields.
       setEditorKey(key => key + 1)
       setBody(""); onBodyChange?.(""); setTitle(""); setTitleTouched(false); setDue(""); setPriority("MEDIUM")
-      setPromoted(null); setMentionOnlyFor(null); setTaskOn(true); setConfirmingFor(null)
+      setPromoted(null); setMentionOnlyFor(null); setTaskOn(defaultTaskOn); setConfirmingFor(null)
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not post the comment.")
     } finally {
@@ -179,7 +208,10 @@ export function DocCommentComposer({
         onChange={value => { setBody(value); onBodyChange?.(value); setError(null); setConfirmingFor(null) }}
         onSubmitShortcut={submit}
         onEscape={onCancel}
-        testId="doc-comment-editor"
+        testId={editorTestId}
+        className={editorClassName}
+        // Enter must never create a task by accident: with a task about to be made the person sends with the button.
+        submitOnEnter={submitOnEnter && !willCreateTask}
       />
 
       {mentions.length > 0 && !confirmingAgent && (
@@ -209,7 +241,7 @@ export function DocCommentComposer({
                 />
                 <span className="min-w-0 text-sm leading-tight">
                   <b className="block break-words text-text-primary [overflow-wrap:anywhere]">Assign as task to @{assignee ? name(assignee) : ""}</b>
-                  <small className="text-xs text-text-subtle">Uncheck to send a plain mention (notification only)</small>
+                  <small className="text-xs text-text-subtle">{taskToggleHint ?? "Uncheck to send a plain mention (notification only)"}</small>
                 </span>
               </label>
               {taskOn && (
@@ -285,7 +317,7 @@ export function DocCommentComposer({
             <b>{name(assignee)}</b> will receive:
           </p>
           <ul className="space-y-1 text-[13px]">
-            <li className="flex gap-1.5"><Check className="mt-0.5 size-3.5 shrink-0 text-status-success" aria-hidden /> {cloudAgent ? "A task, and a run started as this agent, naming " : "A task in its queue, naming "}{isDoc ? "this doc and the highlighted passage" : `this ${targetNoun} and your comment`}</li>
+            <li className="flex gap-1.5"><Check className="mt-0.5 size-3.5 shrink-0 text-status-success" aria-hidden /> {cloudAgent && isDoc ? "A task, and a run started as this agent, naming " : "A task in its queue, naming "}{isDoc ? "this doc and the highlighted passage" : `this ${targetNoun} and your comment`}</li>
             <li className="flex gap-1.5"><Check className="mt-0.5 size-3.5 shrink-0 text-status-success" aria-hidden /> {isDoc ? "This doc" : `This ${targetNoun}`}, its comment thread and linked items, read through its workspace access</li>
             {known.get("agent:" + assignee.id)?.access === "WRITE" ? (
               <li className="flex gap-1.5"><Check className="mt-0.5 size-3.5 shrink-0 text-status-success" aria-hidden /> Its Write grant lets it reply in the thread and change content in this workspace</li>
@@ -294,7 +326,7 @@ export function DocCommentComposer({
             )}
           </ul>
           <p className="text-xs text-text-subtle">
-            {cloudAgent
+            {cloudAgent && isDoc
               ? "Assigning starts a run as this agent, within its access and run limits, if you are allowed to run it. If a run can't start, the task is still assigned and you are told why."
               : "Nothing runs on its own: the agent picks the task up from its queue."}
           </p>

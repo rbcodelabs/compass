@@ -766,6 +766,17 @@ export async function processDueOrchestratorWakeups(params: {
         })
         summary.batchesDispatched += 1
         summary.wakeupsDispatched += claimedIds.length
+      } else if (outcome.status === "already_running") {
+        // The run or sandbox fence won after this batch was claimed. Restore
+        // just the claimed generations, since a new event may have superseded them.
+        const claimedGeneration = readyRows
+          .filter((item) => claimedIds.includes(item.id))
+          .map(({ id, generation }) => ({ id, generation }))
+        const postponed = await prisma.agentOrchestratorWakeup.updateMany({
+          where: { OR: claimedGeneration, state: "DISPATCHED", dispatchedRunId: null },
+          data: { state: "BATCH_WAIT", updatedAt: now },
+        })
+        summary.heldBusy += postponed.count
       } else {
         await prisma.agentOrchestratorWakeup.updateMany({
           where: { id: { in: claimedIds } },

@@ -181,6 +181,8 @@ Moving a Solution to **In delivery** (from the Discovery card, its detail panel,
 
 On touch screens, swipe over card content to scroll vertically or move horizontally between board columns. Use the dotted drag handle to move a card instead. On desktop, column headers stay visible while their cards scroll.
 
+On desktop, a vertical mouse-wheel turn over a wide board moves it sideways when the area under the pointer has no vertical scrolling of its own. Scrollable columns, nested tables and a vertically scrollable board keep their native wheel behavior, including when the pointer is over an icon. Nested scroll areas keep wheel input at their boundaries. Mainly horizontal trackpad gestures and Shift+wheel remain native; vertical-dominant trackpad input follows the same rules as a mouse wheel. On narrower screens, vertical wheel input keeps its native vertical behavior so you can navigate tall columns. Touch and keyboard scrolling keep their native behavior.
+
 Within each horizon, drag cards to reorder them. Order within a horizon communicates relative priority: items higher in the list are higher priority. This ordering is persisted and visible to all workspace members.
 
 ## Launch Tiers & Checklists
@@ -202,6 +204,17 @@ Views are **personal** by default. The owner can share a view with the workspace
 ## All Roadmaps (Cross-Workspace)
 
 **All roadmaps**, in the workspace picker (the menu at the top of the sidebar) and in the account menu on a phone, opens a read-only roadmap at `/[org]/roadmap` that combines every workspace in the organization you can read. Filter by workspace, horizon, squad, status, date range, or linked key result or solution, then group and sort the results. Each item links back to its own workspace, where you edit it. The same saved views menu is available here.
+
+### Fields, filters and grouping across workspaces
+
+Custom fields on roadmap items are defined per workspace, so All roadmaps matches them **by type and name** (case-insensitive): a "Status" picklist in two workspaces is one "Status" field here, while a text field also called "Status" is a separate one. Picklist options are merged by label.
+
+- **Fields** menu: choose which fields appear as chips on board cards and as columns in the table. Nothing is built in, so what counts as "status" or "priority" is whatever fields your workspaces define.
+- **Filters**: every picklist field gets its own filter. Several values in one field are OR, and different fields are AND.
+- **Group by**: besides horizon, workspace and squad, you can group by any picklist field. A multi-select item shows under each of its values.
+- **Layouts**: board, timeline and table.
+
+All of this is saved with the view, so a "Roadmap review" view is just a saved choice of fields, filters and grouping.
 
 Because `roadmap` and `settings` are used by these organization pages, they cannot be used as workspace slugs.
 

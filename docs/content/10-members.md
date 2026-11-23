@@ -58,7 +58,7 @@ Open **Organization Settings → Workspaces** and click **Create workspace**. Th
 
 Either way, there is no separate invite step for the people who are seeded, and you can adjust individual roles afterwards from that workspace's own **Settings → Members**. Agents that create a workspace with `create_workspace` always use the default (everyone in the organization).
 
-On success you land directly in the new workspace's OKRs page, and it appears in the workspace switcher at the top of the sidebar.
+On success you land directly on the new workspace’s Home page, and it appears in the workspace switcher at the top of the sidebar.
 
 Your organization's *first* workspace is created for you when you sign up, as part of onboarding — this page is for adding further ones later.
 

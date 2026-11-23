@@ -3,7 +3,7 @@
 /**
  * Click-to-edit date field — same commit-on-blur/Enter/Escape shape as
  * panel-parts' EditableText, but for a native `<input type="date">` instead
- * of text. Used by TaskDetail for `dueDate`.
+ * of text. Used by TaskDetail for start and due dates.
  */
 import { useRef, useState } from "react";
 import { patchEntityField, type EditContext } from "@/components/panels/panel-parts";
@@ -33,9 +33,11 @@ type Props = {
 export function InlineDateField({ value, field, edit, placeholder, compact = false }: Props) {
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(false);
   const ref = useRef<HTMLInputElement | null>(null);
+  const label = field === "startDate" ? "Start date" : "Due date";
 
-  const begin = () => setEditing(true);
+  const begin = () => { setError(false); setEditing(true); };
 
   const commit = async () => {
     setEditing(false);
@@ -53,7 +55,7 @@ export function InlineDateField({ value, field, edit, placeholder, compact = fal
       );
       edit.onSaved(res.data);
     } catch {
-      // leave as-is on failure
+      setError(true);
     } finally {
       setSaving(false);
     }
@@ -78,12 +80,13 @@ export function InlineDateField({ value, field, edit, placeholder, compact = fal
   }
 
   return (
+    <>
     <button
       type="button"
       onClick={begin}
       disabled={saving}
       title="Click to edit"
-      aria-label={`Due date: ${value ? formatDisplay(value) : "not set"}`}
+      aria-label={`${label}: ${value ? formatDisplay(value) : "not set"}`}
       className={`group/edit text-left rounded-md -mx-1 px-1 hover:bg-muted/60 transition-colors ${compact ? "min-h-7 [&>span]:text-xs" : ""} ${saving ? "opacity-60" : ""}`}
     >
       {value ? (
@@ -92,5 +95,7 @@ export function InlineDateField({ value, field, edit, placeholder, compact = fal
         <span className="text-sm text-muted-foreground italic">{placeholder ?? "Set a due date…"}</span>
       )}
     </button>
+    {error && <span role="alert" className="text-sm text-destructive">Could not save date. The date range may be invalid; check that the start date is on or before the due date, or try again.</span>}
+    </>
   );
 }

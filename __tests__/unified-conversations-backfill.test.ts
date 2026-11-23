@@ -59,6 +59,8 @@ describe("backfillUnifiedConversations", () => {
         upsert: conversationUpsert,
       },
       agentMessage: {
+        // The mirror reads which of these messages already exist (to leave editedAt alone when the text is unchanged).
+        findMany: vi.fn().mockResolvedValue([]),
         upsert: messageUpsert,
       },
     } as never
@@ -89,6 +91,7 @@ describe("backfillUnifiedConversations", () => {
       role: "user",
       authorName: "Rick Bowman",
       authorType: "HUMAN",
+      messageKind: "COMMENT",
     })
     expect(messageUpsert.mock.calls[1]?.[0]?.create).toMatchObject({
       id: replyId,

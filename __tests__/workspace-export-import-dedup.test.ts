@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto"
 import { zipSync } from "fflate"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import type { BlobAdapters } from "@/lib/workspace-export/blobs"
 import { BundleReader } from "@/lib/workspace-export/bundle"
 import { exportWorkspaceToBuffer } from "@/lib/workspace-export/export"
@@ -18,7 +18,7 @@ function normVal(v: unknown): unknown {
   return v
 }
 
-function createInMemoryPrisma(seed: Record<string, Row[]> = {}) {
+function createInMemoryPrisma(seed: Record<string, Row[]> = {}, missingVoteTable = false) {
   const modelByDelegate = new Map([...dmmfModels.keys()].map((m) => [delegateKey(m), m]))
   const tables: Record<string, Row[]> = {}
   for (const [model, rows] of Object.entries(seed)) {
@@ -70,6 +70,7 @@ function createInMemoryPrisma(seed: Record<string, Row[]> = {}) {
         orderBy?: { id?: "asc" | "desc" }
         select?: Record<string, boolean>
       } = {}) {
+        if (model === "DecisionVote" && missingVoteTable) throw { code: "P2021" }
         let list = rows().filter((r) => matches(r, args.where))
         if (args.orderBy?.id === "asc") {
           list = [...list].sort((a, b) => String(a.id).localeCompare(String(b.id)))
@@ -171,6 +172,50 @@ const noopBlobs: BlobAdapters = {
 }
 
 describe("importWorkspaceBundle unique-key deduplication on collapsed users", () => {
+  it("exports a workspace before the vote table exists", async () => {
+    const org = randomUUID(), workspace = randomUUID()
+    const db = createInMemoryPrisma({ Organization: [{ id: org }], Workspace: [{ id: workspace, organizationId: org, slug: "ws", name: "WS" }] }, true)
+    const bundle = await exportWorkspaceToBuffer(db.client, workspace, noopBlobs)
+    expect(new BundleReader(bundle).manifest().counts.DecisionVote).toBe(0)
+  })
+  it.each(["none", "one", "collision", "duplicate-first", "duplicate-last", "content-collision"])("refuses unsafe vote identities before writing any workspace data (%s)", async (mode) => {
+    const sourceOrg = randomUUID(), targetOrg = randomUUID(), workspace = randomUUID(), importer = randomUUID()
+    const request = randomUUID(), revision = randomUUID(), matchedUser = randomUUID(), matchedSecond = randomUUID()
+    const voters = [randomUUID(), randomUUID()]
+    const db = createInMemoryPrisma({
+      Organization: [{ id: sourceOrg }, { id: targetOrg }],
+      Workspace: [{ id: workspace, organizationId: sourceOrg, slug: "votes", name: "Votes" }],
+      User: [...voters.map((id, i) => ({ id, email: `voter${mode === "collision" ? 0 : i}@source.example` })), { id: importer, email: "importer@target.example" }, ...(mode !== "none" ? [{ id: matchedUser, email: "voter0@source.example" }] : []), ...(["duplicate-first", "duplicate-last", "content-collision"].includes(mode) ? [{ id: matchedSecond, email: "voter1@source.example" }] : [])],
+      OrganizationMember: [{ id: randomUUID(), organizationId: targetOrg, userId: importer, role: "ADMIN" }, ...(mode !== "none" ? [{ id: randomUUID(), organizationId: targetOrg, userId: matchedUser, role: "MEMBER" }] : []), ...(["duplicate-first", "duplicate-last", "content-collision"].includes(mode) ? [{ id: randomUUID(), organizationId: targetOrg, userId: matchedSecond, role: "MEMBER" }] : [])],
+      ReviewRequest: [{ id: request, workspaceId: workspace, currentRevisionId: revision }],
+      ReviewRevision: [{ id: revision, requestId: request }],
+      DecisionVote: voters.map((voterUserId, i) => ({ id: randomUUID(), workspaceId: workspace, requestId: request, revisionId: revision, questionIndex: 0, chosenOption: i ? "No" : "Yes", voterUserId, createdAt: new Date(), updatedAt: new Date() })),
+    })
+    let bundle = await exportWorkspaceToBuffer(db.client, workspace, noopBlobs)
+    if (["duplicate-first", "duplicate-last", "content-collision"].includes(mode)) {
+      const reader = new BundleReader(bundle)
+      const files: Record<string, Uint8Array> = {}
+      for (const name of reader.list("")) files[name] = reader.read(name)!
+      if (mode === "content-collision") {
+        const entry = reader.list("data/ReviewRequest.")[0]
+        const row = JSON.parse(reader.readText(entry)!.trim())
+        row.id = voters[0]
+        files[entry] = new TextEncoder().encode(JSON.stringify(row) + "\n")
+      } else {
+        const manifest = reader.manifest()
+        const original = manifest.users.find((user) => user.id === voters[0])!
+        const duplicate = { ...original, email: "unmatched@source.example" }
+        if (mode === "duplicate-first") manifest.users.unshift(duplicate)
+        else manifest.users.push(duplicate)
+        files["manifest.json"] = new TextEncoder().encode(JSON.stringify(manifest))
+      }
+      bundle = Buffer.from(zipSync(files))
+    }
+    await expect(importWorkspaceBundle(db.client, bundle, { organizationId: targetOrg, importerUserId: importer, blobs: noopBlobs, nonce: "unmatched-votes" })).rejects.toThrow(/voter.*match/i)
+    expect(db.tables.Workspace).toHaveLength(1)
+    expect(db.tables.DecisionVote).toHaveLength(2)
+    expect(db.tables.DecisionVote.every((row) => row.voterUserId !== importer)).toBe(true)
+  })
   it("deduplicates CardSortProposal and Follow rows when 5 unmatched source users collapse onto the importer", async () => {
     const srcOrgId = randomUUID()
     const dstOrgId = randomUUID()
@@ -519,4 +564,333 @@ describe("importWorkspaceBundle unique-key deduplication on collapsed users", ()
       "Skipped 1 Follow row(s) that would duplicate another row once people without an account in this organization were attributed to you",
     )
   })
+})
+
+it("aborts workspace publication when writing its import result fails", async () => {
+  const orgId = randomUUID()
+  const wsId = randomUUID()
+  const userId = randomUUID()
+  const db = createInMemoryPrisma({
+    Organization: [{ id: orgId, slug: "org", name: "Org" }],
+    User: [{ id: userId, name: "Importer", email: "importer@example.com" }],
+    OrganizationMember: [{ id: randomUUID(), organizationId: orgId, userId, role: "ADMIN" }],
+    Workspace: [{ id: wsId, organizationId: orgId, name: "Source", slug: "source", ssoEnabled: false }],
+  })
+  const bundle = await exportWorkspaceToBuffer(db.client, wsId, noopBlobs)
+  let published: string | undefined
+  db.client.$transaction = async (fn: (tx: unknown) => Promise<void>) => {
+    const snapshot = structuredClone(db.tables)
+    try {
+      await fn(db.client)
+    } catch (error) {
+      Object.assign(db.tables, snapshot)
+      throw error
+    }
+  }
+  await expect(importWorkspaceBundle(db.client, bundle, {
+    organizationId: orgId, importerUserId: userId, blobs: noopBlobs, nonce: "atomic",
+    async publishResult(tx, report) {
+      expect(tx).toBe(db.client)
+      published = report.workspaceId
+      expect(db.tables.Workspace.some((row) => row.id === published)).toBe(true)
+      throw new Error("result publication failed")
+    },
+  })).rejects.toThrow("result publication failed")
+  expect(published).toBeTruthy()
+  expect(db.tables.Workspace.map((row) => row.id)).toEqual([wsId])
+})
+
+it("preserves the import when the outcome of workspace publication cannot be read", async () => {
+  const orgId = randomUUID()
+  const wsId = randomUUID()
+  const userId = randomUUID()
+  const db = createInMemoryPrisma({
+    Organization: [{ id: orgId, slug: "org", name: "Org" }],
+    User: [{ id: userId, name: "Importer", email: "importer@example.com" }],
+    OrganizationMember: [{ id: randomUUID(), organizationId: orgId, userId, role: "ADMIN" }],
+    Workspace: [{ id: wsId, organizationId: orgId, name: "Source", slug: "source", ssoEnabled: false }],
+  })
+  const bundle = await exportWorkspaceToBuffer(db.client, wsId, noopBlobs)
+  const workspace = db.client.workspace as { findMany: (...args: unknown[]) => Promise<Row[]> }
+  let uncertain = false
+  db.client.workspace = {
+    ...workspace, async findMany(...args: unknown[]) {
+      if (uncertain) throw new Error("commit read unavailable")
+      return workspace.findMany(...args)
+    },
+  }
+  db.client.$transaction = async (fn: (tx: unknown) => Promise<void>) => {
+    await fn(db.client)
+    uncertain = true
+    throw new Error("commit response lost")
+  }
+  await expect(importWorkspaceBundle(db.client, bundle, {
+    organizationId: orgId, importerUserId: userId, blobs: noopBlobs, nonce: "uncertain",
+  })).rejects.toThrow(/outcome.*unknown/i)
+  expect(db.tables.Workspace).toHaveLength(2)
+  expect(db.tables.WorkspaceMember).toHaveLength(1)
+})
+
+it("persists a replay result when retry finds a previously imported workspace", async () => {
+  const org = randomUUID(), ws = randomUUID(), user = randomUUID()
+  const db = createInMemoryPrisma({
+    Organization: [{ id: org, name: "Org", slug: "org" }],
+    Workspace: [{ id: ws, organizationId: org, name: "Source", slug: "src", ssoEnabled: false }],
+    User: [{ id: user, name: "User", email: "user@example.com" }],
+    OrganizationMember: [{ id: randomUUID(), organizationId: org, userId: user, role: "ADMIN" }],
+  })
+  const bytes = await exportWorkspaceToBuffer(db.client, ws, noopBlobs)
+  const options = { organizationId: org, importerUserId: user, nonce: "legacy", blobs: noopBlobs }
+  const first = await importWorkspaceBundle(db.client, bytes, options)
+  let recorded = ""
+  await importWorkspaceBundle(db.client, bytes, { ...options, async recordExisting(report) { recorded = report.workspaceId } })
+  expect(recorded).toBe(first.workspaceId)
+})
+
+it("records the winner first seen after a duplicate publication before returning success", async () => {
+  const org = randomUUID(), ws = randomUUID(), user = randomUUID()
+  const db = createInMemoryPrisma({
+    Organization: [{ id: org, name: "Org", slug: "org" }],
+    Workspace: [{ id: ws, organizationId: org, name: "Source", slug: "src", ssoEnabled: false }],
+    User: [{ id: user, name: "User", email: "user@example.com" }],
+    OrganizationMember: [{ id: randomUUID(), organizationId: org, userId: user, role: "ADMIN" }],
+  })
+  const bytes = await exportWorkspaceToBuffer(db.client, ws, noopBlobs)
+  let destination = ""
+  let recorded = ""
+  db.client.$transaction = async () => {
+    db.tables.Workspace.push({ id: destination, organizationId: org, slug: "winner", name: "Winner" })
+    throw Object.assign(new Error("workspace already exists"), { code: "P2002" })
+  }
+  const result = await importWorkspaceBundle(db.client, bytes, {
+    organizationId: org, importerUserId: user, nonce: "concurrent", blobs: noopBlobs,
+    async bindWorkspace(id) { destination = id },
+    async recordExisting(report) { recorded = report.workspaceId },
+  })
+  expect(result.alreadyImported).toBe(true)
+  expect(recorded).toBe(result.workspaceId)
+})
+
+it("stops before writing imported rows if the applying transaction loses ownership", async () => {
+  const org = randomUUID(), ws = randomUUID(), user = randomUUID()
+  const db = createInMemoryPrisma({
+    Organization: [{ id: org, name: "Org", slug: "org" }],
+    Workspace: [{ id: ws, organizationId: org, name: "Source", slug: "src", ssoEnabled: false }],
+    User: [{ id: user, name: "User", email: "user@example.com" }],
+    OrganizationMember: [{ id: randomUUID(), organizationId: org, userId: user, role: "ADMIN" }],
+    Doc: [{ id: randomUUID(), workspaceId: ws, title: "Owned", content: "body" }],
+  })
+  const bytes = await exportWorkspaceToBuffer(db.client, ws, noopBlobs)
+  const { ImportOwnershipChanged } = await import("@/lib/workspace-export/lease")
+  const phases: string[] = []
+  await expect(importWorkspaceBundle(db.client, bytes, {
+    organizationId: org, importerUserId: user, nonce: "fence", blobs: noopBlobs,
+    async fenceWrite(tx, phase) {
+      expect(tx).toBe(db.client)
+      phases.push(phase)
+      throw new ImportOwnershipChanged()
+    },
+  })).rejects.toThrow(/ownership changed/i)
+  expect(phases).toEqual(["applying"])
+  expect(db.tables.Doc).toHaveLength(1)
+})
+
+it("writes private bytes to a reserved attempt key and refuses to publish unverified bytes", async () => {
+  const org = randomUUID(), ws = randomUUID(), user = randomUUID()
+  const db = createInMemoryPrisma({
+    Organization: [{ id: org, name: "Org", slug: "org" }],
+    Workspace: [{ id: ws, organizationId: org, name: "Source", slug: "src", ssoEnabled: false }],
+    User: [{ id: user, name: "User", email: "user@example.com" }],
+    OrganizationMember: [{ id: randomUUID(), organizationId: org, userId: user, role: "ADMIN" }],
+    Doc: [{ id: randomUUID(), workspaceId: ws, title: "Diagram", content: `![diagram](/api/docs/images/${ws}/${randomUUID()}.png)` }],
+  })
+  const source = { ...noopBlobs, artifact: { ...noopBlobs.artifact, get: async () => new Uint8Array([1]) } }
+  const bytes = await exportWorkspaceToBuffer(db.client, ws, source)
+  const calls: string[] = []
+  const target = { ...noopBlobs, artifact: { ...noopBlobs.artifact,
+    async put(pathname: string) { calls.push("put:" + pathname); return { pathname, created: true } },
+    async get(pathname: string) { calls.push("get:" + pathname); return new Uint8Array([2]) },
+  } }
+  await expect(importWorkspaceBundle(db.client, bytes, {
+    organizationId: org, importerUserId: user, nonce: "journal", blobs: target,
+    journal: {
+      async reserve() { calls.push("reserve"); return "attempt/diagram" },
+      async verify() { calls.push("verify") },
+    },
+  })).rejects.toThrow(/verification failed/i)
+  expect(calls).toEqual(["reserve", "put:attempt/diagram", "get:attempt/diagram"])
+  expect(db.tables.Workspace).toHaveLength(1)
+})
+
+describe("external-link import/export digest contract", () => {
+  it.each([undefined, "0".repeat(64)])("derives the digest instead of trusting a bundle digest %s", async (externalKeyHash) => {
+    const { createHash } = await import("node:crypto")
+    const organizationId = randomUUID()
+    const workspaceId = randomUUID()
+    const importerUserId = randomUUID()
+    const taskId = randomUUID()
+    const prefix = "https://example.com/" + workspaceId + "/"
+    const url = prefix + "a".repeat(1000 - prefix.length)
+    const db = createInMemoryPrisma({
+      Organization: [{id: organizationId, slug: "external-key-org", name: "External key org"}],
+      User: [{id: importerUserId, email: "importer@example.com", name: "Importer"}],
+      OrganizationMember: [{id: randomUUID(), organizationId, userId: importerUserId, role: "ADMIN"}],
+      Workspace: [{id: workspaceId, organizationId, slug: "source-links", name: "Source links", ssoEnabled: false}],
+      Task: [{id: taskId, workspaceId, title: "Task"}],
+      ExternalLink: [{id: randomUUID(), workspaceId, subjectType: "TASK", subjectId: taskId, provider: "OTHER", url, externalKey: url, externalKeyHash, title: "Long link", relation: "RELATED", source: "UI", createdById: null, createdAt: new Date(), updatedAt: new Date()}],
+    })
+    const bundle = await exportWorkspaceToBuffer(db.client, workspaceId, noopBlobs)
+    const report = await importWorkspaceBundle(db.client, bundle, {organizationId, importerUserId, blobs: noopBlobs, nonce: "external-key-digest-" + String(externalKeyHash)})
+    const imported = db.tables.ExternalLink.find(row => row.workspaceId === report.workspaceId)!
+    expect(imported.externalKey).toBe(url)
+    expect(imported.externalKeyHash).toBe(createHash("sha256").update(url, "utf8").digest("hex"))
+    expect(report.counts.ExternalLink).toBe(1)
+    const exportedAgain = await exportWorkspaceToBuffer(db.client, report.workspaceId, noopBlobs)
+    const reader = new BundleReader(exportedAgain)
+    expect([...reader.rows("ExternalLink")][0].externalKey).toBe(url)
+    expect([...reader.rows("ExternalLink")][0].externalKeyHash).toBe(imported.externalKeyHash)
+  })
+})
+
+
+describe("external-link import identity verification", () => {
+  async function fixture(urls: string[]) {
+    const organizationId = randomUUID(), workspaceId = randomUUID(), importerUserId = randomUUID(), taskId = randomUUID()
+    const db = createInMemoryPrisma({
+      Organization: [{id: organizationId, slug: "collision-org", name: "Collision org"}],
+      User: [{id: importerUserId, email: "importer@example.com", name: "Importer"}],
+      OrganizationMember: [{id: randomUUID(), organizationId, userId: importerUserId, role: "ADMIN"}],
+      Workspace: [{id: workspaceId, organizationId, slug: "collision-source", name: "Collision source", ssoEnabled: false}],
+      Task: [{id: taskId, workspaceId, title: "Task"}],
+      ExternalLink: urls.map(url => ({id: randomUUID(), workspaceId, subjectType: "TASK", subjectId: taskId, provider: "OTHER", url, externalKey: url, title: "Link", relation: "RELATED", source: "UI", createdAt: new Date(), updatedAt: new Date()})),
+    })
+    const bundle = await exportWorkspaceToBuffer(db.client, workspaceId, noopBlobs)
+    return {db, bundle, options: {organizationId, importerUserId, blobs: noopBlobs, nonce: "identity-verification"}}
+  }
+  it("rejects a digest collision before unique-key deduplication can hide a different full key", async () => {
+    const {db, bundle, options} = await fixture(["https://example.com/a", "https://example.com/b"])
+    const hashing = await import("@/lib/external-link-key")
+    const digest = vi.spyOn(hashing, "externalLinkKeyHash").mockReturnValue("f".repeat(64))
+    try {
+      await expect(importWorkspaceBundle(db.client, bundle, options)).rejects.toThrow(/collision/i)
+    } finally { digest.mockRestore() }
+  })
+  it("rejects a different full key in the persisted import readback", async () => {
+    const {db, bundle, options} = await fixture(["https://example.com/a"])
+    const client = new Proxy(db.client, {get(target, property) {
+      const delegate = Reflect.get(target, property)
+      if (property !== "externalLink") return delegate
+      return {...delegate, async findMany(args: {select?: Row}) {
+        const rows = await delegate.findMany(args)
+        return args.select?.externalKeyHash ? rows.map((row: Row) => ({...row, externalKey: "https://example.com/different"})) : rows
+      }}
+    }})
+    await expect(importWorkspaceBundle(client, bundle, options)).rejects.toThrow(/identity readback/i)
+  })
+})
+
+it("keeps the first destination's task when another destination collides with its derived task ID", async () => {
+  const { unzipSync, strFromU8, strToU8 } = await import("fflate")
+  const organizationId = randomUUID(), workspaceId = randomUUID(), importerUserId = randomUUID()
+  const db = createInMemoryPrisma({
+    Organization: [{ id: organizationId, name: "Org", slug: "org" }],
+    OrganizationMember: [{ id: randomUUID(), organizationId, userId: importerUserId, role: "ADMIN" }],
+    User: [{ id: importerUserId, name: "Importer", email: "importer@example.com" }],
+    Workspace: [{ id: workspaceId, organizationId, name: "Source", slug: "src", ssoEnabled: false }],
+    Task: [{ id: randomUUID(), workspaceId, title: "Retain this task" }],
+  })
+  const bundle = await exportWorkspaceToBuffer(db.client, workspaceId, noopBlobs)
+  const options = { organizationId, importerUserId, blobs: noopBlobs, nonce: "collision" }
+  const winner = await importWorkspaceBundle(db.client, bundle, options)
+  const task = db.tables.Task.find(row => row.workspaceId === winner.workspaceId)
+  expect(task).toBeDefined()
+  const entries = unzipSync(bundle)
+  const otherSourceId = randomUUID()
+  for (const [path, bytes] of Object.entries(entries)) {
+    entries[path] = strToU8(strFromU8(bytes).replaceAll(workspaceId, otherSourceId))
+  }
+  await expect(importWorkspaceBundle(db.client, zipSync(entries), options)).rejects.toThrow()
+  expect(db.tables.Task).toContainEqual(task)
+})
+
+it("refuses to publish a document that would read unverified private bytes from its destination", async () => {
+  const organizationId = randomUUID(), workspaceId = randomUUID(), importerUserId = randomUUID()
+  const db = createInMemoryPrisma({
+    Organization: [{ id: organizationId, name: "Org", slug: "org" }],
+    Workspace: [{ id: workspaceId, organizationId, name: "Source", slug: "src", ssoEnabled: false }],
+    User: [{ id: importerUserId, name: "User", email: "user@example.com" }],
+    OrganizationMember: [{ id: randomUUID(), organizationId, userId: importerUserId, role: "ADMIN" }],
+    Doc: [{ id: randomUUID(), workspaceId, title: "Diagram", content: `![diagram](/api/docs/images/${workspaceId}/${randomUUID()}.png)` }],
+  })
+  const bytes = await exportWorkspaceToBuffer(db.client, workspaceId, noopBlobs)
+  await expect(importWorkspaceBundle(db.client, bytes, {
+    organizationId, importerUserId, blobs: noopBlobs, nonce: "missing-bytes",
+    journal: { reserve: vi.fn(), verify: vi.fn() },
+  })).rejects.toThrow(/private asset/i)
+  expect(db.tables.Workspace).toHaveLength(1)
+})
+
+it("bounds member batches and rolls back staged memberships when final publication fails", async () => {
+  const organizationId = randomUUID(), workspaceId = randomUUID(), importerUserId = randomUUID()
+  const members = Array.from({ length: 245 }, () => ({
+    id: randomUUID(), organizationId, userId: randomUUID(), role: "MEMBER",
+  }))
+  const db = createInMemoryPrisma({
+    Organization: [{ id: organizationId, name: "Org", slug: "org" }],
+    Workspace: [{ id: workspaceId, organizationId, name: "Source", slug: "src", ssoEnabled: false }],
+    User: [{ id: importerUserId, name: "User", email: "user@example.com" }],
+    OrganizationMember: members,
+  })
+  const bytes = await exportWorkspaceToBuffer(db.client, workspaceId, noopBlobs)
+  const sizes: number[] = []
+  const member = db.client.workspaceMember as {createMany(args: {data: Row[]}): Promise<unknown>}
+  db.client.workspaceMember = { ...member, async createMany(args: {data: Row[]}) {
+    sizes.push(args.data.length)
+    return member.createMany(args)
+  } }
+  db.client.$transaction = async (fn: (tx: unknown) => Promise<unknown>) => {
+    const snapshot = structuredClone(db.tables)
+    try { return await fn(db.client) } catch (error) {
+      for (const key of Object.keys(db.tables)) db.tables[key] = snapshot[key] ?? []
+      throw error
+    }
+  }
+  await expect(importWorkspaceBundle(db.client, bytes, {
+    organizationId, importerUserId, nonce: "members", blobs: noopBlobs, fenceWrite: async () => {},
+    publishResult: async () => { throw new Error("publication interrupted") },
+  })).rejects.toThrow("publication interrupted")
+  expect(sizes.reduce((sum,n) => sum+n, 0)).toBe(246)
+  expect(Math.max(...sizes)).toBeLessThanOrEqual(100)
+  expect(db.tables.WorkspaceMember).toHaveLength(0)
+})
+
+it("retries the first Doc after deleting its child in the last rollback batch", async () => {
+  const organizationId = randomUUID(), workspaceId = randomUUID(), importerUserId = randomUUID()
+  const ids = Array.from({ length: 101 }, () => randomUUID()).sort()
+  const db = createInMemoryPrisma({
+    Organization: [{ id: organizationId, name: "Org", slug: "org" }],
+    Workspace: [{ id: workspaceId, organizationId, name: "Source", slug: "src" }],
+    OrganizationMember: [{ id: randomUUID(), organizationId, userId: importerUserId, role: "ADMIN" }],
+    User: [{ id: importerUserId, name: "User", email: "user@example.com" }],
+    Doc: ids.map((id, i) => ({ id, workspaceId, title: String(i), content: "", parentId: i === 100 ? ids[0] : null })),
+  })
+  const bytes = await exportWorkspaceToBuffer(db.client, workspaceId, noopBlobs)
+  const original = db.client.doc as {deleteMany(args: {where: Row}): Promise<{count: number}>}
+  let blocked = 0
+  db.client.doc = { ...original, async deleteMany(args: {where: Row}) {
+    const predicate = args.where.id as string | {in: string[]}
+    const batch = typeof predicate === "string" ? [predicate] : predicate.in
+    expect(batch.length).toBeLessThanOrEqual(100)
+    if (db.tables.Doc.some(row => batch.includes(String(row.parentId)))) {
+      blocked++
+      throw Object.assign(new Error("Doc has a child"), {code: "P2014"})
+    }
+    return original.deleteMany(args)
+  } }
+  db.client.workspace = { ...(db.client.workspace as object), async createMany() { throw new Error("publication failed") } }
+  await expect(importWorkspaceBundle(db.client, bytes, {
+    organizationId, importerUserId, nonce: "doc-rollback", blobs: noopBlobs,
+  })).rejects.toThrow("publication failed")
+  expect(blocked).toBeGreaterThan(0)
+  expect(db.tables.Doc.map(row => row.id)).toEqual(ids)
 })

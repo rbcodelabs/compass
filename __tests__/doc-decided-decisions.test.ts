@@ -38,6 +38,16 @@ describe("latest decided decision for a document", () => {
     expect(await decisions.findLatestDecidedDocDecision("workspace", docId)).toBeNull()
   })
 
+  it("reports the doc version the decision covers when the packet pins one", async () => {
+    decisionRecordFindMany.mockResolvedValue([record("one", packet({ type: "DOC", id: docId, docVersion: { id: "docver-3", number: 3 } } as never))])
+    expect(await decisions.findLatestDecidedDocDecision("workspace", docId)).toEqual(expect.objectContaining({ docVersion: { id: "docver-3", number: 3 } }))
+  })
+
+  it("ignores a malformed pinned version instead of failing the lookup", async () => {
+    decisionRecordFindMany.mockResolvedValue([record("one", packet({ type: "DOC", id: docId, docVersion: { id: 7, number: "3" } } as never))])
+    expect(await decisions.findLatestDecidedDocDecision("workspace", docId)).toEqual(expect.objectContaining({ docVersion: null }))
+  })
+
   it("reads the newest decision for tracked requests in the workspace", async () => {
     decisionRecordFindMany.mockResolvedValue([record("one")])
     expect(await decisions.findLatestDecidedDocDecision("workspace", docId)).toEqual({
@@ -47,6 +57,7 @@ describe("latest decided decision for a document", () => {
       outcomeLabel: "Approve",
       decidedAt: new Date("2026-09-11T12:00:00.000Z"),
       reviewerName: "Ada Lovelace",
+      docVersion: null,
     })
     expect(decisionRecordFindMany).toHaveBeenCalledWith(
       expect.objectContaining({

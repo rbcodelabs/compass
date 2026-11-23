@@ -38,8 +38,8 @@ never notified about your own actions.
 - **comment** on one, or
 - are **assigned** a Task.
 
-You can also press **Follow** on any of these detail views, in the side panel or
-on the full page. The button reads **Following** once you are subscribed;
+You can also press **Follow** on any of these detail views. In the side panel it is a bell icon in the
+panel header; on the full page it is a button. It reads **Following** once you are subscribed;
 pressing it again unfollows.
 
 **Unfollowing is remembered.** If you unfollow something, commenting on it or

@@ -1846,6 +1846,39 @@ model CustomFieldInheritanceRule {
   @@map("custom_field_inheritance_rules")
 }
 
+/// A link from a Solution or Task to a resource OUTSIDE Compass (GitHub PR or issue, Jira issue, Figma, Google file, Slack
+/// thread, any https URL), ADR-0028. task_links and entity_links only hold Compass UUIDs, so a URL needs its own table.
+/// No foreign keys (Aurora DSQL): subject_id is validated against the workspace in code and rows are removed with the
+/// workspace by lib/external-links-service.ts. The URL and external_key are rebuilt by lib/external-links.ts, never the raw paste.
+model ExternalLink {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId    String   @map("workspace_id") @db.Uuid
+  /// SOLUTION | TASK
+  subjectType    String   @map("subject_type") @db.VarChar(40)
+  subjectId      String   @map("subject_id") @db.Uuid
+  /// GITHUB_PR | GITHUB_ISSUE | JIRA_ISSUE | FIGMA | GOOGLE_DRIVE | SLACK_THREAD | OTHER
+  provider       String   @db.VarChar(30)
+  url            String   @db.VarChar(1000)
+  /// The identity the provider uses, and the dedupe key: owner/repo#482, site/PROJ-456, a Drive file id, or the URL for OTHER.
+  externalKey    String   @map("external_key") @db.VarChar(1000)
+  /// Application-computed SHA-256 lowercase hex of externalKey; full-key readback guards digest collisions.
+  externalKeyHash String  @map("external_key_hash") @db.VarChar(64)
+  title          String   @db.VarChar(255)
+  /// IMPLEMENTS | TRACKS | DESIGN | DOCS | DISCUSSION | RELATED
+  relation       String   @db.VarChar(20)
+  /// Reserved for phase 2 (mirrored provider status as JSON text). Nothing writes it yet.
+  statusSnapshot String?  @map("status_snapshot") @db.Text
+  /// UI | AGENT | MCP | API | SYNC
+  source         String   @default("UI") @db.VarChar(20)
+  createdById    String?  @map("created_by_id") @db.Uuid
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @default(now()) @map("updated_at")
+
+  @@unique([subjectType, subjectId, provider, externalKeyHash], map: "idx_external_links_subject_key")
+  @@index([workspaceId, provider, externalKeyHash], map: "idx_external_links_workspace_key")
+  @@map("external_links")
+}
+
 // ─── Card Sorting ─────────────────────────────────────────────────────────────
 
 // A repeatable "propose moves on a factor" exercise. The factor is any SELECT
@@ -2415,6 +2448,9 @@ model DocVersion {
   /// Set only on manual "named" snapshots (bypasses coalescing). Null for
   /// ordinary auto-snapshots taken before an overwriting save.
   label         String?  @db.VarChar(100)
+  /// v1, v2, v3. Set only on versions pinned for a decision request (see
+  /// pinDocVersion). Null for ordinary auto and named snapshots.
+  versionNumber Int?     @map("version_number")
   createdById   String?  @map("created_by_id") @db.Uuid
   createdByName String?  @map("created_by_name") @db.VarChar(255)
   createdAt     DateTime @default(now()) @map("created_at")
@@ -2687,6 +2723,9 @@ model Task {
   /// or both of assigneeUserId / ownerName may be set.
   ownerName      String?   @map("owner_name") @db.VarChar(255)
   storyPoints    Float?    @map("story_points")
+  /// Optional start of the work. Null means the task has only a due date (a milestone on a timeline). When both are set,
+  /// startDate <= dueDate (checked in code via validateTaskDates, not in the database).
+  startDate      DateTime? @map("start_date")
   dueDate        DateTime? @map("due_date")
   /// Freeform sprint/iteration label (e.g. "Sprint 24", "2026-W31"). Reserved
   /// extension point for a future first-class Sprint entity.
@@ -2917,6 +2956,7 @@ model AgentRuntimeSnapshot {
 /// (not via MCP). See docs/decisions/0001-in-app-agent-architecture.md Phase 3.
 /// DSQL: no FKs, no @updatedAt (set explicitly), no JSON columns.
 model AgentConversation {
+  sandboxCoordinationToken String? @map("sandbox_coordination_token") @db.Uuid
   id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   workspaceId String   @map("workspace_id") @db.Uuid
   userId      String   @map("user_id") @db.Uuid
@@ -3005,6 +3045,24 @@ model AgentConversationReview {
   @@unique([conversationId, userId], map: "idx_agent_conversation_reviews_conversation_user")
   @@index([userId, workspaceId], map: "idx_agent_conversation_reviews_user_workspace")
   @@map("agent_conversation_reviews")
+}
+
+/// Advisory vote on a tracked Decision (ADR-0030). One row per (request, revision, question, voter).
+/// Bare UUIDs, no relations (Aurora DSQL has no foreign keys); lib/decision-votes.ts validates every id.
+/// Never read by the approval path: a vote cannot change a review request or create a decision record.
+model DecisionVote {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId   String   @map("workspace_id") @db.Uuid
+  requestId     String   @map("request_id") @db.Uuid
+  revisionId    String   @map("revision_id") @db.Uuid
+  questionIndex Int      @map("question_index")
+  chosenOption  String   @map("chosen_option") @db.VarChar(120)
+  voterUserId   String   @map("voter_user_id") @db.Uuid
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @default(now()) @map("updated_at")
+
+  @@unique([requestId, revisionId, questionIndex, voterUserId], map: "idx_decision_votes_voter")
+  @@map("decision_votes")
 }
 
 /// Generic typed association link between two entities of one workspace (ADR "One generic
@@ -3097,6 +3155,28 @@ model AgentWebFetch {
 
   @@id([credentialId, seq])
   @@map("agent_web_fetches")
+}
+
+/// Durable ownership across launch, pause and receipt bookkeeping.
+model AgentSandboxOperation {
+  conversationId String    @id @map("conversation_id") @db.Uuid
+  runId          String    @map("run_id") @db.Uuid
+  sandboxName    String    @map("sandbox_name")
+  token          String    @db.Uuid
+  phase          String
+  providerSessionId String? @map("provider_session_id")
+  retryAt        DateTime? @map("retry_at") @db.Timestamptz
+
+  @@map("agent_sandbox_operations")
+}
+
+/// Latest generation to use a named persistent sandbox.
+model AgentSandboxGeneration {
+  sandboxName    String @id @map("sandbox_name")
+  conversationId String @map("conversation_id") @db.Uuid
+  runId          String @map("run_id") @db.Uuid
+
+  @@map("agent_sandbox_generations")
 }
 
 /// One durable, detachable agent turn. The sandbox owns execution and
@@ -3381,12 +3461,17 @@ model AgentMessage {
   /// "MESSAGE" | "PLAN_PROPOSAL" | "SYSTEM_RESOLUTION" (migration 124).
   messageKind    String?   @map("message_kind") @db.VarChar(30)
   editedAt       DateTime? @map("edited_at")
+  /// The AgentRun that produced this assistant message (migration 129). NULL for inline turns, which have no run,
+  /// and for every message that predates the column. Lets spend be counted once: run cost, plus message cost
+  /// only where run_id IS NULL (lib/agent-spend.ts). No foreign key (DSQL).
+  runId          String?   @map("run_id") @db.Uuid
   createdAt      DateTime  @default(now()) @map("created_at")
 
   conversation AgentConversation @relation(fields: [conversationId], references: [id])
 
   @@index([conversationId, createdAt])
   @@index([createdAt], map: "idx_agent_messages_created_at")
+  @@index([runId], map: "idx_agent_messages_run")
   @@map("agent_messages")
 }
 

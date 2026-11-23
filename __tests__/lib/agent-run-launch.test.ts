@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 const m = vi.hoisted(() => ({
@@ -16,12 +16,21 @@ const m = vi.hoisted(() => ({
   stop: vi.fn(),
   acquire: vi.fn(),
   previous: vi.fn(),
+  reserve: vi.fn(),
+  dispatch: vi.fn(),
+  release: vi.fn(),
 }))
 
 vi.mock("@/lib/agent-sandbox", () => ({
   bootSandboxFromSnapshot: (...a: unknown[]) => m.boot(...a),
   stopSandboxByName: (...a: unknown[]) => m.stop(...a),
   acquireConversationSandbox: (...a: unknown[]) => m.acquire(...a),
+}))
+vi.mock("@/lib/agent-sandbox-fence", async (original) => ({
+  ...(await original<object>()),
+  reservePersistentSandboxLaunch: (...a: unknown[]) => m.reserve(...a),
+  dispatchPersistentSandboxLaunch: (...a: unknown[]) => m.dispatch(...a),
+  releasePersistentSandboxLaunch: (...a: unknown[]) => m.release(...a),
 }))
 vi.mock("@/lib/doc-fs", () => ({ listPaths: async () => [], readDocById: async () => null }))
 vi.mock("@/lib/agent-mcp-key", () => ({ mintAgentMcpKey: (...a: unknown[]) => m.mint(...a), revokeAgentMcpKey: (...a: unknown[]) => m.revoke(...a) }))
@@ -69,6 +78,7 @@ function context(over: Partial<LaunchContext> = {}): LaunchContext {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  vi.stubEnv("AUTH_SECRET", "sandbox-launch-test-fixture")
   vi.spyOn(console, "error").mockImplementation(() => {})
   m.packRows.mockResolvedValue([])
   m.packs.mockResolvedValue({ files: [{ path: "pack.txt", content: "p" }], pluginPaths: ["p1"], skillIds: ["s1"], provenanceJson: '[{"packId":"x"}]', systemPromptAppendices: ["APPENDIX"] })
@@ -82,8 +92,13 @@ beforeEach(() => {
   m.boot.mockResolvedValue({ writeFiles: m.writeFiles, runCommand: m.runCommand })
   m.stop.mockResolvedValue(undefined)
   m.previous.mockResolvedValue(null)
+  m.reserve.mockResolvedValue("reservation-id")
+  m.dispatch.mockResolvedValue(true)
+  m.release.mockResolvedValue(undefined)
   m.acquire.mockResolvedValue({ sandbox: { writeFiles: m.writeFiles, runCommand: m.runCommand }, reused: false, reason: "not-found" })
 })
+
+afterEach(() => vi.unstubAllEnvs())
 
 const GITHUB_ENV = { GH_TOKEN: "ghs_x", AGENT_GITHUB_REPOS: "acme/app" }
 
@@ -123,6 +138,9 @@ describe("launchQueuedAgentRun egress policy", () => {
   it("a shell-off run that reuses a conversation sandbox acquires it WITH a policy and a matching profile tag", async () => {
     await launchQueuedAgentRun(context({ reuseConversationSandbox: { conversationId: "conv-1", developer: false } }))
     expect(m.boot).not.toHaveBeenCalled()
+    expect(m.reserve.mock.invocationCallOrder[0]).toBeLessThan(m.dispatch.mock.invocationCallOrder[0])
+    expect(m.dispatch.mock.invocationCallOrder[0]).toBeLessThan(m.acquire.mock.invocationCallOrder[0])
+    expect(m.runCommand.mock.invocationCallOrder[0]).toBeLessThan(m.release.mock.invocationCallOrder[0])
     const arg = m.acquire.mock.calls[0][0]
     expect(arg.boot.networkPolicy.allow).toEqual(["compass.test", "api.anthropic.com"])
     expect(arg.profile).toBe(sandboxNetworkProfile(arg.boot.networkPolicy))
@@ -138,6 +156,23 @@ describe("launchQueuedAgentRun egress policy", () => {
 })
 
 describe("launchQueuedAgentRun", () => {
+  it("releases a reserved launch after a read-only provider lookup fails", async () => {
+    const error = new Error("lookup unavailable")
+    error.name = "PersistentSandboxLookupFailed"
+    m.acquire.mockRejectedValueOnce(error)
+    const ctx = context({ reuseConversationSandbox: { conversationId: "conv-1", developer: false } })
+    await expect(launchQueuedAgentRun(ctx)).resolves.toEqual({ started: false })
+    expect(m.release).toHaveBeenCalledWith(ctx.prisma, "conv-1", "reservation-id")
+  })
+
+  it("keeps a launch fenced when a provider write's outcome is ambiguous", async () => {
+    m.writeFiles.mockRejectedValueOnce(new Error("response lost"))
+    const ctx = context({ reuseConversationSandbox: { conversationId: "conv-1", developer: false } })
+    await expect(launchQueuedAgentRun(ctx)).resolves.toEqual({ started: false })
+    expect(m.release).not.toHaveBeenCalled()
+    expect(m.finalize).toHaveBeenCalledOnce()
+  })
+
   it("mints the agent's key, attaches it to the run BEFORE the sandbox exists, then marks the run started", async () => {
     expect(await launchQueuedAgentRun(context())).toEqual({ started: true })
     expect(m.mint).toHaveBeenCalledWith("member", "ws-1", undefined, new Date(deadlineAt.getTime() + 60_000), { agentId: "agent-1" })

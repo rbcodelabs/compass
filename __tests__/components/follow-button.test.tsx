@@ -64,6 +64,23 @@ describe("FollowButton", () => {
     expect(screen.getByRole("button", { name: "Follow" })).toHaveAttribute("aria-pressed", "false")
   })
 
+  it("in the panel header keeps one constant name, carries state on aria-pressed, and never adds inline text when a save fails", async () => {
+    fetchMock.mockReturnValueOnce(reply({ available: true, following: false })).mockReturnValueOnce(reply({}, false))
+    render(<FollowButton {...props} iconOnly />)
+    const button = await screen.findByRole("button", { name: "Follow" })
+    expect(button).toHaveAttribute("aria-pressed", "false")
+    expect(button.textContent).toBe("")
+    fireEvent.click(button)
+    // Optimistic: pressed, but the name has not changed.
+    expect(screen.getByRole("button", { name: "Follow" })).toBeInTheDocument()
+    const alert = await screen.findByRole("alert")
+    expect(alert).toHaveTextContent("Could not follow")
+    // The error is announced but takes no layout space (visually hidden), so it cannot push Pin / Close off a narrow header.
+    expect(alert).toHaveClass("sr-only")
+    expect(screen.getByRole("button", { name: "Follow" })).toHaveAttribute("title", "Could not follow. Try again.")
+    expect(screen.getByRole("button", { name: "Follow" })).toHaveAttribute("aria-pressed", "false")
+  })
+
   it("ignores a stale response after the subject changes", async () => {
     let resolveFirst: (value: unknown) => void = () => {}
     fetchMock

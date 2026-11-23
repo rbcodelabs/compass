@@ -1,7 +1,9 @@
 import { spawnSync } from "node:child_process";
 import pg from "pg";
+import { require as requireTypeScript } from "tsx/cjs/api";
 
 const E2E_SCHEMA = "compass_dev";
+const IMPORT_MIGRATION = "131_workspace_import_recovery";
 const E2E_SENTINEL = "compass-authenticated-e2e";
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
 const connectionString = process.env.DATABASE_URL;
@@ -51,7 +53,12 @@ const prisma = spawnSync(
   ["node_modules/prisma/build/index.js", "db", "push", "--accept-data-loss"],
   {
     cwd: process.cwd(),
-    env: { ...process.env, DATABASE_URL: prismaUrl.toString() },
+    env: {
+      ...process.env,
+      DATABASE_URL: prismaUrl.href,
+      DATABASE_MIGRATION_URL: prismaUrl.href,
+      POSTGRES_URL_NON_POOLING: prismaUrl.href,
+    },
     stdio: "inherit",
   },
 );
@@ -61,6 +68,21 @@ if (prisma.status !== 0) {
 
 const sentinelPool = new pg.Pool({ connectionString });
 try {
+  // db push can drop runner-managed tables while preserving the migration ledger.
+  // Rebuild this disposable fixture through the registered, idempotent migration.
+  const ledger = await sentinelPool.query("SELECT to_regclass('compass_dev._prisma_migrations') AS name");
+  if (ledger.rows[0].name) {
+    await sentinelPool.query(
+      'DELETE FROM "compass_dev"._prisma_migrations WHERE migration_name = $1 AND finished_at IS NOT NULL',
+      [IMPORT_MIGRATION],
+    );
+  }
+  const { applyMigrations } = requireTypeScript("../lib/migrations/runner.ts", import.meta.url);
+  const response = await applyMigrations(sentinelPool, E2E_SCHEMA, IMPORT_MIGRATION);
+  if (!response.ok) {
+    throw new Error(`Import recovery fixture failed (${response.status}): ${await response.text()}`);
+  }
+
   await sentinelPool.query(`
     CREATE TABLE IF NOT EXISTS public.e2e_database_sentinel (
       value TEXT PRIMARY KEY

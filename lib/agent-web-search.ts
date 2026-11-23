@@ -26,6 +26,7 @@ export const MAX_SEARCH_ATTEMPTS_PER_TURN = MAX_SEARCHES_PER_TURN * 3
 export const DEFAULT_MAX_RESULTS = 5
 export const MAX_RESULTS_CEILING = 8
 export const MAX_QUERY_LENGTH = 400
+const AGENTCORE_MAX_QUERY_LENGTH = 200
 export const MAX_SNIPPET_CHARS = 1_200
 export const SEARCH_TIMEOUT_MS = 25_000
 
@@ -321,11 +322,136 @@ export const bedrockWebSearch: SearchBackend = async (query, maxResults, signal)
 }
 
 /**
- * AGENT_WEB_SEARCH_BACKEND = "bedrock" opts in to Bedrock Web Search. Anything else, or
- * unset, keeps the Vercel AI Gateway backend, so existing deployments are unchanged.
+ * Amazon Bedrock AgentCore Gateway "Web Search" connector. Model-independent (it is an
+ * MCP tool, not a model feature), so it works with any agent model. The gateway is an
+ * AWS_IAM-authorized MCP endpoint; we sign a stateless `tools/call` with SigV4
+ * (service `bedrock-agentcore`) using the deployment's AWS credentials: Vercel OIDC
+ * when AWS_ROLE_ARN is set on Vercel, otherwise the default AWS credential chain.
+ * The identity needs `bedrock-agentcore:InvokeGateway` on the gateway.
+ * Tool name is `<target>___WebSearch`; override with AGENT_WEB_SEARCH_GATEWAY_TOOL.
+ */
+export const DEFAULT_AGENTCORE_TOOL = "web-search___WebSearch"
+
+export function agentCoreSearchConfig(env: Env = process.env) {
+  const url = env.AGENT_WEB_SEARCH_GATEWAY_URL?.trim()
+  if (!url) return null
+  const region =
+    /\.bedrock-agentcore\.([a-z0-9-]+)\.amazonaws\.com/.exec(url)?.[1] ?? env.AWS_REGION?.trim() ?? "us-east-1"
+  return { url, region, tool: env.AGENT_WEB_SEARCH_GATEWAY_TOOL?.trim() || DEFAULT_AGENTCORE_TOOL }
+}
+
+type AwsCredentials = { accessKeyId: string; secretAccessKey: string; sessionToken?: string }
+
+async function resolveAwsCredentials(region: string): Promise<AwsCredentials> {
+  if (process.env.VERCEL && process.env.AWS_ROLE_ARN) {
+    const { awsCredentialsProvider } = await import("@vercel/functions/oidc")
+    return awsCredentialsProvider({ roleArn: process.env.AWS_ROLE_ARN, clientConfig: { region } })()
+  }
+  const { fromNodeProviderChain } = await import("@aws-sdk/credential-providers")
+  return fromNodeProviderChain()()
+}
+
+/** The JSON-RPC reply of an MCP tools/call, whether it came back as JSON or as one SSE event. */
+function mcpReplyJson(raw: string): { result?: { isError?: boolean; content?: { type?: string; text?: string }[] } } | null {
+  const body = raw.trimStart().startsWith("{")
+    ? raw
+    : raw
+        .split("\n")
+        .filter(line => line.startsWith("data:"))
+        .map(line => line.slice(5).trim())
+        .pop()
+  try {
+    return body ? JSON.parse(body) : null
+  } catch {
+    return null
+  }
+}
+
+/** Map the connector's `{ results: [{ title, url, text, publishedDate }] }` payload. Exported for tests. */
+export function shapeAgentCoreResults(toolText: string, maxResults: number): WebSearchResult[] | null {
+  let payload: unknown
+  try {
+    payload = JSON.parse(toolText)
+  } catch {
+    return null
+  }
+  const results = (payload as { results?: unknown } | null)?.results
+  if (!Array.isArray(results)) return null
+  return shapeResults(
+    results.map(item => {
+      if (typeof item !== "object" || item === null) return null
+      const r = item as Record<string, unknown>
+      return {
+        title: r.title,
+        url: r.url,
+        snippet: typeof r.text === "string" ? r.text.replace(/\s+/g, " ") : "",
+        date: r.publishedDate,
+      }
+    }),
+    maxResults,
+  )
+}
+
+export const agentCoreWebSearch: SearchBackend = async (query, maxResults, signal) => {
+  if (query.length > AGENTCORE_MAX_QUERY_LENGTH) return { ok: false, reason: "invalid_input" }
+  const config = agentCoreSearchConfig()
+  if (!config) {
+    console.error("agent web search: AGENT_WEB_SEARCH_GATEWAY_URL is not set")
+    return { ok: false, reason: "upstream" }
+  }
+  try {
+    const { AwsClient } = await import("aws4fetch")
+    const credentials = await resolveAwsCredentials(config.region)
+    const client = new AwsClient({ ...credentials, service: "bedrock-agentcore", region: config.region, retries: 0 })
+    const response = await client.fetch(config.url, {
+      method: "POST",
+      signal,
+      headers: { "content-type": "application/json", accept: "application/json, text/event-stream" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: { name: config.tool, arguments: { query, maxResults } },
+      }),
+    })
+    if (response.status === 429) return { ok: false, reason: "rate_limit" }
+    if (!response.ok) {
+      console.error("agent web search agentcore HTTP error", response.status)
+      return { ok: false, reason: "upstream" }
+    }
+    const reply = mcpReplyJson(await response.text())
+    const text = reply?.result?.content?.find(part => part.type === "text")?.text
+    if (!reply?.result || reply.result.isError || typeof text !== "string") {
+      console.error("agent web search agentcore tool error", response.status)
+      return { ok: false, reason: "upstream" }
+    }
+    const results = shapeAgentCoreResults(text, maxResults)
+    if (!results) {
+      console.error("agent web search agentcore unexpected payload", response.status)
+      return { ok: false, reason: "upstream" }
+    }
+    return { ok: true, results }
+  } catch (error) {
+    if (error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError"))
+      return { ok: false, reason: "timeout" }
+    console.error("agent web search agentcore request failed")
+    return { ok: false, reason: "upstream" }
+  }
+}
+
+/**
+ * AGENT_WEB_SEARCH_BACKEND = "bedrock" or "agentcore" opts in to that backend. Anything
+ * else, or unset, keeps the Vercel AI Gateway backend, so existing deployments are unchanged.
  */
 export function selectSearchBackend(env: Env = process.env): SearchBackend {
-  return env.AGENT_WEB_SEARCH_BACKEND?.trim().toLowerCase() === "bedrock" ? bedrockWebSearch : gatewayPerplexitySearch
+  const forced = env.AGENT_WEB_SEARCH_BACKEND?.trim().toLowerCase()
+  if (forced === "bedrock") return bedrockWebSearch
+  if (forced === "agentcore") return agentCoreWebSearch
+  return gatewayPerplexitySearch
+}
+
+export function webSearchQueryLimit(): number {
+  return selectSearchBackend() === agentCoreWebSearch ? AGENTCORE_MAX_QUERY_LENGTH : MAX_QUERY_LENGTH
 }
 
 export type WebSearchOutcome =
@@ -401,7 +527,7 @@ export function formatSearchOutcome(outcome: WebSearchOutcome): { text: string; 
             : outcome.reason === "timeout"
               ? "The web search timed out. Try a narrower query."
               : outcome.reason === "invalid_input"
-                ? "The search query was not accepted. Rephrase it and try again."
+                ? "The search query was not accepted. Shorten or rephrase it and try again."
                 : "Web search failed. Do not retry repeatedly; use web_fetch on a known URL instead.",
         isError: true,
       }

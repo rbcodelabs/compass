@@ -40,6 +40,8 @@ import { DataGrid, type GridColumnDef, type GridSort } from "@/components/data-g
 import { EntityPill, PILL, type EntityPillData } from "@/components/patterns/entity-pill";
 import { EmptyRailSuggestionsStack } from "@/components/agent/empty-rail-suggestions";
 import { cn } from "@/lib/utils";
+import { SettingsMobileBar, SettingsNavRail } from "@/components/settings/settings-nav";
+import { buildSettingsNav } from "@/lib/settings-nav";
 
 function WorkspaceHeaderExamples() {
   const [status, setStatus] = useState<string | null>(null);
@@ -402,6 +404,40 @@ function EmptyRailSuggestionsExamples() {
   );
 }
 
+function SettingsNavExamples() {
+  const base = { orgSlug: "acme", workspaceSlug: "growth", workspaceName: "Growth", orgName: "Acme" };
+  const member = buildSettingsNav({ ...base, isOrgAdmin: false });
+  const orgAdmin = buildSettingsNav({ ...base, isOrgAdmin: true });
+  const platformAdmin = buildSettingsNav({ ...base, isOrgAdmin: true, isPlatformAdmin: true });
+  const states = [
+    { label: "Member", groups: member, active: "/settings/profile" },
+    { label: "Organization admin", groups: orgAdmin, active: "/acme/growth/settings/modules" },
+    { label: "Platform admin", groups: platformAdmin, active: "/settings/admin/agent-snapshot" },
+  ];
+  return (
+    <Example title="Settings navigation: desktop rail by role, and the small-screen bar">
+      <div className="space-y-6">
+        <div className="grid gap-4 lg:grid-cols-3">
+          {states.map((state) => (
+            <div key={state.label}>
+              <p className="mb-2 text-xs text-text-subtle">{state.label}</p>
+              <div className="flex w-fit max-w-full overflow-x-auto rounded-xl border border-border-default">
+                <SettingsNavRail groups={state.groups} active={state.active} backHref="/dashboard" label={`Settings (${state.label})`} />
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="max-w-sm">
+          <p className="mb-2 text-xs text-text-subtle">Below md: the bar shows the current page; the full list opens in a sheet</p>
+          <div className="overflow-hidden rounded-xl border border-border-default">
+            <SettingsMobileBar groups={orgAdmin} active="/acme/growth/settings" backHref="/dashboard" />
+          </div>
+        </div>
+      </div>
+    </Example>
+  );
+}
+
 function Section({ id, title, description, children }: { id: string; title: string; description: string; children: React.ReactNode }) {
   return (
     <section id={id} className="scroll-mt-8 border-t border-border-default pt-10">
@@ -476,6 +512,7 @@ export function UIRegistry() {
               <div className="space-y-4">
                 <Example title="Page header, toolbar, and section"><div className="space-y-6"><PageHeader eyebrow="Discovery" title="Customer opportunities" description="Connect evidence to opportunities and explore solutions." actions={<Button><Plus />New opportunity</Button>} /><Toolbar leading={<Input aria-label="Search opportunities" placeholder="Search opportunities" />} filters={<FilterBar><StatusBadge status="info">Owner: Rick</StatusBadge><StatusBadge status="neutral">Open</StatusBadge></FilterBar>} actions={<Button variant="outline">Export</Button>} /><PageSection title="Recently updated" description="The opportunities with the newest customer evidence."><EntityCard eyebrow="Opportunity" title="Reduce setup uncertainty" description="New teams need guidance during their first product-planning session." status={<StatusBadge status="warning">Review</StatusBadge>} metadata={<MetricBadge label="Signals" value="8" />} footer="Updated today" /></PageSection></div></Example>
                 <WorkspaceHeaderExamples />
+                <SettingsNavExamples />
                 <Example title="Application shell"><div className="h-64 overflow-hidden rounded-xl border border-border-default"><AppShell className="min-h-0 [&>div]:min-h-0" navigation={<div className="p-4 text-sm font-semibold">Compass<br /><span className="mt-6 block rounded-lg bg-surface-navigation-active p-2 font-normal">Discovery</span></div>}><PageHeader title="Workspace" description="Shared shell spacing and main-content semantics." /></AppShell></div></Example>
                 <Example title="Board and columns"><Board label="Example opportunity board"><BoardColumn title="Exploring" count={1} accent="info"><EntityCard title="Clarify first-run guidance" description="Synthesize onboarding signals." status={<StatusBadge status="info">Open</StatusBadge>} /></BoardColumn><BoardColumn title="Validating" count={1} accent="warning"><EntityCard title="Test guided setup" description="Prototype a first-session checklist." status={<StatusBadge status="warning">Running</StatusBadge>} /></BoardColumn><BoardColumn title="Learned" count={0} accent="success" emptyState={<EmptyState compact title="Nothing learned yet" description="Concluded experiments appear here." />} /></Board></Example>
                 <div className="grid gap-4 lg:grid-cols-2"><Example title="Form field and settings section"><SettingsSection title="Workspace defaults" description="Applied to new opportunities."><FormField id="registry-pattern-name" label="Default owner" description="The teammate responsible for new work."><Input id="registry-pattern-name" placeholder="Choose an owner" /></FormField></SettingsSection></Example><Example title="Detail panel and loading"><div className="h-80 overflow-hidden rounded-xl border border-border-default"><DetailPanel eyebrow="Opportunity" title="Reduce setup uncertainty" description="Customer onboarding"><DetailPanelSection title="Summary"><p className="text-sm text-text-secondary">Help teams reach their first useful plan with less ambiguity.</p></DetailPanelSection><DetailPanelSection title="Activity"><LoadingState rows={2} label="Loading activity" /></DetailPanelSection></DetailPanel></div></Example></div>

@@ -88,6 +88,9 @@ export function ComposerCard(props: Props) {
   // run ends, and browsers disagree on whether (and in what order) blur fires for an element that is disabled or removed.
   const sentAt = useRef(0)
   const returnFocus = useRef(false)
+  const blurTimer = useRef<number | undefined>(undefined)
+  useEffect(() => () => window.clearTimeout(blurTimer.current), [])
+
   const triggerRangeRef = useRef<{ start: number; end: number } | null>(null)
   const [mentionQuery, setMentionQuery] = useState<string | null>(null)
   const [activeMentionIdx, setActiveMentionIdx] = useState(0)
@@ -322,7 +325,10 @@ export function ComposerCard(props: Props) {
                 detectMention(e.currentTarget.value, e.currentTarget.selectionStart)
               }
             }}
-            onBlur={() => window.setTimeout(closeMentions, 120)}
+            onBlur={() => {
+              window.clearTimeout(blurTimer.current)
+              blurTimer.current = window.setTimeout(closeMentions, 120)
+            }}
             onPaste={(e) => {
               if (!onPasteText) return
               if (onPasteText(e.clipboardData.getData("text/plain"))) e.preventDefault()
@@ -395,7 +401,7 @@ export function ComposerCard(props: Props) {
           )}
         </div>
         {chips && (
-          <div data-slot="composer-footer" className="flex min-w-0 items-center gap-2 rounded-b-[inherit] border-t border-border bg-muted/60 p-2 @md/composer:px-2.5">
+          <div data-slot="composer-footer" className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1.5 rounded-b-[inherit] border-t border-border bg-muted/60 p-2 @md/composer:px-2.5">
             {chips}
             <span aria-hidden="true" className="ml-auto hidden min-w-0 flex-1 truncate text-right text-[11px] text-muted-foreground @3xl/composer:block">Enter to send · Shift+Enter for a new line</span>
           </div>
