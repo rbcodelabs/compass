@@ -25,6 +25,7 @@ describe.skipIf(!databaseUrl)("feedback attachment reference scan on real Postgr
   const admin = new Pool({ connectionString: databaseUrl, max: 2 })
   const appPool = new Pool({ connectionString: databaseUrl, max: 4 })
   let prisma: AppPrismaClient
+  const previousDatabaseUrl = process.env.DATABASE_URL
   let owned = false
 
   const WS = randomUUID()
@@ -38,6 +39,8 @@ describe.skipIf(!databaseUrl)("feedback attachment reference scan on real Postgr
     if (!["localhost", "127.0.0.1"].includes(parsed.hostname) || parsed.pathname !== "/compass_e2e" || parsed.searchParams.has("schema")) {
       throw new Error("Only isolated local compass_e2e is allowed")
     }
+    // The migration runner picks plain-PostgreSQL DDL (not DSQL's ASYNC indexes) from DATABASE_URL, as the other replay suites do.
+    process.env.DATABASE_URL = databaseUrl
     vi.stubEnv("PGSCHEMA", prefix)
     vi.stubEnv("COMPASS_ENV", "development")
     vi.stubEnv("VERCEL_ENV", "")
@@ -67,6 +70,8 @@ describe.skipIf(!databaseUrl)("feedback attachment reference scan on real Postgr
     await (prisma as unknown as PrismaClient | undefined)?.$disconnect()
     if (owned) await admin.query(`DROP SCHEMA "${schema}" CASCADE`)
     await admin.end()
+    if (previousDatabaseUrl === undefined) delete process.env.DATABASE_URL
+    else process.env.DATABASE_URL = previousDatabaseUrl
     vi.unstubAllEnvs()
   })
 
