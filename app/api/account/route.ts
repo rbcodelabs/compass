@@ -20,6 +20,10 @@ import { deleteAccount, planAccountDeletion, RetryableDeletionError } from "@/li
  *             Same-origin only: a missing or foreign Origin, or Sec-Fetch-Site other than same-origin, is a 403.
  */
 
+// Deleting an account can release attachment files after the rows are gone (20 s budget shared across its workspaces); keep the
+// function limit explicit and above that.
+export const maxDuration = 60
+
 const json = (body: unknown, status = 200) => NextResponse.json(body, { status, headers: { "cache-control": "no-store" } })
 
 export async function GET() {

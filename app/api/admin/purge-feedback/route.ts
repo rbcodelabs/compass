@@ -34,6 +34,11 @@ import getPrisma from "@/lib/db";
 import { deleteLinksForEntity } from "@/lib/links/service";
 import { drainAfterParentDelete } from "@/lib/typed-links";
 import { secretMatches } from "@/lib/secret-compare";
+import { releaseOwnedFeedbackBlobs } from "@/lib/feedback-attachment-ownership";
+
+// Releasing the files runs inside this request (its counts are in the response) under a 20 s budget; the platform default limit
+// is not guaranteed to cover that, so the limit is explicit.
+export const maxDuration = 60;
 
 function checkAuth(req: NextRequest): boolean {
   return secretMatches(req.headers.get("x-migration-secret"), process.env.MIGRATION_SECRET);
@@ -97,6 +102,19 @@ export async function POST(req: NextRequest) {
     });
   }
 
+  // The files behind the attachment rows are released after the rows are gone, so remember their URLs first. A failed read only means
+  // the files leak (as they always did); it never stops the purge.
+  let attachmentUrls: string[] = [];
+  try {
+    const attachments = await prisma.feedbackAttachment.findMany({
+      where: { feedbackItemId: { in: scopedIds } },
+      select: { url: true },
+    });
+    attachmentUrls = attachments.map((a) => a.url);
+  } catch (error) {
+    console.warn("[purge-feedback] could not read attachment urls; their files will not be released", error);
+  }
+
   // Delete children first (votes, attachments), then the items themselves —
   // every delete driven off scopedIds, never the raw caller input.
   await prisma.feedbackVote.deleteMany({
@@ -114,9 +132,15 @@ export async function POST(req: NextRequest) {
   // Mirror rows of task links to the deleted items (ADR phase 7); failures are logged and swallowed, migration 097 prunes what is left.
   await drainAfterParentDelete("purge-feedback.links", () => deleteLinksForEntity(prisma, "FEEDBACK_ITEM", scopedIds));
 
+  // Only now that the rows are gone: delete the purging workspace's own files that no other row still references. Never throws.
+  const blobs = await releaseOwnedFeedbackBlobs(prisma, workspace.id, attachmentUrls);
+
   return NextResponse.json({
     deleted: count,
     requested: feedbackIds.length,
     resolved: scopedIds.length,
+    blobsDeleted: blobs.deleted,
+    blobsKept: blobs.kept,
+    blobsDryRun: blobs.dryRun,
   });
 }
