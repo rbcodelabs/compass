@@ -21,6 +21,7 @@ describe.skipIf(!databaseUrl)("feedback attachment reference scan on real Postgr
   // getActiveSchema() = `${PGSCHEMA}_dev` outside production, so the helper's default qualifier lands on this schema.
   const prefix = `fa_scan_${randomUUID().replaceAll("-", "").slice(0, 12)}`
   const schema = `${prefix}_dev`
+  const replaySchema = prefix // migrations replay into a plain schema; it is renamed to the `_dev` name getActiveSchema() resolves
   const admin = new Pool({ connectionString: databaseUrl, max: 2 })
   const appPool = new Pool({ connectionString: databaseUrl, max: 4 })
   let prisma: AppPrismaClient
@@ -43,8 +44,11 @@ describe.skipIf(!databaseUrl)("feedback attachment reference scan on real Postgr
     await admin.query(`CREATE SCHEMA "${schema}"`)
     owned = true
     // The real table, created by replaying every registered migration into the schema the app would resolve (not a hand-written copy).
-    const replay = await replayAllMigrations(admin, schema)
+    await admin.query(`DROP SCHEMA "${schema}"`)
+    await admin.query(`CREATE SCHEMA "${replaySchema}"`)
+    const replay = await replayAllMigrations(admin, replaySchema)
     expect(replay.status, JSON.stringify(await replay.json())).toBe(200)
+    await admin.query(`ALTER SCHEMA "${replaySchema}" RENAME TO "${schema}"`)
     const rows: string[] = [
       url(OTHER, "unrelated.png"), // another workspace's own file: must not match
       url(WS, "plain.png"),

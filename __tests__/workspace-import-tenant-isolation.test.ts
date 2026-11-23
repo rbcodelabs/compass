@@ -346,7 +346,10 @@ describe("H1: workspace import tenant isolation", () => {
         ],
       },
     })
-    expect(db.table("FeedbackAttachment").map((r) => r.id)).toEqual([okType])
+    const kept = db.table("FeedbackAttachment")
+    expect(kept).toHaveLength(1)
+    expect(String(kept[0].url)).toMatch(/\/feedback\/[^/]+\/[^/]*-ok\.png$/)
+    expect(okType).toBeTruthy()
     expect(report.warnings.filter((w) => /was skipped/.test(w))).toHaveLength(2)
   })
 
