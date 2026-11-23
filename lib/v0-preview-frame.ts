@@ -1,6 +1,7 @@
 import { headers } from "next/headers"
 import { fetchV0Preview } from "@/lib/v0-artifacts"
 import { normalizeEmbedder, previewFrameSrc } from "@/lib/v0-preview-proxy"
+import { requestHostFromHeaders, requestProtoFromHeaders } from "@/lib/trusted-proxy"
 
 /**
  * The iframe `src` for a V0_CHAT artifact's running app, or null (previews not
@@ -12,7 +13,7 @@ export async function livePreviewSrcFor(userId: string, chatId: string): Promise
   const preview = await fetchV0Preview(userId, chatId)
   if (!preview) return null
   const incoming = await headers()
-  const host = incoming.get("x-forwarded-host") ?? incoming.get("host")
-  const proto = incoming.get("x-forwarded-proto") ?? (host?.startsWith("localhost") ? "http" : "https")
+  const host = requestHostFromHeaders(incoming)
+  const proto = requestProtoFromHeaders(incoming) ?? (host?.startsWith("localhost") ? "http" : "https")
   return previewFrameSrc(preview, host ? normalizeEmbedder(`${proto}://${host}`) : null)
 }
