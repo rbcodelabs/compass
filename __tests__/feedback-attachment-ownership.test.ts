@@ -33,6 +33,7 @@ function setEnv({ compass = "production", vercel, flag = "1" }: { compass?: stri
 
 /** A prisma stand-in whose reference scan returns these rows (other workspaces' attachment rows that mention WS). */
 function prismaWith(rows: { id: string; url: string }[] | Error = []) {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const $queryRaw = vi.fn(async (..._args: unknown[]) => {
     if (rows instanceof Error) throw rows
     return rows
@@ -40,8 +41,9 @@ function prismaWith(rows: { id: string; url: string }[] | Error = []) {
   return { prisma: { $queryRaw } as never, $queryRaw }
 }
 
-let warn: ReturnType<typeof vi.spyOn>
-let info: ReturnType<typeof vi.spyOn>
+type ConsoleSpy = { mock: { calls: unknown[][] } }
+let warn: ConsoleSpy
+let info: ConsoleSpy
 beforeEach(() => {
   deleteMock.mockReset()
   deleteMock.mockResolvedValue(undefined)
