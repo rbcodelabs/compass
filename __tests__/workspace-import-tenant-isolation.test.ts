@@ -322,7 +322,7 @@ describe("H1: workspace import tenant isolation", () => {
     expect(puts).toHaveLength(1)
     expect(puts[0].contentType).toBe("image/webp")
     expect(fetched).toEqual([OWN_FEEDBACK_URL]) // the foreign-namespace URL is never read
-    expect(report.dropped.FeedbackAttachment).toBe(1)
+    expect(report.warnings.filter((w) => /was skipped/.test(w))).toHaveLength(1) // the foreign-namespace row
   })
 
   it("drops a feedback attachment with no bytes whose source file is unreadable, malformed or not this deployment's own", async () => {
@@ -349,8 +349,7 @@ describe("H1: workspace import tenant isolation", () => {
       },
     })
     expect(db.table("FeedbackAttachment")).toHaveLength(0)
-    expect(report.dropped.FeedbackAttachment).toBe(4)
-    expect(report.warnings.join(" ")).toMatch(/Feedback attachment .* was skipped/)
+    expect(report.warnings.filter((w) => /Feedback attachment .* was skipped/.test(w))).toHaveLength(4)
     expect(fetched.sort()).toEqual([OWN_FEEDBACK_URL, `https://${STORE_HOST}/feedback/${srcWs}/boom-b.png`].sort()) // only parser-approved URLs are fetched
   })
 
