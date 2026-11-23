@@ -37,8 +37,8 @@ import { secretMatches } from "@/lib/secret-compare";
 import { releaseOwnedFeedbackBlobs } from "@/lib/feedback-attachment-ownership";
 
 // Releasing the files runs inside this request (its counts are in the response) under a 20 s budget; the platform default limit
-// is not guaranteed to cover that, so the limit is explicit.
-export const maxDuration = 60;
+// is not guaranteed to cover that, so the limit is explicit (300, the same as the workspace layout: never lower than what applies today).
+export const maxDuration = 300;
 
 function checkAuth(req: NextRequest): boolean {
   return secretMatches(req.headers.get("x-migration-secret"), process.env.MIGRATION_SECRET);

@@ -1,6 +1,7 @@
 import { configuredBlobStoreHostname } from "@/lib/feedback-attachments"
 import { copyPublicImportAsset } from "./public-import-asset"
 import { parseOwnedFeedbackKey } from "@/lib/feedback-attachment-ownership"
+import { FEEDBACK_ATTACHMENT_ALLOWED_MIME_TYPES, FEEDBACK_ATTACHMENT_MAX_FILE_BYTES } from "@/lib/feedback-attachment-rules"
 import { ImportOwnershipChanged } from "./lease"
 import { externalLinkKeyHash } from "@/lib/external-link-key"
 import { createHash, randomUUID } from "node:crypto"
@@ -531,10 +532,12 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
           if (!data && typeof raw.id === "string" && parseOwnedFeedbackKey(raw.url, sourceWorkspaceId.toLowerCase()) !== null) {
             try {
               const fetched = await providerIO(() => opts.blobs.fetchPublic(raw.url as string))
-              if (fetched) {
+              // The same size cap and type allowlist the upload paths enforce; anything else is dropped like an unreadable file.
+              const baseType = fetched?.contentType.split(";")[0].trim().toLowerCase() ?? ""
+              if (fetched && fetched.bytes.length <= FEEDBACK_ATTACHMENT_MAX_FILE_BYTES && (FEEDBACK_ATTACHMENT_ALLOWED_MIME_TYPES as readonly string[]).includes(baseType)) {
                 data = fetched.bytes
                 // The fetched type, not the bundle's fileType: the bundle controls the latter.
-                contentType = fetched.contentType
+                contentType = baseType
                 copiedFromSource = true
               }
             } catch {

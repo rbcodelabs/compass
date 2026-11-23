@@ -19,7 +19,7 @@ import { SettingsShell } from "@/components/settings/settings-shell";
 
 // Organization deletion (a server action under this segment) releases attachment files after the rows are gone, under a 20 s budget.
 // A layout's maxDuration applies to every page and server action under it; without it the platform default is not guaranteed to cover that.
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 interface OrgSettingsLayoutProps {
   children: React.ReactNode;

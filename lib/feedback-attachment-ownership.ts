@@ -40,6 +40,8 @@ export function parseOwnedFeedbackKey(url: unknown, workspaceId: string): string
   if (typeof url !== "string" || !url || !WORKSPACE_ID.test(workspaceId)) return null
   // A URL parser normalizes `..`, `\` and encodings away, so refuse them in the raw text first.
   if (/%2e|%2f|%5c|%00/i.test(url) || url.includes("\\") || /[?#]/.test(url)) return null
+  // Whitespace and control characters: a URL parser silently trims or strips them, so the string would not be the one stored.
+  if (/[\u0000-\u0020\u007f-\u009f]/.test(url)) return null
   if (url.split("/").some((segment) => segment === "." || segment === "..")) return null
   try {
     const parsed = new URL(url)
@@ -170,10 +172,20 @@ async function releaseNow(prisma: AppPrismaClient, workspaceId: string, urls: re
   const owned = new Map<string, string>()
   for (const url of new Set(urls)) {
     const key = parseOwnedFeedbackKey(url, workspaceId)
-    if (key !== null) owned.set(key, url)
+    // The provider is handed the canonical URL built from the validated key, never the raw stored string.
+    if (key !== null) owned.set(key, `https://${configuredBlobStoreHostname()}/${key}`)
   }
   result.kept += new Set(urls).size - owned.size
   if (owned.size === 0) return result
+
+  // The deadline starts here, so the scan is inside the budget. Once it has passed (earlier workspaces of an account or organization
+  // deletion used it up) nothing is scanned or deleted; the leftover pathnames are logged as the only record.
+  budget.deadline ??= now() + budget.ms
+  if (now() >= budget.deadline) {
+    result.failed = owned.size
+    logChunks("warn", "budget exhausted before the reference scan; files not deleted; leaked", workspaceId, [...owned.keys()].sort())
+    return result
+  }
 
   // Reference scan: fail closed on any error.
   let referenced: Set<string>
@@ -200,8 +212,7 @@ async function releaseNow(prisma: AppPrismaClient, workspaceId: string, urls: re
   }
 
   // Delete: bounded concurrency inside one wall-clock budget; one delete per object, each isolated.
-  budget.deadline ??= now() + budget.ms
-  const deadline = budget.deadline
+  const deadline = budget.deadline ?? now() + budget.ms
   const store = getPublicFileStore()
   const leaked: string[] = []
   let next = 0
