@@ -8,6 +8,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const deleteMock = vi.fn<(urls: string[]) => Promise<void>>()
+const afterMock = vi.hoisted(() => ({ fn: null as null | ((cb: () => Promise<void>) => void) }))
+vi.mock("next/server", async (orig) => {
+  const actual = await orig<typeof import("next/server")>()
+  return { ...actual, after: (cb: () => Promise<void>) => { if (!afterMock.fn) throw new Error("after was called outside a request scope"); afterMock.fn(cb) } }
+})
 vi.mock("@/lib/storage/public-store", () => ({
   getPublicFileStore: () => ({ delete: deleteMock, put: vi.fn(), fetch: vi.fn() }),
 }))
@@ -17,6 +22,7 @@ import {
   feedbackAttachmentTable,
   parseOwnedFeedbackKey,
   releaseOwnedFeedbackBlobs,
+  releaseOwnedFeedbackBlobsAfterResponse,
 } from "@/lib/feedback-attachment-ownership"
 
 const WS = "aaaaaaaa-1111-4111-8111-bbbbbbbbbbbb"
@@ -50,6 +56,7 @@ beforeEach(() => {
   warn = vi.spyOn(console, "warn").mockImplementation(() => {})
   info = vi.spyOn(console, "info").mockImplementation(() => {})
   setEnv()
+  afterMock.fn = null
 })
 afterEach(() => {
   vi.unstubAllEnvs()
@@ -85,6 +92,11 @@ describe("parseOwnedFeedbackKey (strict, case-sensitive; anything doubtful is nu
     ["a 301-character filename", keyUrl(WS, "x".repeat(301))],
     ["an empty filename", `https://${HOST}/feedback/${WS}/`],
     ["a different prefix", `https://${HOST}/branding/${WS}/a.png`],
+    ["leading whitespace", ` ${keyUrl()}`],
+    ["trailing whitespace", `${keyUrl()} `],
+    ["a trailing newline", `${keyUrl()}\n`],
+    ["an embedded tab", keyUrl(WS, "a\tb.png")],
+    ["an embedded control character", keyUrl(WS, "a\u0001b.png")],
     ["a non-string", 42],
     ["null", null],
   ]
@@ -329,5 +341,58 @@ describe("guard 5: partial failure, budget, bounded concurrency (nothing thrown;
     expect(second.deleted).toBe(0)
     expect(deleteMock).toHaveBeenCalledTimes(1)
     expect(warnLines().some((l) => l.includes(OTHER_WS) && l.includes("b.png"))).toBe(true)
+  })
+})
+
+describe("A5: the provider is handed the canonical key URL, never the raw stored string", () => {
+  it("deletes https://<host>/<key>", async () => {
+    const { prisma } = prismaWith([])
+    // Same key, raw string differs only by host case, which the URL parser normalises; the delete must name the canonical form.
+    await releaseOwnedFeedbackBlobs(prisma, WS, [keyUrl(WS, "a.png").replace(HOST, HOST.toUpperCase())])
+    expect(deleteMock.mock.calls).toEqual([[[keyUrl(WS, "a.png")]]])
+  })
+})
+
+describe("A3: the reference scan is inside the budget", () => {
+  it("once the deadline has passed no scan runs, nothing is deleted, and the leftover pathnames are logged", async () => {
+    let clock = 0
+    const now = () => clock
+    const budget = createReleaseBudget(20_000, now)
+    const { prisma, $queryRaw } = prismaWith([])
+    await releaseOwnedFeedbackBlobs(prisma, WS, [keyUrl(WS, "first.png")], { budget, now })
+    expect($queryRaw).toHaveBeenCalledTimes(1)
+    clock = 25_000
+    const result = await releaseOwnedFeedbackBlobs(prisma, OTHER_WS, [keyUrl(OTHER_WS, "late.png")], { budget, now })
+    expect($queryRaw).toHaveBeenCalledTimes(1) // no second scan
+    expect(deleteMock).toHaveBeenCalledTimes(1)
+    expect(result).toMatchObject({ deleted: 0, failed: 1 })
+    expect(warn.mock.calls.flat().join(" ")).toContain("late.png")
+  })
+})
+
+describe("A4: after() scheduling branch of releaseOwnedFeedbackBlobsAfterResponse", () => {
+  it("hands the work to after() and returns without running it inline", async () => {
+    const scheduled: (() => Promise<void>)[] = []
+    afterMock.fn = (cb) => void scheduled.push(cb)
+    const { prisma } = prismaWith([])
+    await releaseOwnedFeedbackBlobsAfterResponse(prisma, WS, [keyUrl()])
+    expect(scheduled).toHaveLength(1)
+    expect(deleteMock).not.toHaveBeenCalled()
+    await scheduled[0]()
+    expect(deleteMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("falls back to inline when after() throws (no request scope)", async () => {
+    const { prisma } = prismaWith([])
+    await releaseOwnedFeedbackBlobsAfterResponse(prisma, WS, [keyUrl()])
+    expect(deleteMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("skipBlobCleanup never schedules anything", async () => {
+    const scheduled: unknown[] = []
+    afterMock.fn = (cb) => void scheduled.push(cb)
+    const { prisma } = prismaWith([])
+    await releaseOwnedFeedbackBlobsAfterResponse(prisma, WS, [keyUrl()], { skipBlobCleanup: true })
+    expect(scheduled).toHaveLength(0)
   })
 })

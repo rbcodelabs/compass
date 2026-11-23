@@ -197,6 +197,12 @@ vi.mock("@/lib/workspace-export/sweep", () => ({ sweepWorkspaceOwnedRows: async 
 
 vi.mock("@/auth", () => ({ auth: vi.fn() }));
 
+// Wraps (does not replace) the real cascade so this file keeps asserting its table-by-table behaviour while one test reads its arguments.
+vi.mock("@/lib/delete-workspace-cascade", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/delete-workspace-cascade")>();
+  return { ...actual, deleteWorkspaceCascade: vi.fn(actual.deleteWorkspaceCascade) };
+});
+
 import { auth } from "@/auth";
 import { revalidatePath } from "next/cache";
 import { deleteOrganization } from "@/app/[orgSlug]/settings/actions";
@@ -389,6 +395,13 @@ describe("deleteOrganization", () => {
     const result = await deleteOrganization("acme", `  ${ORG_NAME}  `);
     expect(result).toEqual({ ok: true, redirectTo: "/dashboard" });
     expect(mockOrganization.delete).toHaveBeenCalled();
+  });
+
+  it("passes one shared attachment-file budget to the cascade", async () => {
+    seedNonEmptyFindMany();
+    const { deleteWorkspaceCascade } = await import("@/lib/delete-workspace-cascade");
+    await deleteOrganization("acme", ORG_NAME);
+    expect(deleteWorkspaceCascade).toHaveBeenCalledWith(mockPrisma, "ws-1", { blobBudget: expect.objectContaining({ ms: 20_000 }) });
   });
 
   it("cascades every table and returns { redirectTo: '/dashboard' } on the happy path", async () => {

@@ -6,6 +6,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest"
 import type { AppPrismaClient } from "@/lib/db"
 import { feedbackAttachmentTable, findReferencedFeedbackKeys } from "@/lib/feedback-attachment-ownership"
 import { integrationDatabaseUrl } from "@/__tests__/helpers/integration-database"
+import { replayAllMigrations } from "./helpers/replay-migrations"
 
 /**
  * The one real-PostgreSQL check of the release guard's reference scan: the single bound-parameter ILIKE on the workspace UUID,
@@ -41,8 +42,9 @@ describe.skipIf(!databaseUrl)("feedback attachment reference scan on real Postgr
     vi.stubEnv("VERCEL_ENV", "")
     await admin.query(`CREATE SCHEMA "${schema}"`)
     owned = true
-    // Only the columns the scan reads; the table name and `url` TEXT column are what prisma/schema.prisma maps.
-    await admin.query(`CREATE TABLE "${schema}".feedback_attachment (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), feedback_item_id uuid NOT NULL, url text NOT NULL)`)
+    // The real table, created by replaying every registered migration into the schema the app would resolve (not a hand-written copy).
+    const replay = await replayAllMigrations(admin, schema)
+    expect(replay.status, JSON.stringify(await replay.json())).toBe(200)
     const rows: string[] = [
       url(OTHER, "unrelated.png"), // another workspace's own file: must not match
       url(WS, "plain.png"),
@@ -53,9 +55,9 @@ describe.skipIf(!databaseUrl)("feedback attachment reference scan on real Postgr
       url(WS, "bad.png", "%E0%A4%A"), // cannot be decoded
       url(WS, "50%25.png"), // literal %, decodes once to "50%.png" (a different, unparseable-as-key name)
     ]
-    for (const u of rows) await admin.query(`INSERT INTO "${schema}".feedback_attachment (feedback_item_id, url) VALUES ($1, $2)`, [randomUUID(), u])
+    for (const u of rows) await admin.query(`INSERT INTO "${schema}".feedback_attachment (feedback_item_id, url, filename, file_type, file_size) VALUES ($1, $2, 'f.png', 'image/png', 1)`, [randomUUID(), u])
     prisma = new PrismaClient({ adapter: new PrismaPg(appPool, { schema }) }) as unknown as AppPrismaClient
-  }, 60_000)
+  }, 180_000)
 
   afterAll(async () => {
     await (prisma as unknown as PrismaClient | undefined)?.$disconnect()

@@ -274,7 +274,7 @@ describe("deleteAccount", () => {
     const result = await deleteAccount(prisma, ME, { soleOwnedOrganizationIds: ["org-1"], fetchImpl: okFetch() })
     expect(result.ok).toBe(true)
     expect(cascade).toHaveBeenCalledTimes(1)
-    expect(cascade).toHaveBeenCalledWith(prisma, "ws-1")
+    expect(cascade).toHaveBeenCalledWith(prisma, "ws-1", { blobBudget: expect.objectContaining({ ms: 20_000 }) })
     expect(rows("organization")).toEqual([])
     expect(rows("scoringModel")).toEqual([])
   })

@@ -325,6 +325,31 @@ describe("H1: workspace import tenant isolation", () => {
     expect(report.warnings.filter((w) => /was skipped/.test(w))).toHaveLength(1) // the foreign-namespace row
   })
 
+  it("drops a copied source file that is over the upload size cap or has a type the upload paths would refuse", async () => {
+    const item = randomUUID()
+    const big = randomUUID()
+    const html = randomUUID()
+    const okType = randomUUID()
+    const url = (n: string) => `https://${STORE_HOST}/feedback/${srcWs}/${n}`
+    blobs.fetchPublic = async (u) => {
+      if (u.endsWith("big.png")) return { bytes: new Uint8Array(10 * 1024 * 1024 + 1), contentType: "image/png" }
+      if (u.endsWith("page.png")) return { bytes: new Uint8Array(4), contentType: "text/html" }
+      return { bytes: new Uint8Array(4), contentType: "image/png; charset=binary" } // parameters are ignored, the base type decides
+    }
+    const report = await run({
+      rows: {
+        FeedbackItem: [{ id: item, workspaceId: srcWs, title: "f" }],
+        FeedbackAttachment: [
+          { id: big, feedbackItemId: item, url: url("big.png"), filename: "big.png", fileType: "image/png", fileSize: 1 },
+          { id: html, feedbackItemId: item, url: url("page.png"), filename: "page.png", fileType: "image/png", fileSize: 1 },
+          { id: okType, feedbackItemId: item, url: url("ok.png"), filename: "ok.png", fileType: "image/png", fileSize: 4 },
+        ],
+      },
+    })
+    expect(db.table("FeedbackAttachment").map((r) => r.id)).toEqual([okType])
+    expect(report.warnings.filter((w) => /was skipped/.test(w))).toHaveLength(2)
+  })
+
   it("drops a feedback attachment with no bytes whose source file is unreadable, malformed or not this deployment's own", async () => {
     const item = randomUUID()
     const unreadable = randomUUID()
