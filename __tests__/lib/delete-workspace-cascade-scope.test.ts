@@ -319,8 +319,8 @@ describe("deleteWorkspaceCascade Solution / Objective scope", () => {
 // behind them used to be left on public URLs forever. Release runs after the final transaction commits, honours skipBlobCleanup,
 // and never throws into the teardown.
 describe("deleteWorkspaceCascade attachment blob release", () => {
-  const WS_UUID = "11111111-1111-4111-8111-111111111111";
-  const OTHER_WS_UUID = "22222222-2222-4222-8222-222222222222";
+  const WS_UUID = "aaaaaaaa-1111-4111-8111-bbbbbbbbbbbb";
+  const OTHER_WS_UUID = "cccccccc-2222-4222-8222-dddddddddddd";
   const HOST = "store123.public.blob.vercel-storage.com";
   const OWN = `https://${HOST}/feedback/${WS_UUID}/1700000000000-own.png`;
   const THEIRS = `https://${HOST}/feedback/${OTHER_WS_UUID}/1700000000000-theirs.png`;

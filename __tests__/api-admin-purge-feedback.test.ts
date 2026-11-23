@@ -269,8 +269,8 @@ describe("POST /api/admin/purge-feedback", () => {
 // Attachment BLOBS: the rows above were always deleted; the files behind them were not (a permanent leak that also kept deleted
 // feedback on public URLs). Design: Products/Compass/Runs/compass-attachment-leak-small-fix-design.md.
 describe("POST /api/admin/purge-feedback: attachment blob release", () => {
-  const WS_UUID = "11111111-1111-4111-8111-111111111111";
-  const OTHER_WS_UUID = "22222222-2222-4222-8222-222222222222";
+  const WS_UUID = "aaaaaaaa-1111-4111-8111-bbbbbbbbbbbb";
+  const OTHER_WS_UUID = "cccccccc-2222-4222-8222-dddddddddddd";
   const HOST = "store123.public.blob.vercel-storage.com";
   const OWN = `https://${HOST}/feedback/${WS_UUID}/1700000000000-own.png`;
   const THEIRS = `https://${HOST}/feedback/${OTHER_WS_UUID}/1700000000000-theirs.png`;

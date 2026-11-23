@@ -19,8 +19,8 @@ import {
   releaseOwnedFeedbackBlobs,
 } from "@/lib/feedback-attachment-ownership"
 
-const WS = "11111111-1111-4111-8111-111111111111"
-const OTHER_WS = "22222222-2222-4222-8222-222222222222"
+const WS = "aaaaaaaa-1111-4111-8111-bbbbbbbbbbbb"
+const OTHER_WS = "cccccccc-2222-4222-8222-dddddddddddd"
 const HOST = "store123.public.blob.vercel-storage.com"
 const keyUrl = (ws = WS, name = "1700000000000-shot.png", host = HOST) => `https://${host}/feedback/${ws}/${name}`
 
@@ -157,6 +157,7 @@ describe("what is released", () => {
   })
 
   it("feedbackAttachmentTable() qualifies the active schema", () => {
+    vi.stubEnv("COMPASS_ENV", "development")
     expect(feedbackAttachmentTable().text).toBe('"compass_dev"."feedback_attachment"')
     vi.stubEnv("PGSCHEMA", 'we"ird')
     expect(() => feedbackAttachmentTable()).toThrow() // an identifier that needs quoting is refused, never escaped and trusted
