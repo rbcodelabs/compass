@@ -52,24 +52,35 @@ async function dragTo(page: Page, source: Locator, target: Locator, scrollContai
       const box = await target.boundingBox();
       return !!box && box.x >= scrollBox.x && box.x + box.width <= scrollBox.x + scrollBox.width;
     };
-    for (let attempt = 0; attempt < 4 && !(await visible()); attempt++) {
+    // Wait on the real condition (target fully inside the scroll viewport) with a bounded deadline, not a fixed
+    // attempt count. Each pass re-reads the geometry, nudges the pointer toward the side the target is on, and waits
+    // for scrollLeft to actually change. If a pass makes no progress the pointer leaves and re-enters the edge zone so
+    // dnd-kit's auto-scroll restarts instead of idling on a stalled pointer.
+    const deadline = Date.now() + 15_000;
+    const trail: string[] = [];
+    while (!(await visible())) {
       const box = await target.boundingBox();
-      if (!box) throw new Error("drag target has no bounding box");
-      const direction = box.x < scrollBox.x ? -1 : 1;
-      const edgeX = direction < 0 ? scrollBox.x + 8 : scrollBox.x + scrollBox.width - 8;
       const offset = await scrollContainer.evaluate(el => el.scrollLeft);
+      const maxOffset = await scrollContainer.evaluate(el => el.scrollWidth - el.clientWidth);
+      if (!box || Date.now() > deadline) {
+        throw new Error(`drag target never became fully visible: box=${JSON.stringify(box)} scrollBox=${JSON.stringify(scrollBox)} scrollLeft=${offset}/${maxOffset} passes=[${trail.join("; ")}]`);
+      }
+      const direction = box.x < scrollBox.x ? -1 : 1;
+      trail.push(`dir=${direction} x=${Math.round(box.x)} w=${Math.round(box.width)} left=${Math.round(offset)}/${Math.round(maxOffset)}`);
+      const edgeX = direction < 0 ? scrollBox.x + 8 : scrollBox.x + scrollBox.width - 8;
       // Approach from inside the track so the pointer moves toward the requested edge.
       await page.mouse.move(scrollBox.x + scrollBox.width / 2, edgeY, { steps: 6 });
       await page.mouse.move(edgeX, edgeY, { steps: 8 });
       const progress = await page.waitForFunction(({ el, offset, direction }) =>
-        (el!.scrollLeft - offset) * direction > 0,
+        (el!.scrollLeft - offset) * direction > 0 || !el!.isConnected,
         { el: await scrollContainer.elementHandle(), offset, direction }, { timeout: 1200 }
       ).catch((error: Error) => {
         if (error.name !== "TimeoutError") throw error;
       });
       await progress?.dispose();
+      // Let scroll-driven layout settle (and any scroll the pointer is still driving continue) before re-measuring.
+      await expect.poll(visible, { timeout: 1000 }).toBe(true).catch(() => undefined);
     }
-    await expect.poll(visible, { timeout: 2500 }).toBe(true);
   }
 
   const targetBox = await target.boundingBox();

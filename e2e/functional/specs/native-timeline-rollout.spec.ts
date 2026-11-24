@@ -30,7 +30,18 @@ async function scrollToFixtureMonth(page: Page) {
   const offset = (month.getTime() - viewportStart.getTime()) / 86_400_000 * 12;
   // The virtualized chart initially starts two months before today. Scroll
   // the real date region before querying cards outside its render window.
-  await page.getByTestId("native-timeline-scroll").evaluate((element, left) => { element.scrollLeft = left; }, offset);
+  const scroller = page.getByTestId("native-timeline-scroll");
+  // Readiness: the scroller exists in server HTML before the client measures it, and a scrollLeft written before the
+  // canvas has its logical width (or before React has attached onScroll) is lost, leaving the virtual window on the
+  // wrong months with no cards rendered. Wait until the client reports a measured viewport, then apply the offset and
+  // confirm the component's own scroll state and render window caught up.
+  await expect(scroller).not.toHaveAttribute("data-viewport-width-px", "0");
+  await expect(scroller.locator("[data-logical-width-px]")).not.toHaveAttribute("data-logical-width-px", "0");
+  await expect.poll(async () => {
+    await scroller.evaluate((element, left) => { element.scrollLeft = left; }, offset);
+    return Number(await scroller.getAttribute("data-scroll-left-px"));
+  }).toBe(Math.round(offset));
+  await expect(page.getByTestId("timeline-grid")).not.toHaveAttribute("data-rendered-card-count", "0");
 }
 
 test.describe("Native timeline default", () => {
