@@ -1,5 +1,7 @@
 import { configuredBlobStoreHostname } from "@/lib/feedback-attachments"
 import { copyPublicImportAsset } from "./public-import-asset"
+import { parseOwnedFeedbackKey } from "@/lib/feedback-attachment-ownership"
+import { FEEDBACK_ATTACHMENT_ALLOWED_MIME_TYPES, FEEDBACK_ATTACHMENT_MAX_FILE_BYTES } from "@/lib/feedback-attachment-rules"
 import { ImportOwnershipChanged } from "./lease"
 import { externalLinkKeyHash } from "@/lib/external-link-key"
 import { createHash, randomUUID } from "node:crypto"
@@ -15,7 +17,6 @@ import { IMPORT_OVERRIDES, SECRET_COLUMNS } from "@/lib/workspace-export/model-r
 import {
   capabilityPackArtifactPath,
   confineStoragePath,
-  isOwnFeedbackAttachmentUrl,
   type PrivateBlobStore,
 } from "@/lib/workspace-export/path-confinement"
 import {
@@ -523,11 +524,29 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
           }
         }
         if (model === "FeedbackAttachment") {
-          const data = typeof raw.id === "string" ? reader.read(blobEntry("feedback", raw.id)) : null
+          // A source URL is never kept: that would share one file between two workspaces, and deleting either workspace's feedback would then
+          // delete the other's attachment. The bytes come from the bundle, else are COPIED from the bundle's own source workspace namespace.
+          let data = typeof raw.id === "string" ? reader.read(blobEntry("feedback", raw.id)) : null
+          let contentType = String(raw.fileType ?? "application/octet-stream")
+          let copiedFromSource = false
+          if (!data && typeof raw.id === "string" && parseOwnedFeedbackKey(raw.url, sourceWorkspaceId.toLowerCase()) !== null) {
+            try {
+              const fetched = await providerIO(() => opts.blobs.fetchPublic(raw.url as string))
+              // The same size cap and type allowlist the upload paths enforce; anything else is dropped like an unreadable file.
+              const baseType = fetched?.contentType.split(";")[0].trim().toLowerCase() ?? ""
+              if (fetched && fetched.bytes.length <= FEEDBACK_ATTACHMENT_MAX_FILE_BYTES && (FEEDBACK_ATTACHMENT_ALLOWED_MIME_TYPES as readonly string[]).includes(baseType)) {
+                data = fetched.bytes
+                // The fetched type, not the bundle's fileType: the bundle controls the latter.
+                contentType = baseType
+                copiedFromSource = true
+              }
+            } catch {
+              // Unreadable source: dropped below.
+            }
+          }
           if (data && typeof raw.id === "string") {
             const filename = String(raw.filename ?? "attachment").replace(/[^A-Za-z0-9._-]/g, "_")
             const key = `feedback/${newWorkspaceId}/${deriveId(importKey, `fb:${raw.id}`)}-${filename}`
-            const contentType = String(raw.fileType ?? "application/octet-stream")
             const journal = opts.journal
             if (journal) {
               row.url = await copyPublicImportAsset(opts.blobs, journal, key, data, contentType, configuredBlobStoreHostname(), providerIO)
@@ -536,13 +555,10 @@ export async function importWorkspaceBundle(client: Client, bytes: Uint8Array, o
               uploaded.push({ store: "feedback", key: row.url as string })
             }
             blobsCopied++
-          } else if (isOwnFeedbackAttachmentUrl(raw.url, sourceWorkspaceId)) {
-            // Only this deployment's own public-store URLs survive, and verbatim (not run through the id rewrite).
-            row.url = raw.url
-            warnings.push(`Feedback attachment ${raw.id} bytes were not in the bundle; its original URL was kept`)
+            if (copiedFromSource) warnings.push(`Feedback attachment ${raw.id} bytes were not in the bundle; its file was copied from the source workspace`)
           } else {
             dropped.FeedbackAttachment = (dropped.FeedbackAttachment ?? 0) + 1
-            warnings.push(`Feedback attachment ${raw.id} had no bytes in the bundle and an external URL; it was skipped`)
+            warnings.push(`Feedback attachment ${raw.id} had no bytes in the bundle and its source file could not be read; it was skipped`)
             continue
           }
         }

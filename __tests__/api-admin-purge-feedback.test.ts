@@ -26,16 +26,24 @@ const mockVoteDeleteMany = vi.fn();
 const mockAttachmentDeleteMany = vi.fn();
 const mockItemDeleteMany = vi.fn();
 const mockItemFindMany = vi.fn();
+const mockAttachmentFindMany = vi.fn();
+const mockQueryRaw = vi.fn();
+const mockStoreDelete = vi.fn();
 
 const mockPrisma = {
   workspace: { findFirst: mockWorkspaceFindFirst },
   feedbackVote: { deleteMany: mockVoteDeleteMany },
-  feedbackAttachment: { deleteMany: mockAttachmentDeleteMany },
+  feedbackAttachment: { deleteMany: mockAttachmentDeleteMany, findMany: mockAttachmentFindMany },
+  $queryRaw: mockQueryRaw,
   feedbackItem: { deleteMany: mockItemDeleteMany, findMany: mockItemFindMany },
 };
 
 vi.mock("@/lib/db", () => ({
   default: () => mockPrisma,
+}));
+
+vi.mock("@/lib/storage/public-store", () => ({
+  getPublicFileStore: () => ({ delete: mockStoreDelete, put: vi.fn(), fetch: vi.fn() }),
 }));
 
 import { POST } from "@/app/api/admin/purge-feedback/route";
@@ -60,6 +68,9 @@ function request(body: unknown, secret?: string) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockAttachmentFindMany.mockResolvedValue([]);
+  mockQueryRaw.mockResolvedValue([]);
+  mockStoreDelete.mockResolvedValue(undefined);
   process.env.MIGRATION_SECRET = "test-migration-secret";
 });
 
@@ -252,5 +263,82 @@ describe("POST /api/admin/purge-feedback", () => {
     expect(body.requested).toBe(2);
     expect(body.resolved).toBe(1);
     expect(body.deleted).toBe(1);
+  });
+});
+
+// Attachment BLOBS: the rows above were always deleted; the files behind them were not (a permanent leak that also kept deleted
+// feedback on public URLs). Design: Products/Compass/Runs/compass-attachment-leak-small-fix-design.md.
+describe("POST /api/admin/purge-feedback: attachment blob release", () => {
+  const WS_UUID = "aaaaaaaa-1111-4111-8111-bbbbbbbbbbbb";
+  const OTHER_WS_UUID = "cccccccc-2222-4222-8222-dddddddddddd";
+  const HOST = "store123.public.blob.vercel-storage.com";
+  const OWN = `https://${HOST}/feedback/${WS_UUID}/1700000000000-own.png`;
+  const THEIRS = `https://${HOST}/feedback/${OTHER_WS_UUID}/1700000000000-theirs.png`;
+
+  beforeEach(() => {
+    vi.stubEnv("BLOB_READ_WRITE_TOKEN", "vercel_blob_rw_store123_secret");
+    vi.stubEnv("COMPASS_ENV", "production");
+    vi.stubEnv("FEEDBACK_ATTACHMENT_BLOB_DELETE_ENABLED", "1");
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    mockWorkspaceFindFirst.mockResolvedValue({ id: WS_UUID });
+    mockItemFindMany.mockResolvedValue(IDS.map((id) => ({ id })));
+    mockVoteDeleteMany.mockResolvedValue({ count: 0 });
+    mockAttachmentDeleteMany.mockResolvedValue({ count: 2 });
+    mockItemDeleteMany.mockResolvedValue({ count: 2 });
+    mockAttachmentFindMany.mockResolvedValue([{ url: OWN }, { url: THEIRS }]);
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  const purge = () => POST(request({ orgSlug: "rbcodelabs", workspaceSlug: "hiptrip", feedbackIds: IDS }, "test-migration-secret"));
+
+  it("deletes ONLY the purging workspace's own files, after the item delete, and reports blob counts", async () => {
+    const res = await purge();
+    expect(res.status).toBe(200);
+    // URLs are read for the resolved (workspace-scoped) ids, before the rows are deleted.
+    expect(mockAttachmentFindMany).toHaveBeenCalledWith({ where: { feedbackItemId: { in: IDS } }, select: { url: true } });
+    expect(mockAttachmentFindMany.mock.invocationCallOrder[0]).toBeLessThan(mockAttachmentDeleteMany.mock.invocationCallOrder[0]);
+    expect(mockStoreDelete.mock.calls).toEqual([[[OWN]]]);
+    expect(mockStoreDelete.mock.invocationCallOrder[0]).toBeGreaterThan(mockItemDeleteMany.mock.invocationCallOrder[0]);
+    const body = await res.json();
+    expect(body).toMatchObject({ deleted: 2, resolved: 2, blobsDeleted: 1, blobsKept: 1, blobsDryRun: 0 });
+  });
+
+  it("deletes no file when the item delete fails (guard 3; mutation M3: release before the commit)", async () => {
+    mockItemDeleteMany.mockRejectedValue(new Error("db down"));
+    await expect(purge()).rejects.toThrow("db down");
+    expect(mockStoreDelete).not.toHaveBeenCalled();
+  });
+
+  it("keeps a file another row still references", async () => {
+    mockQueryRaw.mockResolvedValue([{ id: "other", url: OWN }]);
+    const body = await (await purge()).json();
+    expect(mockStoreDelete).not.toHaveBeenCalled();
+    expect(body).toMatchObject({ blobsDeleted: 0, blobsKept: 2 });
+  });
+
+  it("with the flag off it only logs what it would delete", async () => {
+    vi.stubEnv("FEEDBACK_ATTACHMENT_BLOB_DELETE_ENABLED", "");
+    const body = await (await purge()).json();
+    expect(mockStoreDelete).not.toHaveBeenCalled();
+    expect(body).toMatchObject({ blobsDeleted: 0, blobsDryRun: 1 });
+  });
+
+  it("a release failure never breaks the purge response", async () => {
+    mockStoreDelete.mockRejectedValue(new Error("provider 500"));
+    const res = await purge();
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ deleted: 2, blobsDeleted: 0 });
+  });
+
+  it("a failure while reading attachment URLs does not stop the purge", async () => {
+    mockAttachmentFindMany.mockRejectedValue(new Error("read failed"));
+    const res = await purge();
+    expect(res.status).toBe(200);
+    expect(mockItemDeleteMany).toHaveBeenCalled();
+    expect(mockStoreDelete).not.toHaveBeenCalled();
   });
 });

@@ -6,9 +6,15 @@
  * workspaceId names a DIFFERENT workspace. So the parent-chain arm is only ever
  * `{ workspaceId: null, <parent> in [...] }`, never a bare parent match.
  */
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CASCADE_CHUNK_SIZE, chunked, deleteWorkspaceCascade } from "@/lib/delete-workspace-cascade";
 import { WS_A, createTenantFakePrisma } from "../helpers/tenant-fake-prisma";
+import { createReleaseBudget } from "@/lib/feedback-attachment-ownership";
+
+const storeDelete = vi.fn<(urls: string[]) => Promise<void>>();
+vi.mock("@/lib/storage/public-store", () => ({
+  getPublicFileStore: () => ({ delete: storeDelete, put: vi.fn(), fetch: vi.fn() }),
+}));
 
 vi.mock("@/lib/artifact-storage", () => ({ getArtifactStorage: () => ({}) }));
 // The registry-driven final sweep walks every content model with real paging; this where-honouring fake neither holds those models nor
@@ -18,7 +24,7 @@ vi.mock("@/lib/workspace-export/sweep", () => ({ sweepWorkspaceOwnedRows: async 
 
 type Call = { model: string; op: string; args: unknown };
 
-function recordingPrisma(results: Record<string, unknown[]> = {}) {
+function recordingPrisma(results: Record<string, unknown[]> = {}, opts: { queryRaw?: unknown[]; txFails?: boolean } = {}) {
   const calls: Call[] = [];
   const model = (name: string) =>
     new Proxy({}, {
@@ -34,8 +40,16 @@ function recordingPrisma(results: Record<string, unknown[]> = {}) {
     });
   const client: unknown = new Proxy({}, {
     get: (_t, prop: string) => {
-      if (prop === "$transaction") return async (fn: (tx: unknown) => unknown) => fn(client);
-      if (prop === "$queryRaw" || prop === "$executeRaw") return async () => [];
+      if (prop === "$transaction") {
+        return async (fn: (tx: unknown) => unknown) => {
+          const out = await fn(client);
+          // The failure is raised after the callback ran, i.e. the commit itself failed.
+          if (opts.txFails) throw new Error("commit failed");
+          return out;
+        };
+      }
+      if (prop === "$queryRaw") return async () => opts.queryRaw ?? [];
+      if (prop === "$executeRaw") return async () => [];
       return model(prop);
     },
   });
@@ -298,5 +312,90 @@ describe("deleteWorkspaceCascade Solution / Objective scope", () => {
     expect(has("solution", "deleteMany", { id: { in: ["sol-1"] } })).toBe(true);
     expect(has("checkIn", "deleteMany", { keyResultId: { in: ["kr-1"] } })).toBe(true);
     expect(has("objective", "deleteMany", { id: { in: ["obj-1"] } })).toBe(true);
+  });
+});
+
+// Attachment BLOBS (design: Products/Compass/Runs/compass-attachment-leak-small-fix-design.md). Step 6 deletes the rows; the files
+// behind them used to be left on public URLs forever. Release runs after the final transaction commits, honours skipBlobCleanup,
+// and never throws into the teardown.
+describe("deleteWorkspaceCascade attachment blob release", () => {
+  const WS_UUID = "aaaaaaaa-1111-4111-8111-bbbbbbbbbbbb";
+  const OTHER_WS_UUID = "cccccccc-2222-4222-8222-dddddddddddd";
+  const HOST = "store123.public.blob.vercel-storage.com";
+  const OWN = `https://${HOST}/feedback/${WS_UUID}/1700000000000-own.png`;
+  const THEIRS = `https://${HOST}/feedback/${OTHER_WS_UUID}/1700000000000-theirs.png`;
+  const canned = { "feedbackItem.findMany": [[{ id: "fb-1" }, { id: "fb-2" }]], "feedbackAttachment.findMany": [[{ url: OWN }, { url: THEIRS }]] };
+
+  beforeEach(() => {
+    storeDelete.mockReset();
+    storeDelete.mockResolvedValue(undefined);
+    vi.stubEnv("BLOB_READ_WRITE_TOKEN", "vercel_blob_rw_store123_secret");
+    vi.stubEnv("COMPASS_ENV", "production");
+    vi.stubEnv("FEEDBACK_ATTACHMENT_BLOB_DELETE_ENABLED", "1");
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  it("reads the attachment URLs before step 6 deletes the rows, then deletes only the workspace's own files", async () => {
+    const { client, calls } = recordingPrisma(structuredClone(canned));
+    await deleteWorkspaceCascade(client, WS_UUID);
+    const read = calls.findIndex((c) => c.model === "feedbackAttachment" && c.op === "findMany");
+    const rowsDeleted = calls.findIndex((c) => c.model === "feedbackAttachment" && c.op === "deleteMany");
+    expect(read).toBeGreaterThan(-1);
+    expect(read).toBeLessThan(rowsDeleted);
+    expect(calls[read].args).toMatchObject({ where: { feedbackItemId: { in: ["fb-1", "fb-2"] } }, select: { url: true } });
+    expect(storeDelete.mock.calls).toEqual([[[OWN]]]);
+  });
+
+  it("deletes no file when the final transaction fails (guard 3; mutation M3: release before the commit)", async () => {
+    const { client } = recordingPrisma(structuredClone(canned), { txFails: true });
+    await expect(deleteWorkspaceCascade(client, WS_UUID)).rejects.toThrow("commit failed");
+    expect(storeDelete).not.toHaveBeenCalled();
+  });
+
+  it("skipBlobCleanup (preview automation) never reads or deletes a file (guard 4; mutation M2)", async () => {
+    const { client, calls } = recordingPrisma(structuredClone(canned));
+    await deleteWorkspaceCascade(client, WS_UUID, { skipBlobCleanup: true });
+    expect(storeDelete).not.toHaveBeenCalled();
+    expect(calls.some((c) => c.model === "feedbackAttachment" && c.op === "findMany")).toBe(false);
+  });
+
+  it("keeps a file another workspace's row still references", async () => {
+    const { client } = recordingPrisma(structuredClone(canned), { queryRaw: [{ id: "x", url: OWN }] });
+    await deleteWorkspaceCascade(client, WS_UUID);
+    expect(storeDelete).not.toHaveBeenCalled();
+  });
+
+  it("a release failure is logged, never thrown into the teardown", async () => {
+    storeDelete.mockRejectedValue(new Error("provider 500"));
+    const { client } = recordingPrisma(structuredClone(canned));
+    await expect(deleteWorkspaceCascade(client, WS_UUID)).resolves.toBeUndefined();
+  });
+
+  it("with the flag off the whole path runs but nothing is deleted", async () => {
+    vi.stubEnv("FEEDBACK_ATTACHMENT_BLOB_DELETE_ENABLED", "");
+    const { client } = recordingPrisma(structuredClone(canned));
+    await deleteWorkspaceCascade(client, WS_UUID);
+    expect(storeDelete).not.toHaveBeenCalled();
+  });
+
+  it("pages the URL read in chunks so no statement carries more than one chunk of ids", async () => {
+    const N = CASCADE_CHUNK_SIZE * 2 + 7;
+    const items = Array.from({ length: N }, (_, i) => ({ id: `fb-${i}` }));
+    const { client, calls } = recordingPrisma({ "feedbackItem.findMany": [items], "feedbackAttachment.findMany": [[]] });
+    await deleteWorkspaceCascade(client, WS_UUID);
+    const reads = calls.filter((c) => c.model === "feedbackAttachment" && c.op === "findMany").map((c) => (c.args as { where: { feedbackItemId: { in: string[] } } }).where.feedbackItemId.in);
+    expect(reads.map((r) => r.length)).toEqual([CASCADE_CHUNK_SIZE, CASCADE_CHUNK_SIZE, 7]);
+  });
+
+  it("accepts one shared release budget (account deletion shares one 20 s budget across its workspaces)", async () => {
+    const budget = createReleaseBudget(20_000);
+    const { client } = recordingPrisma(structuredClone(canned));
+    await deleteWorkspaceCascade(client, WS_UUID, { blobBudget: budget });
+    expect(storeDelete).toHaveBeenCalledTimes(1);
   });
 });

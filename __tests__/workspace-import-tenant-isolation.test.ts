@@ -289,24 +289,96 @@ describe("H1: workspace import tenant isolation", () => {
     expect(db.table("Opportunity")).toHaveLength(0)
   })
 
-  it("keeps a feedback attachment's URL only when it is this deployment's own public-store URL", async () => {
+  it("never keeps a source URL: a readable own-store file is copied into the NEW workspace's namespace with the FETCHED content type", async () => {
     const item = randomUUID()
     const own = randomUUID()
-    const external = randomUUID()
-    const internal = randomUUID()
+    const foreign = randomUUID()
+    const fetched: string[] = []
+    const puts: { path: string; contentType: string }[] = []
+    const foreignUrl = `https://${STORE_HOST}/feedback/${victimWs}/${randomUUID()}-theirs.png`
+    blobs.fetchPublic = async (url) => {
+      fetched.push(url)
+      return { bytes: new TextEncoder().encode("PNGBYTES"), contentType: "image/webp" }
+    }
+    blobs.putPublic = async (path, _bytes, contentType) => {
+      puts.push({ path, contentType })
+      return `https://${STORE_HOST}/${path}`
+    }
     const report = await run({
       rows: {
         FeedbackItem: [{ id: item, workspaceId: srcWs, title: "f" }],
         FeedbackAttachment: [
-          { id: own, feedbackItemId: item, url: OWN_FEEDBACK_URL, filename: "a.png", fileType: "image/png", fileSize: 1 },
-          { id: external, feedbackItemId: item, url: "http://169.254.169.254/latest/meta-data/", filename: "b.png", fileType: "image/png", fileSize: 1 },
-          { id: internal, feedbackItemId: item, url: "https://evil.example/feedback/x.png", filename: "c.png", fileType: "image/png", fileSize: 1 },
+          // fileType is bundle-controlled and must not decide the stored content type.
+          { id: own, feedbackItemId: item, url: OWN_FEEDBACK_URL, filename: "a.png", fileType: "text/html", fileSize: 8 },
+          // A hostile bundle's row pointing at a namespace that is not the bundle's own source workspace.
+          { id: foreign, feedbackItemId: item, url: foreignUrl, filename: "b.png", fileType: "image/png", fileSize: 1 },
         ],
       },
     })
-    const urls = db.table("FeedbackAttachment").map((r) => r.url)
-    expect(urls).toEqual([OWN_FEEDBACK_URL])
-    expect(report.warnings.join(" ")).toMatch(/external URL/)
+    const rows = db.table("FeedbackAttachment")
+    expect(rows).toHaveLength(1)
+    expect(String(rows[0].url).startsWith(`https://${STORE_HOST}/feedback/${report.workspaceId}/`)).toBe(true)
+    expect(rows[0].url).not.toBe(OWN_FEEDBACK_URL)
+    expect(puts).toHaveLength(1)
+    expect(puts[0].contentType).toBe("image/webp")
+    expect(fetched).toEqual([OWN_FEEDBACK_URL]) // the foreign-namespace URL is never read
+    expect(report.warnings.filter((w) => /was skipped/.test(w))).toHaveLength(1) // the foreign-namespace row
+  })
+
+  it("drops a copied source file that is over the upload size cap or has a type the upload paths would refuse", async () => {
+    const item = randomUUID()
+    const big = randomUUID()
+    const html = randomUUID()
+    const okType = randomUUID()
+    const url = (n: string) => `https://${STORE_HOST}/feedback/${srcWs}/${n}`
+    blobs.fetchPublic = async (u) => {
+      if (u.endsWith("big.png")) return { bytes: new Uint8Array(10 * 1024 * 1024 + 1), contentType: "image/png" }
+      if (u.endsWith("page.png")) return { bytes: new Uint8Array(4), contentType: "text/html" }
+      return { bytes: new Uint8Array(4), contentType: "image/png; charset=binary" } // parameters are ignored, the base type decides
+    }
+    const report = await run({
+      rows: {
+        FeedbackItem: [{ id: item, workspaceId: srcWs, title: "f" }],
+        FeedbackAttachment: [
+          { id: big, feedbackItemId: item, url: url("big.png"), filename: "big.png", fileType: "image/png", fileSize: 1 },
+          { id: html, feedbackItemId: item, url: url("page.png"), filename: "page.png", fileType: "image/png", fileSize: 1 },
+          { id: okType, feedbackItemId: item, url: url("ok.png"), filename: "ok.png", fileType: "image/png", fileSize: 4 },
+        ],
+      },
+    })
+    const kept = db.table("FeedbackAttachment")
+    expect(kept).toHaveLength(1)
+    expect(String(kept[0].url)).toMatch(/\/feedback\/[^/]+\/[^/]*-ok\.png$/)
+    expect(okType).toBeTruthy()
+    expect(report.warnings.filter((w) => /was skipped/.test(w))).toHaveLength(2)
+  })
+
+  it("drops a feedback attachment with no bytes whose source file is unreadable, malformed or not this deployment's own", async () => {
+    const item = randomUUID()
+    const unreadable = randomUUID()
+    const external = randomUUID()
+    const internal = randomUUID()
+    const throws = randomUUID()
+    const fetched: string[] = []
+    blobs.fetchPublic = async (url) => {
+      fetched.push(url)
+      if (url.includes("boom")) throw new Error("provider down")
+      return null
+    }
+    const report = await run({
+      rows: {
+        FeedbackItem: [{ id: item, workspaceId: srcWs, title: "f" }],
+        FeedbackAttachment: [
+          { id: unreadable, feedbackItemId: item, url: OWN_FEEDBACK_URL, filename: "a.png", fileType: "image/png", fileSize: 1 },
+          { id: throws, feedbackItemId: item, url: `https://${STORE_HOST}/feedback/${srcWs}/boom-b.png`, filename: "b.png", fileType: "image/png", fileSize: 1 },
+          { id: external, feedbackItemId: item, url: "http://169.254.169.254/latest/meta-data/", filename: "c.png", fileType: "image/png", fileSize: 1 },
+          { id: internal, feedbackItemId: item, url: "https://evil.example/feedback/x.png", filename: "d.png", fileType: "image/png", fileSize: 1 },
+        ],
+      },
+    })
+    expect(db.table("FeedbackAttachment")).toHaveLength(0)
+    expect(report.warnings.filter((w) => /Feedback attachment .* was skipped/.test(w))).toHaveLength(4)
+    expect(fetched.sort()).toEqual([OWN_FEEDBACK_URL, `https://${STORE_HOST}/feedback/${srcWs}/boom-b.png`].sort()) // only parser-approved URLs are fetched
   })
 
   it("treats non-canonical UUID spellings as the ids they are (no allow-list bypass)", async () => {

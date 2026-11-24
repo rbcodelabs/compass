@@ -49,6 +49,7 @@ import type { AppPrismaClient } from "@/lib/db"
 import { deleteInBatches, updateInBatches } from "@/lib/batched-delete"
 import { deleteRunsWhere, deleteWebFetchesWhere, deleteWebSearchesWhere, purgeConversations, tolerateMissingTable } from "@/lib/agent-conversation-purge"
 import { deleteWorkspaceCascade } from "@/lib/delete-workspace-cascade"
+import { createReleaseBudget } from "@/lib/feedback-attachment-ownership"
 import { revokeAllConnectorGrants } from "@/lib/mcp-connectors/revoke-all"
 import { isOrgAdminRole, normalizeOrgRole, normalizeWorkspaceRole } from "@/lib/roles"
 
@@ -213,10 +214,12 @@ async function deleteOwnedConversations(prisma: AppPrismaClient, userId: string)
 }
 
 async function deleteSoleOwned(prisma: AppPrismaClient, plan: DeletionPlan): Promise<void> {
+  // One 20 s attachment-file budget for the whole account, not per workspace; what it cannot finish is logged, not retried.
+  const blobBudget = createReleaseBudget()
   for (const org of plan.soleOwned.organizations) {
     const workspaces = await prisma.workspace.findMany({ where: { organizationId: org.id }, select: { id: true } })
     for (const workspace of workspaces) {
-      await deleteWorkspaceCascade(prisma, workspace.id)
+      await deleteWorkspaceCascade(prisma, workspace.id, { blobBudget })
     }
     // Same tail as deleteOrganization in app/[orgSlug]/settings/actions.ts: org-level rows have no FK cascade.
     const scoringModelIds = (await prisma.scoringModel.findMany({ where: { organizationId: org.id }, select: { id: true } })).map((m) => m.id)

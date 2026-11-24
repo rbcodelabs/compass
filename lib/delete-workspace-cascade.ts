@@ -16,6 +16,7 @@ import { deleteLinksOfTasks } from "@/lib/task-link-writes";
 import { deleteWorkspaceExternalLinks } from "@/lib/external-links-service";
 import { updateInBatches } from "@/lib/batched-delete";
 import { sweepWorkspaceOwnedRows } from "@/lib/workspace-export/sweep";
+import { releaseOwnedFeedbackBlobsAfterResponse, type ReleaseBudget } from "@/lib/feedback-attachment-ownership";
 
 /**
  * Aurora DSQL fails a transaction that modifies more than ~3,000 rows, and the workspace_id indexes on Solution and
@@ -42,7 +43,7 @@ export function chunked<T>(list: readonly T[], size: number = CASCADE_CHUNK_SIZE
  * OpportunityScore, WorkspaceScoringConfig, LaunchChecklist/ChecklistTemplate,
  * FeedbackAttachment, CanvasNodePosition).
  */
-export async function deleteWorkspaceCascade(prisma: AppPrismaClient, workspaceId: string, options: { skipBlobCleanup?: boolean } = {}) {
+export async function deleteWorkspaceCascade(prisma: AppPrismaClient, workspaceId: string, options: { skipBlobCleanup?: boolean; blobBudget?: ReleaseBudget } = {}) {
   await assertDocumentPilotCleanupReviewed(prisma, workspaceId);
 
   // 0. entity_links, FIRST: the only store of every link family (opportunity-to-objective, solution-to-key-result, task references, artifact and
@@ -161,6 +162,19 @@ export async function deleteWorkspaceCascade(prisma: AppPrismaClient, workspaceI
   const feedbackIds = await ids(
     prisma.feedbackItem.findMany({ where: { workspaceId }, select: { id: true } })
   );
+  // The files behind the attachment rows are released after the final transaction commits; remember their URLs before the rows go. A
+  // failed read only means the files leak; it never stops the teardown. Preview automation (skipBlobCleanup) reads nothing.
+  const attachmentUrls: string[] = [];
+  if (!options.skipBlobCleanup) {
+    try {
+      for (const group of chunked(feedbackIds)) {
+        const rows = await prisma.feedbackAttachment.findMany({ where: { feedbackItemId: { in: group } }, select: { url: true } });
+        for (const row of rows) attachmentUrls.push(row.url);
+      }
+    } catch (error) {
+      console.warn("[delete-workspace-cascade] could not read attachment urls; their files will not be released", error);
+    }
+  }
   if (feedbackIds.length > 0) {
     await prisma.feedbackVote.deleteMany({
       where: { feedbackId: { in: feedbackIds } },
@@ -328,4 +342,7 @@ export async function deleteWorkspaceCascade(prisma: AppPrismaClient, workspaceI
     await tx.workspace.delete({ where: { id: workspaceId } });
     await deleteWorkspaceAnalytics(tx, workspaceId);
   });
+
+  // Committed. Only now release the workspace's own attachment files (guards and the production flag live in the helper; it never throws).
+  await releaseOwnedFeedbackBlobsAfterResponse(prisma, workspaceId, attachmentUrls, { skipBlobCleanup: options.skipBlobCleanup, budget: options.blobBudget });
 }

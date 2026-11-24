@@ -6,6 +6,7 @@ import { isPermissionError, PermissionError, resolveOrgAdmin } from "@/lib/permi
 import { findMetricConfigIssues, type MetricConfigIssue } from "@/lib/scoring";
 import type { ScoringFormulaType, MetricDirection } from "@/lib/types";
 import { deleteWorkspaceCascade } from "@/lib/delete-workspace-cascade";
+import { createReleaseBudget } from "@/lib/feedback-attachment-ownership";
 import { SLUG_PATTERN } from "@/lib/slug";
 import { validateOrgSlug } from "@/lib/org-slug";
 import { createWorkspaceInOrg, type WorkspaceMemberSeeding } from "@/lib/workspace-service";
@@ -484,8 +485,10 @@ export async function deleteOrganization(
       })
     ).map((w) => w.id);
 
+    // One attachment-file budget for the whole organization, so the 20 s bound and the concurrency bound hold across its workspaces.
+    const blobBudget = createReleaseBudget();
     for (const workspaceId of workspaceIds) {
-      await deleteWorkspaceCascade(prisma, workspaceId);
+      await deleteWorkspaceCascade(prisma, workspaceId, { blobBudget });
     }
 
     // Org-level rows: scoring model metrics (Restrict) → scoring models →
