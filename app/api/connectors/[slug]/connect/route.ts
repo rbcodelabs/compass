@@ -145,7 +145,7 @@ async function connectViaVercelConnect(request: NextRequest, slug: string, userI
     return NextResponse.redirect(consentUrl, { headers: { "Cache-Control": "no-store" } })
   } catch (error) {
     if (error instanceof McpConnectorError) {
-      console.error("Vercel Connect consent could not be started", slug, error.code, error.message)
+      console.error("Vercel Connect consent could not be started", slug, error.code)
       return NextResponse.json(
         { error: error.message, code: error.code },
         { status: error.code === "CLIENT_NOT_CONFIGURED" || error.code === "CONNECT_MISCONFIGURED" ? 503 : 502 },

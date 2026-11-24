@@ -13,7 +13,7 @@
 import { NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { trustedCompassBaseUrl } from "@/lib/compass-url"
-import { McpConnectorError, connectorDefinition, usesVercelConnect } from "@/lib/mcp-connectors/config"
+import { McpConnectorError, connectorDefinition, safeErrorLabel, usesVercelConnect } from "@/lib/mcp-connectors/config"
 import {
   disconnectGrant,
   findConnector,
@@ -40,7 +40,7 @@ export async function DELETE(_request: Request, context: { params: Promise<{ slu
       return NextResponse.json({ disconnected: revoked, revokedAtProvider: revoked }, { headers: { "Cache-Control": "no-store" } })
     } catch (error) {
       if (error instanceof McpConnectorError) {
-        console.error("Vercel Connect revoke failed", slug, error.code, error.message)
+        console.error("Vercel Connect revoke failed", slug, error.code)
         return NextResponse.json({ error: error.message, code: error.code }, { status: error.code === "CLIENT_NOT_CONFIGURED" || error.code === "CONNECT_MISCONFIGURED" ? 503 : 502 })
       }
       throw error
@@ -68,7 +68,7 @@ export async function DELETE(_request: Request, context: { params: Promise<{ slu
     console.error(
       "MCP connector tokens could not be read before disconnect; skipping provider revocation",
       slug,
-      error instanceof McpConnectorError ? error.code : error,
+      safeErrorLabel(error),
     )
   }
 
