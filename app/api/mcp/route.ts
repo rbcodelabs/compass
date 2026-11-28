@@ -2476,7 +2476,7 @@ const _handler = createMcpHandler(
           .filter(h => groups[h]?.length)
           .map(h => {
             const lines = groups[h].map(item =>
-              `  • **${item.title}**${item.isPrivate ? " 🔒 PRIVATE" : ""}\n    ID: ${item.id}${displayLine("roadmapItem", item).replace("\n", "\n    ")}` +
+              `  • **${item.title}**${item.isPrivate ? " 🔒 PRIVATE" : ""}\n    ID: ${item.id}${displayLine("roadmapItem", item).replaceAll("\n", "\n    ")}` +
               (item.opportunity ? `\n    Opportunity: ${item.opportunity.title}` : "") +
               (item.solution ? `\n    Solution: ${item.solution.title}` : "") +
               (item.experiment ? `\n    Experiment: ${item.experiment.title}` : "") +
