@@ -611,6 +611,7 @@ describe("list_roadmap_items MCP tool — stable joins and commitment evidence",
     }
     expect(result.structuredContent.data.items[0]).toEqual({
       id: "roadmap-1",
+      displayId: null,
       title: "Guided setup",
       description: "Reduce setup failures",
       horizon: "NOW",

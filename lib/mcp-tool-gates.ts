@@ -386,6 +386,11 @@ export const TOOL_GATES: Record<string, Gate> = {
 
   // Roadmap -----------------------------------------------------------------
   list_roadmap_items: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  // workspaceId is only an optional narrowing (and the scope for a display ID, already resolved): when given it must be the item's own.
+  get_roadmap_item: async (a, x) => {
+    if (x.workspaceId) await assertChildInDeclaredWorkspace(a, "roadmapItem", x.roadmapItemId, x.workspaceId)
+    else await assertEntityAccess(a, "roadmapItem", x.roadmapItemId)
+  },
   update_roadmap_item: async (a, x) => {
     const { workspaceId } = await assertEntityAccess(a, "roadmapItem", x.itemId)
     if (x.keyResultId) await assertChildInDeclaredWorkspace(a, "keyResult", x.keyResultId, workspaceId)
@@ -719,7 +724,7 @@ const READ_TOOLS = [
   "get_decision", "capture_canvas", "get_experiment",
   "get_feedback_item", "get_help", "get_launch_checklist", "get_okr_cycle", "get_opportunity",
   "get_opportunity_score", "get_pm_interview", "get_research_session", "get_research_study",
-  "get_review_request", "get_scoring_model", "get_solution_comment", "get_solution_score", "get_squad", "get_task",
+  "get_review_request", "get_scoring_model", "get_solution_comment", "get_solution_score", "get_squad", "get_task", "get_roadmap_item",
   "get_workspace_by_slug", "get_workspace_scoring_model", "get_workspace_summary",
   "list_artifacts", "list_assumptions", "list_checklist_templates", "list_comments",
   "list_custom_field_definitions", "list_custom_field_inheritance_rules", "list_decisions", "list_doc_comments", "list_doc_history",
@@ -884,7 +889,7 @@ export const AGENT_TOOL_POLICY: Record<string, "READ" | "WRITE" | "DENY"> = Obje
   ...["generate_research_guide", "create_research_study", "update_research_study", "generate_research_synthesis", "promote_research_finding_to_evidence"].map(name => [name, "WRITE"]),
   ...["activate_research_study", "close_research_study", "archive_research_study", "issue_research_link", "rotate_research_link", "revoke_research_links"].map(name => [name, "DENY"]),
   ...[
-    "get_current_identity", "TaskList", "TaskGet", "threads_get_current", "threads_list", "threads_get_messages", "threads_get_log", "threads_list_squads", "threads_wait", "threads_list_orchestrators", "list_task_assignees", "list_comments", "get_comment", "get_workspace_summary", "list_workspaces", "get_workspace_by_slug", "list_okr_cycles", "get_okr_cycle", "list_eligible_parent_key_results", "list_opportunities", "list_solutions", "list_assumptions", "get_opportunity", "list_solution_comments", "get_solution_comment", "list_experiments", "get_experiment", "list_roadmap_items", "list_decisions", "get_decision", "list_release_runs", "get_review_request", "list_review_requests", "list_checklist_templates", "get_launch_checklist", "list_squads", "get_squad", "get_task", "list_tasks", "list_task_links", "list_feedback", "get_feedback_item", "list_evidence", "list_doc_history", "capture_canvas", "list_doc_comments", "list_artifacts", "get_artifact", "search_help", "get_help", "slack_list_channels", "slack_read_channel", "slack_read_thread", "slack_search_users", "list_scoring_models", "get_scoring_model", "get_workspace_scoring_model", "get_opportunity_score", "get_solution_score", "list_top_opportunities", "list_custom_field_definitions", "list_custom_field_inheritance_rules", "get_custom_field_values", "group_by_custom_field", "list_links", "list_specs", "list_docs", "get_spec", "list_workspace_modules",
+    "get_current_identity", "TaskList", "TaskGet", "threads_get_current", "threads_list", "threads_get_messages", "threads_get_log", "threads_list_squads", "threads_wait", "threads_list_orchestrators", "list_task_assignees", "list_comments", "get_comment", "get_workspace_summary", "list_workspaces", "get_workspace_by_slug", "list_okr_cycles", "get_okr_cycle", "list_eligible_parent_key_results", "list_opportunities", "list_solutions", "list_assumptions", "get_opportunity", "list_solution_comments", "get_solution_comment", "list_experiments", "get_experiment", "list_roadmap_items", "get_roadmap_item", "list_decisions", "get_decision", "list_release_runs", "get_review_request", "list_review_requests", "list_checklist_templates", "get_launch_checklist", "list_squads", "get_squad", "get_task", "list_tasks", "list_task_links", "list_feedback", "get_feedback_item", "list_evidence", "list_doc_history", "capture_canvas", "list_doc_comments", "list_artifacts", "get_artifact", "search_help", "get_help", "slack_list_channels", "slack_read_channel", "slack_read_thread", "slack_search_users", "list_scoring_models", "get_scoring_model", "get_workspace_scoring_model", "get_opportunity_score", "get_solution_score", "list_top_opportunities", "list_custom_field_definitions", "list_custom_field_inheritance_rules", "get_custom_field_values", "group_by_custom_field", "list_links", "list_specs", "list_docs", "get_spec", "list_workspace_modules",
   ].map(name => [name, "READ"]),
   ...[
     "link_artifact_to_decision", "unlink_artifact_from_decision", "link_artifact_to_experiment", "unlink_artifact_from_experiment",
