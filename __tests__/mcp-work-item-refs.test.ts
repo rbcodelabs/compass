@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { z } from "zod"
 
-const { assertWorkspaceMember, findFirst } = vi.hoisted(() => ({ assertWorkspaceMember: vi.fn(), findFirst: vi.fn() }))
+const { assertWorkspaceMember, findFirst, roadmapFindFirst } = vi.hoisted(() => ({ assertWorkspaceMember: vi.fn(), findFirst: vi.fn(), roadmapFindFirst: vi.fn() }))
 vi.mock("@/lib/mcp-authz", () => ({ assertWorkspaceMember }))
-vi.mock("@/lib/db", () => ({ default: () => ({ task: { findFirst }, opportunity: { findFirst } }) }))
+vi.mock("@/lib/db", () => ({ default: () => ({ task: { findFirst }, opportunity: { findFirst }, roadmapItem: { findFirst: roadmapFindFirst } }) }))
 
-import { McpRefError, MCP_REF_PARAMS, resolveToolRefs, widenRefSchemas } from "@/lib/mcp-work-item-refs"
+import { McpRefError, MCP_REF_PARAMS, MCP_TOOL_REF_PARAMS, resolveToolRefs, widenRefSchemas } from "@/lib/mcp-work-item-refs"
 
 const WS = "11111111-1111-4111-8111-111111111111"
 const UUID = "22222222-2222-4222-8222-222222222222"
@@ -78,5 +78,61 @@ describe("resolveToolRefs", () => {
     await expect(resolveToolRefs(actor, { workspaceId: WS, opportunityId: "TASK-5" })).rejects.toThrow("TASK-5 is a Task")
     findFirst.mockResolvedValue(null)
     await expect(resolveToolRefs(actor, { workspaceId: WS, taskId: "TASK-99" })).rejects.toThrow("TASK-99 was not found in this workspace.")
+  })
+})
+
+// Roadmap items (RM-n): the same resolver, workspace scoped, plus per-tool overrides for the ambiguous `itemId`.
+const WS_B = "33333333-3333-4333-8333-333333333333"
+const RM_UUID = "44444444-4444-4444-8444-444444444444"
+
+/** A store where RM-10 exists only in workspace A (WS), exactly like a per-workspace sequence. */
+function roadmapStore() {
+  roadmapFindFirst.mockImplementation(async ({ where }: { where: { id?: string; workspaceId: string; seqPrefix?: string; seqNumber?: number } }) =>
+    where.workspaceId === WS && (where.id === RM_UUID || (where.seqPrefix === "RM" && where.seqNumber === 10))
+      ? { id: RM_UUID, seqPrefix: "RM", seqNumber: 10 }
+      : null)
+}
+
+describe("roadmap item display IDs", () => {
+  it("resolves RM-10 for roadmapItemId inside the declared workspace, case and leading zeros tolerated", async () => {
+    roadmapStore()
+    for (const ref of ["RM-10", "rm-10", "RM-010", "rm-0010"]) {
+      expect(await resolveToolRefs(actor, { workspaceId: WS, roadmapItemId: ref })).toEqual({ workspaceId: WS, roadmapItemId: RM_UUID })
+    }
+    expect(roadmapFindFirst.mock.calls[0][0].where).toEqual({ workspaceId: WS, seqPrefix: "RM", seqNumber: 10 })
+  })
+
+  it("does not resolve the same display ID in another workspace, and never returns the other workspace's row", async () => {
+    roadmapStore()
+    await expect(resolveToolRefs(actor, { workspaceId: WS_B, roadmapItemId: "RM-10" })).rejects.toThrow("RM-10 was not found in this workspace.")
+    expect(roadmapFindFirst.mock.calls.every(([arg]) => arg.where.workspaceId === WS_B)).toBe(true)
+  })
+
+  it("reports a TASK-n passed as a roadmap item as the wrong type", async () => {
+    roadmapStore()
+    await expect(resolveToolRefs(actor, { workspaceId: WS, roadmapItemId: "TASK-5" })).rejects.toThrow("TASK-5 is a Task")
+    expect(roadmapFindFirst).not.toHaveBeenCalled()
+  })
+
+  it("maps itemId to a roadmap item only for the tools that mean one", async () => {
+    expect(MCP_TOOL_REF_PARAMS).toEqual({ update_roadmap_item: { itemId: "roadmapItem" }, set_launch_tier: { itemId: "roadmapItem" } })
+    const schema = (tool?: string) => z.object(widenRefSchemas({ itemId: z.string().uuid() }, tool))
+    expect(schema("update_roadmap_item").safeParse({ itemId: "RM-10" }).success).toBe(true)
+    expect(schema("set_launch_tier").safeParse({ itemId: "RM-10" }).success).toBe(true)
+    // update_launch_checklist_item.itemId is a checklist item and other tools are untouched: still UUID only.
+    const checklist = widenRefSchemas({ itemId: z.string().uuid() }, "update_launch_checklist_item")
+    expect(z.object(checklist).safeParse({ itemId: "RM-10" }).success).toBe(false)
+    expect(Object.keys(checklist)).toEqual(["itemId"])
+    expect(schema().safeParse({ itemId: "RM-10" }).success).toBe(false)
+  })
+
+  it("resolves itemId only when the calling tool maps it", async () => {
+    roadmapStore()
+    expect(await resolveToolRefs(actor, { workspaceId: WS, itemId: "RM-10", title: "x" }, "update_roadmap_item")).toEqual({ workspaceId: WS, itemId: RM_UUID, title: "x" })
+    const untouched = { workspaceId: WS, itemId: "RM-10" }
+    expect(await resolveToolRefs(actor, untouched, "update_launch_checklist_item")).toBe(untouched)
+    expect(await resolveToolRefs(actor, untouched)).toBe(untouched)
+    await expect(resolveToolRefs(actor, { workspaceId: WS_B, itemId: "RM-10" }, "set_launch_tier")).rejects.toThrow("not found")
+    await expect(resolveToolRefs(actor, { itemId: "RM-10" }, "update_roadmap_item")).rejects.toThrow(/pass workspaceId/)
   })
 })

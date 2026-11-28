@@ -12,6 +12,13 @@ import { runWithMcpActor } from "@/lib/mcp-authz"
 import { z } from "zod"
 import { setModules } from "./helpers/modules";
 
+const { linkedTaskIds } = vi.hoisted(() => ({ linkedTaskIds: vi.fn() }))
+vi.mock("@/lib/task-links-read", () => ({ getTaskIdsLinkedTo: linkedTaskIds }))
+vi.mock("@/lib/custom-field-bulk", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/custom-field-bulk")>()),
+  resolveCustomFieldColumns: vi.fn().mockResolvedValue({ ok: true, columns: [] }),
+  loadCustomFieldValuesFor: vi.fn().mockResolvedValue(new Map()),
+}))
 vi.mock("@/lib/work-item-sequence", async () => (await import("./helpers/work-item-sequence-mock")).workItemSequenceMock())
 
 // ── Prisma mock ─────────────────────────────────────────────────────────────
@@ -21,6 +28,7 @@ const mockPrisma = {
     findUnique: vi.fn(),
   },
   squad: { findFirst: vi.fn() },
+  task: { findMany: vi.fn() },
   solution: { findFirst: vi.fn() },
   opportunity: { findFirst: vi.fn() },
   keyResult: { findFirst: vi.fn() },
@@ -720,5 +728,161 @@ describe("list_roadmap_items recency filtering and sorting", () => {
       squadId: "11111111-1111-4111-8111-111111111111",
       updatedAt: { gte: new Date("2026-09-01T00:00:00.000Z") },
     })
+  })
+})
+
+// ── Display IDs (RM-n) ───────────────────────────────────────────────────────
+
+describe("list_roadmap_items MCP tool — display IDs", () => {
+  const base = { opportunity: null, solution: null, squad: null, experiment: null, startDate: null, endDate: null }
+  beforeEach(() => vi.clearAllMocks())
+
+  it("shows displayId in the full text and structured output, null for an un-numbered item", async () => {
+    mockPrisma.roadmapItem.findMany.mockResolvedValue([
+      { ...base, id: "u-1", title: "Numbered", horizon: "NOW", seqPrefix: "RM", seqNumber: 10 },
+      { ...base, id: "u-2", title: "Old row", horizon: "NOW", seqPrefix: null, seqNumber: null },
+    ])
+    const result = await getHandler("list_roadmap_items")({ workspaceId: "ws-1" }) as unknown as { content: Array<{ text: string }>; structuredContent: { data: { items: Array<{ id: string; displayId: string | null }> } } }
+    const text = result.content[0].text
+    expect(text).toMatch(/Numbered[\s\S]*ID: u-1\n\s+Display ID: RM-10/)
+    expect(text).not.toMatch(/ID: u-2\n\s+Display ID/)
+    expect(result.structuredContent.data.items.map((i) => [i.id, i.displayId])).toEqual([["u-1", "RM-10"], ["u-2", null]])
+  })
+
+  it("shows displayId in compact text and structured output too, and selects the sequence columns", async () => {
+    mockPrisma.roadmapItem.findMany.mockResolvedValue([
+      { id: "u-1", title: "Numbered", horizon: "NOW", squad: null, seqPrefix: "RM", seqNumber: 10 },
+      { id: "u-2", title: "Old row", horizon: "NOW", squad: null, seqPrefix: null, seqNumber: null },
+    ])
+    const result = await getHandler("list_roadmap_items")({ workspaceId: "ws-1", compact: true }) as unknown as { content: Array<{ text: string }>; structuredContent: { data: { items: Array<{ id: string; displayId: string | null }> } } }
+    expect(mockPrisma.roadmapItem.findMany.mock.calls[0][0].select).toMatchObject({ seqPrefix: true, seqNumber: true })
+    const lines = result.content[0].text.split("\n")
+    expect(lines.find((l) => l.includes("[u-1]"))).toContain("RM-10")
+    expect(lines.find((l) => l.includes("[u-2]"))).not.toMatch(/RM-/)
+    expect(result.structuredContent.data.items.map((i) => i.displayId)).toEqual(["RM-10", null])
+  })
+})
+
+describe("get_roadmap_item MCP tool", () => {
+  const ITEM = "55555555-5555-4555-8555-555555555555"
+  const WS = "66666666-6666-4666-8666-666666666666"
+  const row = {
+    id: ITEM, workspaceId: WS, seqPrefix: "RM", seqNumber: 10, title: "Guided setup", description: "Reduce failures", horizon: "NOW", status: "ACTIVE",
+    isPrivate: false, sortOrder: 2, startDate: new Date("2026-07-01"), endDate: null, nowCommitmentProvenance: "NATIVE_GATED", nowDecisionRecordId: "dec-1",
+    opportunityId: "o-1", solutionId: "s-1", experimentId: "e-1", keyResultId: "k-1", feedbackId: "f-1", squadId: "q-1",
+    opportunity: { id: "o-1", title: "Setup confusing", seqPrefix: "OPP", seqNumber: 3 },
+    solution: { id: "s-1", title: "Wizard", seqPrefix: "SOL", seqNumber: 4 },
+    experiment: { id: "e-1", title: "Concierge", seqPrefix: "EXP", seqNumber: 5 },
+    keyResult: { id: "k-1", title: "Activation 40%", seqPrefix: "KR", seqNumber: 6 },
+    feedback: { id: "f-1", title: "Setup hard", seqPrefix: "FB", seqNumber: 7 },
+    squad: { id: "q-1", name: "Activation" },
+    createdAt: new Date("2026-08-01"), updatedAt: new Date("2026-09-01"),
+  }
+  type Result = { content: Array<{ text: string }>; structuredContent: { ok: boolean; data: Record<string, unknown> | null } }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockPrisma.roadmapItem.findFirst.mockResolvedValue(row)
+    mockPrisma.task.findMany.mockResolvedValue([{ id: "t-1", title: "Build wizard", status: "IN_PROGRESS", seqPrefix: "TASK", seqNumber: 12 }])
+    linkedTaskIds.mockResolvedValue(["t-1"])
+  })
+
+  it("returns full detail by UUID, scoped to the item's own row", async () => {
+    const result = await getHandler("get_roadmap_item")({ roadmapItemId: ITEM }) as unknown as Result
+    expect(mockPrisma.roadmapItem.findFirst.mock.calls[0][0].where).toEqual({ id: ITEM })
+    const data = result.structuredContent.data!
+    expect(data).toMatchObject({
+      id: ITEM, displayId: "RM-10", title: "Guided setup", description: "Reduce failures", horizon: "NOW", status: "ACTIVE", isPrivate: false, sortOrder: 2,
+      endDate: null, nowCommitmentProvenance: "NATIVE_GATED", nowDecisionRecordId: "dec-1", squad: { id: "q-1", name: "Activation" },
+      opportunity: { id: "o-1", displayId: "OPP-3", title: "Setup confusing" }, solution: { id: "s-1", displayId: "SOL-4", title: "Wizard" },
+      experiment: { id: "e-1", displayId: "EXP-5", title: "Concierge" }, keyResult: { id: "k-1", displayId: "KR-6", title: "Activation 40%" },
+      feedback: { id: "f-1", displayId: "FB-7", title: "Setup hard" }, tasks: [{ id: "t-1", displayId: "TASK-12", title: "Build wizard", status: "IN_PROGRESS" }],
+    })
+    expect(linkedTaskIds).toHaveBeenCalledWith(expect.anything(), { workspaceId: WS, linkedType: "ROADMAP_ITEM", linkedId: ITEM })
+    expect(mockPrisma.task.findMany.mock.calls[0][0].where).toMatchObject({ workspaceId: WS })
+    const text = result.content[0].text
+    expect(text).toContain("RM-10")
+    expect(text).toContain("Guided setup")
+    expect(text).toContain("TASK-12")
+    expect(text).toContain(`ID: ${ITEM}`)
+  })
+
+  it("resolves RM-10 plus workspaceId and fetches only inside that workspace", async () => {
+    mockPrisma.roadmapItem.findFirst.mockImplementation(async ({ where }: { where: { id?: string; workspaceId?: string; seqNumber?: number } }) =>
+      where.workspaceId === WS && (where.id === ITEM || where.seqNumber === 10) ? (where.id ? row : { id: ITEM, seqPrefix: "RM", seqNumber: 10 }) : null)
+    const result = await getHandler("get_roadmap_item")({ roadmapItemId: "RM-10", workspaceId: WS }) as unknown as Result
+    expect(result.structuredContent.data).toMatchObject({ id: ITEM, displayId: "RM-10" })
+    // The detail read carries the workspace as well as the id.
+    expect(mockPrisma.roadmapItem.findFirst.mock.calls.at(-1)![0].where).toEqual({ id: ITEM, workspaceId: WS })
+  })
+
+  it("does not return an item from another workspace when a UUID is paired with the wrong workspaceId", async () => {
+    mockPrisma.roadmapItem.findFirst.mockImplementation(async ({ where }: { where: { id: string; workspaceId?: string } }) => (where.workspaceId && where.workspaceId !== WS ? null : row))
+    const result = await getHandler("get_roadmap_item")({ roadmapItemId: ITEM, workspaceId: "77777777-7777-4777-8777-777777777777" }) as unknown as Result
+    expect(result.structuredContent.ok).toBe(false)
+    expect(result.content[0].text).toMatch(/not found/i)
+    expect(result.content[0].text).not.toContain("Guided setup")
+    expect(linkedTaskIds).not.toHaveBeenCalled()
+  })
+
+  it("asks for workspaceId when given a display ID without one", async () => {
+    await expect(getHandler("get_roadmap_item")({ roadmapItemId: "RM-10" })).rejects.toThrow(/pass workspaceId/)
+    expect(mockPrisma.roadmapItem.findFirst).not.toHaveBeenCalled()
+  })
+
+  it("reports a missing item as not found", async () => {
+    mockPrisma.roadmapItem.findFirst.mockResolvedValue(null)
+    const result = await getHandler("get_roadmap_item")({ roadmapItemId: ITEM }) as unknown as Result
+    expect(result.structuredContent.ok).toBe(false)
+    expect(result.content[0].text).toContain("not found")
+  })
+
+  it("accepts a display ID in the schema and adds an optional workspaceId", () => {
+    const schema = z.object(registeredSchemas.get_roadmap_item)
+    expect(schema.safeParse({ roadmapItemId: "RM-10", workspaceId: WS }).success).toBe(true)
+    expect(schema.safeParse({ roadmapItemId: ITEM }).success).toBe(true)
+    expect(schema.safeParse({ roadmapItemId: "TASK-1" }).success).toBe(true) // shape only; the resolver names the wrong type
+    expect(schema.safeParse({ roadmapItemId: "nonsense" }).success).toBe(false)
+  })
+})
+
+describe("update_roadmap_item MCP tool — display IDs", () => {
+  const ITEM = "88888888-8888-4888-8888-888888888888"
+  const WS = "99999999-9999-4999-8999-999999999999"
+  const OTHER = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+  beforeEach(() => {
+    vi.clearAllMocks()
+    // RM-10 exists only in WS.
+    mockPrisma.roadmapItem.findFirst.mockImplementation(async ({ where }: { where: { workspaceId: string; seqNumber?: number } }) =>
+      where.workspaceId === WS && where.seqNumber === 10 ? { id: ITEM, seqPrefix: "RM", seqNumber: 10 } : null)
+    mockPrisma.roadmapItem.findUnique.mockResolvedValue({ id: ITEM, workspaceId: WS, title: "Item", horizon: "LATER", status: "ACTIVE" })
+    mockPrisma.roadmapItem.update.mockImplementation(async ({ data, where }) => ({ id: where.id, title: "Item", horizon: "LATER", status: "ACTIVE", ...data }))
+  })
+
+  it("updates the row RM-10 names in the given workspace", async () => {
+    const result = await getHandler("update_roadmap_item")({ itemId: "rm-10", workspaceId: WS, title: "Renamed" })
+    expect(mockPrisma.roadmapItem.update.mock.calls[0][0].where).toEqual({ id: ITEM })
+    expect(textOf(result)).toContain(`ID: ${ITEM}`)
+  })
+
+  it("still updates by UUID", async () => {
+    await getHandler("update_roadmap_item")({ itemId: ITEM, title: "Renamed" })
+    expect(mockPrisma.roadmapItem.update.mock.calls[0][0].where).toEqual({ id: ITEM })
+  })
+
+  it("rejects RM-10 in a workspace that does not hold it, and writes nothing", async () => {
+    await expect(getHandler("update_roadmap_item")({ itemId: "RM-10", workspaceId: OTHER, title: "x" })).rejects.toThrow("RM-10 was not found in this workspace.")
+    expect(mockPrisma.roadmapItem.update).not.toHaveBeenCalled()
+  })
+
+  it("rejects a display ID with no workspaceId, and writes nothing", async () => {
+    await expect(getHandler("update_roadmap_item")({ itemId: "RM-10", title: "x" })).rejects.toThrow(/pass workspaceId/)
+    expect(mockPrisma.roadmapItem.update).not.toHaveBeenCalled()
+  })
+
+  it("widens itemId on update_roadmap_item and set_launch_tier only", () => {
+    expect(z.object(registeredSchemas.update_roadmap_item).safeParse({ itemId: "RM-10", workspaceId: WS }).success).toBe(true)
+    expect(z.object(registeredSchemas.set_launch_tier).safeParse({ itemId: "RM-10", workspaceId: WS, tier: "TIER_1" }).success).toBe(true)
+    expect(z.object(registeredSchemas.update_launch_checklist_item).safeParse({ itemId: "RM-10", status: "DONE" }).success).toBe(false)
   })
 })
