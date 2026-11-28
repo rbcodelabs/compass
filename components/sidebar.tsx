@@ -296,8 +296,6 @@ export function Sidebar({
 
       <SidebarFooter className="px-2 py-3">
         <SidebarMenu>
-          {/* Filled by components/agent/agent-drive.tsx (desktop only); collapses away while empty. */}
-          <SidebarMenuItem id="agent-drive-slot" className="max-md:hidden empty:hidden" />
           <AgentRailToggle />
           <SidebarMenuItem>
             <DropdownMenu>

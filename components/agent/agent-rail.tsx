@@ -35,6 +35,7 @@ import { AgentChat } from "@/components/agent/agent-chat"
 import { DocsPanel } from "@/components/agent/docs-panel"
 import { RailLibraryPane } from "@/components/agent/rail-library-pane"
 import { useAgentRail } from "@/components/agent/agent-rail-context"
+import { AgentDriveSlot } from "@/components/agent/agent-drive"
 import type { RailView } from "@/components/agent/agent-rail-context"
 
 /**
@@ -700,6 +701,7 @@ export function AgentRail({ workspaceId, basePath, userInitials, userId }: Agent
         hidden={view !== "agent"}
         className={cn("min-h-0 flex-1 flex-col", view === "agent" ? "flex" : "hidden")}
       >
+        <AgentDriveSlot />
         <AgentChat
           variant="rail"
           railActive={open && view === "agent"}

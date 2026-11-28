@@ -26,6 +26,7 @@ import { isComposerPanelType } from "@/components/panels/composer-panel-types"
 import { panelTitles } from "@/components/panels/panel-titles"
 import { useLabels } from "@/components/thinking-model/thinking-model-provider"
 import { AgentChat } from "@/components/agent/agent-chat"
+import { AgentDriveSlot } from "@/components/agent/agent-drive"
 import { ConversationNotAvailable } from "@/components/panels/conversation-not-available"
 import { CommentDeepLinkOpener } from "@/components/panels/comment-deep-link-opener"
 import { isCommentId } from "@/lib/comment-deep-link"
@@ -578,6 +579,8 @@ export function ConversationPanel({ conversationId }: { conversationId: string }
   const initialStatus: ConversationStatus = currentSettings?.status ?? "OPEN"
 
   return (
+    <>
+    <AgentDriveSlot />
     <AgentChat
       variant="rail"
       routeSegment="conversations"
@@ -611,5 +614,6 @@ export function ConversationPanel({ conversationId }: { conversationId: string }
         if (panelType) openPanel(panelType, targetId)
       }}
     />
+    </>
   )
 }

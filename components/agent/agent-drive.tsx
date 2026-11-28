@@ -1,12 +1,11 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { createPortal } from "react-dom"
 import { usePathname, useRouter } from "next/navigation"
 import { Bot, OctagonX } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
-import { SidebarMenuButton } from "@/components/ui/sidebar"
 import { parseSseFrames } from "@/lib/sse-frames"
 import { resolveNavigationPath, UI_SCREENSHOT_MAX_BASE64, type UiCommandKind } from "@/lib/ui-control"
 
@@ -24,12 +23,29 @@ import { resolveNavigationPath, UI_SCREENSHOT_MAX_BASE64, type UiCommandKind } f
  */
 
 /**
- * The sidebar footer renders an empty list item with this id; the idle "Let agent drive" control is portalled into it. A floating
- * button in the viewport corner sat on top of whatever the page docks there (the opportunity composer's Submit, detail panels),
- * and no z-index fixes that for a control that has to stay clickable. The opted-in banner below stays fixed: it is a deliberate,
- * short-lived status the user chose to turn on.
+ * The chat rail renders <AgentDriveSlot /> in its Agent view; the idle "Let agent drive" control is portalled into it. The rail
+ * unmounts when closed, so the slot registers itself in a tiny external store rather than being looked up once at mount. A floating
+ * button in the viewport corner sat on top of whatever the page docks there (the opportunity composer's Submit, detail panels), and
+ * no z-index fixes that for a control that has to stay clickable. The opted-in banner below stays fixed and visible even with the
+ * rail closed: it is a deliberate, short-lived status the user chose to turn on.
  */
-export const AGENT_DRIVE_SLOT_ID = "agent-drive-slot"
+let slotElement: HTMLElement | null = null
+const slotListeners = new Set<() => void>()
+const subscribeSlot = (listener: () => void) => {
+  slotListeners.add(listener)
+  return () => void slotListeners.delete(listener)
+}
+function registerSlot(el: HTMLElement | null) {
+  // Ignore a null from a stale unmount when a newer slot has already registered.
+  if (el === null && slotElement !== null && slotElement.isConnected) return
+  slotElement = el
+  slotListeners.forEach((listener) => listener())
+}
+
+/** Empty mount point for the idle control; collapses away while empty (desktop only). */
+export function AgentDriveSlot() {
+  return <div ref={registerSlot} className="max-md:hidden empty:hidden" />
+}
 
 type StreamCommand = { id: string; kind: UiCommandKind; args: Record<string, unknown> }
 type Phase = "off" | "connecting" | "on"
@@ -121,11 +137,8 @@ export function AgentDrive({ workspaceId, basePath }: { workspaceId: string; bas
   const pathname = usePathname()
   const [phase, setPhase] = useState<Phase>("off")
   const [error, setError] = useState<string | null>(null)
-  // Where the idle control lives (see AGENT_DRIVE_SLOT_ID); found after mount because the sidebar renders it.
-  const [slot, setSlot] = useState<HTMLElement | null>(null)
-  useEffect(() => {
-    setSlot(document.getElementById(AGENT_DRIVE_SLOT_ID))
-  }, [])
+  // Where the idle control lives: the chat rail's slot, present only while the rail is open.
+  const slot = useSyncExternalStore(subscribeSlot, () => slotElement, () => null)
   const tabId = useRef<string>("")
   const sessionId = useRef<string | null>(null)
   const abort = useRef<AbortController | null>(null)
@@ -285,12 +298,19 @@ export function AgentDrive({ workspaceId, basePath }: { workspaceId: string; bas
   if (phase === "off") {
     if (!slot) return null
     return createPortal(
-      <div data-agent-drive-ui>
-        <SidebarMenuButton onClick={start} tooltip="Let an agent move you between screens and see this screen" className="text-text-secondary">
-          <Bot className="text-text-subtle" aria-hidden="true" />
+      <div data-agent-drive-ui className="border-b border-border-default px-3 py-1.5">
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={start}
+          title="Let an agent move you between screens and see this screen"
+          className="gap-1.5 text-text-secondary"
+        >
+          <Bot className="size-4 text-text-subtle" aria-hidden="true" />
           <span>Let agent drive</span>
-        </SidebarMenuButton>
-        {error ? <p role="alert" className="mt-1 px-2 text-xs text-destructive group-data-[collapsible=icon]:hidden">{error}</p> : null}
+        </Button>
+        {error ? <p role="alert" className="mt-1 px-2 text-xs text-destructive">{error}</p> : null}
       </div>,
       slot,
     )

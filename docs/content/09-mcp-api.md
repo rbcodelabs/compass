@@ -1304,7 +1304,7 @@ Add this to your Claude Desktop `claude_desktop_config.json`:
 
 ### Driving the user's screen
 
-These tools act on the calling user's own open Compass tab, and only after the user turns on **Let agent drive** (a banner with a Stop button stays visible while it is on). They cannot click or type. All three require `mcp:write` scope.
+These tools act on the calling user's own open Compass tab, and only after the user turns on **Let agent drive** (a button at the top of the chat panel, opened with ⌘J; a banner with a Stop button stays visible while it is on). They cannot click or type. All three require `mcp:write` scope.
 
 | Tool | Description |
 |---|---|

@@ -81,6 +81,8 @@ test("an agent can read, move and screenshot a tab only while the user lets it d
     expect(refused.structuredContent?.message).toMatch(/Let agent drive/);
 
     // ── 2. The user opts in ─────────────────────────────────────────────────
+    // The control lives in the chat panel (⌘J), not the sidebar.
+    await page.keyboard.press("ControlOrMeta+j");
     const driveButton = page.getByRole("button", { name: "Let agent drive" });
     await expect(driveButton).toBeVisible();
     await keep("1-before-opt-in", await page.screenshot());
@@ -134,6 +136,7 @@ test("an agent can read, move and screenshot a tab only while the user lets it d
     await driveButton.click();
     await expect(banner).toBeVisible();
     await page.reload();
+    if (!(await page.getByRole("button", { name: "Let agent drive" }).isVisible())) await page.keyboard.press("ControlOrMeta+j");
     await expect(page.getByRole("button", { name: "Let agent drive" })).toBeVisible();
     await expect(banner).toBeHidden();
   } finally {
