@@ -127,6 +127,8 @@ test("an agent can read, move and screenshot a tab only while the user lets it d
     // ── 7. Stop: the banner goes and the agent is locked out again ──────────
     await banner.getByRole("button", { name: "Stop" }).click();
     await expect(banner).toBeHidden();
+    // The chat panel closes when the agent navigates the tab, so reopen it to reach the idle control again.
+    if (!(await page.getByRole("button", { name: "Let agent drive" }).isVisible())) await page.keyboard.press("ControlOrMeta+j");
     await expect(page.getByRole("button", { name: "Let agent drive" })).toBeVisible();
     const afterStop = await tool(request, "ui_get_state", { workspaceId });
     expect(afterStop.structuredContent?.ok).toBe(false);
