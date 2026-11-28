@@ -129,4 +129,49 @@ test.describe.serial("roadmap display IDs over MCP", () => {
     const titles = (await pool.query("SELECT title FROM compass_dev.roadmap_items WHERE workspace_id=ANY($1::uuid[]) ORDER BY title", [[wsA, wsB, wsC]])).rows.map((r) => r.title);
     expect(titles).toEqual(["Item in B", "Renamed by UUID"]);
   });
+  test("edge cases: case-insensitive RM-n, wrong-type refs, checklist itemId stays UUID-only, archived and un-numbered items, absurd numbers", async ({ request }) => {
+    // Lower/mixed case resolves to the same row for reads and writes.
+    expect(succeeded(await tool(request, "get_roadmap_item", { roadmapItemId: "Rm-1", workspaceId: wsA })).id).toBe(itemA);
+    succeeded(await tool(request, "update_roadmap_item", { itemId: "rm-1", workspaceId: wsA, title: "Case insensitive write" }));
+    expect((await pool.query("SELECT title FROM compass_dev.roadmap_items WHERE id=$1", [itemA])).rows[0].title).toBe("Case insensitive write");
+
+    // A TASK-n where a roadmap itemId is expected names its real type on both tools and writes nothing.
+    const wrongUpdate = await tool(request, "update_roadmap_item", { itemId: "TASK-1", workspaceId: wsA, title: "Must not land" });
+    refused(wrongUpdate);
+    expect(JSON.stringify(wrongUpdate)).toContain("is a Task");
+    refused(await tool(request, "set_launch_tier", { itemId: "TASK-1", workspaceId: wsA, tier: "TIER_1" }));
+
+    // itemId is a launch checklist item in update_launch_checklist_item: an RM-n must never be mapped to a roadmap item there.
+    refused(await tool(request, "update_launch_checklist_item", { itemId: "RM-1", workspaceId: wsA, status: "DONE" }));
+    refused(await tool(request, "update_launch_checklist_item", { itemId: "RM-1", status: "DONE" }));
+
+    // Malformed, zero, and numbers beyond a 32-bit integer are refused as errors, never resolved to some row.
+    for (const bad of ["RM-0", "RM-", "RM-x", "RM-99999999999999999999", "RM-1; DROP TABLE roadmap_items", "RM--1", "../RM-1"]) {
+      refused(await tool(request, "get_roadmap_item", { roadmapItemId: bad, workspaceId: wsA }));
+    }
+    // workspaceId must be a UUID; a slug or display ID there is refused.
+    refused(await tool(request, "get_roadmap_item", { roadmapItemId: "RM-1", workspaceId: "RM-1" }));
+    refused(await tool(request, "get_roadmap_item", { roadmapItemId: itemA, workspaceId: "not-a-uuid" }));
+
+    // Archived items leave list_roadmap_items but keep their number and stay addressable by it.
+    const second = succeeded(await tool(request, "add_to_roadmap", { workspaceId: wsA, title: "Second in A", horizon: "NEXT" })).id as string;
+    expect((await listed(request, wsA)).find((i) => i.id === second)?.displayId).toBe("RM-2");
+    succeeded(await tool(request, "update_roadmap_item", { itemId: "RM-2", workspaceId: wsA, status: "ARCHIVED" }));
+    expect((await listed(request, wsA)).map((i) => i.id)).not.toContain(second);
+    expect(succeeded(await tool(request, "get_roadmap_item", { roadmapItemId: "RM-2", workspaceId: wsA }))).toMatchObject({ id: second, displayId: "RM-2", status: "ARCHIVED" });
+    // Numbers are not recycled: the next item is RM-3, not RM-2.
+    const third = succeeded(await tool(request, "add_to_roadmap", { workspaceId: wsA, title: "Third in A", horizon: "LATER" })).id as string;
+    expect((await listed(request, wsA)).find((i) => i.id === third)?.displayId).toBe("RM-3");
+
+    // An un-numbered legacy row: displayId is null in list and get, and no RM-n reaches it.
+    const legacy = randomUUID();
+    await pool.query("INSERT INTO compass_dev.roadmap_items (id,workspace_id,title,horizon) VALUES ($1,$2,'Legacy un-numbered','NOW')", [legacy, wsA]);
+    await pool.query("UPDATE compass_dev.roadmap_items SET seq_prefix=NULL, seq_number=NULL WHERE id=$1", [legacy]);
+    expect((await listed(request, wsA)).find((i) => i.id === legacy)?.displayId).toBeNull();
+    expect((await listed(request, wsA, { compact: true })).find((i) => i.id === legacy)?.displayId).toBeNull();
+    expect(succeeded(await tool(request, "get_roadmap_item", { roadmapItemId: legacy })).displayId).toBeNull();
+    expect(succeeded(await tool(request, "get_roadmap_item", { roadmapItemId: legacy, workspaceId: wsA })).title).toBe("Legacy un-numbered");
+    // The same UUID with the sibling workspace is not found.
+    refused(await tool(request, "get_roadmap_item", { roadmapItemId: legacy, workspaceId: wsB }));
+  });
 });
