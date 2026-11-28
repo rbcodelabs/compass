@@ -17,7 +17,8 @@ import { resolveWorkItem } from "@/lib/work-item-resolve"
  * display ID never reveals whether a row exists in a workspace the caller cannot see.
  *
  * Ambiguous names are left alone on purpose: `itemId` is a roadmap item in one tool and a checklist item in
- * another, and polymorphic `objectId`/`targetId`/`linkedId` carry their type in a sibling field.
+ * another, and polymorphic `objectId`/`targetId`/`linkedId` carry their type in a sibling field. A name that is
+ * unambiguous *within one tool* is mapped per tool in MCP_TOOL_REF_PARAMS instead.
  */
 export const MCP_REF_PARAMS: Readonly<Record<string, WorkItemType>> = {
   objectiveId: "objective",
@@ -35,6 +36,21 @@ export const MCP_REF_PARAMS: Readonly<Record<string, WorkItemType>> = {
   docId: "doc",
   artifactId: "artifact",
   studyId: "researchStudy",
+}
+
+/**
+ * Parameters that only mean one type inside a particular tool. `itemId` is the roadmap item in update_roadmap_item and
+ * set_launch_tier, but a launch checklist item in update_launch_checklist_item, so it can never be mapped globally.
+ */
+export const MCP_TOOL_REF_PARAMS: Readonly<Record<string, Readonly<Record<string, WorkItemType>>>> = {
+  update_roadmap_item: { itemId: "roadmapItem" },
+  set_launch_tier: { itemId: "roadmapItem" },
+}
+
+/** The reference parameters of one tool: the global map plus that tool's own entries (which win). */
+function refParamsFor(toolName?: string): Readonly<Record<string, WorkItemType>> {
+  const own = toolName && Object.hasOwn(MCP_TOOL_REF_PARAMS, toolName) ? MCP_TOOL_REF_PARAMS[toolName] : undefined
+  return own ? { ...MCP_REF_PARAMS, ...own } : MCP_REF_PARAMS
 }
 
 type AnyZod = z.ZodType
@@ -77,13 +93,14 @@ function refSchema(type: WorkItemType, wrap: "none" | "optional" | "nullable" | 
 }
 
 /** Returns a copy of a tool's `inputSchema` shape that accepts display IDs in the mapped parameters. */
-export function widenRefSchemas<T>(inputSchema: T): T {
+export function widenRefSchemas<T>(inputSchema: T, toolName?: string): T {
   if (!inputSchema || typeof inputSchema !== "object" || typeof (inputSchema as { parse?: unknown }).parse === "function") return inputSchema
   const shape = inputSchema as Record<string, AnyZod>
+  const refParams = refParamsFor(toolName)
   const widened: Record<string, AnyZod> = {}
   let changed = false
   for (const [key, schema] of Object.entries(shape)) {
-    const type = Object.hasOwn(MCP_REF_PARAMS, key) ? MCP_REF_PARAMS[key] : undefined
+    const type = Object.hasOwn(refParams, key) ? refParams[key] : undefined
     const uuid = type && schema && typeof schema === "object" ? isUuidString(schema) : null
     if (type && uuid) {
       widened[key] = refSchema(type, uuid.wrap, uuid.description)
@@ -104,9 +121,9 @@ export class McpRefError extends Error {}
  * caller may use that workspace. Arguments with no display ID are returned untouched (same object), so a UUID-only
  * call behaves and costs exactly what it did before.
  */
-export async function resolveToolRefs<A extends Record<string, unknown>>(actor: McpActor, args: A): Promise<A> {
+export async function resolveToolRefs<A extends Record<string, unknown>>(actor: McpActor, args: A, toolName?: string): Promise<A> {
   const pending: Array<[string, string, WorkItemType]> = []
-  for (const [key, type] of Object.entries(MCP_REF_PARAMS)) {
+  for (const [key, type] of Object.entries(refParamsFor(toolName))) {
     const value = args[key]
     if (typeof value === "string" && classifyWorkItemRef(value).kind === "display") pending.push([key, value, type])
   }

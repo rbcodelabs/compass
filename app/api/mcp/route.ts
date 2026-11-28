@@ -143,11 +143,13 @@ import {
   listChecklistTemplates,
   setLaunchTier,
   getLaunchChecklist,
+  getRoadmapItem,
   updateLaunchChecklistItem,
   updateRoadmapItem,
   createRoadmapItem,
   promoteSolutionToRoadmap,
 } from "@/lib/roadmap-tool-handlers"
+import { displayIdFromRow, displayLine } from "@/lib/work-item-ids"
 import {
   createTask,
   getTask,
@@ -296,7 +298,7 @@ const _handler = createMcpHandler(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       handler: (args: any, extra?: any) => any
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ) => (server.registerTool as (...a: any[]) => any)(name, meta && typeof meta === "object" && meta.inputSchema ? { ...meta, inputSchema: widenRefSchemas(meta.inputSchema) } : meta, async (rawArgs: any, extra: any) => {
+    ) => (server.registerTool as (...a: any[]) => any)(name, meta && typeof meta === "object" && meta.inputSchema ? { ...meta, inputSchema: widenRefSchemas(meta.inputSchema, name) } : meta, async (rawArgs: any, extra: any) => {
       const actor = { ...getMcpActor(), authorizedWorkspaceId: undefined }
       // Display IDs (TASK-12) become UUIDs exactly once, inside the gate and after its actor-type/policy checks, so the
       // tool's own gate, the handler and every receipt only ever see UUIDs, and a denied call resolves nothing.
@@ -305,7 +307,7 @@ const _handler = createMcpHandler(
       let resolved = false
       const resolveOnce = async () => {
         if (!resolved) {
-          args = await resolveToolRefs(actor, args)
+          args = await resolveToolRefs(actor, args, name)
           resolved = true
         }
         return args
@@ -2336,7 +2338,7 @@ const _handler = createMcpHandler(
         title: "List Roadmap Items",
         description:
           "Lists all active roadmap items for a workspace grouped by horizon (NOW / NEXT / LATER / LAUNCHING / LAUNCHED / SHIPPED). " +
-          "Includes linked opportunity and solution titles, squad, and IDs. " +
+          "Includes linked opportunity and solution titles, squad, and IDs, plus each item's displayId (RM-12, null while un-numbered), which you can pass to get_roadmap_item and update_roadmap_item together with workspaceId. " +
           "Custom fields: `customFieldFilters` narrows to items whose ROADMAP_ITEM custom field values match (several filters are ANDed; " +
           "each filter takes exactly one of `value`, `anyOf` or `isSet`). SELECT matches the exact option value; MULTI_SELECT matches when the item has " +
           "that option (or any of `anyOf`); TEXT/URL is a case-insensitive substring; NUMBER/BOOLEAN/DATE is exact equality; `isSet` tests presence for any type. " +
@@ -2400,7 +2402,7 @@ const _handler = createMcpHandler(
         const rows = compact
           ? await prisma.roadmapItem.findMany({
               where,
-              select: { id: true, title: true, horizon: true, squad: { select: { name: true } }, ...(opportunityColumns ? { opportunityId: true } : {}) },
+              select: { id: true, seqPrefix: true, seqNumber: true, title: true, horizon: true, squad: { select: { name: true } }, ...(opportunityColumns ? { opportunityId: true } : {}) },
               orderBy,
             })
           : await prisma.roadmapItem.findMany({
@@ -2419,7 +2421,7 @@ const _handler = createMcpHandler(
           opportunity: { title: string } | null; solution: { title: string } | null; experiment: { title: string } | null
           solutionId: string | null; experimentId: string | null; keyResultId: string | null; feedbackId: string | null; squadId: string | null
           startDate: Date | null; endDate: Date | null; nowCommitmentProvenance: string | null; nowDecisionRecordId: string | null
-          createdAt: Date; updatedAt: Date
+          createdAt: Date; updatedAt: Date; seqPrefix: string | null; seqNumber: number | null
         }>>
         if (!items.length) {
           // An empty *recency window* (or a field-filtered query) is a successful
@@ -2448,11 +2450,13 @@ const _handler = createMcpHandler(
             .map(h => `**${h}**\n` + items.filter(i => i.horizon === h).map(i => {
               const fields = formatFieldValues(fieldValues?.get(i.id))
               const linked = formatFieldValues(opportunityFieldsOf(i) ?? undefined)
-              return `  • ${i.title} [${i.id}]${i.squad ? ` (${i.squad.name})` : ""}${fields ? ` — ${fields}` : ""}${linked ? ` — Opportunity: ${linked}` : ""}`
+              const displayId = displayIdFromRow("roadmapItem", i)
+              return `  • ${i.title} [${i.id}]${displayId ? ` ${displayId}` : ""}${i.squad ? ` (${i.squad.name})` : ""}${fields ? ` — ${fields}` : ""}${linked ? ` — Opportunity: ${linked}` : ""}`
             }).join("\n"))
           return ok(sections.join("\n\n"), {
             items: items.map((i) => ({
               id: i.id,
+              displayId: displayIdFromRow("roadmapItem", i),
               title: i.title,
               horizon: i.horizon,
               squad: i.squad?.name ?? null,
@@ -2472,7 +2476,7 @@ const _handler = createMcpHandler(
           .filter(h => groups[h]?.length)
           .map(h => {
             const lines = groups[h].map(item =>
-              `  • **${item.title}**${item.isPrivate ? " 🔒 PRIVATE" : ""}\n    ID: ${item.id}` +
+              `  • **${item.title}**${item.isPrivate ? " 🔒 PRIVATE" : ""}\n    ID: ${item.id}${displayLine("roadmapItem", item).replaceAll("\n", "\n    ")}` +
               (item.opportunity ? `\n    Opportunity: ${item.opportunity.title}` : "") +
               (item.solution ? `\n    Solution: ${item.solution.title}` : "") +
               (item.experiment ? `\n    Experiment: ${item.experiment.title}` : "") +
@@ -2488,6 +2492,7 @@ const _handler = createMcpHandler(
         return ok(sections.join("\n\n"), {
           items: items.map((i) => ({
             id: i.id,
+            displayId: displayIdFromRow("roadmapItem", i),
             title: i.title,
             description: i.description,
             horizon: i.horizon,
@@ -2520,6 +2525,23 @@ const _handler = createMcpHandler(
     )
 
     register(
+      "get_roadmap_item",
+      {
+        title: "Get Roadmap Item",
+        description:
+          "Returns full detail for one roadmap item: displayId (RM-12), title, description, horizon, status, privacy, sort order, dates, " +
+          "linked opportunity / solution / experiment / key result / feedback (each with its id, displayId and title), squad, " +
+          "Now-commitment provenance, custom field values, and the Tasks linked to it (id, displayId, title, status). " +
+          "Pass roadmapItemId as a UUID, or as a display ID like RM-12 together with workspaceId (display IDs are unique per workspace).",
+        inputSchema: {
+          roadmapItemId: z.string().uuid().describe("UUID of the roadmap item"),
+        },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      getRoadmapItem
+    )
+
+    register(
       "update_roadmap_item",
       {
         title: "Update Roadmap Item",
@@ -2529,7 +2551,7 @@ const _handler = createMcpHandler(
           "Use horizon to move items between NOW / NEXT / LATER. Use status ARCHIVED to remove from view. " +
           "LAUNCHING and LAUNCHED cannot be set here — use set_launch_tier to move an item into LAUNCHING.",
         inputSchema: {
-          itemId: z.string().uuid().describe("UUID of the roadmap item"),
+          itemId: z.string().uuid().describe("UUID of the roadmap item (or a display ID like RM-12 with workspaceId)"),
           keyResultId: z.string().uuid().nullable().optional().describe("Key Result UUID in the item's workspace; null clears the link, omitted preserves it"),
           opportunityId: z.string().uuid().nullable().optional().describe("Opportunity UUID in the item's workspace; null clears the link, omitted preserves it"),
           solutionId: z.string().uuid().nullable().optional().describe("Solution UUID in the item's workspace; null clears the link, omitted preserves it"),

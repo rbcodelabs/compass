@@ -218,9 +218,9 @@ describe("list_roadmap_items custom field values, compact mode, linked opportuni
     const result = await call("list_roadmap_items", { workspaceId: WS, compact: true })
     const query = mockPrisma.roadmapItem.findMany.mock.calls[0][0]
     expect(query.include).toBeUndefined()
-    expect(Object.keys(query.select).sort()).toEqual(["horizon", "id", "squad", "title"].sort())
+    expect(Object.keys(query.select).sort()).toEqual(["horizon", "id", "seqNumber", "seqPrefix", "squad", "title"].sort())
     const item = data(result).items[0]
-    expect(Object.keys(item).sort()).toEqual(["customFields", "horizon", "id", "squad", "title"])
+    expect(Object.keys(item).sort()).toEqual(["customFields", "displayId", "horizon", "id", "squad", "title"])
     expect(item.squad).toBe("Platform")
     expect(result.content[0].text).not.toContain("Big Opp")
     expect(result.content[0].text).toContain(I1)

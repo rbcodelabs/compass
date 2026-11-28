@@ -24,7 +24,7 @@ const mockPrisma = {
   objective: { findUnique: vi.fn(), findMany: vi.fn() },
   entityLink: { findMany: vi.fn() },
   solution: { findUnique: vi.fn(), findFirst: vi.fn(), update: vi.fn() },
-  roadmapItem: { findUnique: vi.fn(), update: vi.fn() },
+  roadmapItem: { findUnique: vi.fn(), findFirst: vi.fn(), update: vi.fn() },
   artifact: { findUnique: vi.fn() },
   feedbackItem: { findUnique: vi.fn() },
   doc: { findUnique: vi.fn(), findMany: vi.fn(), findFirst: vi.fn() },
@@ -82,6 +82,7 @@ import {
   scopesSatisfy,
 } from "@/lib/mcp-tool-gates"
 import { runWithMcpActor } from "@/lib/mcp-authz"
+import { resolveToolRefs } from "@/lib/mcp-work-item-refs"
 
 const MEMBER = { userId: "user-1" }
 const SERVICE = { userId: null, purpose: "SERVICE" as const }
@@ -1430,5 +1431,52 @@ describe("list_docs (Docs library, filter by kind)", () => {
 
   it("is not available to public research credentials", async () => {
     await expect(applyToolGate("list_docs", RESEARCH, { workspaceId: "ws-1" })).rejects.toThrow(/not available to research interviews/)
+  })
+})
+
+describe("roadmap item display IDs (RM-n) at the gate", () => {
+  const WS_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+  const WS_B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+  const ITEM = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+  type Where = { AND?: Array<{ id?: string }> }
+  beforeEach(() => {
+    // The caller is a member of workspace A only.
+    mockPrisma.workspace.findFirst.mockImplementation(async ({ where }: { where: Where }) => (where.AND?.[0]?.id === WS_A ? { id: WS_A } : null))
+    // RM-10 exists only in workspace A.
+    mockPrisma.roadmapItem.findFirst.mockImplementation(async ({ where }: { where: { workspaceId: string } }) => (where.workspaceId === WS_A ? { id: ITEM, seqPrefix: "RM", seqNumber: 10 } : null))
+    mockPrisma.roadmapItem.findUnique.mockResolvedValue({ workspaceId: WS_A })
+  })
+
+  it.each([
+    ["get_roadmap_item", { roadmapItemId: "RM-10" }],
+    ["update_roadmap_item", { itemId: "RM-10", title: "x" }],
+    ["set_launch_tier", { itemId: "RM-10", tier: "TIER_1" }],
+  ])("%s denies RM-10 paired with a workspace the caller is not in, before anything is looked up", async (tool, args) => {
+    await expect(callTool(tool, MEMBER, { ...args, workspaceId: WS_B })).rejects.toThrow(/not found or access denied/)
+    expect(mockPrisma.roadmapItem.findFirst).not.toHaveBeenCalled()
+    expect(mockPrisma.roadmapItem.update).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ["get_roadmap_item", "roadmapItemId", {}],
+    ["update_roadmap_item", "itemId", { title: "x" }],
+  ])("%s lets a member resolve RM-10 in their own workspace to the UUID the gate then authorizes", async (tool, key, extra) => {
+    const args = { [key]: "RM-10", workspaceId: WS_A, ...extra }
+    const actor = { ...MEMBER }
+    await expect(applyToolGate(tool, actor, args, () => resolveToolRefs(actor as never, args, tool))).resolves.toBeUndefined()
+    expect(mockPrisma.roadmapItem.findFirst.mock.calls[0][0].where).toEqual({ workspaceId: WS_A, seqPrefix: "RM", seqNumber: 10 })
+    expect(mockPrisma.roadmapItem.findUnique).toHaveBeenCalledWith(expect.objectContaining({ where: { id: ITEM } }))
+  })
+
+  it("get_roadmap_item refuses a UUID paired with a different workspace even when the caller is in both", async () => {
+    mockPrisma.workspace.findFirst.mockResolvedValue({ id: "any" })
+    await expect(applyToolGate("get_roadmap_item", MEMBER, { roadmapItemId: ITEM, workspaceId: WS_B })).rejects.toThrow(/does not belong to workspace/)
+  })
+
+  it("get_roadmap_item is a read for OAuth scopes and for agents, and denies a non-member by UUID", async () => {
+    expect(requiredToolScope("get_roadmap_item")).toBe("mcp:read")
+    expect(AGENT_TOOL_POLICY.get_roadmap_item).toBe("READ")
+    mockPrisma.workspace.findFirst.mockResolvedValue(null)
+    await expect(applyToolGate("get_roadmap_item", MEMBER, { roadmapItemId: ITEM })).rejects.toThrow(/not found or access denied/)
   })
 })

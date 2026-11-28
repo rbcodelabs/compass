@@ -1,7 +1,7 @@
 /** Auditable MCP → REST ledger. It documents parity but never drives routing. */
 export const MCP_PARITY_CATALOG = {
-  toolCount: 235,
-  sortedToolNamesSha256: "0ad01338a07f72018c993025a075c91764864dcb16641982a2bd42685422fce1",
+  toolCount: 236,
+  sortedToolNamesSha256: "62ff66adf8bebbe567c98b50f23fc730c0187b89f34060ffd8821c381576b323",
 } as const
 
 export type McpRestParityDisposition =
@@ -108,6 +108,7 @@ export const MCP_REST_PARITY_MANIFEST = {
   get_solution_score: direct("getSolutionScore"),
   get_squad: direct("getSquad"),
   get_task: direct("getTask"),
+  get_roadmap_item: direct("getRoadmapItem"),
   get_workspace_by_slug: direct("getWorkspaceBySlug"),
   get_workspace_scoring_model: direct("getWorkspaceScoringModel"),
   get_workspace_summary: direct("getWorkspaceSummary"),

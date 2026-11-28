@@ -1,4 +1,6 @@
 import { displayIdFromRow, displayLine } from "@/lib/work-item-ids"
+import { getTaskIdsLinkedTo } from "@/lib/task-links-read"
+import { describeColumns, formatFieldValues, loadCustomFieldValuesFor, resolveCustomFieldColumns } from "@/lib/custom-field-bulk"
 /**
  * Handler functions for the Launch Tiers + Checklist Templates MCP tools.
  * Extracted into this module so they can be unit-tested without the MCP server layer,
@@ -168,6 +170,77 @@ export async function promoteSolutionToRoadmap(input: {
 
 function promotionData(item: { id: string; title: string; horizon: string; isPrivate: boolean; solutionId: string | null; opportunityId: string | null; squadId: string | null; startDate: Date | null; endDate: Date | null }, opportunityTitle: string, created: boolean, inheritedFields: InheritedField[] = []) {
   return { id: item.id, title: item.title, horizon: item.horizon, isPrivate: item.isPrivate, solutionId: item.solutionId, opportunityId: item.opportunityId, opportunityTitle, squadId: item.squadId, startDate: item.startDate, endDate: item.endDate, created, inheritedFields }
+}
+
+// ─── get_roadmap_item ─────────────────────────────────────────────────────────
+
+type Numbered = { seqPrefix: string | null; seqNumber: number | null }
+const linkedRef = (type: "opportunity" | "solution" | "experiment" | "keyResult" | "feedback", row: ({ id: string; title: string } & Numbered) | null) =>
+  row ? { id: row.id, displayId: displayIdFromRow(type, row), title: row.title } : null
+const linkedSelect = { id: true, title: true, seqPrefix: true, seqNumber: true } as const
+
+/**
+ * Full detail for one roadmap item. `workspaceId` (supplied by the caller, or alongside a display ID) narrows the read to
+ * that workspace, so a UUID paired with the wrong workspace is "not found" and returns nothing. The tool's gate has already
+ * authorized the item's own workspace; the scope here keeps the handler from relying on that alone.
+ */
+export async function getRoadmapItem({ roadmapItemId, workspaceId }: { roadmapItemId: string; workspaceId?: string }) {
+  const prisma = getPrisma()
+  const item = await prisma.roadmapItem.findFirst({
+    where: { id: roadmapItemId, ...(workspaceId ? { workspaceId } : {}) },
+    include: {
+      opportunity: { select: linkedSelect }, solution: { select: linkedSelect }, experiment: { select: linkedSelect },
+      keyResult: { select: linkedSelect }, feedback: { select: linkedSelect }, squad: { select: { id: true, name: true } },
+    },
+  })
+  if (!item) return fail(`Roadmap item "${roadmapItemId}" not found.`)
+
+  const taskIds = await getTaskIdsLinkedTo(prisma, { workspaceId: item.workspaceId, linkedType: "ROADMAP_ITEM", linkedId: item.id })
+  const taskRows = taskIds.length
+    ? await prisma.task.findMany({ where: { id: { in: taskIds }, workspaceId: item.workspaceId }, select: { id: true, title: true, status: true, seqPrefix: true, seqNumber: true } })
+    : []
+  const tasks = taskRows.map((t) => ({ id: t.id, displayId: displayIdFromRow("task", t), title: t.title, status: t.status }))
+
+  const columnResult = await resolveCustomFieldColumns(prisma, { workspaceId: item.workspaceId, objectType: "ROADMAP_ITEM" })
+  const columns = columnResult.ok ? columnResult.columns : []
+  const customFields = columns.length ? (await loadCustomFieldValuesFor(prisma, columns, [item.id])).get(item.id) ?? {} : {}
+
+  const displayId = displayIdFromRow("roadmapItem", item)
+  const opportunity = linkedRef("opportunity", item.opportunity)
+  const solution = linkedRef("solution", item.solution)
+  const experiment = linkedRef("experiment", item.experiment)
+  const keyResult = linkedRef("keyResult", item.keyResult)
+  const feedback = linkedRef("feedback", item.feedback)
+  const squad = item.squad ? { id: item.squad.id, name: item.squad.name } : null
+  const ref = (label: string, r: { id: string; displayId: string | null; title: string } | null) =>
+    r ? `${label}: ${r.displayId ? `${r.displayId} ` : ""}${r.title} (ID: ${r.id})` : null
+  const date = (d: Date | null) => (d ? new Intl.DateTimeFormat("en-US", { timeZone: "UTC" }).format(d) : null)
+  const fieldsText = formatFieldValues(customFields)
+
+  const lines = [
+    `**${displayId ? `${displayId} · ` : ""}${item.title}**`,
+    `Horizon: ${item.horizon}`,
+    `Status: ${item.status}`,
+    item.isPrivate ? "Private: yes (hidden from public portal)" : null,
+    item.description ? `Description: ${item.description}` : null,
+    item.startDate || item.endDate ? `Dates: ${date(item.startDate) ?? "?"} – ${date(item.endDate) ?? "?"}` : null,
+    ref("Opportunity", opportunity), ref("Solution", solution), ref("Experiment", experiment), ref("Key Result", keyResult), ref("Feedback", feedback),
+    squad ? `Squad: ${squad.name} (ID: ${squad.id})` : null,
+    `Now commitment: ${item.nowCommitmentProvenance}${item.nowDecisionRecordId ? ` (decision ${item.nowDecisionRecordId})` : ""}`,
+    fieldsText ? `Fields: ${fieldsText}` : null,
+    tasks.length ? `Tasks (${tasks.length}):\n` + tasks.map((t) => `  • [${t.status}] ${t.displayId ? `${t.displayId} ` : ""}${t.title} — ID: ${t.id}`).join("\n") : "Tasks: none",
+    "",
+    `ID: ${item.id}${displayLine("roadmapItem", item)}`,
+  ].filter((l): l is string => l !== null)
+
+  return ok(lines.join("\n"), {
+    id: item.id, displayId, workspaceId: item.workspaceId, title: item.title, description: item.description, horizon: item.horizon, status: item.status,
+    isPrivate: item.isPrivate, sortOrder: item.sortOrder, startDate: item.startDate, endDate: item.endDate,
+    opportunity, solution, experiment, keyResult, feedback, squad,
+    nowCommitmentProvenance: item.nowCommitmentProvenance, nowDecisionRecordId: item.nowDecisionRecordId,
+    customFields, ...(columns.length ? { customFieldDefinitions: describeColumns(columns) } : {}),
+    tasks, createdAt: item.createdAt, updatedAt: item.updatedAt,
+  })
 }
 
 export async function updateRoadmapItem(input: {
